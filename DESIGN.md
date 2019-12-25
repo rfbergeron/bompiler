@@ -33,7 +33,37 @@ Formatting Rules/Preferences:
 1. No files, with the exception of flex and bison source files, will have lines
 over 80 columns in width. This will be expanded to include LaTeX source files
 when I begin using that.
-2. the `#pragma` directive shall not be used
+2. The `#pragma` directive shall not be used
+3. The following GNU Indent options shall be set:
+   - --line-length 80                         -l80
+   - --dont-format-comments                   -nfca
+   - --honour-newlines                        -hnl
+   - --no-comment-delimiters-on-blank-lines   -ncdb
+   - --blank-lines-after-declarations         -bad
+   - --blank-lines-after-procedures           -bap
+   - --no-blank-lines-after-commas            -nbc
+   - --break-before-boolean-operator          -bbo
+   - --dont-break-function-decl-args          -nbfda
+   - --braces-on-if-line                      -br
+   - --braces-on-struct-decl-line             -brs
+   - --braces-on-func-def-line                -brf
+   - --cuddle-else                            -ce
+   - --cuddle-do-while                        -cdw
+   - --leave-preprocessor-space               -lps
+   - --space-after-for                        -saf
+   - --space-after-if                         -sai
+   - --space-after-while                      -saw
+   - --space-after-procedure-calls            -pcs
+   - --space-after-cast                       -cs
+   - --no-tabs                                -nut
+   - --tab-size 4                             -ts4
+   - --indent-level 4                         -i4
+   - --paren-indentation 8                    -pi4
+   - --continuation-indentation 8             -ci4
+   - --case-indentation 4                     -cli4
+   - --preprocessor-indentation 4             -ppi4
+   - --case-brace-indentation 0               -cbi0
+   - --brace-indent 0                         -bli0
 
 ## 3. Tasks
 It may be helpful to write a scanner and parser for the existing intermediate
