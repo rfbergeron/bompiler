@@ -4,11 +4,11 @@
 #include <assert.h>
 #include "map.h"
 
-// Smallest prime less than (2^32)-1. Alternatively we could swap the last digit
+// largest prime less than (2^32)-1. Alternatively we could swap the last digit
 // to a 9 but I'm not sure exactly what the difference is.
-const uint32_t KNUTH_CONST = 2654435761;
-const uint32_t UINT32_T_MAX = 0xFFFFFFFF;
-const uint32_t UINT32_T_MSB = 0x80000000;
+static const uint32_t KNUTH_CONST = 2654435761;
+static const uint32_t UINT32_T_MAX = 0xFFFFFFFF;
+static const uint32_t UINT32_T_MSB = 0x80000000;
 
 uint32_t base2_leading_zeroes_32bit (uint32_t arg) {
     for (size_t i = 0; i < 32; ++i) {
@@ -89,18 +89,6 @@ void *map_get (struct map *map_, void *key) {
     }
 }
 
-void map_free (struct map *map_) {
-    if (map_->keys != NULL) {
-        free (map_->keys);
-        map_->keys = NULL;
-    }
-
-    if (map_->values != NULL) {
-        free (map_->values);
-        map_->values = NULL;
-    }
-}
-
 void map_expand (struct map *map_) {
     size_t old_size = map_->size;
     uintptr_t *old_keys = map_->keys;
@@ -118,5 +106,28 @@ void map_expand (struct map *map_) {
         if ((void *) stored_key != NULL) {
             map_put (map_, (void *) stored_key, (void *) *(old_values + i));
         }
+    }
+}
+
+struct map *map_init (size_t size_) {
+    struct map *map_ = (struct map *) calloc (sizeof (struct map), size_);
+
+    map_->size = size_;
+    map_->count = 0;
+    map_->max_open_addr_index = 0;
+    map_->keys = (uintptr_t *) calloc (sizeof (uintptr_t), size_);
+    map_->values = (uintptr_t *) calloc (sizeof (uintptr_t), size_);
+    return map_;
+}
+
+void map_free (struct map *map_) {
+    if (map_->keys != NULL) {
+        free (map_->keys);
+        map_->keys = NULL;
+    }
+
+    if (map_->values != NULL) {
+        free (map_->values);
+        map_->values = NULL;
     }
 }
