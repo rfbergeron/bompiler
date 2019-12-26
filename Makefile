@@ -11,6 +11,12 @@ DEPFILE = ${MKFILE}.dep
 GMAKE = ${MAKE} --no-print-directory
 # name of the compiled executable
 EXECNAME = bompiler
+# name of the testing executable
+TSTEXECNAME = test
+# main source file
+MAIN = main.c
+# test source file
+TEST = test.c
 # .c source files
 SRC = map.c
 # .h header files
@@ -26,17 +32,20 @@ all : ${DEPFILE} ${EXECNAME}
 ${EXECNAME} : ${OBJ}
 	${C} -o bompiler ${OBJ}
 
+${TSTEXECNAME} : ${OBJ} ${TEST:.c=.o}
+	${C} -o test ${OBJ} ${TEST:.c=.o}
+
 %.o : %.c
 	${C} -c $< ${HDR}
 
 clean:
-	rm -f ${OBJ} ${GENSRC} ${GENHDR} ${DEPFILE}
+	rm -f ${OBJ} ${TEST:.c=.o} ${MAIN:.c=.o} ${GENSRC} ${GENHDR} ${DEPFILE}
 
 spotless: clean
 	rm -f ${EXECNAME}
 
 ci: 
-	git add ${HDR} ${SRC} ${MKFILE} README.md DESIGN.md .gitignore
+	git add ${HDR} ${SRC} ${MKFILE} ${TEST} README.md DESIGN.md .gitignore
 
 deps: ${SRC} ${GEN}
 	${CDEP} ${SRC} ${GEN} ${MKFILE} >> ${DEPFILE}

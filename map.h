@@ -14,6 +14,7 @@ struct map {
 
 void map_put (struct map *map_, void *key, void *value);
 void *map_get (struct map *map_, void *key);
-void map_free (struct map *map_);
 void map_expand (struct map *map_);
+struct map * map_init (size_t size_);
+void map_free (struct map *map_);
 #endif

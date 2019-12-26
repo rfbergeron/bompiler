@@ -13,7 +13,7 @@ Make.
 
 Non-code documents (like this one) will be in markdown format for now. I plan
 to switch to LaTeX at a later date once I have figured out how it works and
-have set up an editor and document viewer for it.
+have set up an editor and viewer for it.
 
 I will be using flex and bison to generate the scanner and parser, and git will
 be used for version control.
@@ -26,7 +26,7 @@ project. It will be expanded as I become aware of issues that I have not yet
 addressed and believe I will forget or overlook if they are not written down.
 
 The tool I will use to format code is GNU Indent. Since Indent only supports
-C/C++ as far as I know, other files will be formatted by hand or not at all. I
+C as far as I know, other files will be formatted by hand or not at all. I
 may switch to astyle or clang-format if this becomes a nuisance.
 
 Formatting Rules/Preferences:
@@ -125,5 +125,17 @@ is twice the size of the original and copies the values into it. Since the
 values returned by the hash will be different after expansion, the entire thing
 might need to be remapped? That's a really terrible way to do it so there may
 be a better alternative. Will have to see.
+
+### 4.X `test.c test.h`
+This file will contain functions for testing components of the compiler, like
+the hashmap, type checking, AST construction, etc. I will not be specifying
+most of the functions in this file in the design document, for my own
+convenievce and because I don't actually know what tests I'll be running.
+
+The tests will be contained in a separate executeable.
+
+#### `main`
+Runs tests. In the future, this may take command line arguments that specify
+what tests to execute/exclude.
 
 ### TODO: this will be copied in from documents for the original compiler
