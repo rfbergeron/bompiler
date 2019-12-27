@@ -17,7 +17,7 @@ int map_unit_test () {
     printf ("Putting key-value pair (\"%s\",\"%s\") into map.\n", test_key,
             test_val);
     map_put (test_map, test_key, test_val);
-    printf ("Retrieving value for key \"%s\": \"%s\"\n", test_key,
+    printf ("Retrieving value for key \"%s\": \"%s\"\n\n", test_key,
             map_get (test_map, (void *) test_key));
 
     // fill up the map
@@ -37,8 +37,39 @@ int map_unit_test () {
     }
 
     // print out contents
+    printf ("\n%-5s   %-16s %-16s\n", "Index", "Key", "Value");
+    for (size_t i = 0; i < test_map->size; ++i) {
+        char *stored_key = (char *) *(test_map->keys + i);
+        char *stored_val = (char *) *(test_map->values + i);
+
+        if (stored_key == NULL) {
+            stored_key = "NULL";
+        } else if (strlen (stored_key) == 0) {
+            stored_key = "EMPTY";
+        }
+
+        if (stored_val == NULL) {
+            stored_val = "NULL";
+        } else if (strlen (stored_val) == 0) {
+            stored_val = "EMPTY";
+        }
+
+        printf ("%-5d: (%-16s,%-16s)\n", i, stored_key, stored_val);
+    }
+
+    // put in just one more
+    size_t ov_max_len = strlen ("overflow_key");
+    char *overflow_key = (char *) calloc (sizeof (char), ov_max_len);
+    char *overflow_val = (char *) calloc (sizeof (char), ov_max_len);
+
+    strcpy (overflow_key, "overflow_key");
+    strcpy (overflow_val, "overflow_val");
+    printf ("\nOverflowing the map, which should cause it to expand\n");
+    map_put (test_map, overflow_key, overflow_val);
+
+    // print out the contents again
     printf ("%-5s   %-16s %-16s\n", "Index", "Key", "Value");
-    for (size_t i = 0; i < test_size; ++i) {
+    for (size_t i = 0; i < test_map->size; ++i) {
         char *stored_key = (char *) *(test_map->keys + i);
         char *stored_val = (char *) *(test_map->values + i);
 
