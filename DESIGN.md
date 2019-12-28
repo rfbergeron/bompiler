@@ -100,41 +100,54 @@ stored within the map. Has two dynamically allocated arrays, one of type
 only be interacted with using the functions provided by the header file, for
 consistency, the only exception to this being structure initialization.
 
-#### `put`
+#### `map_put`
 Takes three arguments: the map and the key and value to emplace in the map.
 Calls the hash function to compute the index the pair should be mapped to.
 Then, checks the values at that location. If the keys match or there is no key
 present, write the pair to that location. If there has been a collision, use
 open addressing to map the key-value pair to a different location. If there are
-no more open slots, indicate that there has been an error.
+no more open slots, call `map_expand`.
 
-#### `get`
+#### `map_get`
 Takes two arguments: the map and the key to search for in the table.
 Call the hash function to compute the index to check at. Then, check the key at
 the location. If the key at that location does not match, or there is no key,
 search over the table to make sure the key/value pair has not been open
-addressed.
+addressed. Return `NULL` if no matching entry was found.
 
-#### `free_map`
-Takes one argument: the map that is to be freed. Calls `free` on the key and
-value arrays. Argument may need to be a pointer? Not sure.
+#### `map_free`
+Takes one argument: a pointer to the map that is to be freed. Calls `free` on
+the key and value arrays (if they are not null), and the map itself.
 
-#### `expand`
+#### `map_init`
+Takes one argument: the size of the map to be created. Allocates space for a
+map and the key-value pairs. Initializes entry and open address count to 0.
+
+#### `map_expand`
 Takes one argument: the map that is to be expanded. Allocates a new array that
 is twice the size of the original and copies the values into it. Since the
 values returned by the hash will be different after expansion, the entire thing
 might need to be remapped? That's a really terrible way to do it so there may
 be a better alternative. Will have to see.
 
+### 4.2 `string_set.h string_set.c`
+These files will contain the code responsible for storing and tracking unique
+tokens inside of the source file(s). Internally, the set of tokens shall be
+represented by a `map` with key and value both being the string itself.
+
+#### `string_set_intern`
+Takes one argument, the cstring to enter into the set. Returns the string that
+was inserted.
+
+#### `string_set_dump`
+Takes one argument, a `FILE *` that the contents of the set will dump dumped to.
+Formats and prints out the contents of the map in a pretty way.
+
 ### 4.X `test.c test.h`
 This file will contain functions for testing components of the compiler, like
 the hashmap, type checking, AST construction, etc. I will not be specifying
 most of the functions in this file in the design document, for my own
-convenievce and because I don't actually know what tests I'll be running.
 
-The tests will be contained in a separate executeable.
-
-#### `main`
 Runs tests. In the future, this may take command line arguments that specify
 what tests to execute/exclude.
 
