@@ -4,8 +4,7 @@
 #include <string.h>
 #include "map.h"
 
-int map_unit_test ()
-{
+int map_unit_test () {
     size_t test_size = 30;
     struct map *test_map = map_init (test_size);
     char *test_key = (char *) calloc (sizeof (char), 5);
@@ -108,8 +107,7 @@ int map_unit_test ()
     return EXIT_SUCCESS;
 }
 
-int main (int argc, char **argv)
-{
+int main (int argc, char **argv) {
     map_unit_test ();
     return EXIT_SUCCESS;
 }

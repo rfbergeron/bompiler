@@ -56,8 +56,8 @@ deps: ${SRC} ${GEN}
 	${CDEP} ${SRC} ${GEN} ${MKFILE} >> ${DEPFILE}
 
 format:
-	indent -l80 -nfca -hnl -ncdb -bad -bap -nbc -bbo -nbfda -npsl -br -brs\
-	-brf -ce -cdw -lps -saf -sai -saw -pcs -cs -bs -nut -ts4 -i4 -pi4 -ci4\
+	indent -l80 -nfca -hnl -ncdb -bad -bap -nbc -bbo -nbfda -npsl -br -brs \
+	-brf -ce -cdw -lps -saf -sai -saw -pcs -cs -bs -nut -ts4 -i4 -pi4 -ci4 \
 	-cli4 -ppi4 -cbi0 -bli0 ${SRC} ${HDR} ${TEST}
 
 ${DEPFILE} :

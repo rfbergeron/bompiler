@@ -10,8 +10,7 @@ static const uint32_t KNUTH_CONST = 2654435761;
 static const uint32_t UINT32_T_MAX = 0xFFFFFFFF;
 static const uint32_t UINT32_T_MSB = 0x80000000;
 
-uint32_t base2_leading_zeroes_32bit (uint32_t arg)
-{
+uint32_t base2_leading_zeroes_32bit (uint32_t arg) {
     for (size_t i = 0; i < 32; ++i) {
         if (arg & (UINT32_T_MSB >> i) != 0) {
             return i;
@@ -20,8 +19,7 @@ uint32_t base2_leading_zeroes_32bit (uint32_t arg)
     return 32;
 }
 
-uint32_t knuth_hash (uintptr_t to_hash, size_t max_value)
-{
+uint32_t knuth_hash (uintptr_t to_hash, size_t max_value) {
     assert (max_value <= UINT32_T_MAX && max_value > 0);
     uint32_t shift_amount = base2_leading_zeroes_32bit ((uint32_t) max_value);
 
@@ -30,8 +28,7 @@ uint32_t knuth_hash (uintptr_t to_hash, size_t max_value)
     return ((to_hash * KNUTH_CONST) >> shift_amount) % max_value;
 }
 
-void map_put (struct map *map_, void *key, void *value)
-{
+void map_put (struct map *map_, void *key, void *value) {
     assert (key != NULL);
     uint32_t map_index = knuth_hash ((uintptr_t) key, map_->size);
     uintptr_t stored_key = *(map_->keys + map_index);
@@ -74,8 +71,7 @@ void map_put (struct map *map_, void *key, void *value)
     }
 }
 
-void *map_get (struct map *map_, void *key)
-{
+void *map_get (struct map *map_, void *key) {
     assert (key != NULL);
     uint32_t map_index = knuth_hash ((uintptr_t) key, map_->size);
     uintptr_t stored_key = *(map_->keys + map_index);
@@ -93,8 +89,7 @@ void *map_get (struct map *map_, void *key)
     }
 }
 
-void map_expand (struct map *map_)
-{
+void map_expand (struct map *map_) {
     size_t old_size = map_->size;
     uintptr_t *old_keys = map_->keys;
     uintptr_t *old_values = map_->values;
@@ -114,8 +109,7 @@ void map_expand (struct map *map_)
     }
 }
 
-struct map *map_init (size_t size_)
-{
+struct map *map_init (size_t size_) {
     struct map *map_ = (struct map *) calloc (sizeof (struct map), size_);
 
     map_->size = size_;
@@ -126,8 +120,7 @@ struct map *map_init (size_t size_)
     return map_;
 }
 
-void map_free (struct map *map_)
-{
+void map_free (struct map *map_) {
     if (map_->keys != NULL) {
         free (map_->keys);
         map_->keys = NULL;
