@@ -130,4 +130,5 @@ void map_free (struct map *map_) {
         free (map_->values);
         map_->values = NULL;
     }
+    free (map_);
 }
