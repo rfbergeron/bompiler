@@ -85,6 +85,10 @@ if there's anything I have learned, it's that I don't know how to handle
 C-strings correctly. flex and bison will also need to be tweaked to output
 C code instead of C++.
 
+After looking at the scanner I have decided it would be helpful to write a
+replacement for `std::vector` since I need a way to keep track of an arbitrary
+number of filename includes, and I imagine there will be more in the future.
+
 ## 4. Design
 
 ### 4.1 `map.h map.c`
@@ -106,14 +110,21 @@ Calls the hash function to compute the index the pair should be mapped to.
 Then, checks the values at that location. If the keys match or there is no key
 present, write the pair to that location. If there has been a collision, use
 open addressing to map the key-value pair to a different location. If there are
-no more open slots, call `map_expand`.
+no more open slots, call `map_expand`. Key may not be `NULL`.
 
 #### `map_get`
 Takes two arguments: the map and the key to search for in the table.
 Call the hash function to compute the index to check at. Then, check the key at
 the location. If the key at that location does not match, or there is no key,
 search over the table to make sure the key/value pair has not been open
-addressed. Return `NULL` if no matching entry was found.
+addressed. Return `NULL` if no matching entry was found. Key may not be `NULL`.
+
+#### `map_remove`
+Takes two arguments: the map and the key of the value to be removed. Computes
+index with hash function and compares given value with stored value. If not
+present, iterates over open addressed values until finds a key that matches or
+reacheds the end. Removes key and value from map if present. Returns nothing.
+Argument may not be `NULL`.
 
 #### `map_free`
 Takes one argument: a pointer to the map that is to be freed. Calls `free` on
@@ -142,6 +153,70 @@ was inserted.
 #### `string_set_dump`
 Takes one argument, a `FILE *` that the contents of the set will dump dumped to.
 Formats and prints out the contents of the map in a pretty way.
+
+### 4.3 `vector.h vector.c`
+These files will contain the replacement for `std::vector`. Like `map`, stored
+values must be pointers.
+
+#### `struct vector`
+This structure shall contain 3 fields: a dynamically allocated array to store
+the contents in, a `size_t` containing the length of the array, and the number
+of elements that currently exist in the vector as a stack.
+
+While a vector can be used as both an array and a stack, elements inserted into
+the vector without the stack's knowledge (elements inserted at indices greater
+than `stack_size`) may be ignored by the stack operations.
+
+#### `vector_get`
+Takes 2 arguments: the vector to retrieve the element from and the index of the
+element to be retrieved. Returns the element at the provided index, or `NULL` if
+none is present. The index argument may not be larger than (size of the
+array - 1) or less than 0.
+
+#### `vector_put`
+Takes 3 arguments: the vector to insert the element into, the index at which the
+element is to be inserted, and a pointer to the element to be inserted. Inserts
+the object at the specified index. Returns nothing. The index argument may not
+be larger than (size of the array - 1) or less than 0.
+
+#### `vector_remove`
+Takes 2 arguments: the vector to remove an element from and the index of the
+element to be removed. Returns the value that was located at that index, or
+`NULL` if there was none.
+
+#### `vector_append`
+Takes 2 arguments: the vector to append the element to, and a pointer to the
+element to append. Appends the element to the end of the vector.
+
+#### `vector_push`
+Takes 2 arguments: the vector to push the element onto and a pointer. Pushes
+the pointer onto the front of the vector as if it were a stack. Automatically
+doubles the size of the vector if it is full.
+
+#### `vector_pop`
+Takes one argument: the vector to pop the first element of. Takes the first
+element of the vector and removes it, then returns it. Returns `NULL` if the
+vector is empty.
+
+#### `vector_peek`
+Takes one argument: the vector to peek at the first elemnt of. Returns the first
+element of the vector, or `NULL` if the vector is empty.
+
+#### `vector_empty`
+Takes one argument: the vector to check the contents of. Returns whether or not
+the vector is empty (whether or not all entries are `NULL`).
+
+#### `vector_expand`
+Takes one argument: the vector to expand. Doubles the length of the vector.
+Returns nothing.
+
+#### `vector_init`
+Takes one argument: the size of the vector to be created. Allocates space for
+the vector and it's contents. Returns a pointer to the created vector.
+
+#### `vector_free`
+Takes one argument: a pointer to the vector to be freed. Frees the `struct
+vector` and the internal array. Returns nothing.
 
 ### 4.X `test.c test.h`
 This file will contain functions for testing components of the compiler, like
