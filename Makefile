@@ -20,7 +20,7 @@ TEST = test.c
 # .c source files
 SRC = map.c string_set.c
 # .h header files
-HDR = map.h string_set.h vector.h
+HDR = map.h string_set.h vector.h lyutils.h auxlib.h astree.h
 # .o object files
 OBJ = ${SRC:.c=.o}
 # .gch header somethings?
