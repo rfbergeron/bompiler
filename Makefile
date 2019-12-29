@@ -39,8 +39,14 @@ ${EXECNAME} : ${OBJ}
 ${TSTEXECNAME} : ${OBJ} ${TEST:.c=.o}
 	${C} -o test ${OBJ} ${TEST:.c=.o}
 
+yylex.o : yylex.c
+	${CYY} -c $< ${HDR} ${GENHDR}
+
 %.o : %.c
 	${C} -c $< ${HDR}
+
+yylex.c : scanner.l
+	flex --outfile=yylex.c scanner.l
 
 clean:
 	rm -f ${OBJ} ${TEST:.c=.o} ${MAIN:.c=.o} ${GENSRC} ${GENHDR} ${DEPFILE}\
