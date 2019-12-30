@@ -1,11 +1,9 @@
 %{
-
-#include <cassert>
+#include <assert.h>
 
 #include "lyutils.h"
 #include "astree.h"
 #include "symtable.h"
-
 %}
 
 %debug
@@ -14,8 +12,8 @@
 %token-table
 %verbose
 
-%destructor { destroy ($$); } <>
-%printer { assert (yyoutput == stderr); astree::dump (cerr, $$); } <>
+%destructor { astree_destroy (1, $$); } <>
+%printer { assert (yyoutput == stderr); astree_dump_node ($$, stderr); } <>
 
 %token TOK_VOID TOK_INT TOK_STRING TOK_TYPE_ID
 %token TOK_IF TOK_ELSE TOK_WHILE TOK_RETURN TOK_STRUCT
@@ -29,48 +27,48 @@
 %left  TOK_EQ TOK_NE TOK_LT TOK_LE TOK_GT TOK_GE
 %left  '+' '-'
 %left  '*' '/' '%'
-%precedence TOK_POS TOK_NEG TOK_NOT
-%precedence TOK_ARROW '['
-%precedence TOK_ELSE
+%right TOK_POS TOK_NEG TOK_NOT
+%left TOK_ARROW TOK_INDEX
+%right TOK_ELSE
 
 
 %%
 
-start       : program                                                           { $$ = $1 = nullptr; }
+start       : program                                                           { $$ = $1 = NULL; }
             ;
-program     : program structdef                                                 { $$ = $1->adopt($2); }
-            | program function                                                  { $$ = $1->adopt($2); }
-            | program vardecl                                                   { $$ = $1->adopt($2); }
+program     : program structdef                                                 { $$ = astree_adopt($1, $2, NULL, NULL); }
+            | program function                                                  { $$ = astree_adopt($1, $2, NULL, NULL); }
+            | program vardecl                                                   { $$ = astree_adopt($1, $2, NULL, NULL); }
             | program error '}'                                                 { $$ = $1; }
             | program error ';'                                                 { $$ = $1; }
-            | %empty                                                            { $$ = parser::newroot(); }
+            | %empty                                                            { $$ = parser_make_root ();}
             ;
-structdef   : TOK_STRUCT TOK_IDENT '{' structbody '}' ';'                       { $$ = $1->adopt($2, $4); }
-            | TOK_STRUCT TOK_IDENT '{' '}' ';'                                  { $$ = $1->adopt($2); }
+structdef   : TOK_STRUCT TOK_IDENT '{' structbody '}' ';'                       { $$ = astree_adopt($1, $2, $4, NULL); }
+            | TOK_STRUCT TOK_IDENT '{' '}' ';'                                  { $$ = astree_adopt($1, $2, NULL, NULL); }
             ;
-structbody  : type TOK_IDENT ';'                                                { $$ = parser::make_type_id($1, $2); }
-            | structbody type TOK_IDENT ';'                                     { $$ = $1->buddy_up(parser::make_type_id($2, $3)); }
+structbody  : type TOK_IDENT ';'                                                { $$ = parser_make_type_id($1, $2, NULL); }
+            | structbody type TOK_IDENT ';'                                     { $$ = astree_buddy_up($1, parser_make_type_id($2, $3, NULL)); }
             ;
-function    : type TOK_IDENT '(' parameters ')' block                           { $$ = parser::make_function($1, $2, $3, $4, $6); }
-            | type TOK_IDENT '(' ')' block                                      { $$ = parser::make_function($1, $2, $3, nullptr, $5); }
+function    : type TOK_IDENT '(' parameters ')' block                           { $$ = parser_make_function($1, $2, $3, $4, $6); }
+            | type TOK_IDENT '(' ')' block                                      { $$ = parser_make_function($1, $2, $3, NULL, $5); }
             ;
-parameters  : type TOK_IDENT                                                    { $$ = parser::make_type_id($1, $2); }
-            | parameters ',' type TOK_IDENT                                     { $$ = $1->buddy_up(parser::make_type_id($3, $4)); }
+parameters  : type TOK_IDENT                                                    { $$ = parser_make_type_id($1, $2, NULL); }
+            | parameters ',' type TOK_IDENT                                     { $$ = astree_buddy_up($1, parser_make_type_id($3, $4, NULL)); }
             ;
 type        : plaintype                                                         { $$ = $1; }
             | TOK_VOID                                                          { $$ = $1; }
-            | TOK_ARRAY '<' plaintype '>'                                       { $$ = $1->adopt($3); }
+            | TOK_ARRAY '<' plaintype '>'                                       { $$ = astree_adopt($1, $3, NULL, NULL); }
             ;
 plaintype   : TOK_INT                                                           { $$ = $1; }
             | TOK_STRING                                                        { $$ = $1; }
-            | TOK_PTR '<' TOK_STRUCT TOK_IDENT '>'                              { $$ = $1->adopt($4); }
+            | TOK_PTR '<' TOK_STRUCT TOK_IDENT '>'                              { $$ = astree_adopt($1, $4, NULL, NULL); }
             ;
-block       : '{' statements '}'                                                { $$ = $1->adopt_sym(TOK_BLOCK, $2); }
-            | '{' '}'                                                           { $$ = $1->adopt_sym(TOK_BLOCK, nullptr); }
-            | ';'                                                               { $$ = nullptr; }
+block       : '{' statements '}'                                                { $$ = astree_adopt_sym($1, TOK_BLOCK, $2, NULL); }
+            | '{' '}'                                                           { $$ = astree_adopt_sym($1, TOK_BLOCK, NULL, NULL); }
+            | ';'                                                               { $$ = NULL; }
             ;
 statements  : statement                                                         { $$ = $1; }
-            | statements statement                                              { $$ = $1->buddy_up($2); }
+            | statements statement                                              { $$ = astree_buddy_up($1, $2); }
 statement   : vardecl                                                           { $$ = $1; }
             | block                                                             { $$ = $1; }
             | while                                                             { $$ = $1; }
@@ -78,32 +76,32 @@ statement   : vardecl                                                           
             | return                                                            { $$ = $1; }
             | expr ';'                                                          { $$ = $1; }
             ;
-vardecl     : type TOK_IDENT '=' expr ';'                                       { $$ = parser::make_type_id($1,$2, $4); }
-            | type TOK_IDENT ';'                                                { $$ = parser::make_type_id($1,$2); }
+vardecl     : type TOK_IDENT '=' expr ';'                                       { $$ = parser_make_type_id($1, $2, $4); }
+            | type TOK_IDENT ';'                                                { $$ = parser_make_type_id($1, $2, NULL); }
             ;
-while       : TOK_WHILE '(' expr ')' statement                                  { $$ = $1->adopt($3,$5); }
+while       : TOK_WHILE '(' expr ')' statement                                  { $$ = astree_adopt($1, $3,$5, NULL); }
             ;
-ifelse      : TOK_IF '(' expr ')' statement TOK_ELSE statement                  { $$ = $1->adopt($3, $5, $7); }
-            | TOK_IF '(' expr ')' statement %prec TOK_ELSE                      { $$ = $1->adopt($3, $5); }
+ifelse      : TOK_IF '(' expr ')' statement TOK_ELSE statement                  { $$ = astree_adopt($1, $3, $5, $7); }
+            | TOK_IF '(' expr ')' statement %prec TOK_ELSE                      { $$ = astree_adopt($1, $3, $5, NULL); }
             ;
-return      : TOK_RETURN expr ';'                                               { $$ = $1->adopt($2); }
+return      : TOK_RETURN expr ';'                                               { $$ = astree_adopt($1, $2, NULL, NULL); }
             | TOK_RETURN ';'                                                    { $$ = $1; }
             ;
-expr        : expr '+' expr                                                     { $$ = $2->adopt($1, $3); }
-            | expr '-' expr                                                     { $$ = $2->adopt($1, $3); }
-            | expr '/' expr                                                     { $$ = $2->adopt($1, $3); }
-            | expr '*' expr                                                     { $$ = $2->adopt($1, $3); }
-            | expr '%' expr                                                     { $$ = $2->adopt($1, $3); }
-            | expr '=' expr                                                     { $$ = $2->adopt($1, $3); }
-            | expr TOK_EQ expr                                                  { $$ = $2->adopt($1, $3); }
-            | expr TOK_NE expr                                                  { $$ = $2->adopt($1, $3); }
-            | expr '<' expr %prec TOK_LT                                        { $$ = $2->adopt_sym(TOK_LT, $1, $3); }
-            | expr TOK_LE expr                                                  { $$ = $2->adopt($1, $3); }
-            | expr '>' expr %prec TOK_GT                                        { $$ = $2->adopt_sym(TOK_GT, $1, $3); }
-            | expr TOK_GE expr                                                  { $$ = $2->adopt($1, $3); }
-            | '+' expr %prec TOK_POS                                            { $$ = $1->adopt_sym(TOK_POS, $2); }
-            | '-' expr %prec TOK_NEG                                            { $$ = $1->adopt_sym(TOK_NEG, $2); }
-            | TOK_NOT expr                                                      { $$ = $1->adopt($2); }
+expr        : expr '+' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
+            | expr '-' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
+            | expr '/' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
+            | expr '*' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
+            | expr '%' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
+            | expr '=' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
+            | expr TOK_EQ expr                                                  { $$ = astree_adopt($2, $1, $3, NULL); }
+            | expr TOK_NE expr                                                  { $$ = astree_adopt($2, $1, $3, NULL); }
+            | expr '<' expr %prec TOK_LT                                        { $$ = astree_adopt_sym($2, TOK_LT, $1, $3); }
+            | expr TOK_LE expr                                                  { $$ = astree_adopt($2, $1, $3, NULL); }
+            | expr '>' expr %prec TOK_GT                                        { $$ = astree_adopt_sym($2, TOK_GT, $1, $3); }
+            | expr TOK_GE expr                                                  { $$ = astree_adopt($2, $1, $3, NULL); }
+            | '+' expr %prec TOK_POS                                            { $$ = astree_adopt_sym($1, TOK_POS, $2, NULL); }
+            | '-' expr %prec TOK_NEG                                            { $$ = astree_adopt_sym($1, TOK_NEG, $2, NULL); }
+            | TOK_NOT expr                                                      { $$ = astree_adopt($1, $2, NULL, NULL); }
             | allocator                                                         { $$ = $1; }
             | call                                                              { $$ = $1; }
             | '(' expr ')'                                                      { $$ = $2; }
@@ -111,18 +109,18 @@ expr        : expr '+' expr                                                     
             | constant                                                          { $$ = $1; }
             ;
 exprs       : expr                                                              { $$ = $1; }
-            | exprs ',' expr                                                    { $$ = $1->buddy_up($3); }
+            | exprs ',' expr                                                    { $$ = astree_buddy_up($1, $3); }
             ;
-allocator   : TOK_ALLOC '<' TOK_STRING '>' '(' expr ')'                         { $$ = $1->adopt($3, $6); }
-            | TOK_ALLOC '<' TOK_STRUCT TOK_IDENT '>' '(' ')'                    { $$ = $1->adopt($4); }
-            | TOK_ALLOC '<' TOK_ARRAY '<' plaintype '>' '>' '(' expr ')'        { $$ = $1->adopt($3->adopt($5), $9); }
+allocator   : TOK_ALLOC '<' TOK_STRING '>' '(' expr ')'                         { $$ = astree_adopt($1, $3, $6, NULL); }
+            | TOK_ALLOC '<' TOK_STRUCT TOK_IDENT '>' '(' ')'                    { $$ = astree_adopt($1, $4, NULL, NULL); }
+            | TOK_ALLOC '<' TOK_ARRAY '<' plaintype '>' '>' '(' expr ')'        { $$ = astree_adopt($1, astree_adopt($3, $5, NULL, NULL), $9, NULL); }
             ;
-call        : TOK_IDENT '(' exprs ')'                                           { $$ = $2->adopt_sym(TOK_CALL, $1, $3); }
-            | TOK_IDENT '(' ')'                                                 { $$ = $2->adopt_sym(TOK_CALL, $1); }
+call        : TOK_IDENT '(' exprs ')'                                           { $$ = astree_adopt_sym($2, TOK_CALL, $1, $3); }
+            | TOK_IDENT '(' ')'                                                 { $$ = astree_adopt_sym($2, TOK_CALL, $1, NULL); }
             ;
 variable    : TOK_IDENT                                                         { $$ = $1; }
-            | expr '[' expr ']' %prec TOK_INDEX                                 { $$ = $2->adopt_sym(TOK_INDEX, $1, $3); }
-            | expr TOK_ARROW TOK_IDENT                                          { $$ = $2->adopt($1, $3); }
+            | expr '[' expr ']' %prec TOK_INDEX                                 { $$ = astree_adopt_sym($2, TOK_INDEX, $1, $3); }
+            | expr TOK_ARROW TOK_IDENT                                          { $$ = astree_adopt($2, $1, $3, NULL); }
             ;
 constant    : TOK_INTCON                                                        { $$ = $1; }
             | TOK_CHARCON                                                       { $$ = $1; }
@@ -134,35 +132,34 @@ constant    : TOK_INTCON                                                        
 // functions, structures, typeids, allocs can have their type
 // assigned when they adopt their children
 
-astree* parser::newroot() {
-   parser::root = new astree(TOK_ROOT, {lexer::get_filenr(), 0, 0}, "");
-   return parser::root;
-}
-const char * parser::get_tname (int symbol) {
-   return yytname [YYTRANSLATE (symbol)];
+const char * parser_get_tname (int symbol) {
+    return yytname [YYTRANSLATE (symbol)];
 }
 
-astree* parser::make_function(astree* type, astree* id, astree* paren,
-      astree* params, astree* block) {
-   astree* function = new astree(TOK_FUNCTION, type->loc,
-         astree::NOINFO);
-   astree* type_id = parser::make_type_id(type, id);
-   return function->adopt(type_id, paren->adopt_sym(TOK_PARAM, params),
-         block);
+struct astree* parser_make_root () {
+    return astree_init (TOK_ROOT, (struct location) {lexer_get_fileno(), 0, 0}, "");
 }
 
-astree* parser::make_type_id(astree* type, astree* id, astree* expr) {
-   astree* type_id = new astree(TOK_TYPE_ID, type->loc, astree::NOINFO);
-   return type_id->adopt(type, id, expr);
+struct astree* parser_make_function(struct astree *type, struct astree *id,
+        struct astree *paren, struct astree *params, struct astree *block) {
+    struct astree* function = astree_init (TOK_FUNCTION, type->loc, "");
+    struct astree* type_id = parser_make_type_id(type, id, NULL);
+    return astree_adopt (function, type_id, astree_adopt_sym (paren, TOK_PARAM,
+            params, NULL), block);
 }
 
-astree* parser::make_struct(astree* parent, astree* structure_id,
-       astree* structure_body) {
-    //structure_id->attributes.set((size_t)attr::TYPEID);
-    parent->type_id=structure_id->lexinfo;
-    return parent->adopt(structure_id, structure_body);
+struct astree* parser_make_type_id(struct astree *type, struct astree *id,
+        struct astree *expr) {
+    struct astree* type_id = astree_init (TOK_TYPE_ID, type->loc, "");
+    return astree_adopt (type_id, type, id, expr);
 }
 
-bool is_defined_token (int symbol) {
-   return YYTRANSLATE (symbol) > YYUNDEFTOK;
+struct astree* parser_make_struct(struct astree *parent, struct astree *structure_id,
+       struct astree *structure_body) {
+    parent->type_id = structure_id->lexinfo;
+    return astree_adopt (parent, structure_id, structure_body, NULL);
+}
+
+int is_defined_token (int symbol) {
+    return YYTRANSLATE (symbol) > YYUNDEFTOK;
 }
