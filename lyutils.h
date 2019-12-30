@@ -48,12 +48,15 @@ void lexer_init_global_vars ();
 
 const char *parser_get_tname (int symbol);
 struct astree *parser_make_root ();
-struct astree* parser_make_type_id(struct astree *type, struct astree *id,
-        struct astree *expr);
-struct astree* parser_make_function(struct astree *type, struct astree *id,
-        struct astree *paren, struct astree *params, struct astree *block);
-struct astree* parser_make_struct(struct astree *parent, struct astree *structure_id,
-       struct astree *structure_body);
+struct astree *parser_make_type_id (struct astree *type, struct astree *id,
+                                    struct astree *expr);
+struct astree *parser_make_function (struct astree *type, struct astree *id,
+                                     struct astree *paren,
+                                     struct astree *params,
+                                     struct astree *block);
+struct astree *parser_make_struct (struct astree *parent,
+                                   struct astree *structure_id,
+                                   struct astree *structure_body);
 
 #    define YYSTYPE_IS_DECLARED
 typedef struct astree *YYSTYPE;
