@@ -30,7 +30,7 @@ const char **lexer_filename (int fileno) {
 size_t lexer_include_lineno (int fileno) {
     // this oughtta be fixed; don't want to be casting size_t's to pointers but
     // dynamically allocating all that sounds like a pain in the ass
-    return vector_get (lexer_include_linenos, (size_t) fileno);
+    return (size_t) vector_get (lexer_include_linenos, (size_t) fileno);
 }
 
 void lexer_newfilename (const char *filename) {
