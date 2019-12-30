@@ -42,8 +42,9 @@ void lexer_include ();
 int lexer_token (int symbol);
 int lexer_badtoken (int symbol);
 void lexer_fatal_error (const char *msg);
-FILE *lexer_error ();
+void lexer_error (const char *msg);
 void lexer_dump_filenames (FILE * out);
+void lexer_init_global_vars ();
 
 #    define YYSTYPE_IS_DECLARED
 typedef struct astree *YYSTYPE;
