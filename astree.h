@@ -36,7 +36,7 @@ void astree_free (struct astree *astree_);
 struct astree *astree_adopt (struct astree *parent, struct astree *child1,
                              struct astree *child2, struct astree *child3);
 struct astree *astree_adopt_sym (struct astree *parent, int symbol,
-                                struct astree *child1, struct astree *child2);
+                                 struct astree *child1, struct astree *child2);
 struct astree *astree_buddy_up (struct astree *astree_, struct astree *sibling);
 void astree_dump_node (struct astree *astree_, FILE * out);
 void astree_dump_tree (struct astree *astree_, FILE * out, int depth);
