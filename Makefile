@@ -2,10 +2,10 @@
 
 WARN = -Wall -Wextra -Werror -Wpedantic -Wshadow
 # full gcc exec command
-C = gcc -g -O0 -std=c11
+C = gcc -g -O0 -std=gnu11
 CWARN = ${C} ${WARN} -fdiagnostics-color=never
 CYY = ${C} -Wno-sign-compare
-CDEP = gcc -std=c11 -MM ${WARN}
+CDEP = gcc -std=gnu11 -MM ${WARN}
 MKFILE = Makefile
 DEPFILE = ${MKFILE}.dep
 GMAKE = ${MAKE} --no-print-directory
@@ -18,7 +18,7 @@ MAIN = main.c
 # test source file
 TEST = test.c
 # .c source files
-SRC = map.c string_set.c lyutils.c astree.c vector.c
+SRC = map.c string_set.c lyutils.c astree.c vector.c auxlib.c
 # .h header files
 HDR = map.h string_set.h vector.h lyutils.h auxlib.h astree.h symtable.h
 # .o object files
@@ -33,8 +33,8 @@ FMT = ${SRC:=~} ${HDR:=~} ${TEST:=~}
 
 all : ${DEPFILE} ${EXECNAME}
 
-${EXECNAME} : ${OBJ}
-	${C} -o bompiler ${OBJ}
+${EXECNAME} : ${OBJ} ${MAIN:.c=.o}
+	${C} -o bompiler ${OBJ} ${MAIN:.c=.o}
 
 ${TSTEXECNAME} : ${OBJ} ${TEST:.c=.o}
 	${C} -o test ${OBJ} ${TEST:.c=.o}
@@ -51,7 +51,7 @@ yyparse.o : yyparse.c yyparse.h
 yylex.c : scanner.l
 	flex --outfile=yylex.c scanner.l
 
-yyparse.c yyparse.h : parser.y
+yyparse.h yyparse.c : parser.y
 	bison -Wall -v --defines=yyparse.h --output=yyparse.c parser.y
 
 clean:
@@ -62,16 +62,17 @@ spotless: clean
 	rm -f ${EXECNAME} ${TSTEXECNAME} ${FMT}
 
 ci: 
-	git add ${HDR} ${SRC} ${MKFILE} ${TEST} README.md DESIGN.md .gitignore \
-	parser.y scanner.l
+	git add ${HDR} ${SRC} ${MKFILE} ${TEST} ${MAIN} README.md DESIGN.md \
+	.gitignore parser.y scanner.l
 
-deps: ${SRC} ${GEN}
-	${CDEP} ${SRC} ${GEN} ${MKFILE} >> ${DEPFILE}
+deps: ${SRC} ${GENSRC} ${GENHDR}
+	${CDEP} ${SRC} ${HDR} ${TEST} ${MAIN} ${GENSRC} ${GENHDR} ${MKFILE} \
+	>> ${DEPFILE}
 
 format:
 	indent -l80 -nfca -hnl -ncdb -bad -bap -nbc -bbo -nbfda -npsl -br -brs \
 	-brf -ce -cdw -lps -saf -sai -saw -pcs -cs -bs -nut -ts4 -i4 -pi4 -ci4 \
-	-cli4 -ppi4 -cbi0 -bli0 parser.y ${SRC} ${HDR} ${TEST}
+	-cli4 -ppi4 -cbi0 -bli0 parser.y ${SRC} ${HDR} ${TEST} ${MAIN}
 
 ${DEPFILE} :
 	@ touch ${DEPFILE}
