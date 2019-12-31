@@ -6,28 +6,6 @@
 #    include <string.h>
 #    include <stdarg.h>
 
-//
-// DESCRIPTION
-//    Auxiliary library containing miscellaneous useful things.
-//
-
-//
-// Error message and exit status utility.
-//
-
-/*struct exec {
-   static string execname;
-   static int exit_status;
-};
-
-struct exit_error: public exception {
-   exit_error (int);
-};*/
-
-FILE *error ();
-
-void eprint_status (const char *command, int status);
-
 // Print the status returned by wait(2) from a subprocess.
 
 // set_flags -
@@ -85,8 +63,7 @@ void debug_where_short (char flag, const char *file, int line, const char *msg);
 // Support for stub messages.
 //
 #    define STUB(CODE) { \
-         debug::where (__FILE__, __LINE__, __PRETTY_FUNCTION__); \
-         cerr << CODE << endl; \
+         debug::where (__FILE__, __LINE__, __PRETTY_FUNCTION__, CODE); \
      }
 
 #endif
