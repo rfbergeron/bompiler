@@ -16,33 +16,33 @@ extern FILE *tokfile;
 size_t lexer_last_yyleng;
 struct location lexer_loc;
 struct vector *lexer_filenames;
-struct vector *lexer_include_linenos;
+struct vector *lexer_include_linenrs;
 struct astree *parser_root;
 
-size_t lexer_get_fileno () {
-    return lexer_loc.fileno;
+size_t lexer_get_filenr () {
+    return lexer_loc.filenr;
 }
 
-const char **lexer_filename (int fileno) {
-    return (vector_get (lexer_filenames, (size_t) fileno));
+const char **lexer_filename (int filenr) {
+    return (vector_get (lexer_filenames, (size_t) filenr));
 }
 
-size_t lexer_include_lineno (int fileno) {
+size_t lexer_include_linenr (int filenr) {
     // this oughtta be fixed; don't want to be casting size_t's to pointers but
     // dynamically allocating all that sounds like a pain in the ass
-    return (size_t) vector_get (lexer_include_linenos, (size_t) fileno);
+    return (size_t) vector_get (lexer_include_linenrs, (size_t) filenr);
 }
 
 void lexer_newfilename (const char *filename) {
-    lexer_loc.fileno = lexer_filenames->size;
+    lexer_loc.filenr = lexer_filenames->size;
     vector_push (lexer_filenames, (void *) filename);
-    vector_push (lexer_include_linenos, (void *) lexer_loc.lineno + 1);
+    vector_push (lexer_include_linenrs, (void *) lexer_loc.linenr + 1);
 }
 
 void lexer_advance () {
     if (!lexer_interactive) {
         if (lexer_loc.offset == 0) {
-            printf (";%3d,%3d: ", lexer_loc.fileno, lexer_loc.lineno);
+            printf (";%3d,%3d: ", lexer_loc.filenr, lexer_loc.linenr);
         }
         printf ("%s", yytext);
     }
@@ -51,7 +51,7 @@ void lexer_advance () {
 }
 
 void lexer_newline () {
-    ++lexer_loc.lineno;
+    ++lexer_loc.linenr;
     lexer_loc.offset = 0;
 }
 
@@ -71,20 +71,20 @@ void lexer_bad_char (unsigned char bad) {
 }
 
 void lexer_include () {
-    size_t lineno;
+    size_t linenr;
     size_t filename_size = strlen (yytext) + 1;
     char *filename = (char *) malloc (sizeof (char) * filename_size);
     int scan_rc = sscanf (yytext, "# %zu \"%[^\"]\"",
-                          &lineno, filename);
+                          &linenr, filename);
 
     if (scan_rc != 2) {
         fprintf (stderr, "Invalid directive, ignored: %s\n", yytext);
     } else {
         if (yy_flex_debug) {
-            fprintf (stderr, "--included # %d \"%s\"\n", lineno, filename);
+            fprintf (stderr, "--included # %d \"%s\"\n", linenr, filename);
         }
-        fprintf (tokfile, "# %2d %s\n", lineno, filename);
-        lexer_loc.lineno = lineno - 1;
+        fprintf (tokfile, "# %2d %s\n", linenr, filename);
+        lexer_loc.linenr = linenr - 1;
         lexer_newfilename (filename);
     }
     free (filename);
@@ -92,8 +92,8 @@ void lexer_include () {
 
 int lexer_token (int symbol) {
     yylval = astree_init (symbol, lexer_loc, yytext);
-    fprintf (tokfile, "%2d  %3d.%3d %3d %-13s %s\n", yylval->loc.fileno,
-             yylval->loc.lineno, yylval->loc.offset, yylval->symbol,
+    fprintf (tokfile, "%2d  %3d.%3d %3d %-13s %s\n", yylval->loc.filenr,
+             yylval->loc.linenr, yylval->loc.offset, yylval->symbol,
              parser_get_tname (yylval->symbol), *(yylval->lexinfo));
     return symbol;
 }
@@ -114,8 +114,8 @@ void lexer_fatal_error (const char *msg) {
 
 void lexer_error (const char *message) {
     assert (!vector_empty (lexer_filenames));
-    fprintf (stderr, "%s:%d.%d: %s", lexer_filename (lexer_loc.fileno),
-             lexer_loc.lineno, lexer_loc.offset, message);
+    fprintf (stderr, "%s:%d.%d: %s", lexer_filename (lexer_loc.filenr),
+             lexer_loc.linenr, lexer_loc.offset, message);
 }
 
 void lexer_dump_filenames (FILE * out) {
@@ -129,7 +129,7 @@ void lexer_init_global_vars () {
     lexer_interactive = 0;
     lexer_loc = (struct location) { 0, 1, 0 };
     lexer_filenames = vector_init (10);
-    lexer_include_linenos = vector_init (10);
+    lexer_include_linenrs = vector_init (10);
 }
 
 void yyerror (const char *message) {

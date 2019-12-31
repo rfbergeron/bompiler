@@ -10,8 +10,8 @@
 #    include "vector.h"
 
 struct location {
-    size_t fileno;
-    size_t lineno;
+    size_t filenr;
+    size_t linenr;
     size_t offset;
 };
 
@@ -23,7 +23,7 @@ struct astree {
     struct vector *children;    // children of this n-way node
     struct astree *next_sibling;    // for adopting long lists of siblings
     struct astree *firstborn;   // head of the list of siblings
-    size_t block_no;            // block number this node occurs in
+    size_t blocknr;             // block number this node occurs in
     int *attributes;            // type attributes
     const char **type_id;       // structure type
 };

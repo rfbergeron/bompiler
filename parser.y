@@ -141,7 +141,7 @@ const char *parser_get_tname (int symbol) {
 }
 
 struct astree *parser_make_root () {
-    return astree_init (TOK_ROOT, (struct location) { lexer_get_fileno (), 0,
+    return astree_init (TOK_ROOT, (struct location) { lexer_get_filenr (), 0,
                         0
                         }, "");
 }
