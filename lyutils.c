@@ -98,7 +98,7 @@ int lexer_token (int symbol) {
     return symbol;
 }
 
-int lexer_badtoken (int symbol) {
+int lexer_bad_token (int symbol) {
     size_t bufsize = strlen ("Invalid token (") + strlen (yytext) + 3;
     char *buffer = (char *) malloc (sizeof (char) * bufsize);
 

@@ -5,7 +5,7 @@
 
 #include "lyutils.h"
 #include "astree.h"
-#include "symtable.h"
+//#include "symtable.h"
 // *INDENT-OFF*
 %}
 
@@ -16,7 +16,7 @@
 %verbose
 
 %destructor { astree_destroy (1, $$); } <>
-%printer { assert (yyoutput == stderr); astree_dump_node ($$, stderr); } <>
+%printer { assert (yyoutput == stderr); astree_dump_tree ($$, stderr, 0); } <>
 
 %token TOK_VOID TOK_INT TOK_STRING TOK_TYPE_ID
 %token TOK_IF TOK_ELSE TOK_WHILE TOK_RETURN TOK_STRUCT
