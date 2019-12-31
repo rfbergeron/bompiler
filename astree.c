@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stddef.h>
+#include <stdarg.h>
 
 #include "string_set.h"
 #include "lyutils.h"
@@ -13,7 +14,7 @@
 
 struct astree *astree_init (int symbol_, const struct location loc_,
                             const char *info) {
-    struct astree *ret = (struct astree *) calloc (sizeof (struct astree *), 1);
+    struct astree *ret = (struct astree *) malloc (sizeof (struct astree *));
 
     ret->symbol = symbol_;
     ret->loc = loc_;
@@ -170,11 +171,11 @@ char *astree_to_string (struct astree *tree) {
     if (strlen (tname) > 4)
         tname += 4;
     int bufsize = snprintf (NULL, 0, "%s \"%s\" %s {%d} attrs", tname,
-                            *(tree->lexinfo), locstring, tree->block_no);
+                            *(tree->lexinfo), locstring, tree->blocknr);
     char *buffer = (char *) malloc (sizeof (char) * (bufsize + 1));
 
     snprintf (buffer, bufsize, "%s \"%s\" %s {%d} attrs", tname,
-              *(tree->lexinfo), locstring, tree->block_no);
+              *(tree->lexinfo), locstring, tree->blocknr);
     free (locstring);
     return buffer;
 }
@@ -198,22 +199,25 @@ void astree_print_tree (struct astree *tree, FILE * out, int depth) {
 }
 
 char *location_to_string (struct location location_) {
-    int bufsize = snprintf (NULL, 0, "{%d, %d, %d}", location_.fileno,
-                            location_.lineno, location_.offset);
+    int bufsize = snprintf (NULL, 0, "{%d, %d, %d}", location_.filenr,
+                            location_.linenr, location_.offset);
     char *buffer = (char *) malloc (sizeof (char) * (bufsize + 1));
 
     *(buffer + bufsize) = 0;
-    snprintf (buffer, bufsize, "{%d, %d, %d}", location_.fileno,
-              location_.lineno, location_.offset);
+    snprintf (buffer, bufsize, "{%d, %d, %d}", location_.filenr,
+              location_.linenr, location_.offset);
     return buffer;
 }
 
-void destroy (struct astree *tree1, struct astree *tree2, struct astree *tree3) {
+void astree_destroy (size_t count, ...) {
     //DEBUGH('y', "  DESTROYING");
-    if (tree1 != NULL)
-        astree_free (tree1);
-    if (tree2 != NULL)
-        astree_free (tree2);
-    if (tree3 != NULL)
-        astree_free (tree3);
+    va_list args;
+
+    va_start (args, count);
+    for (size_t i = 0; i < count; ++i) {
+        struct astree *tree = va_arg (args, struct astree *);
+
+        astree_free (tree);
+    }
+    va_end (args);
 }

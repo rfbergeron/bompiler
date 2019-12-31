@@ -31,9 +31,9 @@ int yylex_destroy ();
 int yyparse ();
 void yyerror (const char *message);
 
-size_t lexer_get_fileno ();
-const char **lexer_filename (int fileno);
-size_t lexer_include_lineno (int fileno);
+size_t lexer_get_filenr ();
+const char **lexer_filename (int filenr);
+size_t lexer_include_linenr (int filenr);
 void lexer_new_filename (const char **filename);
 void lexer_advance ();
 void lexer_newline ();
