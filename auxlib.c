@@ -3,8 +3,12 @@
 #include <string.h>
 #include <stdio.h>
 #include <limits.h>
+#include <err.h>
 
 #include "auxlib.h"
+
+// not ideal but I'm the only one that'll ever be using it so whatever
+#define MAX_MESSAGE_LEN 1024 
 
 int flags[UCHAR_MAX + 1] = { 0 };
 
@@ -31,11 +35,18 @@ int debug_get_flag (char flag) {
 }
 
 void debug_where (char flag, const char *file, int line,
-                  const char *pretty_function, const char *msg) {
-    fprintf (stderr, "./oc: DEBUG(%c) %s[%d] \n%s %s\n", flag, file, line,
-             pretty_function, msg);
+                  const char *pretty_function, const char *msg, ...) {
+    va_list args;
+    char full_msg[MAX_MESSAGE_LEN];
+    vsprintf(full_msg, msg, args);
+    warnx ("DEBUG(%c) %s[%d] \n%s %s", flag, file, line,
+             pretty_function, full_msg);
 }
 
-void debug_where_short (char flag, const char *file, int line, const char *msg) {
-    fprintf (stderr, "./oc: DEBUG(%c) %s[%d] %s\n", flag, file, line, msg);
+void debug_where_short (char flag, const char *file, int line,
+                        const char *msg, ...) {
+    va_list args;
+    char full_msg[MAX_MESSAGE_LEN];
+    vsprintf(full_msg, msg, args);
+    warnx ("DEBUG(%c) %s[%d] %s", flag, file, line, full_msg);
 }
