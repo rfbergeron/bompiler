@@ -24,7 +24,7 @@ extern int yydebug;
 extern int yyleng;
 extern FILE *tokfile;
 int lexer_interactive;
-struct astree *root;
+struct astree *parser_root;
 
 int yylex ();
 int yylex_destroy ();
@@ -44,7 +44,8 @@ int lexer_bad_token (int symbol);
 void lexer_fatal_error (const char *msg);
 void lexer_error (const char *msg);
 void lexer_dump_filenames (FILE * out);
-void lexer_init_global_vars ();
+void lexer_init_globals ();
+void lexer_free_globals ();
 
 const char *parser_get_tname (int symbol);
 struct astree *parser_make_root ();

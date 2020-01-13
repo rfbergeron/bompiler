@@ -15,7 +15,7 @@
 #include "string_set.h"
 
 #define LINESIZE 1024
-const char *CPP = "/usr/bin/cpp -nostdinc";
+const char *CPP = "/usr/bin/cpp -nostdinc ";
 const char *OC_EXT = ".oc";
 const char *STR_EXT = ".str";
 const char *TOK_EXT = ".tok";
@@ -84,6 +84,7 @@ int main (int argc, char **argv) {
         err (1, "%s", oc_name);
     }
 
+    DEBUGS ('m', "Creating names of output files and cpp exec line");
     memcpy (strname, oc_name, name_len);
     memcpy (strname + name_len, STR_EXT, strlen (STR_EXT));
     memcpy (tokname, oc_name, name_len);
@@ -93,6 +94,7 @@ int main (int argc, char **argv) {
     memcpy (cppcmd, CPP, strlen (CPP));
     memcpy (cppcmd + strlen (CPP), oc_name, strlen (oc_name));
 
+    DEBUGS ('m', "Opening files and pipes");
     yyin = popen (cppcmd, "r");
     if (yyin == NULL) {
         err (1, "%s", cppcmd);
@@ -109,19 +111,26 @@ int main (int argc, char **argv) {
     if (astfile == NULL) {
         err (1, "%s", astname);
     }
-    // do stuff
-    
+    // remember to initialize certain things, like the string table
+    string_set_init_globals ();
+    lexer_init_globals ();
+
+    DEBUGS ('m', "Parsing");
     int parse_status = yyparse();
 
-    if (parse_status == 0) {
-        errx (1, "Parsing failed with status %d.", parse_status);
+    if (parse_status != 0) {
+        warnx ("Parsing failed with status %d.", parse_status);
     } else {
-        // do more stuff
+        DEBUGS ('m', "Parse successful; dumping strings.");
+        string_set_dump (strfile);
     }
 
+    DEBUGS ('m', "Execution finished; wrapping up.");
     int pclose_status = pclose (yyin);
     fclose (strfile);
     fclose (tokfile);
     fclose (astfile);
+    string_set_free_globals ();
+    lexer_free_globals ();
     return EXIT_SUCCESS;
 }

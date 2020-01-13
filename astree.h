@@ -30,7 +30,7 @@ struct astree {
 
 void location_print (FILE * out, const struct location location_);
 
-struct astree *astree_init (int symbol, const struct location,
+struct astree *astree_init (int symbol_, const struct location loc_,
                             const char *lexinfo);
 void astree_free (struct astree *astree_);
 struct astree *astree_adopt (struct astree *parent, struct astree *child1,
@@ -38,7 +38,7 @@ struct astree *astree_adopt (struct astree *parent, struct astree *child1,
 struct astree *astree_adopt_sym (struct astree *parent, int symbol,
                                  struct astree *child1, struct astree *child2);
 struct astree *astree_buddy_up (struct astree *astree_, struct astree *sibling);
-void astree_dump (struct astree *astree_);
+void astree_dump (struct astree *astree_, FILE *out);
 void astree_dump_tree (struct astree *astree_, FILE * out, int depth);
 void astree_print_tree (struct astree *astree_, FILE * out, int depth);
 char *astree_to_string (struct astree *astree_);

@@ -7,16 +7,19 @@
 #include "vector.h"
 
 void vector_put (struct vector *vector_, const size_t index, void *value) {
+    assert (vector_ != NULL);
     assert (index < vector_->size);
     *((vector_->values) + index) = (uintptr_t) value;
 }
 
 void *vector_get (struct vector *vector_, const size_t index) {
+    assert (vector_ != NULL);
     assert (index < vector_->size);
     return (void *) *((vector_->values) + index);
 }
 
 void *vector_remove (struct vector *vector_, const size_t index) {
+    assert (vector_ != NULL);
     assert (index < vector_->size);
     uintptr_t ret = *((vector_->values) + index);
 
@@ -25,6 +28,7 @@ void *vector_remove (struct vector *vector_, const size_t index) {
 }
 
 void vector_push (struct vector *vector_, void *value) {
+    assert (vector_ != NULL);
     if (vector_->stack_size == vector_->size)
         vector_expand (vector_);
     *((vector_->values) + vector_->stack_size) = (uintptr_t) value;
@@ -32,6 +36,7 @@ void vector_push (struct vector *vector_, void *value) {
 }
 
 void *vector_pop (struct vector *vector_) {
+    assert (vector_ != NULL);
     if (vector_empty (vector_))
         return NULL;
     void *ret = (void *) *(vector_->values);
@@ -45,14 +50,17 @@ void *vector_pop (struct vector *vector_) {
 }
 
 void *vector_peek (struct vector *vector_) {
+    assert (vector_ != NULL);
     return (void *) *((vector_->values) + vector_->stack_size);
 }
 
 int vector_empty (struct vector *vector_) {
+    assert (vector_ != NULL);
     return (vector_->stack_size == 0);
 }
 
 void vector_expand (struct vector *vector_) {
+    assert (vector_ != NULL);
     uintptr_t *old_values = vector_->values;
     size_t old_size = vector_->size;
 
@@ -72,6 +80,7 @@ struct vector *vector_init (const size_t size_) {
 }
 
 void vector_free (struct vector *vector_) {
+    assert (vector_ != NULL);
     free (vector_->values);
     free (vector_);
 }
