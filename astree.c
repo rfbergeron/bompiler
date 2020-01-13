@@ -10,17 +10,23 @@
 #include "astree.h"
 #include "vector.h"
 #include "map.h"
+#include "auxlib.h"
 //#include "symtable.h"
 
 struct astree *astree_init (int symbol_, const struct location loc_,
                             const char *info) {
-    struct astree *ret = (struct astree *) malloc (sizeof (struct astree *));
+    DEBUGS ('t', "Initializing new astree node with code: %d", symbol_);
+    struct astree *ret = (struct astree *) malloc (sizeof (struct astree));
 
     ret->symbol = symbol_;
     ret->loc = loc_;
     ret->lexinfo = string_set_intern (info);
-    ret->firstborn = ret;
+    ret->children = vector_init (10);
     ret->next_sibling = NULL;
+    ret->firstborn = ret;
+    ret->blocknr = 0;
+
+    DEBUGS ('t', "Assigning node attributes.");
     // remember, attributes for nodes which adopt a different symbol
     // must have the appropriate attributes set in adopt_symbol
     switch (symbol_) {
@@ -67,6 +73,7 @@ struct astree *astree_init (int symbol_, const struct location loc_,
 }
 
 void astree_free (struct astree *astree_) {
+    assert (astree_ != NULL);
     while (!vector_empty (astree_->children)) {
         struct astree *child = vector_pop (astree_->children);
 
@@ -75,6 +82,7 @@ void astree_free (struct astree *astree_) {
     if (yydebug) {
         // print tree contents to stderr
     }
+    vector_free (astree_->children);
     free (astree_);
 }
 
@@ -151,15 +159,20 @@ astree* astree::third() {
     return children[2];
 }*/
 
-void astree_dump_tree (struct astree *tree, FILE * out, int depth) {
+void astree_dump_tree (struct astree *tree, FILE *out, int depth) {
     // Dump formatted tree: current pointer, current token, followed
     // by pointers to children, on one line. Then call recursively on
     // children with increased depth (identation)
 }
 
-void astree_dump (struct astree *tree) {
+void astree_dump (struct astree *tree, FILE *out) {
     // print pointer value and tree contents without any special formatting,
     // followed by the pointer values of this node's children
+    if (tree == NULL) return;
+    DEBUGS('t', "Dumping astree node.");
+    char *nodestr = astree_to_string (tree);
+    fprintf (out, "%p->%s", tree, nodestr);
+    free (nodestr);
 }
 
 char *astree_to_string (struct astree *tree) {
@@ -210,14 +223,15 @@ char *location_to_string (struct location location_) {
 }
 
 void astree_destroy (size_t count, ...) {
-    //DEBUGH('y', "  DESTROYING");
+    DEBUGS ('t', "  DESTROYING");
     va_list args;
 
     va_start (args, count);
     for (size_t i = 0; i < count; ++i) {
         struct astree *tree = va_arg (args, struct astree *);
 
-        astree_free (tree);
+        if (tree != NULL)
+            astree_free (tree);
     }
     va_end (args);
 }

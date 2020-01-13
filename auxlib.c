@@ -37,16 +37,20 @@ int debug_get_flag (char flag) {
 void debug_where (char flag, const char *file, int line,
                   const char *pretty_function, const char *msg, ...) {
     va_list args;
+    va_start (args, msg);
     char full_msg[MAX_MESSAGE_LEN];
     vsprintf(full_msg, msg, args);
     warnx ("DEBUG(%c) %s[%d] \n%s %s", flag, file, line,
              pretty_function, full_msg);
+    va_end (args);
 }
 
 void debug_where_short (char flag, const char *file, int line,
                         const char *msg, ...) {
     va_list args;
+    va_start (args, msg);
     char full_msg[MAX_MESSAGE_LEN];
     vsprintf(full_msg, msg, args);
     warnx ("DEBUG(%c) %s[%d] %s", flag, file, line, full_msg);
+    va_end (args);
 }

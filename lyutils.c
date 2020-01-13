@@ -17,7 +17,6 @@ size_t lexer_last_yyleng;
 struct location lexer_loc;
 struct vector *lexer_filenames;
 struct vector *lexer_include_linenrs;
-struct astree *parser_root;
 
 size_t lexer_get_filenr () {
     return lexer_loc.filenr;
@@ -91,10 +90,12 @@ void lexer_include () {
 }
 
 int lexer_token (int symbol) {
+    DEBUGS('l', "Found token with code: %p, length: %p", symbol, yyleng);
     yylval = astree_init (symbol, lexer_loc, yytext);
     fprintf (tokfile, "%2d  %3d.%3d %3d %-13s %s\n", yylval->loc.filenr,
              yylval->loc.linenr, yylval->loc.offset, yylval->symbol,
              parser_get_tname (yylval->symbol), *(yylval->lexinfo));
+    //fprintf (tokfile, "%p: [%p]->%s, length: %u\n", symbol, yytext, yytext, yyleng);
     return symbol;
 }
 
@@ -125,11 +126,16 @@ void lexer_dump_filenames (FILE * out) {
     }
 }
 
-void lexer_init_global_vars () {
+void lexer_init_globals () {
     lexer_interactive = 0;
     lexer_loc = (struct location) { 0, 1, 0 };
     lexer_filenames = vector_init (10);
     lexer_include_linenrs = vector_init (10);
+}
+
+void lexer_free_globals () {
+    vector_free (lexer_filenames);
+    vector_free (lexer_include_linenrs);
 }
 
 void yyerror (const char *message) {
