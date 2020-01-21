@@ -39,7 +39,7 @@ void lexer_newfilename (const char *filename) {
 }
 
 void lexer_advance () {
-    if (!lexer_interactive) {
+    if (lexer_interactive) {
         if (lexer_loc.offset == 0) {
             printf (";%3d,%3d: ", lexer_loc.filenr, lexer_loc.linenr);
         }

@@ -1,15 +1,14 @@
 #ifndef __MAP_H__
 #    define __MAP_H__
 
-#    include <stdint.h>
 #    include <stddef.h>
 
 struct map {
     size_t size;
     size_t count;
     size_t max_open_addr_index;
-    uintptr_t *keys;
-    uintptr_t *values;
+    void **keys;
+    void **values;
 };
 
 void map_put (struct map *map_, void *key, void *value);

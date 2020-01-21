@@ -7,7 +7,7 @@
 struct vector {
     size_t size;
     size_t stack_size;
-    uintptr_t *values;
+    void **values;
 };
 
 void vector_put (struct vector *vector_, const size_t index, void *value);

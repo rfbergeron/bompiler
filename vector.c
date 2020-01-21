@@ -9,29 +9,32 @@
 void vector_put (struct vector *vector_, const size_t index, void *value) {
     assert (vector_ != NULL);
     assert (index < vector_->size);
-    *((vector_->values) + index) = (uintptr_t) value;
+    assert (index >= 0);
+    *((vector_->values) + index) = value;
 }
 
 void *vector_get (struct vector *vector_, const size_t index) {
     assert (vector_ != NULL);
     assert (index < vector_->size);
-    return (void *) *((vector_->values) + index);
+    assert (index >= 0);
+    return *((vector_->values) + index);
 }
 
 void *vector_remove (struct vector *vector_, const size_t index) {
     assert (vector_ != NULL);
     assert (index < vector_->size);
-    uintptr_t ret = *((vector_->values) + index);
+    assert (index >= 0);
+    void *ret = *((vector_->values) + index);
 
-    *((vector_->values) + index) = (uintptr_t) NULL;
-    return (void *) ret;
+    *((vector_->values) + index) = NULL;
+    return ret;
 }
 
 void vector_push (struct vector *vector_, void *value) {
     assert (vector_ != NULL);
     if (vector_->stack_size == vector_->size)
         vector_expand (vector_);
-    *((vector_->values) + vector_->stack_size) = (uintptr_t) value;
+    *((vector_->values) + vector_->stack_size) = value;
     ++(vector_->stack_size);
 }
 
@@ -39,7 +42,7 @@ void *vector_pop (struct vector *vector_) {
     assert (vector_ != NULL);
     if (vector_empty (vector_))
         return NULL;
-    void *ret = (void *) *(vector_->values);
+    void *ret = *(vector_->values);
 
     --(vector_->stack_size);
     for (size_t i = 0; i < vector_->stack_size; ++i) {
@@ -51,7 +54,7 @@ void *vector_pop (struct vector *vector_) {
 
 void *vector_peek (struct vector *vector_) {
     assert (vector_ != NULL);
-    return (void *) *((vector_->values) + vector_->stack_size);
+    return *((vector_->values) + vector_->stack_size);
 }
 
 int vector_empty (struct vector *vector_) {
@@ -61,11 +64,11 @@ int vector_empty (struct vector *vector_) {
 
 void vector_expand (struct vector *vector_) {
     assert (vector_ != NULL);
-    uintptr_t *old_values = vector_->values;
+    void **old_values = vector_->values;
     size_t old_size = vector_->size;
 
     vector_->size *= 2;
-    vector_->values = (uintptr_t *) calloc (sizeof (uintptr_t), vector_->size);
+    vector_->values = calloc (sizeof (void *), vector_->size);
     memcpy (vector_->values, old_values, old_size);
     free (old_values);
 }
@@ -75,7 +78,7 @@ struct vector *vector_init (const size_t size_) {
 
     ret->size = size_;
     ret->stack_size = 0;
-    ret->values = (uintptr_t *) calloc (sizeof (uintptr_t), size_);
+    ret->values = (void **) calloc (sizeof (void *), size_);
     return ret;
 }
 
