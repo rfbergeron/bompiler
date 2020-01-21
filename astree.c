@@ -15,7 +15,7 @@
 
 struct astree *astree_init (int symbol_, const struct location loc_,
                             const char *info) {
-    DEBUGS ('t', "Initializing new astree node with code: %d", symbol_);
+    DEBUGS ('t', "Initializing new astree node with code: %s", parser_get_tname(symbol_));
     struct astree *ret = (struct astree *) malloc (sizeof (struct astree));
 
     ret->symbol = symbol_;
@@ -74,6 +74,7 @@ struct astree *astree_init (int symbol_, const struct location loc_,
 
 void astree_free (struct astree *astree_) {
     assert (astree_ != NULL);
+    DEBUGS('t', "Freeing an astree with sym %d, %s.", astree_->symbol, parser_get_tname(astree_->symbol));
     while (!vector_empty (astree_->children)) {
         struct astree *child = vector_pop (astree_->children);
 
@@ -82,7 +83,8 @@ void astree_free (struct astree *astree_) {
     if (yydebug) {
         // print tree contents to stderr
     }
-    vector_free (astree_->children);
+    if (astree_->children != NULL)
+        vector_free (astree_->children);
     free (astree_);
 }
 
@@ -178,6 +180,10 @@ void astree_dump (struct astree *tree, FILE *out) {
 char *astree_to_string (struct astree *tree) {
     // print token name, lexinfo in quotes, the location, block number,
     // attributes, and the typeid if this is a struct
+    if(tree == NULL) {
+        return NULL;
+    }
+
     const char *tname = parser_get_tname (tree->symbol);
     char *locstring = location_to_string (tree->loc);
 
@@ -195,6 +201,9 @@ char *astree_to_string (struct astree *tree) {
 
 void astree_print_tree (struct astree *tree, FILE * out, int depth) {
     // print out the whole tree
+    if (tree == NULL) return;
+    DEBUGS('t', "Tree info: token: %s, lexinfo: %s",
+            parser_get_tname (tree->symbol), *(tree->lexinfo));
     size_t numspaces = depth * 3;
     char *indent = (char *) malloc ((sizeof (char) * numspaces) + 1);
 
@@ -205,33 +214,37 @@ void astree_print_tree (struct astree *tree, FILE * out, int depth) {
     fprintf (out, "%s%s\n", indent, nodestr);
     free (nodestr);
     free (indent);
-    for (size_t i = 0; i < tree->children->size; ++i) {
-        astree_print_tree ((struct astree *) vector_get (tree->children, i),
-                           out, depth + 1);
+    DEBUGS('t', "       %s has %u children", parser_get_tname (tree->symbol),
+            tree->children->stack_size);
+    for (size_t i = 0; i < tree->children->stack_size; ++i) {
+        struct astree *child = (struct astree *) vector_get (tree->children, i);
+        if (child != NULL) {
+            DEBUGS('t', "       %s has a child; printing.", parser_get_tname (tree->symbol));
+            astree_print_tree (child, out, depth + 1);
+        }
     }
 }
 
 char *location_to_string (struct location location_) {
     int bufsize = snprintf (NULL, 0, "{%d, %d, %d}", location_.filenr,
-                            location_.linenr, location_.offset);
-    char *buffer = (char *) malloc (sizeof (char) * (bufsize + 1));
-
-    *(buffer + bufsize) = 0;
+                            location_.linenr, location_.offset) + 1;
+    char *buffer = (char *) malloc (sizeof (char) * (bufsize));
     snprintf (buffer, bufsize, "{%d, %d, %d}", location_.filenr,
               location_.linenr, location_.offset);
     return buffer;
 }
 
 void astree_destroy (size_t count, ...) {
-    DEBUGS ('t', "  DESTROYING");
     va_list args;
 
     va_start (args, count);
     for (size_t i = 0; i < count; ++i) {
         struct astree *tree = va_arg (args, struct astree *);
 
-        if (tree != NULL)
+        if (tree != NULL) {
+            DEBUGS ('t', "  DESTROYING: %d, %s", tree->symbol, parser_get_tname(tree->symbol));
             astree_free (tree);
+        }
     }
     va_end (args);
 }

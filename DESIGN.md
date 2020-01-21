@@ -35,38 +35,37 @@ Formatting Rules/Preferences:
    when I begin using that.
 2. The `#pragma` directive shall not be used
 3. The following GNU Indent options shall be set:
-   Long:                                        Short:
-   - --line-length 80                           -l80
-   - --dont-format-comments                     -nfca
-   - --honour-newlines                          -hnl
-   - --no-comment-delimiters-on-blank-lines     -ncdb
-   - --blank-lines-after-declarations           -bad
-   - --blank-lines-after-procedures             -bap
-   - --no-blank-lines-after-commas              -nbc
-   - --break-before-boolean-operator            -bbo
-   - --dont-break-function-decl-args            -nbfda
-   - --dont-break-procedure-type                -npsl
-   - --braces-on-if-line                        -br
-   - --braces-on-struct-decl-line               -brs
-   - --braces-on-func-def-line                  -brf
-   - --cuddle-else                              -ce
-   - --cuddle-do-while                          -cdw
-   - --leave-preprocessor-space                 -lps
-   - --space-after-for                          -saf
-   - --space-after-if                           -sai
-   - --space-after-while                        -saw
-   - --space-after-procedure-calls              -pcs
-   - --space-after-cast                         -cs
-   - --blank-before-sizeof                      -bs
-   - --no-tabs                                  -nut
-   - --tab-size 4                               -ts4
-   - --indent-level 4                           -i4
-   - --paren-indentation 8                      -pi4
-   - --continuation-indentation 8               -ci4
-   - --case-indentation 4                       -cli4
-   - --preprocessor-indentation 4               -ppi4
-   - --case-brace-indentation 0                 -cbi0
-   - --brace-indent 0                           -bli0
+   - --line-length 80                           or -l80
+   - --dont-format-comments                     or -nfca
+   - --honour-newlines                          or -hnl
+   - --no-comment-delimiters-on-blank-lines     or -ncdb
+   - --blank-lines-after-declarations           or -bad
+   - --blank-lines-after-procedures             or -bap
+   - --no-blank-lines-after-commas              or -nbc
+   - --break-before-boolean-operator            or -bbo
+   - --dont-break-function-decl-args            or -nbfda
+   - --dont-break-procedure-type                or -npsl
+   - --braces-on-if-line                        or -br
+   - --braces-on-struct-decl-line               or -brs
+   - --braces-on-func-def-line                  or -brf
+   - --cuddle-else                              or -ce
+   - --cuddle-do-while                          or -cdw
+   - --leave-preprocessor-space                 or -lps
+   - --space-after-for                          or -saf
+   - --space-after-if                           or -sai
+   - --space-after-while                        or -saw
+   - --space-after-procedure-calls              or -pcs
+   - --space-after-cast                         or -cs
+   - --blank-before-sizeof                      or -bs
+   - --no-tabs                                  or -nut
+   - --tab-size 4                               or -ts4
+   - --indent-level 4                           or -i4
+   - --paren-indentation 8                      or -pi4
+   - --continuation-indentation 8               or -ci4
+   - --case-indentation 4                       or -cli4
+   - --preprocessor-indentation 4               or -ppi4
+   - --case-brace-indentation 0                 or -cbi0
+   - --brace-indent 0                           or -bli0
                                                 
 
 ## 3. Tasks
@@ -97,12 +96,12 @@ Knuth's multiplicative method to hash values.
 
 #### `struct map`
 This structure will contain the actual map data. Only capable of storing
-pointers. Will store values internally as type `uintptr_t`. Has a field
-indicating the current size of the map and the number of values currently
-stored within the map. Has two dynamically allocated arrays, one of type
-`uint32_t` for the keys and another of type `uintptr_t` for the values. Should
-only be interacted with using the functions provided by the header file, for
-consistency, the only exception to this being structure initialization.
+pointers. Keys and values shall be stored in arrays of type `void **` allocated
+on the stack. Has a field indicating the current size of the map and the number
+of values currently stored within the map. Has two dynamically allocated arrays,
+one of. Should only be interacted with using the functions provided by the
+header file, for consistency, the only exception to this being structure
+initialization.
 
 #### `map_put`
 Takes three arguments: the map and the key and value to emplace in the map.
@@ -161,7 +160,8 @@ values must be pointers.
 #### `struct vector`
 This structure shall contain 3 fields: a dynamically allocated array to store
 the contents in, a `size_t` containing the length of the array, and the number
-of elements that currently exist in the vector as a stack.
+of elements that currently exist in the vector as a stack. The internal array
+shall be of type `void **`.
 
 While a vector can be used as both an array and a stack, elements inserted into
 the vector without the stack's knowledge (elements inserted at indices greater

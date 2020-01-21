@@ -31,11 +31,11 @@ uint32_t knuth_hash (uintptr_t to_hash, size_t max_value) {
 void map_put (struct map *map_, void *key, void *value) {
     assert (key != NULL);
     uint32_t map_index = knuth_hash ((uintptr_t) key, map_->size);
-    uintptr_t stored_key = *(map_->keys + map_index);
+    void *stored_key = *(map_->keys + map_index);
 
-    if (key == (void *) stored_key) {
+    if (key == stored_key) {
         // Already present
-        *(map_->values + map_index) = (uintptr_t) value;
+        *(map_->values + map_index) = value;
         ++(map_->count);
     } else {
         size_t open_index = 0;
@@ -44,10 +44,10 @@ void map_put (struct map *map_, void *key, void *value) {
         // check if key has been open addressed and look for an empty slot
         while (current_index < map_->size &&
                (map_->size < map_->max_open_addr_index || open_index == 0)) {
-            if (*(map_->keys + current_index) == (uintptr_t) key) {
-                *(map_->values + current_index) = (uintptr_t) value;
+            if (*(map_->keys + current_index) == key) {
+                *(map_->values + current_index) = value;
                 return;
-            } else if ((void *) *(map_->keys + current_index) == NULL
+            } else if (*(map_->keys + current_index) == NULL
                        && open_index == 0) {
                 open_index = current_index;
             }
@@ -55,12 +55,12 @@ void map_put (struct map *map_, void *key, void *value) {
         }
 
         // emplace the value somewhere
-        if ((void *) stored_key == NULL) {
-            *(map_->keys + map_index) = (uintptr_t) key;
-            *(map_->values + map_index) = (uintptr_t) value;
+        if (stored_key == NULL) {
+            *(map_->keys + map_index) = key;
+            *(map_->values + map_index) = value;
         } else if (open_index != 0) {
-            *(map_->keys + open_index) = (uintptr_t) key;
-            *(map_->values + open_index) = (uintptr_t) value;
+            *(map_->keys + open_index) = key;
+            *(map_->values + open_index) = value;
             if (open_index > map_->max_open_addr_index) {
                 map_->max_open_addr_index = open_index;
             }
@@ -74,15 +74,15 @@ void map_put (struct map *map_, void *key, void *value) {
 void *map_get (struct map *map_, void *key) {
     assert (key != NULL);
     uint32_t map_index = knuth_hash ((uintptr_t) key, map_->size);
-    uintptr_t stored_key = *(map_->keys + map_index);
+    void *stored_key = *(map_->keys + map_index);
 
-    if (stored_key == (uintptr_t) key) {
-        return (void *) *(map_->values + map_index);
+    if (stored_key == key) {
+        return *(map_->values + map_index);
     } else {
         for (size_t i = 0; i < map_->max_open_addr_index; ++i) {
             stored_key = *(map_->keys + i);
-            if (stored_key == (uintptr_t) key) {
-                return (void *) *(map_->values + map_index);
+            if (stored_key == key) {
+                return *(map_->values + map_index);
             }
         }
         return NULL;
@@ -91,22 +91,24 @@ void *map_get (struct map *map_, void *key) {
 
 void map_expand (struct map *map_) {
     size_t old_size = map_->size;
-    uintptr_t *old_keys = map_->keys;
-    uintptr_t *old_values = map_->values;
+    void **old_keys = map_->keys;
+    void **old_values = map_->values;
 
     map_->size *= 2;
-    map_->keys = calloc (sizeof (uintptr_t), map_->size);
-    map_->values = calloc (sizeof (uintptr_t), map_->size);
+    map_->keys = calloc (sizeof (void *), map_->size);
+    map_->values = calloc (sizeof (void *), map_->size);
     map_->count = 0;
     map_->max_open_addr_index = 0;
 
     for (size_t i = 0; i < old_size; ++i) {
-        uintptr_t stored_key = *(old_keys + i);
+        void *stored_key = *(old_keys + i);
 
-        if ((void *) stored_key != NULL) {
-            map_put (map_, (void *) stored_key, (void *) *(old_values + i));
+        if (stored_key != NULL) {
+            map_put (map_, stored_key, *(old_values + i));
         }
     }
+    free (old_keys);
+    free (old_values);
 }
 
 struct map *map_init (size_t size_) {
@@ -115,8 +117,8 @@ struct map *map_init (size_t size_) {
     map_->size = size_;
     map_->count = 0;
     map_->max_open_addr_index = 0;
-    map_->keys = (uintptr_t *) calloc (sizeof (uintptr_t), size_);
-    map_->values = (uintptr_t *) calloc (sizeof (uintptr_t), size_);
+    map_->keys = calloc (sizeof (void *), size_);
+    map_->values = calloc (sizeof (void *), size_);
     return map_;
 }
 

@@ -123,6 +123,7 @@ int main (int argc, char **argv) {
     } else {
         DEBUGS ('m', "Parse successful; dumping strings.");
         string_set_dump (strfile);
+        astree_print_tree (parser_root, astfile, 0);
     }
 
     DEBUGS ('m', "Execution finished; wrapping up.");
