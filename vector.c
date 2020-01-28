@@ -40,11 +40,11 @@ void *vector_remove (struct vector *vector_, const size_t index) {
 void vector_push (struct vector *vector_, void *value) {
     assert (vector_ != NULL);
     if (vector_->stack_size == vector_->size) vector_expand (vector_);
-    /*DEBUGS ('v',
+    DEBUGS ('v',
             "Pushing pointer %p to index %u; original value: %p",
             value,
             vector_->stack_size,
-            *((vector_->values) + vector_->stack_size));*/
+            *((vector_->values) + vector_->stack_size));
     *((vector_->values) + vector_->stack_size) = value;
     ++(vector_->stack_size);
 }
@@ -77,7 +77,7 @@ void vector_expand (struct vector *vector_) {
     void **old_values = vector_->values;
     size_t old_size = vector_->size;
 
-    for(size_t i = 0; i < old_size; ++i) {
+    for (size_t i = 0; i < old_size; ++i) {
         DEBUGS ('v', "Old vector value: %p index: %u", *(old_values + i), i);
     }
 
@@ -86,8 +86,11 @@ void vector_expand (struct vector *vector_) {
     memcpy (vector_->values, old_values, old_size * sizeof (void *));
     free (old_values);
 
-    for(size_t i = 0; i < vector_->size; ++i) {
-        DEBUGS ('v', "New vector value: %p index: %u", *(vector_->values + i), i);
+    for (size_t i = 0; i < vector_->size; ++i) {
+        DEBUGS ('v',
+                "New vector value: %p index: %u",
+                *(vector_->values + i),
+                i);
     }
 }
 

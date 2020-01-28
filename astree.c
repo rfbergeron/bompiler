@@ -30,7 +30,6 @@ struct astree *astree_init (int symbol_,
     ret->firstborn = ret;
     ret->blocknr = 0;
 
-    DEBUGS ('t', "Assigning node attributes.");
     // remember, attributes for nodes which adopt a different symbol
     // must have the appropriate attributes set in adopt_symbol
     switch (symbol_) {
@@ -99,8 +98,10 @@ struct astree *astree_adopt (struct astree *parent,
                              struct astree *child2,
                              struct astree *child3) {
     if (child1 != NULL) {
-        DEBUGS ('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
-                                          parser_get_tname(child1->symbol));
+        DEBUGS ('t',
+                "Tree %s adopts %s",
+                parser_get_tname (parent->symbol),
+                parser_get_tname (child1->symbol));
         struct astree *current_sibling = child1->firstborn;
 
         do {
@@ -109,8 +110,10 @@ struct astree *astree_adopt (struct astree *parent,
         } while (current_sibling != NULL);
     }
     if (child2 != NULL) {
-        DEBUGS ('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
-                                          parser_get_tname(child2->symbol));
+        DEBUGS ('t',
+                "Tree %s adopts %s",
+                parser_get_tname (parent->symbol),
+                parser_get_tname (child2->symbol));
         struct astree *current_sibling = child2->firstborn;
 
         do {
@@ -119,8 +122,10 @@ struct astree *astree_adopt (struct astree *parent,
         } while (current_sibling != NULL);
     }
     if (child3 != NULL) {
-        DEBUGS ('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
-                                          parser_get_tname(child3->symbol));
+        DEBUGS ('t',
+                "Tree %s adopts %s",
+                parser_get_tname (parent->symbol),
+                parser_get_tname (child3->symbol));
         struct astree *current_sibling = child3->firstborn;
 
         do {
@@ -227,35 +232,27 @@ char *astree_to_string (struct astree *tree) {
 void astree_print_tree (struct astree *tree, FILE *out, int depth) {
     // print out the whole tree
     DEBUGS ('t',
-            "Tree info: token: %s, lexinfo: %s",
+            "Tree info: token: %s, lexinfo: %s, children: %u",
             parser_get_tname (tree->symbol),
-            *(tree->lexinfo));
+            *(tree->lexinfo),
+            tree->children->stack_size);
+
     size_t numspaces = depth * 3;
-    char *indent = (char *) malloc ((sizeof (char) * numspaces) + 1);
-
+    char indent[1024];
     memset (indent, ' ', numspaces);
-    *(indent + numspaces) = 0;
+    indent[numspaces] = 0;
     char *nodestr = astree_to_string (tree);
-
     fprintf (out, "%s%s\n", indent, nodestr);
     free (nodestr);
-    free (indent);
-    DEBUGS ('t',
-            "       %s has %u children",
-            parser_get_tname (tree->symbol),
-            tree->children->stack_size);
-    DEBUGS ('t', "Printing addresses of children.");
+
     for (size_t i = 0; i < tree->children->stack_size; ++i) {
-        DEBUGS ('t', "   %p", vector_get (tree->children, i));
+        DEBUGS ('t', "    %p", vector_get (tree->children, i));
     }
 
     for (size_t i = 0; i < tree->children->stack_size; ++i) {
         struct astree *child = (struct astree *) vector_get (tree->children, i);
 
         if (child != NULL) {
-            DEBUGS ('t',
-                    "       %s has a child; printing.",
-                    parser_get_tname (tree->symbol));
             astree_print_tree (child, out, depth + 1);
         }
     }
