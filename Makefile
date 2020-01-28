@@ -65,6 +65,9 @@ clean:
 spotless: clean
 	rm -f ${EXECNAME} ${TSTEXECNAME} ${FMT} *.output *.out
 
+cleantest:
+	rm -f *.str *.tok *.ast *.sym *.oil
+
 ci: 
 	git add ${HDR} ${SRC} ${MKFILE} ${TEST} ${MAIN} README.md DESIGN.md \
 	.gitignore parser.y scanner.l
@@ -80,7 +83,6 @@ indent:
 
 format:
 	clang-format --style=file -i ${SRC} ${HDR} ${TEST} ${MAIN} parser.y
-
 
 ${DEPFILE} :
 	@ touch ${DEPFILE}

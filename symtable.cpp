@@ -3,34 +3,14 @@
 #include "symtable.h"
 #include "auxlib.h"
 
-using symbol_table = unordered_map<const string*,symbol_value*>;
-using symbol_entry = symbol_table::value_type;
-using attr_bitset = bitset<static_cast<long unsigned int>(16)>;
-symbol_table* type_checker::type_names = new symbol_table();
-symbol_table* type_checker::globals = new symbol_table();
-symbol_table* type_checker::locals = nullptr;
-vector<symbol_table*> type_checker::tables;
-vector<string> type_checker::string_constants;
-int type_checker::next_block = 1;
-const string type_checker::DUMMY_FUNCTION = "__DUMMY__";
-attr_bitset type_checker::TYPE_ATTR_MASK;
-const unordered_map<attr,const string> type_checker::attr_map= {
-      {attr::VOID,      "void"     },
-      {attr::INT,       "int"      },
-      {attr::NULLPTR_T, "nullptr"  },
-      {attr::STRING,    "string"   },
-      {attr::STRUCT,    "struct"   },
-      {attr::ARRAY,     "array"    },
-      {attr::FUNCTION,  "function" },
-      {attr::VARIABLE,  "variable" },
-      {attr::FIELD,     "field"    },
-      {attr::TYPEID,    "typeid"   },
-      {attr::PARAM,     "param"    },
-      {attr::LOCAL,     "local"    },
-      {attr::LVAL,      "lval"     },
-      {attr::CONST,     "const"    },
-      {attr::VREG,      "vreg"     },
-      {attr::VADDR,     "vaddr"    }};
+struct map *type_names;
+struct map *globals;
+struct map *locals;
+struct vector *tables;
+struct vector *string_constants;
+int next_block = 1;
+const char *DUMMY_FUNCTION = "__DUMMY__";
+int TYPE_ATTR_MASK[16];
 
 ostream& operator<< (ostream& out, const attr& attribute) {
    return out << type_checker::attr_map.at(attribute);
@@ -68,6 +48,10 @@ ostream& operator<< (ostream& out, const symbol_value* symval) {
    return out;
 }
 
+/*******************************************************************************
+ * symbol_value functions
+ ******************************************************************************/
+
 symbol_value::symbol_value(astree* tree, size_t sequence_,
         size_t block_nr_):
         attributes(tree->attributes), lloc(tree->loc),
@@ -75,34 +59,57 @@ symbol_value::symbol_value(astree* tree, size_t sequence_,
         block_nr(block_nr_) {
 }
 
-symbol_value::~symbol_value() {
-    if(fields != nullptr) {
-        for(auto iter = fields->begin(); iter != fields->end();
-                ++iter) {
-            delete iter->second;
+struct symbol_value *symbol_value_init (struct astree *tree,
+                                        size_t sequence_,
+                                        size_t block_nr_) {
+    struct symbol_value *ret = (struct symbol_value *)
+            malloc (sizeof (struct symbol_value));
+    ret->attributes = tree->attributes;
+    ret->loc = tree->loc;
+    ret->type_id = tree->type_id;
+    ret->sequence = sequence_;
+    ret->block_nr = block_nr_;
+    return ret;
+}
+
+void symbol_value_free (struct symbol_value *symbol_value_) {
+    if (symbol_value_->fields != NULL) {
+        for(size_t i = 0; i < symbol_value_->fields; ++i ) {
+            struct symbol_value *field = *(symbol_value_->fields + i);
+            if(field != NULL) symbol_value_free(field);
         }
-        delete fields;
     }
+    if (symbol_value_->parameters != NULL) {
+        for(size_t i = 0; i < symbol_value_->parameters; ++i ) {
+            struct symbol_value *param = *(symbol_value_->parameters + i);
+            if(param != NULL) symbol_value_free(param);
+        }
+    }
+    free (symbol_value_);
 }
 
-bool symbol_value::has_attr(attr attribute) {
-    return attributes.test((size_t)attribute);
+int symbol_value_has_attr(struct symbol_value *symval, enum attr attribute) {
+    return symval->attributes[(int) attribute];
 }
 
-void symbol_value::set_attr(attr attribute) {
-    attributes.set((size_t)attribute);
+void symbol_value_set_attr(struct symbol_value *symval, enum attr attribute) {
+    symval->attributes[(int) attribute] = 1;
 }
 
-vector<symbol_table*> type_checker::get_tables() {
+/*******************************************************************************
+ * type checker functions
+ ******************************************************************************/
+
+struct vector *type_checker_get_tables() {
     return tables;
 }
 
-vector<string> type_checker::get_string_constants() {
+struct vector *type_checker_get_string_constants() {
     return string_constants;
 }
 
 vector<symbol_entry> type_checker::sort_symtable(symbol_table* table) {
-    DEBUGH('9', "Sorting symtable");
+    DEBUGS('9', "Sorting symtable");
     vector<symbol_entry> sorted;
     if(table->empty()) return sorted;
     symbol_entry*  min_lloc = nullptr;
@@ -146,12 +153,16 @@ vector<symbol_entry> type_checker::sort_symtable(symbol_table* table) {
     return sorted;
 }
 
-int type_checker::make_symbol_table(astree* root) {
-    TYPE_ATTR_MASK.set((size_t)attr::INT).set((size_t)attr::VOID)
-            .set((size_t)attr::STRING).set((size_t)attr::NULLPTR_T)
-            .set((size_t)attr::STRUCT).set((size_t)attr::ARRAY);
-    DEBUGH('t', "Making symbol table");
-    for(astree* child : root->children) {
+int type_checker_make_symbol_table(struct astree *root) {
+    TYPE_ATTR_MASK[ATTR_INT] = 1;
+    TYPE_ATTR_MASK[ATTR_VOID] = 1;
+    TYPE_ATTR_MASK[ATTR_STRING] = 1;
+    TYPE_ATTR_MASK[ATTR_NULLPTR_T] = 1;
+    TYPE_ATTR_MASK[ATTR_STRUCT] = 1;
+    TYPE_ATTR_MASK[ATTR_ARRAY] = 1;
+    DEBUGS('t', "Making symbol table");
+    for(size_t i = 0; i < root->children->stack_size; ++i) {
+        struct astree *child = *(root->children->values + i);
         int status;
         // validation method requires a sequence number but expressions
         // as defined by the parser cannot have vardecls below them in
@@ -172,35 +183,36 @@ int type_checker::make_symbol_table(astree* root) {
                 if(status != 0) return status;
                 break;
             case '=':
-                status = make_global_entry(child->first());
+                status = make_global_entry(astree_first(child));
                 if(status != 0) return status;
-                status = validate_stmt_expr(child->second(),
+                status = validate_stmt_expr(astree_second(child),
                         &DUMMY_FUNCTION, dummy_sequence);
                 if(status != 0) return status;
-                if(!types_compatible(child->first(), child->second())) {
-                    cerr << "ERROR: Incompatible types for global"
-                         << endl;
+                if(!types_compatible(astree_first(child), astree_second(child))) {
+                    fprintf(stderr, "ERROR: Incompatible types for global\n");
                     return -1;
-                } else if(!child->first()->attributes.test(
-                        (size_t)attr::LVAL)) {
-                    cerr << "ERROR: Global assignment destination"
-                         << " is not an LVAL" << endl;
+                } else if(!astree-first(child)->attributes[ATTR_LVAL]) {
+                    fprintf(stderr, "ERROR: Global assignment destination is not an LVAL\n");
                     return -1;
                 }
                 // type is the type of the right operand
-                child->attributes |= (child->second()->attributes &
-                        TYPE_ATTR_MASK);
+                // TODO(rfbergeron): turn this into a function and declare the
+                // number of attributes somehow, somewhere
+                for (size_t i = 0; i < 16; ++i) {
+                child->attributes[i] |= (astree-second(child)->attributes[i] &
+                        TYPE_ATTR_MASK[i]);
+                }
                 if(status != 0) return status;
                 break;
             default:
-                cerr << "ERROR: Unexpected symbol at top level: "
-                     << parser::get_tname(child->symbol) << endl;
+                fprintf(stderr, "ERROR: Unexpected symbol at top level: %s\n",
+                        parser_get_tname (child->symbol));
                 return -1;
         }
     }
     // use local table list to group all tables together
-    tables.push_back(globals);
-    tables.push_back(type_names);
+    vector_push (tables, globals);
+    vector_push (tables, type_names);
     return 0;
 }
 
@@ -228,7 +240,7 @@ int type_checker::make_global_entry(astree* global) {
                 return -1;
             }
         }
-        
+ 
         symbol_value* global_value = new struct symbol_value(
                 identifier);
         globals->insert({identifier->lexinfo, global_value});

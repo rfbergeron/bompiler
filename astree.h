@@ -24,7 +24,7 @@ struct astree {
     struct astree *next_sibling;// for adopting long lists of siblings
     struct astree *firstborn;   // head of the list of siblings
     size_t blocknr;             // block number this node occurs in
-    int *attributes;            // type attributes
+    int attributs[16];          // type attributes
     const char **type_id;       // structure type
 };
 
