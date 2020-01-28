@@ -1,17 +1,17 @@
 #ifndef __UTILS_H__
-#    define __UTILS_H__
+#define __UTILS_H__
 
 // flex and bison interface utilities
 
-#    include <string.h>
-#    include <stdio.h>
-#    include <stdlib.h>
-#    include <stddef.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-#    include "auxlib.h"
-#    include "astree.h"
+#include "astree.h"
+#include "auxlib.h"
 
-#    define YYEOF 0
+#define YYEOF 0
 
 // forward declarations
 struct astree;
@@ -43,15 +43,17 @@ int lexer_token (int symbol);
 int lexer_bad_token (int symbol);
 void lexer_fatal_error (const char *msg);
 void lexer_error (const char *msg);
-void lexer_dump_filenames (FILE * out);
+void lexer_dump_filenames (FILE *out);
 void lexer_init_globals ();
 void lexer_free_globals ();
 
 const char *parser_get_tname (int symbol);
 struct astree *parser_make_root ();
-struct astree *parser_make_type_id (struct astree *type, struct astree *id,
+struct astree *parser_make_type_id (struct astree *type,
+                                    struct astree *id,
                                     struct astree *expr);
-struct astree *parser_make_function (struct astree *type, struct astree *id,
+struct astree *parser_make_function (struct astree *type,
+                                     struct astree *id,
                                      struct astree *paren,
                                      struct astree *params,
                                      struct astree *block);
@@ -59,9 +61,9 @@ struct astree *parser_make_struct (struct astree *parent,
                                    struct astree *structure_id,
                                    struct astree *structure_body);
 
-#    define YYSTYPE_IS_DECLARED
+#define YYSTYPE_IS_DECLARED
 typedef struct astree *YYSTYPE;
 
-#    include "yyparse.h"
+#include "yyparse.h"
 
 #endif

@@ -1,8 +1,9 @@
-#include <stdint.h>
-#include <stddef.h>
-#include <stdlib.h>
-#include <assert.h>
 #include "map.h"
+
+#include <assert.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 // largest prime less than (2^32)-1. Alternatively we could swap the last digit
 // to a 9 but I'm not sure exactly what the difference is.
@@ -47,8 +48,8 @@ void map_put (struct map *map_, void *key, void *value) {
             if (*(map_->keys + current_index) == key) {
                 *(map_->values + current_index) = value;
                 return;
-            } else if (*(map_->keys + current_index) == NULL
-                       && open_index == 0) {
+            } else if (*(map_->keys + current_index) == NULL &&
+                       open_index == 0) {
                 open_index = current_index;
             }
             ++current_index;

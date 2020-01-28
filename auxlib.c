@@ -1,16 +1,16 @@
-#include <assert.h>
-#include <errno.h>
-#include <string.h>
-#include <stdio.h>
-#include <limits.h>
-#include <err.h>
-
 #include "auxlib.h"
 
-// not ideal but I'm the only one that'll ever be using it so whatever
-#define MAX_MESSAGE_LEN 1024 
+#include <assert.h>
+#include <err.h>
+#include <errno.h>
+#include <limits.h>
+#include <stdio.h>
+#include <string.h>
 
-int flags[UCHAR_MAX + 1] = { 0 };
+// not ideal but I'm the only one that'll ever be using it so whatever
+#define MAX_MESSAGE_LEN 1024
+
+int flags[UCHAR_MAX + 1] = {0};
 
 void debug_set_flags (const char *initflags) {
     for (size_t i = 0; i < strlen (initflags); ++i) {
@@ -34,23 +34,38 @@ int debug_get_flag (char flag) {
     return flags[(unsigned char) flag];
 }
 
-void debug_where (char flag, const char *file, int line,
-                  const char *pretty_function, const char *msg, ...) {
+void debug_where (char flag,
+                  const char *file,
+                  int line,
+                  const char *pretty_function,
+                  const char *msg,
+                  ...) {
     va_list args;
+
     va_start (args, msg);
     char full_msg[MAX_MESSAGE_LEN];
-    vsprintf(full_msg, msg, args);
-    warnx ("DEBUG(%c) %s[%d] \n%s %s", flag, file, line,
-             pretty_function, full_msg);
+
+    vsprintf (full_msg, msg, args);
+    warnx ("DEBUG(%c) %s[%d] \n%s %s",
+           flag,
+           file,
+           line,
+           pretty_function,
+           full_msg);
     va_end (args);
 }
 
-void debug_where_short (char flag, const char *file, int line,
-                        const char *msg, ...) {
+void debug_where_short (char flag,
+                        const char *file,
+                        int line,
+                        const char *msg,
+                        ...) {
     va_list args;
+
     va_start (args, msg);
     char full_msg[MAX_MESSAGE_LEN];
-    vsprintf(full_msg, msg, args);
+
+    vsprintf (full_msg, msg, args);
     warnx ("DEBUG(%c) %s[%d] %s", flag, file, line, full_msg);
     va_end (args);
 }

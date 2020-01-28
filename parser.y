@@ -1,13 +1,12 @@
+// clang-format off
 // *INDENT-OFF*
 %{
-// *INDENT-ON*
 #include <assert.h>
 
 #include "lyutils.h"
 #include "astree.h"
 #include "auxlib.h"
 //#include "symtable.h"
-// *INDENT-OFF*
 %}
 
 %debug
@@ -133,35 +132,40 @@ constant    : TOK_INTCON                                                        
             ;
 %%
 
-// *INDENT-ON*
 // functions, structures, typeids, allocs can have their type
 // assigned when they adopt their children
+// *INDENT-ON*
 
 const char *parser_get_tname (int symbol) {
     return yytname[YYTRANSLATE (symbol)];
 }
 
+// clang-format performs poorly on the above function for some reason
+// clang-format on
 struct astree *parser_make_root () {
-    DEBUGS('p', "Initializing AST, root token code: %d", TOK_ROOT);
-    DEBUGS('p', "Translation of token code: %s", parser_get_tname (TOK_ROOT));
-    return astree_init (TOK_ROOT, (struct location) { lexer_get_filenr (), 0,
-                        0
-                        }, "");
+    DEBUGS ('p', "Initializing AST, root token code: %d", TOK_ROOT);
+    DEBUGS ('p', "Translation of token code: %s", parser_get_tname (TOK_ROOT));
+    return astree_init (TOK_ROOT,
+                        (struct location) {lexer_get_filenr (), 0, 0},
+                        "");
 }
 
-struct astree *parser_make_function (struct astree *type, struct astree *id,
+struct astree *parser_make_function (struct astree *type,
+                                     struct astree *id,
                                      struct astree *paren,
                                      struct astree *params,
                                      struct astree *block) {
     struct astree *function = astree_init (TOK_FUNCTION, type->loc, "");
     struct astree *type_id = parser_make_type_id (type, id, NULL);
 
-    return astree_adopt (function, type_id,
+    return astree_adopt (function,
+                         type_id,
                          astree_adopt_sym (paren, TOK_PARAM, params, NULL),
                          block);
 }
 
-struct astree *parser_make_type_id (struct astree *type, struct astree *id,
+struct astree *parser_make_type_id (struct astree *type,
+                                    struct astree *id,
                                     struct astree *expr) {
     struct astree *type_id = astree_init (TOK_TYPE_ID, type->loc, "");
 
@@ -175,6 +179,4 @@ struct astree *parser_make_struct (struct astree *parent,
     return astree_adopt (parent, structure_id, structure_body, NULL);
 }
 
-int is_defined_token (int symbol) {
-    return YYTRANSLATE (symbol) > YYUNDEFTOK;
-}
+int is_defined_token (int symbol) { return YYTRANSLATE (symbol) > YYUNDEFTOK; }

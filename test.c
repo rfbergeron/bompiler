@@ -1,7 +1,8 @@
-#include <stdlib.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
 #include "map.h"
 
 int map_unit_test () {
@@ -14,10 +15,12 @@ int map_unit_test () {
     strcpy (test_val, "yomp");
 
     // try a single value
-    printf ("Putting key-value pair (\"%s\",\"%s\") into map.\n", test_key,
+    printf ("Putting key-value pair (\"%s\",\"%s\") into map.\n",
+            test_key,
             test_val);
     map_put (test_map, test_key, test_val);
-    printf ("Retrieving value for key \"%s\": \"%s\"\n\n", test_key,
+    printf ("Retrieving value for key \"%s\": \"%s\"\n\n",
+            test_key,
             map_get (test_map, (void *) test_key));
 
     // fill up the map
@@ -31,7 +34,8 @@ int map_unit_test () {
         strcpy (fill_val, "test_val_");
         sprintf (fill_key + strlen (fill_key), "%d", i);
         sprintf (fill_val + strlen (fill_val), "%d", i);
-        printf ("Putting key-value pair (\"%s\",\"%s\") into map.\n", fill_key,
+        printf ("Putting key-value pair (\"%s\",\"%s\") into map.\n",
+                fill_key,
                 fill_val);
         map_put (test_map, fill_key, fill_val);
     }
@@ -94,11 +98,11 @@ int map_unit_test () {
         char *stored_val = (char *) *(test_map->values + i);
 
         if (stored_key != NULL) {
-            //printf ("Freeing key: %s\n", stored_key);
+            // printf ("Freeing key: %s\n", stored_key);
             free (stored_key);
         }
         if (stored_val != NULL) {
-            //printf ("Freeing val: %s\n", stored_val);
+            // printf ("Freeing val: %s\n", stored_val);
             free (stored_val);
         }
     }

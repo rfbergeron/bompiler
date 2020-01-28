@@ -1,8 +1,8 @@
 #ifndef __VECTOR_H__
-#    define __VECTOR_H__
+#define __VECTOR_H__
 
-#    include <stdint.h>
-#    include <stddef.h>
+#include <stddef.h>
+#include <stdint.h>
 
 struct vector {
     size_t size;
