@@ -69,15 +69,19 @@ ci:
 	git add ${HDR} ${SRC} ${MKFILE} ${TEST} ${MAIN} README.md DESIGN.md \
 	.gitignore parser.y scanner.l
 
-deps: ${SRC} ${GENSRC} ${GENHDR}
-	${CDEP} ${SRC} ${HDR} ${TEST} ${MAIN} ${GENSRC} ${GENHDR} ${MKFILE} \
+dep: ${SRC} ${GENSRC} ${GENHDR}
+	${CDEP} ${SRC} ${HDR} ${TEST} ${MAIN} ${GENSRC} ${GENHDR} \
 	>> ${DEPFILE}
 
-format:
+indent:
 	indent -l80 -nfca -hnl -ncdb -bad -bap -nbc -bbo -nbfda -npsl -br -brs \
 	-brf -ce -cdw -lps -saf -sai -saw -pcs -cs -bs -nut -ts4 -i4 -pi4 -ci4 \
-	-cli4 -ppi4 -cbi0 -bli0 parser.y ${SRC} ${HDR} ${TEST} ${MAIN}
+	-cli4 -ppi4 -cbi0 -bli0 ${SRC} ${HDR} ${TEST} ${MAIN} parser.y
+
+format:
+	clang-format --style=file -i ${SRC} ${HDR} ${TEST} ${MAIN} parser.y
+
 
 ${DEPFILE} :
 	@ touch ${DEPFILE}
-	${GMAKE} deps
+	${GMAKE} dep
