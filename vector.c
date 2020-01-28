@@ -77,21 +77,28 @@ void vector_expand (struct vector *vector_) {
     void **old_values = vector_->values;
     size_t old_size = vector_->size;
 
-    for (size_t i = 0; i < old_size; ++i) {
-        DEBUGS ('v', "Old vector value: %p index: %u", *(old_values + i), i);
-    }
+    DEBUGE (
+            'v',
+            for (size_t i = 0; i < old_size; ++i) {
+                DEBUGS ('v',
+                        "Old vector value: %p index: %u",
+                        *(old_values + i),
+                        i);
+            });
 
     vector_->size *= 2;
     vector_->values = calloc (sizeof (void *), vector_->size);
     memcpy (vector_->values, old_values, old_size * sizeof (void *));
     free (old_values);
 
-    for (size_t i = 0; i < vector_->size; ++i) {
-        DEBUGS ('v',
-                "New vector value: %p index: %u",
-                *(vector_->values + i),
-                i);
-    }
+    DEBUGE (
+            'v',
+            for (size_t i = 0; i < vector_->size; ++i) {
+                DEBUGS ('v',
+                        "New vector value: %p index: %u",
+                        *(vector_->values + i),
+                        i);
+            });
 }
 
 struct vector *vector_init (const size_t size_) {
