@@ -169,17 +169,17 @@ struct astree *astree_buddy_up (struct astree *sibling1,
     return sibling2;
 }
 
-/*astree* astree::first() {
-    return children[0];
+struct astree *astree_first(struct astree *parent) {
+    return vector_get (parent->children, 0);
 }
 
-astree* astree::second() {
-    return children[1];
+struct astree *astree_second(struct astree *parent) {
+    return vector_get (parent->children, 1);
 }
 
-astree* astree::third() {
-    return children[2];
-}*/
+struct astree *astree_third(struct astree *parent) {
+    return vector_get (parent->children, 2);
+}
 
 void astree_dump_tree (struct astree *tree, FILE *out, int depth) {
     // Dump formatted tree: current pointer, current token, followed

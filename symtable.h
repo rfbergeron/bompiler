@@ -14,6 +14,7 @@
 struct astree;
 struct location;
 
+// attributes correspond to array indices in the order they are listed here
 enum attr {
     ATTR_VOID,
     ATTR_INT,
@@ -30,15 +31,14 @@ enum attr {
     ATTR_LVAL,
     ATTR_CONST,
     ATTR_VREG,
-    ATTR_VADDR,
-    NUM_ATTRIBUTES
+    ATTR_VADDR
 };
 
 struct symbol_value {
-    int *attributes;
+    int attributes[16];
     size_t sequence;
     struct map *fields;
-    struct location lloc;
+    struct location loc;
     size_t block_nr;
     struct vector *parameters;
     const char **type_id;
