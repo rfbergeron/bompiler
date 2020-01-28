@@ -111,9 +111,7 @@ int main (int argc, char **argv) {
     if (tokfile == NULL) {
         err (1, "%s", tokname);
     }
-    // change to stderr for debug purposes
     astfile = fopen (astname, "w");
-    // astfile = stderr;
     if (astfile == NULL) {
         err (1, "%s", astname);
     }
