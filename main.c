@@ -1,17 +1,17 @@
+#include <assert.h>
+#include <err.h>
+#include <getopt.h>
+#include <libgen.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
-#include <libgen.h>
-#include <unistd.h>
-#include <getopt.h>
-#include <err.h>
-#include <assert.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
+#include "astree.h"
 #include "auxlib.h"
 #include "lyutils.h"
-#include "astree.h"
 #include "string_set.h"
 
 #define LINESIZE 1024
@@ -28,6 +28,7 @@ char tokname[LINESIZE];
 char astname[LINESIZE];
 char symname[LINESIZE];
 char oilname[LINESIZE];
+
 // cpp options go here
 FILE *strfile;
 FILE *tokfile;
@@ -35,33 +36,34 @@ FILE *astfile;
 FILE *symfile;
 FILE *oilfile;
 
-void scan_options(int argc, char** argv) { 
-   opterr = 0;
-   for (;;) {
-      int option = getopt (argc, argv, "@:D:ly");
-      if (option == EOF) break;
-      switch (option) {
-         case '@':
-            debug_set_flags (optarg);
-            break;
-         case 'D':
-            // cpp args
-            //DEBUGH('c', "     cpp option: " << optarg);
-            //cpp_opts.append(" -D ").append(optarg);
-            break;
-         case 'l':
-            //DEBUGH('c', "     yy_flex_debug set to 1");
-            yy_flex_debug = 1;
-            break;
-         case 'y':
-            //DEBUGH('c', "     yydebug set to 1");
-            yydebug = 1;
-            break;
-         default:
-            fprintf (stderr, "-%c: invalid option\n", (char) optopt);
-            break;
-      }
-   }
+void scan_options (int argc, char **argv) {
+    opterr = 0;
+    for (;;) {
+        int option = getopt (argc, argv, "@:D:ly");
+
+        if (option == EOF) break;
+        switch (option) {
+            case '@':
+                debug_set_flags (optarg);
+                break;
+            case 'D':
+                // cpp args
+                // DEBUGH('c', "     cpp option: " << optarg);
+                // cpp_opts.append(" -D ").append(optarg);
+                break;
+            case 'l':
+                // DEBUGH('c', "     yy_flex_debug set to 1");
+                yy_flex_debug = 1;
+                break;
+            case 'y':
+                // DEBUGH('c', "     yydebug set to 1");
+                yydebug = 1;
+                break;
+            default:
+                fprintf (stderr, "-%c: invalid option\n", (char) optopt);
+                break;
+        }
+    }
 }
 
 int main (int argc, char **argv) {
@@ -69,9 +71,10 @@ int main (int argc, char **argv) {
     yy_flex_debug = 0;
     scan_options (argc, argv);
 
-    char *oc_name = basename(argv[optind]);
+    char *oc_name = basename (argv[optind]);
     char *ext_ptr = strstr (oc_name, OC_EXT);
     ptrdiff_t name_len = ext_ptr - oc_name;
+
     assert (name_len < LINESIZE);
 
     if (ext_ptr == NULL || name_len <= 0) {
@@ -80,6 +83,7 @@ int main (int argc, char **argv) {
 
     struct stat statbuf;
     int status = stat (oc_name, &statbuf);
+
     if (status == -1) {
         err (1, "%s", oc_name);
     }
@@ -99,15 +103,17 @@ int main (int argc, char **argv) {
     if (yyin == NULL) {
         err (1, "%s", cppcmd);
     }
-    strfile = fopen(strname, "w");
+    strfile = fopen (strname, "w");
     if (strfile == NULL) {
-        err(1, "%s", strname);
+        err (1, "%s", strname);
     }
     tokfile = fopen (tokname, "w");
     if (tokfile == NULL) {
-        err(1, "%s", tokname);
+        err (1, "%s", tokname);
     }
+    // change to stderr for debug purposes
     astfile = fopen (astname, "w");
+    // astfile = stderr;
     if (astfile == NULL) {
         err (1, "%s", astname);
     }
@@ -116,7 +122,7 @@ int main (int argc, char **argv) {
     lexer_init_globals ();
 
     DEBUGS ('m', "Parsing");
-    int parse_status = yyparse();
+    int parse_status = yyparse ();
 
     if (parse_status != 0) {
         warnx ("Parsing failed with status %d.", parse_status);
@@ -128,6 +134,7 @@ int main (int argc, char **argv) {
 
     DEBUGS ('m', "Execution finished; wrapping up.");
     int pclose_status = pclose (yyin);
+
     fclose (strfile);
     fclose (tokfile);
     fclose (astfile);

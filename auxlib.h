@@ -1,10 +1,10 @@
 #ifndef __AUXLIB_H__
-#    define __AUXLIB_H__
+#define __AUXLIB_H__
 
-#    include <limits.h>
-#    include <stdio.h>
-#    include <string.h>
-#    include <stdarg.h>
+#include <limits.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
 
 // Print the status returned by wait(2) from a subprocess.
 
@@ -17,10 +17,17 @@
 
 void debug_set_flags (const char *optflags);
 int debug_get_flag (char flag);
-void debug_where (char flag, const char *file, int line,
-                  const char *pretty_function, const char *msg, ...);
-void debug_where_short (char flag, const char *file, int line,
-                        const char *msg, ...);
+void debug_where (char flag,
+                  const char *file,
+                  int line,
+                  const char *pretty_function,
+                  const char *msg,
+                  ...);
+void debug_where_short (char flag,
+                        const char *file,
+                        int line,
+                        const char *msg,
+                        ...);
 
 // DEBUGL -
 //    Macro which expands into debug code.  First argument is a
@@ -40,36 +47,40 @@ void debug_where_short (char flag, const char *file, int line,
 //    DEBUGS, but without a message. Instead, one or more lines of code, which
 //    are enclosed in the braces, are executed if the appropriate flag is set.
 
-#    ifdef NDEBUG
-#        define DEBUGL(FLAG,PRINTF_ARGS...) ;
-#        define DEBUGE(FLAG,PRINTF_ARGS...) ;
-#        define DEBUGS(FLAG,PRINTF_ARGS...) ;
-#    else
-#        define DEBUGL(FLAG,PRINTF_ARGS...) { \
-             if (debug_get_flag (FLAG)) { \
-                 debug_where (FLAG, __FILE__, __LINE__, \
-                        __PRETTY_FUNCTION__, PRINTF_ARGS); \
-             } \
-         }
-#        define DEBUGE(FLAG,STMT) { \
-             if (debug_get_flag (FLAG)) { \
-                 debug_where (FLAG, __FILE__, __LINE__, \
-                        __PRETTY_FUNCTION__, ""); \
-                 STMT; \
-             } \
-         }
-#        define DEBUGS(FLAG,PRINTF_ARGS...) { \
-             if (debug_get_flag (FLAG)) { \
-                 debug_where_short (FLAG, __FILE__, __LINE__, PRINTF_ARGS); \
-             } \
-         }
-#    endif
+#ifdef NDEBUG
+#define DEBUGL(FLAG, PRINTF_ARGS...) ;
+#define DEBUGE(FLAG, PRINTF_ARGS...) ;
+#define DEBUGS(FLAG, PRINTF_ARGS...) ;
+#else
+#define DEBUGL(FLAG, PRINTF_ARGS...)                                           \
+    {                                                                          \
+        if (debug_get_flag (FLAG)) {                                           \
+            debug_where (FLAG,                                                 \
+                         __FILE__,                                             \
+                         __LINE__,                                             \
+                         __PRETTY_FUNCTION__,                                  \
+                         PRINTF_ARGS);                                         \
+        }                                                                      \
+    }
+#define DEBUGE(FLAG, STMT)                                                     \
+    {                                                                          \
+        if (debug_get_flag (FLAG)) {                                           \
+            debug_where (FLAG, __FILE__, __LINE__, __PRETTY_FUNCTION__, "");   \
+            STMT;                                                              \
+        }                                                                      \
+    }
+#define DEBUGS(FLAG, PRINTF_ARGS...)                                           \
+    {                                                                          \
+        if (debug_get_flag (FLAG)) {                                           \
+            debug_where_short (FLAG, __FILE__, __LINE__, PRINTF_ARGS);         \
+        }                                                                      \
+    }
+#endif
 
 //
 // Support for stub messages.
 //
-#    define STUB(CODE) { \
-         debug::where (__FILE__, __LINE__, __PRETTY_FUNCTION__, CODE); \
-     }
+#define STUB(CODE)                                                             \
+    { debug::where (__FILE__, __LINE__, __PRETTY_FUNCTION__, CODE); }
 
 #endif

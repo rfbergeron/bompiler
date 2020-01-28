@@ -1,7 +1,7 @@
 #ifndef __MAP_H__
-#    define __MAP_H__
+#define __MAP_H__
 
-#    include <stddef.h>
+#include <stddef.h>
 
 struct map {
     size_t size;
