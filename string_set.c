@@ -5,54 +5,35 @@
 #include <string.h>
 
 #include "auxlib.h"
-#include "map.h"
+#include "klib/khash.h"
 
 static const size_t starting_set_size = 100;
 static const char *entry_format = "string_set[%4d]: %22p->\"%s\"\n";
-static struct map *set;
+KHASH_SET_INIT_STR(str);
+khash_t(str) *string_set;
 
-void string_set_init_globals () { set = map_init (starting_set_size); }
-
-const char **string_set_get_existing (const char *string) {
-    for (size_t i = 0; i < set->size; ++i) {
-        const char **current_ptr = *(set->values + i);
-        if (current_ptr == NULL) continue;
-        if (strcmp (string, *current_ptr) == 0) {
-            DEBUGS ('s', "Strings equal: %s %s", string, *current_ptr);
-            return current_ptr;
-        }
-    }
-    return NULL;
-}
+void string_set_init_globals () { string_set = kh_init(str); }
 
 void string_set_free_globals () {
-    for (size_t i = 0; i < set->size; ++i) {
-        char **string_ptr = (char **) *(set->values + i);
-
-        if (string_ptr != NULL) {
-            if (*(string_ptr) != NULL) free (*(string_ptr));
-            free (string_ptr);
-        }
+    for (khint_t k = 0; k < kh_end(string_set); ++k) {
+        if (kh_exist(string_set, k)) free((char *)kh_key(string_set, k));
     }
-    map_free (set);
+    kh_destroy(str, string_set);
 }
 
-const char **string_set_intern (const char *string) {
-    const char **existing_entry = string_set_get_existing (string);
-    if (existing_entry != NULL) return existing_entry;
-
-    const char **string_ptr = (const char **) malloc (sizeof (char *));
-    *(string_ptr) = strdup (string);
-    map_put (set, string_ptr, string_ptr);
-    return string_ptr;
+const char *string_set_intern (const char *string) {
+    int absent;
+    khint_t key = kh_put (str, string_set, string, &absent);
+    if (absent) kh_key (string_set, key) = strdup (string);
+    return (const char *) kh_key (string_set, key);
 }
 
 void string_set_dump (FILE *out) {
     DEBUGS ('s', "Dumping string set");
-    for (size_t i = 0; i < set->size; ++i) {
-        char **token = (char **) *(set->values + i);
-
-        if (token == NULL) continue;
-        fprintf (out, entry_format, i, (void *) token, *(token));
+    for (khint_t k = 0; k < kh_end(string_set); ++k) {
+        if (kh_exist(string_set, k)) {
+            const char *token = (const char *) kh_key (string_set, k);
+            fprintf (out, entry_format, k, (void *) token, token);
+        }
     }
 }

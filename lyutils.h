@@ -13,9 +13,7 @@
 
 #define YYEOF 0
 
-// forward declarations
-struct astree;
-struct location;
+typedef struct ASTree ASTree;
 
 extern FILE *yyin;
 extern char *yytext;
@@ -24,7 +22,7 @@ extern int yydebug;
 extern int yyleng;
 extern FILE *tokfile;
 int lexer_interactive;
-struct astree *parser_root;
+ASTree *parser_root;
 
 int yylex ();
 int yylex_destroy ();
@@ -32,9 +30,9 @@ int yyparse ();
 void yyerror (const char *message);
 
 size_t lexer_get_filenr ();
-const char **lexer_filename (int filenr);
+const char *lexer_filename (int filenr);
 size_t lexer_include_linenr (int filenr);
-void lexer_new_filename (const char **filename);
+void lexer_new_filename (const char *filename);
 void lexer_advance ();
 void lexer_newline ();
 void lexer_bad_char (unsigned char bad);
@@ -48,21 +46,21 @@ void lexer_init_globals ();
 void lexer_free_globals ();
 
 const char *parser_get_tname (int symbol);
-struct astree *parser_make_root ();
-struct astree *parser_make_type_id (struct astree *type,
-                                    struct astree *id,
-                                    struct astree *expr);
-struct astree *parser_make_function (struct astree *type,
-                                     struct astree *id,
-                                     struct astree *paren,
-                                     struct astree *params,
-                                     struct astree *block);
-struct astree *parser_make_struct (struct astree *parent,
-                                   struct astree *structure_id,
-                                   struct astree *structure_body);
+ASTree *parser_make_root ();
+ASTree *parser_make_type_id (ASTree *type,
+                                    ASTree *id,
+                                    ASTree *expr);
+ASTree *parser_make_function (ASTree *type,
+                                     ASTree *id,
+                                     ASTree *paren,
+                                     ASTree *params,
+                                     ASTree *block);
+ASTree *parser_make_struct (ASTree *parent,
+                                   ASTree *structure_id,
+                                   ASTree *structure_body);
 
 #define YYSTYPE_IS_DECLARED
-typedef struct astree *YYSTYPE;
+typedef ASTree *YYSTYPE;
 
 #include "yyparse.h"
 
