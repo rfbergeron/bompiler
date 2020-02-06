@@ -142,21 +142,21 @@ const char *parser_get_tname (int symbol) {
 
 // clang-format performs poorly on the above function for some reason
 // clang-format on
-struct astree *parser_make_root () {
+ASTree *parser_make_root () {
     DEBUGS ('p', "Initializing AST, root token code: %d", TOK_ROOT);
     DEBUGS ('p', "Translation of token code: %s", parser_get_tname (TOK_ROOT));
     return astree_init (TOK_ROOT,
-                        (struct location) {lexer_get_filenr (), 0, 0},
+                        (Location) {lexer_get_filenr (), 0, 0},
                         "");
 }
 
-struct astree *parser_make_function (struct astree *type,
-                                     struct astree *id,
-                                     struct astree *paren,
-                                     struct astree *params,
-                                     struct astree *block) {
-    struct astree *function = astree_init (TOK_FUNCTION, type->loc, "");
-    struct astree *type_id = parser_make_type_id (type, id, NULL);
+ASTree *parser_make_function (ASTree *type,
+                                     ASTree *id,
+                                     ASTree *paren,
+                                     ASTree *params,
+                                     ASTree *block) {
+    ASTree *function = astree_init (TOK_FUNCTION, type->loc, "");
+    ASTree *type_id = parser_make_type_id (type, id, NULL);
 
     return astree_adopt (function,
                          type_id,
@@ -164,17 +164,17 @@ struct astree *parser_make_function (struct astree *type,
                          block);
 }
 
-struct astree *parser_make_type_id (struct astree *type,
-                                    struct astree *id,
-                                    struct astree *expr) {
-    struct astree *type_id = astree_init (TOK_TYPE_ID, type->loc, "");
+ASTree *parser_make_type_id (ASTree *type,
+                                    ASTree *id,
+                                    ASTree *expr) {
+    ASTree *type_id = astree_init (TOK_TYPE_ID, type->loc, "");
 
     return astree_adopt (type_id, type, id, expr);
 }
 
-struct astree *parser_make_struct (struct astree *parent,
-                                   struct astree *structure_id,
-                                   struct astree *structure_body) {
+ASTree *parser_make_struct (ASTree *parent,
+                                   ASTree *structure_id,
+                                   ASTree *structure_body) {
     parent->type_id = structure_id->lexinfo;
     return astree_adopt (parent, structure_id, structure_body, NULL);
 }

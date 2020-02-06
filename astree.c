@@ -9,23 +9,21 @@
 
 #include "auxlib.h"
 #include "lyutils.h"
-#include "map.h"
 #include "string_set.h"
-#include "vector.h"
 //#include "symtable.h"
 
-struct astree *astree_init (int symbol_,
-                            const struct location loc_,
+ASTree *astree_init (int symbol_,
+                            const Location loc_,
                             const char *info) {
     DEBUGS ('t',
             "Initializing new astree node with code: %s",
             parser_get_tname (symbol_));
-    struct astree *ret = (struct astree *) malloc (sizeof (struct astree));
+    ASTree *ret = (ASTree *) malloc (sizeof (ASTree));
 
     ret->symbol = symbol_;
     ret->loc = loc_;
     ret->lexinfo = string_set_intern (info);
-    ret->children = vector_init (10);
+    kv_init (ret->children);
     ret->next_sibling = NULL;
     ret->firstborn = ret;
     ret->blocknr = 0;
@@ -75,37 +73,37 @@ struct astree *astree_init (int symbol_,
     return ret;
 }
 
-void astree_free (struct astree *astree_) {
+void astree_free (ASTree *astree_) {
     assert (astree_ != NULL);
     DEBUGS ('t',
             "Freeing an astree with sym %d, %s.",
             astree_->symbol,
             parser_get_tname (astree_->symbol));
-    while (!vector_empty (astree_->children)) {
-        struct astree *child = vector_pop (astree_->children);
+    while (kv_size (astree_->children) != 0) {
+        ASTree *child = kv_pop (astree_->children);
 
         astree_free (child);
     }
     if (yydebug) {
         // print tree contents to stderr
     }
-    if (astree_->children != NULL) vector_free (astree_->children);
+    kv_destroy (astree_->children);
     free (astree_);
 }
 
-struct astree *astree_adopt (struct astree *parent,
-                             struct astree *child1,
-                             struct astree *child2,
-                             struct astree *child3) {
+ASTree *astree_adopt (ASTree *parent,
+                             ASTree *child1,
+                             ASTree *child2,
+                             ASTree *child3) {
     if (child1 != NULL) {
         DEBUGS ('t',
                 "Tree %s adopts %s",
                 parser_get_tname (parent->symbol),
                 parser_get_tname (child1->symbol));
-        struct astree *current_sibling = child1->firstborn;
+        ASTree *current_sibling = child1->firstborn;
 
         do {
-            vector_push (parent->children, current_sibling);
+            kv_push (ASTree *, parent->children, current_sibling);
             current_sibling = current_sibling->next_sibling;
         } while (current_sibling != NULL);
     }
@@ -114,10 +112,10 @@ struct astree *astree_adopt (struct astree *parent,
                 "Tree %s adopts %s",
                 parser_get_tname (parent->symbol),
                 parser_get_tname (child2->symbol));
-        struct astree *current_sibling = child2->firstborn;
+        ASTree *current_sibling = child2->firstborn;
 
         do {
-            vector_push (parent->children, current_sibling);
+            kv_push (ASTree *, parent->children, current_sibling);
             current_sibling = current_sibling->next_sibling;
         } while (current_sibling != NULL);
     }
@@ -126,20 +124,20 @@ struct astree *astree_adopt (struct astree *parent,
                 "Tree %s adopts %s",
                 parser_get_tname (parent->symbol),
                 parser_get_tname (child3->symbol));
-        struct astree *current_sibling = child3->firstborn;
+        ASTree *current_sibling = child3->firstborn;
 
         do {
-            vector_push (parent->children, current_sibling);
+            kv_push (ASTree *, parent->children, current_sibling);
             current_sibling = current_sibling->next_sibling;
         } while (current_sibling != NULL);
     }
     return parent;
 }
 
-struct astree *astree_adopt_sym (struct astree *parent,
+ASTree *astree_adopt_sym (ASTree *parent,
                                  int symbol_,
-                                 struct astree *child1,
-                                 struct astree *child2) {
+                                 ASTree *child1,
+                                 ASTree *child2) {
     parent->symbol = symbol_;
     if (symbol_ == TOK_LT || symbol_ == TOK_GT) {
         // attributes.set((size_t)attr::INT);
@@ -153,8 +151,8 @@ struct astree *astree_adopt_sym (struct astree *parent,
     return astree_adopt (parent, child1, child2, NULL);
 }
 
-struct astree *astree_buddy_up (struct astree *sibling1,
-                                struct astree *sibling2) {
+ASTree *astree_buddy_up (ASTree *sibling1,
+                                ASTree *sibling2) {
     assert (sibling1 != NULL);
     // if sib is null don't bother doing anything
     if (sibling2 == NULL) return sibling1;
@@ -169,25 +167,25 @@ struct astree *astree_buddy_up (struct astree *sibling1,
     return sibling2;
 }
 
-struct astree *astree_first(struct astree *parent) {
-    return vector_get (parent->children, 0);
+ASTree *astree_first(ASTree *parent) {
+    return kv_A (parent->children, 0);
 }
 
-struct astree *astree_second(struct astree *parent) {
-    return vector_get (parent->children, 1);
+ASTree *astree_second(ASTree *parent) {
+    return kv_A (parent->children, 1);
 }
 
-struct astree *astree_third(struct astree *parent) {
-    return vector_get (parent->children, 2);
+ASTree *astree_third(ASTree *parent) {
+    return kv_A (parent->children, 2);
 }
 
-void astree_dump_tree (struct astree *tree, FILE *out, int depth) {
+void astree_dump_tree (ASTree *tree, FILE *out, int depth) {
     // Dump formatted tree: current pointer, current token, followed
     // by pointers to children, on one line. Then call recursively on
     // children with increased depth (identation)
 }
 
-void astree_dump (struct astree *tree, FILE *out) {
+void astree_dump (ASTree *tree, FILE *out) {
     // print pointer value and tree contents without any special formatting,
     // followed by the pointer values of this node's children
     if (tree == NULL) return;
@@ -198,7 +196,7 @@ void astree_dump (struct astree *tree, FILE *out) {
     free (nodestr);
 }
 
-char *astree_to_string (struct astree *tree) {
+char *astree_to_string (ASTree *tree) {
     // print token name, lexinfo in quotes, the location, block number,
     // attributes, and the typeid if this is a struct
     if (tree == NULL) {
@@ -213,7 +211,7 @@ char *astree_to_string (struct astree *tree) {
                             0,
                             "%s \"%s\" %s {%d} attrs",
                             tname,
-                            *(tree->lexinfo),
+                            tree->lexinfo,
                             locstring,
                             tree->blocknr);
     char *buffer = (char *) malloc (sizeof (char) * (bufsize + 1));
@@ -222,20 +220,20 @@ char *astree_to_string (struct astree *tree) {
               bufsize,
               "%s \"%s\" %s {%d} attrs",
               tname,
-              *(tree->lexinfo),
+              tree->lexinfo,
               locstring,
               tree->blocknr);
     free (locstring);
     return buffer;
 }
 
-void astree_print_tree (struct astree *tree, FILE *out, int depth) {
+void astree_print_tree (ASTree *tree, FILE *out, int depth) {
     // print out the whole tree
     DEBUGS ('t',
             "Tree info: token: %s, lexinfo: %s, children: %u",
             parser_get_tname (tree->symbol),
-            *(tree->lexinfo),
-            tree->children->stack_size);
+            tree->lexinfo,
+            kv_size(tree->children));
 
     size_t numspaces = depth * 3;
     char indent[1024];
@@ -245,12 +243,12 @@ void astree_print_tree (struct astree *tree, FILE *out, int depth) {
     fprintf (out, "%s%s\n", indent, nodestr);
     free (nodestr);
 
-    for (size_t i = 0; i < tree->children->stack_size; ++i) {
-        DEBUGS ('t', "    %p", vector_get (tree->children, i));
+    for (size_t i = 0; i < kv_size(tree->children); ++i) {
+        DEBUGS ('t', "    %p", kv_A (tree->children, i));
     }
 
-    for (size_t i = 0; i < tree->children->stack_size; ++i) {
-        struct astree *child = (struct astree *) vector_get (tree->children, i);
+    for (size_t i = 0; i < kv_size(tree->children); ++i) {
+        ASTree *child = (ASTree *) kv_A (tree->children, i);
 
         if (child != NULL) {
             astree_print_tree (child, out, depth + 1);
@@ -258,7 +256,7 @@ void astree_print_tree (struct astree *tree, FILE *out, int depth) {
     }
 }
 
-char *location_to_string (struct location location_) {
+char *location_to_string (Location location_) {
     int bufsize = snprintf (NULL,
                             0,
                             "{%d, %d, %d}",
@@ -282,7 +280,7 @@ void astree_destroy (size_t count, ...) {
 
     va_start (args, count);
     for (size_t i = 0; i < count; ++i) {
-        struct astree *tree = va_arg (args, struct astree *);
+        ASTree *tree = va_arg (args, ASTree *);
 
         if (tree != NULL) {
             DEBUGS ('t',

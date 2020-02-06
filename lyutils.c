@@ -11,30 +11,28 @@
 #include "astree.h"
 #include "auxlib.h"
 //#include "symtable.h"
-#include "vector.h"
+#include "klib/kvec.h"
 
 extern FILE *tokfile;
 size_t lexer_last_yyleng;
-struct location lexer_loc;
-struct vector *lexer_filenames;
-struct vector *lexer_include_linenrs;
+Location lexer_loc;
+kvec_t(const char *) lexer_filenames;
+kvec_t(size_t) lexer_include_linenrs;
 
 size_t lexer_get_filenr () { return lexer_loc.filenr; }
 
-const char **lexer_filename (int filenr) {
-    return (vector_get (lexer_filenames, (size_t) filenr));
+const char *lexer_filename (int filenr) {
+    return kv_A(lexer_filenames, (size_t) filenr);
 }
 
 size_t lexer_include_linenr (int filenr) {
-    // this oughtta be fixed; don't want to be casting size_t's to pointers but
-    // dynamically allocating all that sounds like a pain in the ass
-    return (size_t) vector_get (lexer_include_linenrs, (size_t) filenr);
+    return kv_A (lexer_include_linenrs, (size_t) filenr);
 }
 
-void lexer_newfilename (const char *filename) {
-    lexer_loc.filenr = lexer_filenames->size;
-    vector_push (lexer_filenames, (void *) filename);
-    vector_push (lexer_include_linenrs, (void *) lexer_loc.linenr + 1);
+void lexer_new_filename (const char *filename) {
+    lexer_loc.filenr = kv_size (lexer_filenames);
+    kv_push (const char *, lexer_filenames, filename);
+    kv_push (size_t, lexer_include_linenrs, lexer_loc.linenr + 1);
 }
 
 void lexer_advance () {
@@ -54,9 +52,7 @@ void lexer_newline () {
 }
 
 void lexer_bad_char (unsigned char bad) {
-    // max size is len of error msg + parens + 3 digits for char as int + nul
-    size_t bufsize = strlen ("Invalid source character (") + 3 + 1 + 1;
-    char *buffer = (char *) calloc (sizeof (char), bufsize);
+    char buffer[1024];
 
     if (isgraph (bad))
         sprintf (buffer, "Invalid source character (%s)\n", &bad);
@@ -66,13 +62,11 @@ void lexer_bad_char (unsigned char bad) {
                  (unsigned *) &bad);
 
     lexer_error (buffer);
-    free (buffer);
 }
 
 void lexer_include () {
     size_t linenr;
-    size_t filename_size = strlen (yytext) + 1;
-    char *filename = (char *) malloc (sizeof (char) * filename_size);
+    char filename [1024];
     int scan_rc = sscanf (yytext, "# %zu \"%[^\"]\"", &linenr, filename);
 
     if (scan_rc != 2) {
@@ -83,9 +77,8 @@ void lexer_include () {
         }
         fprintf (tokfile, "# %2d %s\n", linenr, filename);
         lexer_loc.linenr = linenr - 1;
-        lexer_newfilename (filename);
+        lexer_new_filename (filename);
     }
-    free (filename);
 }
 
 int lexer_token (int symbol) {
@@ -98,26 +91,23 @@ int lexer_token (int symbol) {
              yylval->loc.offset,
              yylval->symbol,
              parser_get_tname (yylval->symbol),
-             *(yylval->lexinfo));
+             yylval->lexinfo);
     // fprintf (tokfile, "%p: [%p]->%s, length: %u\n", symbol, yytext, yytext,
     // yyleng);
     return symbol;
 }
 
 int lexer_bad_token (int symbol) {
-    size_t bufsize = strlen ("Invalid token (") + strlen (yytext) + 3;
-    char *buffer = (char *) malloc (sizeof (char) * bufsize);
-
+    char buffer[1024];
     sprintf (buffer, "Invalid token (%s)\n", yytext);
     lexer_error (buffer);
-    free (buffer);
     return lexer_token (symbol);
 }
 
 void lexer_fatal_error (const char *msg) { errx (1, "%s", msg); }
 
 void lexer_error (const char *message) {
-    assert (!vector_empty (lexer_filenames));
+    assert (kv_size(lexer_filenames) != 0);
     fprintf (stderr,
              "%s:%d.%d: %s",
              lexer_filename (lexer_loc.filenr),
@@ -127,24 +117,24 @@ void lexer_error (const char *message) {
 }
 
 void lexer_dump_filenames (FILE *out) {
-    for (size_t index = 0; index < lexer_filenames->size; ++index) {
+    for (size_t index = 0; index < kv_size(lexer_filenames); ++index) {
         fprintf (out,
                  "filenames[%2d] = \"%s\"\n",
                  index,
-                 (char *) vector_get (lexer_filenames, index));
+                 (const char *) kv_A (lexer_filenames, index));
     }
 }
 
 void lexer_init_globals () {
     lexer_interactive = 0;
-    lexer_loc = (struct location) {0, 1, 0};
-    lexer_filenames = vector_init (10);
-    lexer_include_linenrs = vector_init (10);
+    lexer_loc = (Location) {0, 1, 0};
+    kv_init(lexer_filenames);
+    kv_init(lexer_include_linenrs);
 }
 
 void lexer_free_globals () {
-    vector_free (lexer_filenames);
-    vector_free (lexer_include_linenrs);
+    kv_destroy(lexer_filenames);
+    kv_destroy(lexer_include_linenrs);
 }
 
 void yyerror (const char *message) { lexer_error (message); }

@@ -7,12 +7,9 @@
 #include "astree.h"
 #include "auxlib.h"
 #include "lyutils.h"
-#include "map.h"
-#include "vector.h"
+#include "klib/khash.h"
 
-// circular dependency with astree; forward declare
-struct astree;
-struct location;
+KHASH_MAP_INIT_INT(symbol_table, struct symbol_value *);
 
 // attributes correspond to array indices in the order they are listed here
 enum attr {
@@ -37,15 +34,15 @@ enum attr {
 struct symbol_value {
     int attributes[16];
     size_t sequence;
-    struct map *fields;
-    struct location loc;
+    khash_t(symbol_table) *fields;
+    Location loc;
     size_t block_nr;
     struct vector *parameters;
     const char **type_id;
     int has_block;
 };
 
-struct symbol_value *symbol_value_init (struct astree *tree,
+struct symbol_value *symbol_value_init (ASTree *tree,
                                         size_t sequence_,
                                         size_t block_nr_);
 void symbol_value_free (struct symbol_value *symbol_value_);
@@ -54,5 +51,5 @@ void symbol_value_print (struct symbol_value *symbol_value_, FILE *out);
 // may need functions for printing attributes and attribute sets
 
 // where the magic happens
-int check_types (struct astree *root);
+int check_types (ASTree *root);
 #endif
