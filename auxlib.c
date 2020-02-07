@@ -46,7 +46,7 @@ void debug_where (char flag,
     char full_msg[MAX_MESSAGE_LEN];
 
     vsprintf (full_msg, msg, args);
-    warnx ("DEBUG(%c) %s[%d] \n%s %s",
+    warnx ("DEBUG(%c) %s[%d] \n%s %s\n",
            flag,
            file,
            line,
@@ -66,6 +66,6 @@ void debug_where_short (char flag,
     char full_msg[MAX_MESSAGE_LEN];
 
     vsprintf (full_msg, msg, args);
-    warnx ("DEBUG(%c) %s[%d] %s", flag, file, line, full_msg);
+    warnx ("DEBUG(%c) %s[%d] %s\n", flag, file, line, full_msg);
     va_end (args);
 }
