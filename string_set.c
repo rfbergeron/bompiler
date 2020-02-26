@@ -9,16 +9,16 @@
 
 static const size_t starting_set_size = 100;
 static const char *entry_format = "string_set[%4d]: %22p->\"%s\"\n";
-KHASH_SET_INIT_STR(str);
-khash_t(str) *string_set;
+KHASH_SET_INIT_STR (str);
+khash_t (str) * string_set;
 
-void string_set_init_globals () { string_set = kh_init(str); }
+void string_set_init_globals () { string_set = kh_init (str); }
 
 void string_set_free_globals () {
-    for (khint_t k = 0; k < kh_end(string_set); ++k) {
-        if (kh_exist(string_set, k)) free((char *)kh_key(string_set, k));
+    for (khint_t k = 0; k < kh_end (string_set); ++k) {
+        if (kh_exist (string_set, k)) free ((char *) kh_key (string_set, k));
     }
-    kh_destroy(str, string_set);
+    kh_destroy (str, string_set);
 }
 
 const char *string_set_intern (const char *string) {
@@ -30,8 +30,8 @@ const char *string_set_intern (const char *string) {
 
 void string_set_dump (FILE *out) {
     DEBUGS ('s', "Dumping string set");
-    for (khint_t k = 0; k < kh_end(string_set); ++k) {
-        if (kh_exist(string_set, k)) {
+    for (khint_t k = 0; k < kh_end (string_set); ++k) {
+        if (kh_exist (string_set, k)) {
             const char *token = (const char *) kh_key (string_set, k);
             fprintf (out, entry_format, k, (void *) token, token);
         }
