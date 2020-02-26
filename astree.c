@@ -53,29 +53,29 @@ ASTree *astree_init (int symbol_, const Location location, const char *info) {
         case TOK_NOT:
         case TOK_POS:
         case TOK_NEG:
-            // attributes.set((size_t)attr::INT);
+            ret->attributes[ATTR_INT] = 1;
         case '=':
         case TOK_ALLOC:
         case TOK_CALL:
-            // attributes.set((size_t)attr::VREG);
+            ret->attributes[ATTR_VREG] = 1;
             break;
         case TOK_ARROW:
         case TOK_INDEX:
-            // attributes.set((size_t)attr::LVAL);
-            // attributes.set((size_t)attr::VADDR);
+            ret->attributes[ATTR_LVAL] = 1;
+            ret->attributes[ATTR_VADDR] = 1;
             break;
         case TOK_NULLPTR:
-            // attributes.set((size_t)attr::NULLPTR_T);
-            // attributes.set((size_t)attr::CONST);
+            ret->attributes[ATTR_NULL] = 1;
+            ret->attributes[ATTR_CONST] = 1;
             break;
         case TOK_INTCON:
         case TOK_CHARCON:
-            // attributes.set((size_t)attr::CONST);
-            // attributes.set((size_t)attr::INT);
+            ret->attributes[ATTR_CONST] = 1;
+            ret->attributes[ATTR_INT] = 1;
             break;
         case TOK_STRINGCON:
-            // attributes.set((size_t)attr::CONST);
-            // attributes.set((size_t)attr::STRING);
+            ret->attributes[ATTR_CONST] = 1;
+            ret->attributes[ATTR_STRING] = 1;
             break;
     }
     return ret;
@@ -209,25 +209,6 @@ void astree_dump (ASTree *tree, FILE *out) {
     fprintf (out, "%p->%s", tree, nodestr);
 }
 
-void astree_to_string (ASTree *tree, char *buffer, size_t size) {
-    // print token name, lexinfo in quotes, the location, block number,
-    // attributes, and the typeid if this is a struct
-    if (tree == NULL) return;
-
-    const char *tname = parser_get_tname (tree->symbol);
-    char locstr[LINESIZE];
-    location_to_string (tree->loc, locstr, LINESIZE);
-
-    if (strlen (tname) > 4) tname += 4;
-    snprintf (buffer,
-              size,
-              "%s \"%s\" %s {%d} attrs",
-              tname,
-              tree->lexinfo,
-              locstr,
-              tree->blocknr);
-}
-
 void location_to_string (Location location, char *buffer, size_t size) {
     int bufsize = snprintf (buffer,
                             size,
@@ -239,11 +220,39 @@ void location_to_string (Location location, char *buffer, size_t size) {
 }
 
 void attributes_to_string (int *attributes, char *buffer, size_t size) {
+    size_t offset = 0;
+    buffer[0] = 0;
     for (size_t i = 0, offset = 0; i < NUM_ATTRIBUTES; ++i) {
-        if(attributes[i]) offset += snprintf (buffer + offset,
+        if(attributes[i]) {
+            DEBUGS('a', "Printing attribute %s", attr_map[i]);
+            snprintf (buffer + offset,
                                               size - offset,
-                                              "%s", attr_map[i]);
+                                              "%s ", attr_map[i]);
+            offset = strlen (buffer);
+        }
     }
+}
+
+void astree_to_string (ASTree *tree, char *buffer, size_t size) {
+    // print token name, lexinfo in quotes, the location, block number,
+    // attributes, and the typeid if this is a struct
+    if (tree == NULL) return;
+
+    const char *tname = parser_get_tname (tree->symbol);
+    char locstr[LINESIZE];
+    location_to_string (tree->loc, locstr, LINESIZE);
+    char attrstr[LINESIZE];
+    attributes_to_string (tree->attributes, attrstr, LINESIZE);
+
+    if (strlen (tname) > 4) tname += 4;
+    snprintf (buffer,
+              size,
+              "%s \"%s\" %s {%d} %s",
+              tname,
+              tree->lexinfo,
+              locstr,
+              tree->blocknr,
+              attrstr);
 }
 
 void astree_print_tree (ASTree *tree, FILE *out, int depth) {
