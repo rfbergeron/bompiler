@@ -12,9 +12,13 @@
 #include "string_set.h"
 //#include "symtable.h"
 
-ASTree *astree_init (int symbol_,
-                            const Location loc_,
-                            const char *info) {
+ASTree *astree_first (ASTree *parent) { return kv_A (parent->children, 0); }
+
+ASTree *astree_second (ASTree *parent) { return kv_A (parent->children, 1); }
+
+ASTree *astree_third (ASTree *parent) { return kv_A (parent->children, 2); }
+
+ASTree *astree_init (int symbol_, const Location loc_, const char *info) {
     DEBUGS ('t',
             "Initializing new astree node with code: %s",
             parser_get_tname (symbol_));
@@ -27,6 +31,9 @@ ASTree *astree_init (int symbol_,
     ret->next_sibling = NULL;
     ret->firstborn = ret;
     ret->blocknr = 0;
+    ret->first = &astree_first;
+    ret->second = &astree_second;
+    ret->third = &astree_third;
 
     // remember, attributes for nodes which adopt a different symbol
     // must have the appropriate attributes set in adopt_symbol
@@ -92,9 +99,9 @@ void astree_free (ASTree *astree_) {
 }
 
 ASTree *astree_adopt (ASTree *parent,
-                             ASTree *child1,
-                             ASTree *child2,
-                             ASTree *child3) {
+                      ASTree *child1,
+                      ASTree *child2,
+                      ASTree *child3) {
     if (child1 != NULL) {
         DEBUGS ('t',
                 "Tree %s adopts %s",
@@ -135,9 +142,9 @@ ASTree *astree_adopt (ASTree *parent,
 }
 
 ASTree *astree_adopt_sym (ASTree *parent,
-                                 int symbol_,
-                                 ASTree *child1,
-                                 ASTree *child2) {
+                          int symbol_,
+                          ASTree *child1,
+                          ASTree *child2) {
     parent->symbol = symbol_;
     if (symbol_ == TOK_LT || symbol_ == TOK_GT) {
         // attributes.set((size_t)attr::INT);
@@ -151,8 +158,7 @@ ASTree *astree_adopt_sym (ASTree *parent,
     return astree_adopt (parent, child1, child2, NULL);
 }
 
-ASTree *astree_buddy_up (ASTree *sibling1,
-                                ASTree *sibling2) {
+ASTree *astree_buddy_up (ASTree *sibling1, ASTree *sibling2) {
     assert (sibling1 != NULL);
     // if sib is null don't bother doing anything
     if (sibling2 == NULL) return sibling1;
@@ -165,18 +171,6 @@ ASTree *astree_buddy_up (ASTree *sibling1,
        << "; oldest sib: " << parser::get_tname(firstborn->symbol)
        << " " << *(firstborn->lexinfo)); */
     return sibling2;
-}
-
-ASTree *astree_first(ASTree *parent) {
-    return kv_A (parent->children, 0);
-}
-
-ASTree *astree_second(ASTree *parent) {
-    return kv_A (parent->children, 1);
-}
-
-ASTree *astree_third(ASTree *parent) {
-    return kv_A (parent->children, 2);
 }
 
 void astree_dump_tree (ASTree *tree, FILE *out, int depth) {
@@ -233,7 +227,7 @@ void astree_print_tree (ASTree *tree, FILE *out, int depth) {
             "Tree info: token: %s, lexinfo: %s, children: %u",
             parser_get_tname (tree->symbol),
             tree->lexinfo,
-            kv_size(tree->children));
+            kv_size (tree->children));
 
     size_t numspaces = depth * 3;
     char indent[1024];
@@ -243,11 +237,11 @@ void astree_print_tree (ASTree *tree, FILE *out, int depth) {
     fprintf (out, "%s%s\n", indent, nodestr);
     free (nodestr);
 
-    for (size_t i = 0; i < kv_size(tree->children); ++i) {
+    for (size_t i = 0; i < kv_size (tree->children); ++i) {
         DEBUGS ('t', "    %p", kv_A (tree->children, i));
     }
 
-    for (size_t i = 0; i < kv_size(tree->children); ++i) {
+    for (size_t i = 0; i < kv_size (tree->children); ++i) {
         ASTree *child = (ASTree *) kv_A (tree->children, i);
 
         if (child != NULL) {

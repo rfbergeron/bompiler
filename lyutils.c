@@ -16,13 +16,13 @@
 extern FILE *tokfile;
 size_t lexer_last_yyleng;
 Location lexer_loc;
-kvec_t(const char *) lexer_filenames;
-kvec_t(size_t) lexer_include_linenrs;
+kvec_t (const char *) lexer_filenames;
+kvec_t (size_t) lexer_include_linenrs;
 
 size_t lexer_get_filenr () { return lexer_loc.filenr; }
 
 const char *lexer_filename (int filenr) {
-    return kv_A(lexer_filenames, (size_t) filenr);
+    return kv_A (lexer_filenames, (size_t) filenr);
 }
 
 size_t lexer_include_linenr (int filenr) {
@@ -66,7 +66,7 @@ void lexer_bad_char (unsigned char bad) {
 
 void lexer_include () {
     size_t linenr;
-    char filename [1024];
+    char filename[1024];
     int scan_rc = sscanf (yytext, "# %zu \"%[^\"]\"", &linenr, filename);
 
     if (scan_rc != 2) {
@@ -107,7 +107,7 @@ int lexer_bad_token (int symbol) {
 void lexer_fatal_error (const char *msg) { errx (1, "%s", msg); }
 
 void lexer_error (const char *message) {
-    assert (kv_size(lexer_filenames) != 0);
+    assert (kv_size (lexer_filenames) != 0);
     fprintf (stderr,
              "%s:%d.%d: %s",
              lexer_filename (lexer_loc.filenr),
@@ -117,7 +117,7 @@ void lexer_error (const char *message) {
 }
 
 void lexer_dump_filenames (FILE *out) {
-    for (size_t index = 0; index < kv_size(lexer_filenames); ++index) {
+    for (size_t index = 0; index < kv_size (lexer_filenames); ++index) {
         fprintf (out,
                  "filenames[%2d] = \"%s\"\n",
                  index,
@@ -128,13 +128,13 @@ void lexer_dump_filenames (FILE *out) {
 void lexer_init_globals () {
     lexer_interactive = 0;
     lexer_loc = (Location) {0, 1, 0};
-    kv_init(lexer_filenames);
-    kv_init(lexer_include_linenrs);
+    kv_init (lexer_filenames);
+    kv_init (lexer_include_linenrs);
 }
 
 void lexer_free_globals () {
-    kv_destroy(lexer_filenames);
-    kv_destroy(lexer_include_linenrs);
+    kv_destroy (lexer_filenames);
+    kv_destroy (lexer_include_linenrs);
 }
 
 void yyerror (const char *message) { lexer_error (message); }

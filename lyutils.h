@@ -47,17 +47,15 @@ void lexer_free_globals ();
 
 const char *parser_get_tname (int symbol);
 ASTree *parser_make_root ();
-ASTree *parser_make_type_id (ASTree *type,
-                                    ASTree *id,
-                                    ASTree *expr);
+ASTree *parser_make_type_id (ASTree *type, ASTree *id, ASTree *expr);
 ASTree *parser_make_function (ASTree *type,
-                                     ASTree *id,
-                                     ASTree *paren,
-                                     ASTree *params,
-                                     ASTree *block);
+                              ASTree *id,
+                              ASTree *paren,
+                              ASTree *params,
+                              ASTree *block);
 ASTree *parser_make_struct (ASTree *parent,
-                                   ASTree *structure_id,
-                                   ASTree *structure_body);
+                            ASTree *structure_id,
+                            ASTree *structure_body);
 
 #define YYSTYPE_IS_DECLARED
 typedef ASTree *YYSTYPE;
