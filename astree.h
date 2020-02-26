@@ -35,8 +35,9 @@ struct ASTree {
 
 void location_print (FILE *out, const Location location_);
 
-ASTree *astree_init (int symbol_, const Location loc_, const char *lexinfo);
-void astree_free (ASTree *astree_);
+ASTree *astree_init (int symbol_, const Location location, const char *lexinfo);
+void astree_destroy (ASTree *astree_);
+void astree_annihilate (size_t count, ...);
 ASTree *astree_adopt (ASTree *parent,
                       ASTree *child1,
                       ASTree *child2,
@@ -52,9 +53,7 @@ ASTree *astree_third (ASTree *parent);
 void astree_dump (ASTree *astree_, FILE *out);
 void astree_dump_tree (ASTree *astree_, FILE *out, int depth);
 void astree_print_tree (ASTree *astree_, FILE *out, int depth);
-char *astree_to_string (ASTree *astree_);
-char *location_to_string (Location location_);
-
-void astree_destroy (size_t count, ...);
+void astree_to_string (ASTree *astree, char *buffer, size_t size);
+void location_to_string (Location location, char *buffer, size_t size);
 
 #endif

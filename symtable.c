@@ -782,6 +782,7 @@ int make_function_entry (ASTree *function) {
             return -1;
         }
     }
+    DEBUGS('t', "oof");
 
     SymbolValue *function_entry =
             symbol_value_init (astree_second (type_id), 0, 0);
@@ -811,7 +812,7 @@ int make_function_entry (ASTree *function) {
         kv_push (SymbolValue *, function_entry->parameters, param_entry);
     }
 
-    DEBUGS ('t', "Inserting function entry with block id %s", next_block);
+    DEBUGS ('t', "Inserting function entry with block id %u", next_block);
     int empty;
     khiter_t k = kh_put (SymbolTable, globals, function_id, &empty);
     if (!empty) {

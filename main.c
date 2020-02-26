@@ -11,8 +11,9 @@
 
 #include "astree.h"
 #include "auxlib.h"
+#include "symtable.h"
 #include "lyutils.h"
-#include "string_set.h"
+#include "strset.h"
 
 #define LINESIZE 1024
 const char *CPP = "/usr/bin/cpp -nostdinc ";
@@ -118,6 +119,7 @@ int main (int argc, char **argv) {
     // remember to initialize certain things, like the string table
     string_set_init_globals ();
     lexer_init_globals ();
+    type_checker_init_globals ();
 
     DEBUGS ('m', "Parsing");
     int parse_status = yyparse ();
@@ -128,6 +130,7 @@ int main (int argc, char **argv) {
         DEBUGS ('m', "Parse successful; dumping strings.");
         string_set_dump (strfile);
         astree_print_tree (parser_root, astfile, 0);
+        make_symbol_table (parser_root);
     }
 
     DEBUGS ('m', "Execution finished; wrapping up.");
@@ -138,5 +141,6 @@ int main (int argc, char **argv) {
     fclose (astfile);
     string_set_free_globals ();
     lexer_free_globals ();
+    type_checker_free_globals ();
     return EXIT_SUCCESS;
 }

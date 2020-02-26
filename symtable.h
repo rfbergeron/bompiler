@@ -12,44 +12,6 @@
 typedef struct SymbolValue SymbolValue;
 KHASH_MAP_INIT_STR (SymbolTable, SymbolValue *);
 
-// attributes correspond to array indices in the order they are listed here
-enum attr {
-    ATTR_VOID,
-    ATTR_INT,
-    ATTR_NULL,
-    ATTR_STRING,
-    ATTR_STRUCT,
-    ATTR_ARRAY,
-    ATTR_FUNCTION,
-    ATTR_VARIABLE,
-    ATTR_FIELD,
-    ATTR_TYPEID,
-    ATTR_PARAM,
-    ATTR_LOCAL,
-    ATTR_LVAL,
-    ATTR_CONST,
-    ATTR_VREG,
-    ATTR_VADDR,
-    NUM_ATTRIBUTES
-};
-
-char attr_map[][32] = {"void",
-                       "int",
-                       "null",
-                       "string",
-                       "struct",
-                       "array",
-                       "function",
-                       "variable",
-                       "field",
-                       "typeid",
-                       "parameter",
-                       "local",
-                       "lval",
-                       "const",
-                       "vreg",
-                       "vaddr"};
-
 struct SymbolValue {
     int attributes[(size_t) NUM_ATTRIBUTES];
     size_t sequence;
@@ -73,4 +35,5 @@ void type_checker_free_globals ();
 
 // where the magic happens
 int check_types (ASTree *root);
+int make_symbol_table (ASTree *root);
 #endif
