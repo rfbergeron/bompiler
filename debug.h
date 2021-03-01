@@ -1,12 +1,10 @@
-#ifndef __AUXLIB_H__
-#define __AUXLIB_H__
+#ifndef __DEBUG_H__
+#define __DEBUG_H__
 
 #include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-
-// Print the status returned by wait(2) from a subprocess.
 
 // set_flags -
 //    Takes a string argument, and sets a flag for each char in the
@@ -28,29 +26,6 @@ void debug_where_short (char flag,
                         int line,
                         const char *msg,
                         ...);
-
-// attributes correspond to array indices in the order they are listed here
-enum attr {
-    ATTR_VOID,
-    ATTR_INT,
-    ATTR_NULL,
-    ATTR_STRING,
-    ATTR_STRUCT,
-    ATTR_ARRAY,
-    ATTR_FUNCTION,
-    ATTR_VARIABLE,
-    ATTR_FIELD,
-    ATTR_TYPEID,
-    ATTR_PARAM,
-    ATTR_LOCAL,
-    ATTR_LVAL,
-    ATTR_CONST,
-    ATTR_VREG,
-    ATTR_VADDR,
-    NUM_ATTRIBUTES
-};
-
-extern char attr_map[][32];
 
 // DEBUGL -
 //    Macro which expands into debug code.  First argument is a
@@ -102,6 +77,7 @@ extern char attr_map[][32];
 
 //
 // Support for stub messages.
+//
 //
 #define STUB(CODE)                                                             \
     { debug::where (__FILE__, __LINE__, __PRETTY_FUNCTION__, CODE); }

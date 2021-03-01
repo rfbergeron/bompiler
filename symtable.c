@@ -2,6 +2,8 @@
 
 #include "astree.h"
 #include "auxlib.h"
+#include "debug.h"
+#include "attributes.h"
 #include "err.h"
 #include "lyutils.h"
 
@@ -684,6 +686,7 @@ int make_global_entry (ASTree *global) {
                  extract_ident (global));
         return -1;
     } else {
+        DEBUGS('t', "Making global entry for value %s", extract_ident(global));
         ASTree *type = astree_first (global);
         ASTree *identifier = astree_second (global);
         identifier->attributes[ATTR_LVAL] = 1;
@@ -794,28 +797,30 @@ int make_function_entry (ASTree *function) {
     for (size_t i = 0; i < kv_size (params->children); ++i) {
         ASTree *param = kv_A (params->children, i);
         const char *param_id_str = extract_ident (param);
+        /*
         int empty;
-        khiter_t k = kh_put (SymbolTable, locals, param_id_str, &empty);
+        khiter_t k = kh_get (SymbolTable, locals, param_id_str);
         if (!empty) {
             fprintf (stderr,
                      "ERROR: Duplicate declaration of parameter: %s\n",
                      param_id_str);
             return -1;
         }
+        */
         ASTree *param_identifier = astree_second (param);
         param_identifier->attributes[ATTR_PARAM] = 1;
+        DEBUGS('t', "Defining function parameter %s", extract_ident (param));
         status = make_local_entry (param, &param_sequence_nr);
         if (status != 0) return status;
-        SymbolValue *param_entry =
-                symbol_value_init (astree_second (param), i, next_block);
-        kh_val (locals, k) = param_entry;
+        khiter_t k = kh_get (SymbolTable, locals, param_id_str);
+        SymbolValue *param_entry = kh_value (locals, k);
         kv_push (SymbolValue *, function_entry->parameters, param_entry);
     }
 
     DEBUGS ('t', "Inserting function entry with block id %u", next_block);
-    int empty;
-    khiter_t k = kh_put (SymbolTable, globals, function_id, &empty);
-    if (!empty) {
+    khiter_t k = kh_get (SymbolTable, globals, function_id);
+    if (k == kh_end(globals) {
+        k = kh_
         SymbolValue *prototype = kh_val (globals, k);
         if (!functions_equal (prototype, function_entry)) {
             fprintf (stderr,
@@ -859,9 +864,13 @@ int make_function_entry (ASTree *function) {
 int make_local_entry (ASTree *local, size_t *sequence_nr) {
     if (kh_get (SymbolTable, locals, extract_ident (local)) !=
         kh_end (locals)) {
+        khiter_t k = kh_get(SymbolTable, locals, extract_ident(local));
+        DEBUGS('t', "Got klib iterator");
+        SymbolValue *existing_entry = kh_value (locals, k);
+        DEBUGS('t', "Got symtable entry %p", existing_entry);
         fprintf (stderr,
-                 "ERROR: Duplicate declaration of variable: %s\n",
-                 extract_ident (local));
+                 "ERROR: Duplicate declaration of variable %s at location %d\n",
+                 extract_ident (local), existing_entry->loc.linenr);
         return -1;
     } else {
         ASTree *type = local->first (local);
@@ -980,12 +989,13 @@ void type_checker_dump_symbols (FILE *out) {
 
     DEBUGS ('s', "Dumping global declarations");
     for (khiter_t k = kh_begin (globals); k != kh_end (globals); ++k) {
-        DEBUGS ('s', "Writing a global value");
         SymbolValue *top = kh_val (globals, k);
         fprintf (out, "%s ", kh_key (globals, k));
+        DEBUGS ('s', "Writing global value %s", kh_key (globals, k));
         print_symbol_value (out, top);
         fprintf (out, "\n");
         if (top->attributes[ATTR_FUNCTION]) {
+            DEBUGS ('s', "Dumping local declarations");
             locals = kv_A (tables, current_blocknr);
             for (khiter_t local_k = kh_begin (locals);
                  local_k != kh_end (locals);

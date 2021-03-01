@@ -5,6 +5,8 @@
 #include <string.h>
 
 #include "auxlib.h"
+#include "debug.h"
+#include "attributes.h"
 #include "klib/khash.h"
 
 static const size_t starting_set_size = 100;

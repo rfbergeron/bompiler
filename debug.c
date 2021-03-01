@@ -1,4 +1,4 @@
-#include "auxlib.h"
+#include "debug.h"
 
 #include <assert.h>
 #include <err.h>
@@ -14,23 +14,6 @@
 
 int flags[UCHAR_MAX + 1] = {0};
 
-char attr_map[][32] = {"void",
-                       "int",
-                       "null",
-                       "string",
-                       "struct",
-                       "array",
-                       "function",
-                       "variable",
-                       "field",
-                       "typeid",
-                       "parameter",
-                       "local",
-                       "lval",
-                       "const",
-                       "vreg",
-                       "vaddr"};
-
 void debug_set_flags (const char *initflags) {
     for (size_t i = 0; i < strlen (initflags); ++i) {
         const unsigned char flag = *(initflags + i);
@@ -44,9 +27,6 @@ void debug_set_flags (const char *initflags) {
         }
     }
 }
-
-// getflag -
-//    Check to see if a certain flag is on.
 
 int debug_get_flag (char flag) {
     // WARNING: Don't TRACE this function or the stack will blow up.
