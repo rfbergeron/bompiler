@@ -10,8 +10,10 @@
 
 #include "astree.h"
 #include "auxlib.h"
+#include "debug.h"
+#include "attributes.h"
 
-#define YYEOF 0
+//#define YYEOF 0
 
 typedef struct ASTree ASTree;
 
@@ -21,8 +23,8 @@ extern int yy_flex_debug;
 extern int yydebug;
 extern int yyleng;
 extern FILE *tokfile;
-int lexer_interactive;
-ASTree *parser_root;
+extern int lexer_interactive;
+extern ASTree *parser_root;
 
 int yylex ();
 int yylex_destroy ();

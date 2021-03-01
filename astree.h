@@ -4,9 +4,10 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "auxlib.h"
+#include "debug.h"
+#include "attributes.h"
 #include "klib/kvec.h"
-#include "lyutils.h"
+//#include "lyutils.h"
 
 typedef struct {
     size_t filenr;

@@ -10,7 +10,8 @@
 #include <unistd.h>
 
 #include "astree.h"
-#include "auxlib.h"
+#include "debug.h"
+#include "attributes.h"
 #include "symtable.h"
 #include "lyutils.h"
 #include "strset.h"
@@ -96,6 +97,8 @@ int main (int argc, char **argv) {
     memcpy (tokname + name_len, TOK_EXT, strlen (TOK_EXT));
     memcpy (astname, oc_name, name_len);
     memcpy (astname + name_len, AST_EXT, strlen (AST_EXT));
+    memcpy (symname, oc_name, name_len);
+    memcpy (symname + name_len, SYM_EXT, strlen (SYM_EXT));
     memcpy (cppcmd, CPP, strlen (CPP));
     memcpy (cppcmd + strlen (CPP), oc_name, strlen (oc_name));
 
@@ -116,6 +119,10 @@ int main (int argc, char **argv) {
     if (astfile == NULL) {
         err (1, "%s", astname);
     }
+    symfile = fopen (symname, "w");
+    if (symfile == NULL) {
+        err (1, "%s", symname);
+    }
     // remember to initialize certain things, like the string table
     string_set_init_globals ();
     lexer_init_globals ();
@@ -131,6 +138,7 @@ int main (int argc, char **argv) {
         string_set_dump (strfile);
         make_symbol_table (parser_root);
         astree_print_tree (parser_root, astfile, 0);
+        type_checker_dump_symbols (symfile);
     }
 
     DEBUGS ('m', "Execution finished; wrapping up.");

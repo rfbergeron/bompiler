@@ -7,7 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "auxlib.h"
+#include "attributes.h"
+#include "debug.h"
 #include "lyutils.h"
 #include "strset.h"
 #define LINESIZE 1024

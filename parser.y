@@ -175,4 +175,4 @@ ASTree *parser_make_struct (ASTree *parent,
     return astree_adopt (parent, structure_id, structure_body, NULL);
 }
 
-int is_defined_token (int symbol) { return YYTRANSLATE (symbol) > YYUNDEFTOK; }
+int is_defined_token (int symbol) { return YYTRANSLATE (symbol) > YYUNDEF; }

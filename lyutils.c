@@ -9,13 +9,16 @@
 #include <string.h>
 
 #include "astree.h"
-#include "auxlib.h"
+#include "debug.h"
+#include "attributes.h"
 //#include "symtable.h"
 #include "klib/kvec.h"
 
 extern FILE *tokfile;
 size_t lexer_last_yyleng;
 Location lexer_loc;
+int lexer_interactive;
+ASTree *parser_root;
 kvec_t (const char *) lexer_filenames;
 kvec_t (size_t) lexer_include_linenrs;
 
