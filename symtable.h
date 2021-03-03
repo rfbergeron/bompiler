@@ -5,21 +5,20 @@
 #include <string.h>
 
 #include "astree.h"
-#include "auxlib.h"
 #include "debug.h"
 #include "attributes.h"
 #include "lyutils.h"
+#include "badlib/badmap.h"
 
 typedef struct SymbolValue SymbolValue;
-KHASH_MAP_INIT_STR (SymbolTable, SymbolValue *);
 
 struct SymbolValue {
     int attributes[(size_t) NUM_ATTRIBUTES];
     size_t sequence;
-    khash_t (SymbolTable) * fields;
+    struct map* fields;
     Location loc;
     size_t blocknr;
-    kvec_t (SymbolValue *) parameters;
+    struct llist *parameters;
     const char *type_id;
     int has_block;
 };

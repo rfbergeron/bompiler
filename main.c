@@ -11,14 +11,13 @@
 
 #include "astree.h"
 #include "debug.h"
-#include "attributes.h"
 #include "symtable.h"
 #include "lyutils.h"
 #include "strset.h"
 
 #define LINESIZE 1024
 const char *CPP = "/usr/bin/cpp -nostdinc ";
-const char *OC_EXT = ".oc";
+const char *SRC_EXT = ".oc";
 const char *STR_EXT = ".str";
 const char *TOK_EXT = ".tok";
 const char *AST_EXT = ".ast";
@@ -74,7 +73,7 @@ int main (int argc, char **argv) {
     scan_options (argc, argv);
 
     char *oc_name = basename (argv[optind]);
-    char *ext_ptr = strstr (oc_name, OC_EXT);
+    char *ext_ptr = strstr (oc_name, SRC_EXT);
     ptrdiff_t name_len = ext_ptr - oc_name;
 
     assert (name_len < LINESIZE);

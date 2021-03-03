@@ -1,20 +1,27 @@
 #include "symtable.h"
 
 #include "astree.h"
-#include "auxlib.h"
 #include "debug.h"
 #include "attributes.h"
 #include "err.h"
 #include "lyutils.h"
+#include "string.h"
+#include "badlib/badllist.h"
 
-khash_t (SymbolTable) * type_names;
-khash_t (SymbolTable) * globals;
-khash_t (SymbolTable) * locals;
-kvec_t (khash_t (SymbolTable) *) tables;
-kvec_t (const char *) string_constants;
+struct map * type_names;
+struct map * globals;
+struct map * locals;
+struct llist * tables;
+struct llist * string_constants;
 int next_block = 1;
 const char *DUMMY_FUNCTION = "__DUMMY__";
 int TYPE_ATTR_MASK[16];
+static const size_t MAX_STRING_LENGTH = 31;
+static const size_t DEFAULT_MAP_SIZE = 100;
+
+static int strncmp_wrapper (void *s1, void *s2) {
+    return strncmp(s1, s2, MAX_STRING_LENGTH);
+}
 
 int types_compatible_attr (int *a1, int *a2) {
     if ((a1[ATTR_ARRAY] || a1[ATTR_STRUCT] || a1[ATTR_STRING] ||
@@ -55,20 +62,11 @@ int types_compatible_ast_smv (ASTree *tree, SymbolValue *entry) {
     return types_compatible_attr (tree->attributes, entry->attributes);
 }
 
-#define types_compatible(x, y)                                                 \
-    _Generic((x), \
-        int *: types_compatible_attr,        \
-        SymbolValue *: types_compatible_smv, \
-        ASTree *: _Generic((y), \
-            ASTree *: types_compatible_ast, \
-            SymbolValue *: types_compatible_ast_smv) \
-        ) (x,y)
-
 int functions_equal (SymbolValue *f1, SymbolValue *f2) {
-    if (kv_size (f1->parameters) != kv_size (f2->parameters)) return 0;
-    for (size_t i = 0; i < kv_size (f1->parameters); ++i) {
-        if (!types_compatible (kv_A (f1->parameters, i),
-                               kv_A (f2->parameters, i)))
+    if (llist_size (f1->parameters) != llist_size (f2->parameters)) return 0;
+    for (size_t i = 0; i < llist_size (f1->parameters); ++i) {
+        if (!types_compatible_smv (llist_get (f1->parameters, i),
+                               llist_get (f2->parameters, i)))
             return 0;
     }
     return 0;
@@ -83,8 +81,8 @@ enum attr get_type_attr (const SymbolValue *symval) {
 
 void set_blocknr (ASTree *tree, size_t nr) {
     tree->blocknr = nr;
-    for (size_t i = 0; i < kv_size (tree->children); ++i) {
-        set_blocknr (kv_A (tree->children, i), nr);
+    for (size_t i = 0; i < llist_size (tree->children); ++i) {
+        set_blocknr (llist_get (tree->children, i), nr);
     }
 }
 
@@ -105,7 +103,7 @@ void *copy_type_attrs (ASTree *parent, ASTree *child) {
 }
 
 ASTree *extract_param (ASTree *function, size_t index) {
-    return kv_A (astree_second (function)->children, index);
+    return llist_get (astree_second (function)->children, index);
 }
 
 const char *extract_ident (ASTree *type_id) {
@@ -125,14 +123,16 @@ int assign_type_id (ASTree *ident) {
     DEBUGS ('t', "Attempting to assign a type");
     int locals_empty, globals_empty;
     const char *id_str = ident->lexinfo;
-    khiter_t locals_k = kh_put (SymbolTable, locals, id_str, &locals_empty);
-    khiter_t globals_k = kh_put (SymbolTable, globals, id_str, &globals_empty);
+    size_t id_str_len = strnlen(id_str, MAX_STRING_LENGTH);
+    SymbolValue * local_id = map_get(locals, (char*)id_str, id_str_len);
+    SymbolValue * global_id = map_get(globals, (char*)id_str, id_str_len);
+
     if (!locals_empty) {
         DEBUGS ('t', "Assigning %s a local value\n", id_str);
-        assign_type_id_smv (ident, kh_val (locals, locals_k));
+        assign_type_id_smv (ident, local_id);
     } else if (!globals_empty) {
         DEBUGS ('t', "Assigning %s a global value", id_str);
-        assign_type_id_smv (ident, kh_val (globals, globals_k));
+        assign_type_id_smv (ident, global_id);
     } else {
         fprintf (stderr,
                  "ERROR: could not resolve symbol: %s %s\n",
@@ -165,7 +165,6 @@ int validate_type_id (ASTree *type, ASTree *identifier) {
     }
     ASTree *type_node = NULL;
     SymbolValue *type_value = NULL;
-    khiter_t k;
     switch (type->symbol) {
         case TOK_INT:
             DEBUGS ('t', "Setting attribute INT");
@@ -178,18 +177,18 @@ int validate_type_id (ASTree *type, ASTree *identifier) {
         case TOK_PTR:
             DEBUGS ('t', "Setting attribute STRUCT");
             type_node = type->first (type);
-            k = kh_get (SymbolTable, type_names, type_node->lexinfo);
-            if (k == kh_end (type_names)) {
-                fprintf (stderr,
-                         "ERROR: Type not declared: %s\n",
-                         type_node->lexinfo);
-                return -1;
-            } else {
-                type_value = kh_value (type_names, k);
+            type_value = map_get(type_names, (char*)type_node->lexinfo,
+                    strnlen(type_node->lexinfo, MAX_STRING_LENGTH));
+            if (type_value) {
                 type_node->decl_loc = type_value->loc;
                 type_node->attributes[ATTR_TYPEID] = 1;
                 identifier->attributes[ATTR_STRUCT] = 1;
                 identifier->type_id = type_node->lexinfo;
+            } else {
+                fprintf (stderr,
+                         "ERROR: Type not declared: %s\n",
+                         type_node->lexinfo);
+                return -1;
             }
             break;
         case TOK_VOID:
@@ -209,18 +208,18 @@ int validate_type_id (ASTree *type, ASTree *identifier) {
             break;
         case TOK_IDENT:
             DEBUGS ('t', "Type is pointer; resolving");
-            k = kh_get (SymbolTable, type_names, type->lexinfo);
-            if (k == kh_end (type_names)) {
-                fprintf (stderr,
-                         "ERROR: type not declared: %s\n",
-                         identifier->type_id);
-                return -1;
-            } else {
-                SymbolValue *type_value = kh_value (type_names, k);
+            type_value = map_get(type_names, (char*)type->lexinfo,
+                    strnlen(type->lexinfo, MAX_STRING_LENGTH));
+            if (type_value) {
                 identifier->attributes[ATTR_STRUCT] = 1;
                 identifier->type_id = type->lexinfo;
                 type->attributes[ATTR_TYPEID] = 1;
                 type->decl_loc = type_value->loc;
+            } else {
+                fprintf (stderr,
+                         "ERROR: type not declared: %s\n",
+                         identifier->type_id);
+                return -1;
             }
             break;
         default:
@@ -235,8 +234,8 @@ int validate_type_id (ASTree *type, ASTree *identifier) {
 int validate_block (ASTree *block,
                     const char *function_name,
                     size_t *sequence_nr) {
-    for (size_t i = 0; i < kv_size (block->children); ++i) {
-        ASTree *statement = kv_A (block->children, i);
+    for (size_t i = 0; i < llist_size (block->children); ++i) {
+        ASTree *statement = llist_get (block->children, i);
         int status = validate_stmt_expr (statement, function_name, sequence_nr);
         if (status != 0) return status;
     }
@@ -248,14 +247,15 @@ int validate_stmt_expr (ASTree *statement,
                         size_t *sequence_nr) {
     int status;
     const char *ident;
-    khiter_t fn_k = kh_put (SymbolTable, globals, function_name, &status);
     SymbolValue *function =
-            function_name == DUMMY_FUNCTION ? NULL : kh_value (globals, fn_k);
+            function_name == DUMMY_FUNCTION ? NULL :
+            map_get(globals, (char*)function_name, strnlen(function_name, MAX_STRING_LENGTH));
+
     DEBUGS ('t', "Validating next statement/expression");
     switch (statement->symbol) {
         // trees generated my the "statement" production
         case TOK_RETURN:
-            if (kv_size (statement->children) <= 0) {
+            if (llist_size (statement->children) <= 0) {
                 if (!function->attributes[ATTR_VOID]) {
                     fprintf (stderr,
                              "ERROR: Return statement with value in void "
@@ -267,7 +267,7 @@ int validate_stmt_expr (ASTree *statement,
                 validate_stmt_expr (statement->first (statement),
                                     function_name,
                                     sequence_nr);
-                status = types_compatible (statement->first (statement),
+                status = types_compatible_ast_smv (statement->first (statement),
                                            function);
                 if (status == 0) {
                     fprintf (stderr, "ERROR: Incompatible return type\n");
@@ -292,7 +292,7 @@ int validate_stmt_expr (ASTree *statement,
                                          function_name,
                                          sequence_nr);
             if (status != 0) return status;
-            if (kv_size (statement->children) == 3)
+            if (llist_size (statement->children) == 3)
                 status = validate_stmt_expr (statement->third (statement),
                                              function_name,
                                              sequence_nr);
@@ -324,7 +324,7 @@ int validate_stmt_expr (ASTree *statement,
                                          function_name,
                                          sequence_nr);
             if (status != 0) return status;
-            if (!types_compatible (statement->first (statement),
+            if (!types_compatible_ast (statement->first (statement),
                                    statement->second (statement))) {
                 fprintf (
                         stderr,
@@ -354,7 +354,7 @@ int validate_stmt_expr (ASTree *statement,
                                          function_name,
                                          sequence_nr);
             if (status != 0) return status;
-            if (!types_compatible (statement->first (statement),
+            if (!types_compatible_ast (statement->first (statement),
                                    statement->second (statement))) {
                 fprintf (stderr,
                          "ERROR: Incompatible types for operator: %s\n",
@@ -380,7 +380,7 @@ int validate_stmt_expr (ASTree *statement,
                                          function_name,
                                          sequence_nr);
             if (status != 0) return status;
-            if (!types_compatible (statement->first (statement),
+            if (!types_compatible_ast (statement->first (statement),
                                    statement->second (statement))) {
                 fprintf (stderr,
                          "ERROR: Incompatible types for operator: %s\n",
@@ -415,7 +415,7 @@ int validate_stmt_expr (ASTree *statement,
         case TOK_ALLOC:
             status = validate_type_id (statement->first (statement), statement);
             if (status != 0) return status;
-            if (kv_size (statement->children) == 2) {
+            if (llist_size (statement->children) == 2) {
                 status = validate_stmt_expr (statement->second (statement),
                                              function_name,
                                              sequence_nr);
@@ -469,19 +469,16 @@ int validate_stmt_expr (ASTree *statement,
                                          function_name,
                                          sequence_nr);
             if (status != 0) return status;
-            khiter_t k = kh_get (SymbolTable,
-                                 type_names,
-                                 statement->first (statement)->type_id);
+            const char *tid = statement->first (statement)->type_id;
+            SymbolValue *struct_def = map_get(type_names, (char*)tid,
+                    strnlen(tid, MAX_STRING_LENGTH));
             if (statement->first (statement)->attributes[ATTR_STRUCT] &&
-                k != kh_end (type_names)) {
-                // get struct def and check to make sure the field
-                // is in it,
-                SymbolValue *struct_def = kh_value (type_names, k);
-                khiter_t k2 = kh_get (SymbolTable,
-                                      struct_def->fields,
-                                      statement->second (statement)->lexinfo);
-                if (k2 != kh_end (struct_def->fields)) {
-                    SymbolValue *field_def = kh_val (struct_def->fields, k2);
+               struct_def) {
+                /* make sure field is defined */
+                const char *tid2 = statement->second(statement)->lexinfo;
+                SymbolValue *field_def = map_get(struct_def->fields,
+                        (char*)tid2, strnlen(tid2, MAX_STRING_LENGTH));
+                if (field_def) {
                     assign_type_id_smv (statement->second (statement),
                                         field_def);
                     assign_type_id_smv (statement, field_def);
@@ -507,7 +504,7 @@ int validate_stmt_expr (ASTree *statement,
             break;
         case TOK_STRINGCON:
             // save for intlang
-            kv_push (const char *, string_constants, statement->lexinfo);
+            llist_push_front (string_constants, (char*)statement->lexinfo);
             break;
         case TOK_IDENT:
             status = assign_type_id (statement);
@@ -525,10 +522,9 @@ int validate_stmt_expr (ASTree *statement,
 int validate_call (ASTree *call) {
     const char *identifier = call->first (call)->lexinfo;
     // params are at the same level as the id
-    khiter_t k = kh_get (SymbolTable, globals, identifier);
-    if (k != kh_end (globals)) {
-        SymbolValue *function = kh_value (globals, k);
-        if (kv_size (call->children) - 1 != kv_size (function->parameters)) {
+    SymbolValue *function = map_get (globals, (char*)identifier, strnlen(identifier, MAX_STRING_LENGTH));
+    if (function) {
+        if (llist_size (call->children) - 1 != llist_size (function->parameters)) {
             fprintf (stderr,
                      "ERROR: incorrect number of arguments %s\n",
                      identifier);
@@ -537,17 +533,17 @@ int validate_call (ASTree *call) {
         DEBUGS ('t',
                 "Validating arguments for call to %s, num call->children: %d",
                 identifier,
-                kv_size (call->children) - 1);
-        for (size_t i = 0; i < kv_size (function->parameters); ++i) {
+                llist_size (call->children) - 1);
+        for (size_t i = 0; i < llist_size (function->parameters); ++i) {
             DEBUGS ('t', "Validating argument %d", i);
-            ASTree *param = kv_A (call->children, i + 1);
+            ASTree *param = llist_get (call->children, i + 1);
             size_t dummy_sequence = 0;
             DEBUGS ('t', "Argument was not null");
             int status =
                     validate_stmt_expr (param, DUMMY_FUNCTION, &dummy_sequence);
             if (status != 0) return status;
             DEBUGS ('t', "Comparing types");
-            if (!types_compatible (param, kv_A (function->parameters, i))) {
+            if (!types_compatible_ast_smv (param, llist_get (function->parameters, i))) {
                 fprintf (stderr,
                          "ERROR: incompatible type for argument: %s\n",
                          param->lexinfo);
@@ -587,14 +583,10 @@ SymbolValue *symbol_value_init (ASTree *tree,
 
 void symbol_value_free (SymbolValue *symbol_value) {
     if (symbol_value->fields != NULL) {
-        for (khiter_t i = 0; i != kh_end (symbol_value->fields); ++i) {
-            if (kh_exist (symbol_value->fields, i))
-                free ((SymbolValue *) kh_value (symbol_value->fields, i));
-        }
+        map_destroy(symbol_value->fields);
     }
 
-    while (kv_size (symbol_value->parameters) > 0)
-        free (kv_pop (symbol_value->parameters));
+    llist_destroy(symbol_value->parameters);
     free (symbol_value);
 }
 
@@ -678,8 +670,9 @@ kvec_t (char *) type_checker_get_string_constants () {
 
 int make_global_entry (ASTree *global) {
     int empty;
-    khiter_t k = kh_put (SymbolTable, globals, extract_ident (global), &empty);
-    if (!empty) {
+    size_t ident_len = strnlen(extract_ident(global), MAX_STRING_LENGTH);
+    SymbolValue *exists = map_get(globals, (char*)extract_ident (global), ident_len);
+    if (exists) {
         // error; duplicate declaration
         fprintf (stderr,
                  "ERROR: Global var has already been declared: %s\n",
@@ -694,13 +687,13 @@ int make_global_entry (ASTree *global) {
         int status = validate_type_id (global->first (global),
                                        global->second (global));
         if (status != 0) return status;
-        if (kv_size (global->children) == 3) {
+        if (llist_size (global->children) == 3) {
             size_t dummy_sequence = 0;
             status = validate_stmt_expr (astree_third (global),
                                          DUMMY_FUNCTION,
                                          &dummy_sequence);
             if (status != 0) return status;
-            if (!types_compatible (astree_third (global),
+            if (!types_compatible_ast (astree_third (global),
                                    astree_second (global))) {
                 fprintf (stderr,
                          "ERROR: Incompatible type for global variable\n");
@@ -709,33 +702,36 @@ int make_global_entry (ASTree *global) {
         }
 
         SymbolValue *global_value = symbol_value_init (identifier, 0, 0);
-        kh_value (globals, k) = global_value;
+        map_insert(globals, (char*)extract_ident(global), ident_len, global_value);
         return 0;
     }
 }
 
 int make_structure_entry (ASTree *structure) {
     const char *structure_type = structure->first (structure)->lexinfo;
+    size_t structure_type_len = strnlen(structure_type, MAX_STRING_LENGTH);
     DEBUGS ('t', "Defining structure type: %s", *structure_type);
-    int empty;
-    khiter_t k = kh_put (SymbolTable, type_names, structure_type, &empty);
-    if (!empty) {
+    SymbolValue *structure_value = map_get(type_names, (char*)structure_type, structure_type_len);
+    if (structure_value) {
         fprintf (stderr,
                  "ERROR: Duplicate definition of structure %s\n",
                  structure_type);
         return -1;
     } else {
-        SymbolValue *structure_value =
-                symbol_value_init (astree_first (structure), 0, 0);
-        khash_t (SymbolTable) *fields = kh_init (SymbolTable);
-        kh_val (type_names, k) = structure_value;
+        structure_value = symbol_value_init (astree_first (structure), 0, 0);
+        struct map *fields = malloc(sizeof(*fields));
+        map_init(fields, DEFAULT_MAP_SIZE, NULL, (void(*)(void*))symbol_value_free, strncmp_wrapper);
+        map_insert(type_names, (char*)structure_type, structure_type_len,
+                structure_value);
         // start from 2nd child; 1st was type name
-        for (size_t i = 1; i < kv_size (structure->children); ++i) {
-            ASTree *field = kv_A (structure->children, i);
+        size_t i;
+        for (i = 1; i < llist_size (structure->children); ++i) {
+            ASTree *field = llist_get (structure->children, i);
             const char *field_id_str = extract_ident (field);
+            size_t field_id_str_len = strnlen(field_id_str, MAX_STRING_LENGTH);
             DEBUGS ('t', "Found structure field: %s", field_id_str);
-            khiter_t k2 = kh_put (SymbolTable, fields, field_id_str, &empty);
-            if (!empty) {
+            SymbolValue *field_value = map_get (fields, (char*)field_id_str, field_id_str_len);
+            if (field_value) {
                 fprintf (stderr,
                          "ERROR: Duplicate declaration of field: %s\n",
                          field_id_str);
@@ -746,9 +742,8 @@ int make_structure_entry (ASTree *structure) {
                 if (status != 0) return status;
                 astree_second (field)->attributes[ATTR_FIELD] = 1;
                 astree_second (field)->attributes[ATTR_LVAL] = 1;
-                SymbolValue *field_value =
-                        symbol_value_init (astree_second (field), i - 1, 0);
-                kh_val (fields, k2) = field_value;
+                field_value = symbol_value_init (astree_second (field), i - 1, 0);
+                map_insert(fields, (char*)field_id_str, field_id_str_len, field_value);
                 DEBUGS ('t',
                         "Field inserted at %s",
                         astree_second (field)->lexinfo);
@@ -765,8 +760,10 @@ int make_function_entry (ASTree *function) {
     ASTree *type_id = astree_first (function);
     astree_second (type_id)->attributes[ATTR_FUNCTION] = 1;
     const char *function_id = extract_ident (type_id);
+    size_t fn_tid_ten = strnlen(function->type_id, MAX_STRING_LENGTH);
     int status = validate_type_id (type_id->first (type_id),
                                    type_id->second (type_id));
+    SymbolValue *function_entry = NULL;
     if (status != 0) return status;
     if (type_id->attributes[ATTR_ARRAY]) {
         fprintf (stderr,
@@ -776,8 +773,7 @@ int make_function_entry (ASTree *function) {
         return -1;
     } else if (type_id->attributes[ATTR_STRUCT]) {
         int empty;
-        khiter_t k =
-                kh_put (SymbolTable, type_names, function->type_id, &empty);
+        function_entry = map_get(type_names, (char*)function->type_id, fn_tid_ten);
         if (empty) {
             fprintf (stderr,
                      "ERROR: Structrue has no definition: %s\n",
@@ -787,15 +783,14 @@ int make_function_entry (ASTree *function) {
     }
     DEBUGS('t', "oof");
 
-    SymbolValue *function_entry =
-            symbol_value_init (astree_second (type_id), 0, 0);
-    locals = kh_init (SymbolTable);
+    function_entry = symbol_value_init (astree_second (type_id), 0, 0);
+    map_init(locals, DEFAULT_MAP_SIZE, NULL, (void(*)(void*))symbol_value_free, strncmp_wrapper);
     // check and add parameters; set block
     set_blocknr (astree_second (function), next_block);
     ASTree *params = astree_second (function);
     size_t param_sequence_nr = 0;
-    for (size_t i = 0; i < kv_size (params->children); ++i) {
-        ASTree *param = kv_A (params->children, i);
+    for (size_t i = 0; i < llist_size (params->children); ++i) {
+        ASTree *param = llist_get (params->children, i);
         const char *param_id_str = extract_ident (param);
         /*
         int empty;
@@ -812,16 +807,15 @@ int make_function_entry (ASTree *function) {
         DEBUGS('t', "Defining function parameter %s", extract_ident (param));
         status = make_local_entry (param, &param_sequence_nr);
         if (status != 0) return status;
-        khiter_t k = kh_get (SymbolTable, locals, param_id_str);
-        SymbolValue *param_entry = kh_value (locals, k);
-        kv_push (SymbolValue *, function_entry->parameters, param_entry);
+        size_t param_id_str_len = strnlen(param_id_str, MAX_STRING_LENGTH);
+        SymbolValue *param_entry = map_get(locals, (char*)param_id_str, param_id_str_len);
+        llist_push_front(function_entry->parameters, param_entry);
     }
 
     DEBUGS ('t', "Inserting function entry with block id %u", next_block);
-    khiter_t k = kh_get (SymbolTable, globals, function_id);
-    if (k == kh_end(globals) {
-        k = kh_
-        SymbolValue *prototype = kh_val (globals, k);
+    size_t function_id_len = strnlen(function_id, MAX_STRING_LENGTH);
+    SymbolValue *prototype = map_get(globals, (char*)function_id, function_id_len);
+    if (prototype) {
         if (!functions_equal (prototype, function_entry)) {
             fprintf (stderr,
                      "ERROR: redefinition of function: %s\n",
@@ -832,7 +826,7 @@ int make_function_entry (ASTree *function) {
                      "ERROR: function has already been defined: %s\n",
                      function_id);
             return -1;
-        } else if (kv_size (function->children) == 3) {
+        } else if (llist_size (function->children) == 3) {
             DEBUGS ('t', "Completing entry for prototype %s", function_id);
             size_t new_sequence_nr = 0;
             status = validate_block (astree_third (function),
@@ -842,8 +836,8 @@ int make_function_entry (ASTree *function) {
             prototype->has_block = 1;
         }
     } else {
-        kh_val (globals, k) = function_entry;
-        if (kv_size (function->children) == 3) {
+        map_insert (globals, (char*)function_id, function_id_len, function_entry);
+        if (llist_size (function->children) == 3) {
             DEBUGS ('t', "No protoype; defining function %s", function_id);
             size_t new_sequence_nr = 0;
             set_blocknr (astree_third (function), next_block);
@@ -855,18 +849,18 @@ int make_function_entry (ASTree *function) {
         }
     }
 
-    kv_push (khash_t (SymbolTable) *, tables, locals);
+    llist_push_front (tables, locals);
     locals = NULL;
     ++next_block;
     return 0;
 }
 
 int make_local_entry (ASTree *local, size_t *sequence_nr) {
-    if (kh_get (SymbolTable, locals, extract_ident (local)) !=
-        kh_end (locals)) {
-        khiter_t k = kh_get(SymbolTable, locals, extract_ident(local));
-        DEBUGS('t', "Got klib iterator");
-        SymbolValue *existing_entry = kh_value (locals, k);
+    const char *local_ident = extract_ident(local);
+    size_t local_ident_len = strnlen(local_ident, MAX_STRING_LENGTH);
+    SymbolValue *existing_entry = map_get(locals, (char*)local_ident, local_ident_len);
+
+    if (existing_entry) {
         DEBUGS('t', "Got symtable entry %p", existing_entry);
         fprintf (stderr,
                  "ERROR: Duplicate declaration of variable %s at location %d\n",
@@ -882,14 +876,14 @@ int make_local_entry (ASTree *local, size_t *sequence_nr) {
                 validate_type_id (local->first (local), local->second (local));
         if (status != 0) return status;
         DEBUGS ('t', "Checking to see if var has an initial value");
-        if (kv_size (local->children) == 3) {
+        if (llist_size (local->children) == 3) {
             size_t dummy_sequence = 0;
             DEBUGS ('t', "it do have value");
             status = validate_stmt_expr (local->third (local),
                                          DUMMY_FUNCTION,
                                          &dummy_sequence);
             if (status != 0) return status;
-            if (!types_compatible (local->third (local),
+            if (!types_compatible_ast (local->third (local),
                                    local->second (local))) {
                 fprintf (stderr,
                          "ERROR: Incompatible type for local variable\n");
@@ -900,8 +894,8 @@ int make_local_entry (ASTree *local, size_t *sequence_nr) {
         SymbolValue *local_value = symbol_value_init (astree_second (local),
                                                       *sequence_nr,
                                                       next_block);
-        khiter_t k = kh_put (SymbolTable, locals, identifier->lexinfo, &status);
-        kh_value (locals, k) = local_value;
+        size_t identifier_len = strnlen(identifier->lexinfo, MAX_STRING_LENGTH);
+        map_insert(locals, (char*)identifier->lexinfo, identifier_len, local_value);
         ++sequence_nr;
         return 0;
     }
@@ -909,8 +903,8 @@ int make_local_entry (ASTree *local, size_t *sequence_nr) {
 
 int make_symbol_table (ASTree *root) {
     DEBUGS ('t', "Making symbol table");
-    for (size_t i = 0; i < kv_size (root->children); ++i) {
-        ASTree *child = kv_A (root->children, i);
+    for (size_t i = 0; i < llist_size (root->children); ++i) {
+        ASTree *child = llist_get (root->children, i);
         int status;
         /*
          * validation method requires a sequence number but expressions
@@ -939,7 +933,7 @@ int make_symbol_table (ASTree *root) {
                                              DUMMY_FUNCTION,
                                              &dummy_sequence);
                 if (status != 0) return status;
-                if (!types_compatible (astree_first (child),
+                if (!types_compatible_ast (astree_first (child),
                                        astree_second (child))) {
                     fprintf (stderr, "ERROR: Incompatible types for global\n");
                     return -1;
@@ -961,12 +955,13 @@ int make_symbol_table (ASTree *root) {
         }
     }
     // use local table list to group all tables together
-    kv_push (khash_t (SymbolTable) *, tables, globals);
-    kv_push (khash_t (SymbolTable) *, tables, type_names);
+    llist_push_front(tables, globals);
+    llist_push_front(tables, type_names);
     return 0;
 }
 
 void type_checker_dump_symbols (FILE *out) {
+    /*
     size_t current_blocknr = 0;
     DEBUGS ('s', "Dumping structure types");
     for (khiter_t k = kh_begin (type_names); k != kh_end (type_names); ++k) {
@@ -1011,6 +1006,7 @@ void type_checker_dump_symbols (FILE *out) {
             fprintf (out, "\n");
         }
     }
+    */
 }
 
 void type_checker_init_globals () {
@@ -1020,21 +1016,26 @@ void type_checker_init_globals () {
     TYPE_ATTR_MASK[ATTR_NULL] = 1;
     TYPE_ATTR_MASK[ATTR_STRUCT] = 1;
     TYPE_ATTR_MASK[ATTR_ARRAY] = 1;
-    kv_init (string_constants);
-    kv_init (tables);
-    globals = kh_init (SymbolTable);
-    type_names = kh_init (SymbolTable);
-    locals = kh_init (SymbolTable);
+    string_constants = malloc (sizeof(*string_constants));
+    llist_init(string_constants, NULL, NULL);
+    tables = malloc (sizeof(*tables));
+    llist_init(tables, (void(*)(void*))symbol_value_free, NULL);
+    globals = malloc (sizeof(*globals));
+    map_init(globals, DEFAULT_MAP_SIZE, NULL, (void(*)(void*))symbol_value_free,
+            strncmp_wrapper);
+    type_names = malloc (sizeof(*type_names));
+    map_init(type_names, DEFAULT_MAP_SIZE, NULL, (void(*)(void*))symbol_value_free,
+            strncmp_wrapper);
+    locals = malloc (sizeof(*locals));
+    map_init(locals, DEFAULT_MAP_SIZE, NULL, (void(*)(void*))symbol_value_free,
+            strncmp_wrapper);
 }
 
 void type_checker_free_globals () {
     DEBUGS ('t', "DESTROYING SYMTABLES");
-    for (size_t i = 0; i < kv_size (tables); ++i) {
-        khash_t (SymbolTable) *locals = kv_A (tables, i);
-        for (khiter_t k = kh_begin (locals); k != kh_end (locals); ++k) {
-            if (kh_exist (locals, k)) symbol_value_free (kh_val (locals, k));
-        }
-        kh_destroy (SymbolTable, locals);
-    }
+    /* the destructor for table values was set so we should be able to just free
+     * the list, which will call the destructor for every inserted table
+     */
+    llist_destroy(tables);
     DEBUGS ('t', "  SYMTABLES DESTROYED");
 }
