@@ -11,13 +11,14 @@
 #include "debug.h"
 #include "lyutils.h"
 #include "strset.h"
+#include "badlib/badllist.h"
 #define LINESIZE 1024
 
-ASTree *astree_first (ASTree *parent) { return kv_A (parent->children, 0); }
+ASTree *astree_first (ASTree *parent) { return llist_get (parent->children, 0); }
 
-ASTree *astree_second (ASTree *parent) { return kv_A (parent->children, 1); }
+ASTree *astree_second (ASTree *parent) { return llist_get (parent->children, 1); }
 
-ASTree *astree_third (ASTree *parent) { return kv_A (parent->children, 2); }
+ASTree *astree_third (ASTree *parent) { return llist_get (parent->children, 2); }
 
 ASTree *astree_init (int symbol_, const Location location, const char *info) {
     DEBUGS ('t',
@@ -28,7 +29,12 @@ ASTree *astree_init (int symbol_, const Location location, const char *info) {
     ret->symbol = symbol_;
     ret->loc = location;
     ret->lexinfo = string_set_intern (info);
-    kv_init (ret->children);
+
+    /* casting function pointers is undefined behavior but it seems like most
+     * compiler implementations make it work, and here we're just changing the
+     * type of a pointer argument */
+    ret->children = malloc(sizeof(*(ret->children)));
+    llist_init (ret->children, (void(*)(void*))(astree_destroy), NULL);
     ret->next_sibling = NULL;
     ret->firstborn = ret;
     ret->blocknr = 0;
@@ -88,15 +94,10 @@ void astree_destroy (ASTree *astree) {
             "Freeing an astree with sym %d, %s.",
             astree->symbol,
             parser_get_tname (astree->symbol));
-    while (kv_size (astree->children) != 0) {
-        ASTree *child = kv_pop (astree->children);
-
-        astree_destroy (child);
-    }
+    llist_destroy(astree->children);
     if (yydebug) {
         // print tree contents to stderr
     }
-    kv_destroy (astree->children);
     free (astree);
 }
 
@@ -130,7 +131,7 @@ ASTree *astree_adopt (ASTree *parent,
         ASTree *current_sibling = child1->firstborn;
 
         do {
-            kv_push (ASTree *, parent->children, current_sibling);
+            llist_push_front(parent->children, current_sibling);
             current_sibling = current_sibling->next_sibling;
         } while (current_sibling != NULL);
     }
@@ -142,7 +143,7 @@ ASTree *astree_adopt (ASTree *parent,
         ASTree *current_sibling = child2->firstborn;
 
         do {
-            kv_push (ASTree *, parent->children, current_sibling);
+            llist_push_front(parent->children, current_sibling);
             current_sibling = current_sibling->next_sibling;
         } while (current_sibling != NULL);
     }
@@ -154,7 +155,7 @@ ASTree *astree_adopt (ASTree *parent,
         ASTree *current_sibling = child3->firstborn;
 
         do {
-            kv_push (ASTree *, parent->children, current_sibling);
+            llist_push_front(parent->children, current_sibling);
             current_sibling = current_sibling->next_sibling;
         } while (current_sibling != NULL);
     }
@@ -262,7 +263,7 @@ void astree_print_tree (ASTree *tree, FILE *out, int depth) {
             "Tree info: token: %s, lexinfo: %s, children: %u",
             parser_get_tname (tree->symbol),
             tree->lexinfo,
-            kv_size (tree->children));
+            llist_size (tree->children));
 
     size_t numspaces = depth * 3;
     char indent[LINESIZE];
@@ -272,12 +273,12 @@ void astree_print_tree (ASTree *tree, FILE *out, int depth) {
     astree_to_string (tree, nodestr, LINESIZE);
     fprintf (out, "%s%s\n", indent, nodestr);
 
-    for (size_t i = 0; i < kv_size (tree->children); ++i) {
-        DEBUGS ('t', "    %p", kv_A (tree->children, i));
+    for (size_t i = 0; i < llist_size (tree->children); ++i) {
+        DEBUGS ('t', "    %p", llist_get (tree->children, i));
     }
 
-    for (size_t i = 0; i < kv_size (tree->children); ++i) {
-        ASTree *child = (ASTree *) kv_A (tree->children, i);
+    for (size_t i = 0; i < llist_size (tree->children); ++i) {
+        ASTree *child = (ASTree *) llist_get (tree->children, i);
 
         if (child != NULL) {
             astree_print_tree (child, out, depth + 1);

@@ -1,4 +1,4 @@
-#include "shared.h"
+#include "attributes.h"
 
 char attr_map[][32] = {"void",
                        "int",

@@ -4,38 +4,46 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "auxlib.h"
 #include "debug.h"
 #include "attributes.h"
-#include "klib/khash.h"
+#include "badlib/badmap.h"
 
-static const size_t starting_set_size = 100;
-static const char *entry_format = "string_set[%4d]: %22p->\"%s\"\n";
-KHASH_SET_INIT_STR (str);
-khash_t (str) * string_set;
+static const size_t MAX_STRING_LENGTH = 31;
+static const size_t starting_size = 100;
+static const char *entry_format = "string_set[%4d,%4d]: %22p->\"%s\"\n";
+static Map string_set = {0};
+extern FILE* strfile;
 
-void string_set_init_globals () { string_set = kh_init (str); }
+static int strncmp_wrapper (void *s1, void *s2) {
+    return strncmp(s1, s2, MAX_STRING_LENGTH);
+}
+
+void dump_string (void *string, void *unused, size_t i, size_t j) {
+    fprintf (strfile, entry_format, i, j, string, (char*)string);
+}
+
+/* the key and value will point to the same thing so only one of the destructors
+ * should be set.
+ */
+void string_set_init_globals () { map_init(&string_set, starting_size, free, NULL, strncmp_wrapper); }
 
 void string_set_free_globals () {
-    for (khint_t k = 0; k < kh_end (string_set); ++k) {
-        if (kh_exist (string_set, k)) free ((char *) kh_key (string_set, k));
-    }
-    kh_destroy (str, string_set);
+    map_destroy(&string_set);
 }
 
 const char *string_set_intern (const char *string) {
-    int absent;
-    khint_t key = kh_put (str, string_set, string, &absent);
-    if (absent) kh_key (string_set, key) = strdup (string);
-    return (const char *) kh_key (string_set, key);
+    const size_t len = strnlen(string, MAX_STRING_LENGTH);
+    const char *ret = map_get(&string_set, (char*)string, len);
+
+    if (!ret) {
+        ret = strdup(string);
+        map_insert(&string_set, (char*)string, len, (char*)string);
+    }
+
+    return ret;
 }
 
 void string_set_dump (FILE *out) {
     DEBUGS ('s', "Dumping string set");
-    for (khint_t k = 0; k < kh_end (string_set); ++k) {
-        if (kh_exist (string_set, k)) {
-            const char *token = (const char *) kh_key (string_set, k);
-            fprintf (out, entry_format, k, (void *) token, token);
-        }
-    }
+    map_foreach(&string_set, dump_string);
 }

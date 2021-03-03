@@ -1,5 +1,5 @@
-#ifndef __SHARED_H__
-#define __SHARED_H__
+#ifndef __ATTRIBUTES_H__
+#define __ATTRIBUTES_H__
 
 // attributes correspond to array indices in the order they are listed here
 enum attr {

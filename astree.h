@@ -6,7 +6,7 @@
 
 #include "debug.h"
 #include "attributes.h"
-#include "klib/kvec.h"
+#include "badlib/badllist.h"
 //#include "lyutils.h"
 
 typedef struct {
@@ -23,7 +23,7 @@ struct ASTree {
     Location loc;              // source location
     Location decl_loc;         // for identies declaration location
     const char *lexinfo;       // pointer to lexical information
-    kvec_t (ASTree *) children;// children of this n-way node
+    LinkedList *children;        // children of this n-way node
     ASTree *next_sibling;      // for adopting long lists of siblings
     ASTree *firstborn;         // head of the list of siblings
     size_t blocknr;            // block number this node occurs in

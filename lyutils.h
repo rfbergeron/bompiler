@@ -9,7 +9,6 @@
 #include <string.h>
 
 #include "astree.h"
-#include "auxlib.h"
 #include "debug.h"
 #include "attributes.h"
 
