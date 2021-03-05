@@ -143,37 +143,31 @@ const char *parser_get_tname (int symbol) {
 
 // clang-format performs poorly on the above function for some reason
 // clang-format on
-ASTree *parser_make_root () {
-    DEBUGS ('p', "Initializing AST, root token code: %d", TOK_ROOT);
-    DEBUGS ('p', "Translation of token code: %s", parser_get_tname (TOK_ROOT));
-    return astree_init (TOK_ROOT, (Location) {lexer_get_filenr (), 0, 0}, "");
+ASTree *parser_make_root() {
+  DEBUGS('p', "Initializing AST, root token code: %d", TOK_ROOT);
+  DEBUGS('p', "Translation of token code: %s", parser_get_tname(TOK_ROOT));
+  return astree_init(TOK_ROOT, (Location){lexer_get_filenr(), 0, 0}, "_root");
 }
 
-ASTree *parser_make_function (ASTree *type,
-                              ASTree *id,
-                              ASTree *paren,
-                              ASTree *params,
-                              ASTree *block) {
-    ASTree *function = astree_init (TOK_FUNCTION, type->loc, "");
-    ASTree *type_id = parser_make_type_id (type, id, NULL);
+ASTree *parser_make_function(ASTree *type, ASTree *id, ASTree *paren,
+                             ASTree *params, ASTree *block) {
+  ASTree *function = astree_init(TOK_FUNCTION, type->loc, "_function");
+  ASTree *type_id = parser_make_type_id(type, id, NULL);
 
-    return astree_adopt (function,
-                         type_id,
-                         astree_adopt_sym (paren, TOK_PARAM, params, NULL),
-                         block);
+  return astree_adopt(function, type_id,
+                      astree_adopt_sym(paren, TOK_PARAM, params, NULL), block);
 }
 
-ASTree *parser_make_type_id (ASTree *type, ASTree *id, ASTree *expr) {
-    ASTree *type_id = astree_init (TOK_TYPE_ID, type->loc, "");
+ASTree *parser_make_type_id(ASTree *type, ASTree *id, ASTree *expr) {
+  ASTree *type_id = astree_init(TOK_TYPE_ID, type->loc, "_type_id");
 
-    return astree_adopt (type_id, type, id, expr);
+  return astree_adopt(type_id, type, id, expr);
 }
 
-ASTree *parser_make_struct (ASTree *parent,
-                            ASTree *structure_id,
-                            ASTree *structure_body) {
-    parent->type_id = structure_id->lexinfo;
-    return astree_adopt (parent, structure_id, structure_body, NULL);
+ASTree *parser_make_struct(ASTree *parent, ASTree *structure_id,
+                           ASTree *structure_body) {
+  parent->type_id = structure_id->lexinfo;
+  return astree_adopt(parent, structure_id, structure_body, NULL);
 }
 
-int is_defined_token (int symbol) { return YYTRANSLATE (symbol) > YYUNDEF; }
+int is_defined_token(int symbol) { return YYTRANSLATE(symbol) > YYUNDEF; }
