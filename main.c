@@ -11,9 +11,9 @@
 
 #include "astree.h"
 #include "debug.h"
-#include "symtable.h"
 #include "lyutils.h"
 #include "strset.h"
+#include "symtable.h"
 
 #define LINESIZE 1024
 const char *CPP = "/usr/bin/cpp -nostdinc ";
@@ -37,117 +37,121 @@ FILE *astfile;
 FILE *symfile;
 FILE *oilfile;
 
-void scan_options (int argc, char **argv) {
-    opterr = 0;
-    for (;;) {
-        int option = getopt (argc, argv, "@:D:ly");
+void scan_options(int argc, char **argv) {
+  opterr = 0;
+  for (;;) {
+    int option = getopt(argc, argv, "@:D:ly");
 
-        if (option == EOF) break;
-        switch (option) {
-            case '@':
-                debug_set_flags (optarg);
-                break;
-            case 'D':
-                // cpp args
-                // DEBUGH('c', "     cpp option: " << optarg);
-                // cpp_opts.append(" -D ").append(optarg);
-                break;
-            case 'l':
-                // DEBUGH('c', "     yy_flex_debug set to 1");
-                yy_flex_debug = 1;
-                break;
-            case 'y':
-                // DEBUGH('c', "     yydebug set to 1");
-                yydebug = 1;
-                break;
-            default:
-                fprintf (stderr, "-%c: invalid option\n", (char) optopt);
-                break;
-        }
+    if (option == EOF) break;
+    switch (option) {
+      case '@':
+        debug_set_flags(optarg);
+        break;
+      case 'D':
+        // cpp args
+        // DEBUGH('c', "     cpp option: " << optarg);
+        // cpp_opts.append(" -D ").append(optarg);
+        break;
+      case 'l':
+        // DEBUGH('c', "     yy_flex_debug set to 1");
+        yy_flex_debug = 1;
+        break;
+      case 'y':
+        // DEBUGH('c', "     yydebug set to 1");
+        yydebug = 1;
+        break;
+      default:
+        fprintf(stderr, "-%c: invalid option\n", (char)optopt);
+        break;
     }
+  }
 }
 
-int main (int argc, char **argv) {
-    yydebug = 0;
-    yy_flex_debug = 0;
-    scan_options (argc, argv);
+int main(int argc, char **argv) {
+  yydebug = 0;
+  yy_flex_debug = 0;
+  scan_options(argc, argv);
 
-    char *oc_name = basename (argv[optind]);
-    char *ext_ptr = strstr (oc_name, SRC_EXT);
-    ptrdiff_t name_len = ext_ptr - oc_name;
+  char *oc_name = basename(argv[optind]);
+  char *ext_ptr = strstr(oc_name, SRC_EXT);
+  ptrdiff_t name_len = ext_ptr - oc_name;
 
-    assert (name_len < LINESIZE);
+  assert(name_len < LINESIZE);
 
-    if (ext_ptr == NULL || name_len <= 0) {
-        errx (1, "%s: Not an oc file.", oc_name);
-    }
+  if (ext_ptr == NULL || name_len <= 0) {
+    errx(1, "%s: Not an oc file.", oc_name);
+  }
 
-    struct stat statbuf;
-    int status = stat (oc_name, &statbuf);
+  struct stat statbuf;
+  int status = stat(oc_name, &statbuf);
 
-    if (status == -1) {
-        err (1, "%s", oc_name);
-    }
+  if (status == -1) {
+    err(1, "%s", oc_name);
+  }
 
-    DEBUGS ('m', "Creating names of output files and cpp exec line");
-    memcpy (strname, oc_name, name_len);
-    memcpy (strname + name_len, STR_EXT, strlen (STR_EXT));
-    memcpy (tokname, oc_name, name_len);
-    memcpy (tokname + name_len, TOK_EXT, strlen (TOK_EXT));
-    memcpy (astname, oc_name, name_len);
-    memcpy (astname + name_len, AST_EXT, strlen (AST_EXT));
-    memcpy (symname, oc_name, name_len);
-    memcpy (symname + name_len, SYM_EXT, strlen (SYM_EXT));
-    memcpy (cppcmd, CPP, strlen (CPP));
-    memcpy (cppcmd + strlen (CPP), oc_name, strlen (oc_name));
+  DEBUGS('m', "Creating names of output files and cpp exec line");
+  memcpy(strname, oc_name, name_len);
+  memcpy(strname + name_len, STR_EXT, strlen(STR_EXT));
+  memcpy(tokname, oc_name, name_len);
+  memcpy(tokname + name_len, TOK_EXT, strlen(TOK_EXT));
+  memcpy(astname, oc_name, name_len);
+  memcpy(astname + name_len, AST_EXT, strlen(AST_EXT));
+  memcpy(symname, oc_name, name_len);
+  memcpy(symname + name_len, SYM_EXT, strlen(SYM_EXT));
+  memcpy(cppcmd, CPP, strlen(CPP));
+  memcpy(cppcmd + strlen(CPP), oc_name, strlen(oc_name));
 
-    DEBUGS ('m', "Opening files and pipes");
-    yyin = popen (cppcmd, "r");
-    if (yyin == NULL) {
-        err (1, "%s", cppcmd);
-    }
-    strfile = fopen (strname, "w");
-    if (strfile == NULL) {
-        err (1, "%s", strname);
-    }
-    tokfile = fopen (tokname, "w");
-    if (tokfile == NULL) {
-        err (1, "%s", tokname);
-    }
-    astfile = fopen (astname, "w");
-    if (astfile == NULL) {
-        err (1, "%s", astname);
-    }
-    symfile = fopen (symname, "w");
-    if (symfile == NULL) {
-        err (1, "%s", symname);
-    }
-    // remember to initialize certain things, like the string table
-    string_set_init_globals ();
-    lexer_init_globals ();
-    type_checker_init_globals ();
+  DEBUGS('m', "Opening files and pipes");
+  yyin = popen(cppcmd, "r");
+  if (yyin == NULL) {
+    err(1, "%s", cppcmd);
+  }
+  strfile = fopen(strname, "w");
+  if (strfile == NULL) {
+    err(1, "%s", strname);
+  }
+  tokfile = fopen(tokname, "w");
+  if (tokfile == NULL) {
+    err(1, "%s", tokname);
+  }
+  astfile = fopen(astname, "w");
+  if (astfile == NULL) {
+    err(1, "%s", astname);
+  }
+  symfile = fopen(symname, "w");
+  if (symfile == NULL) {
+    err(1, "%s", symname);
+  }
+  // remember to initialize certain things, like the string table
+  string_set_init_globals();
+  lexer_init_globals();
+  type_checker_init_globals();
 
-    DEBUGS ('m', "Parsing");
-    int parse_status = yyparse ();
+  DEBUGS('m', "Parsing");
+  int parse_status = yyparse();
 
-    if (parse_status != 0) {
-        warnx ("Parsing failed with status %d.", parse_status);
-    } else {
-        DEBUGS ('m', "Parse successful; dumping strings.");
-        string_set_dump (strfile);
-        make_symbol_table (parser_root);
-        astree_print_tree (parser_root, astfile, 0);
-        type_checker_dump_symbols (symfile);
-    }
+  if (parse_status != 0) {
+    warnx("Parsing failed with status %d.", parse_status);
+  } else {
+    DEBUGS('m', "Parse successful; dumping strings.");
 
-    DEBUGS ('m', "Execution finished; wrapping up.");
-    int pclose_status = pclose (yyin);
+    make_symbol_table(parser_root);
+    string_set_dump(strfile);
+    astree_print_tree(parser_root, astfile, 0);
+    // type_checker_dump_symbols (symfile);
+  }
 
-    fclose (strfile);
-    fclose (tokfile);
-    fclose (astfile);
-    string_set_free_globals ();
-    lexer_free_globals ();
-    type_checker_free_globals ();
-    return EXIT_SUCCESS;
+  DEBUGS('m', "Execution finished; wrapping up.");
+  int pclose_status = pclose(yyin);
+
+  fclose(strfile);
+  fclose(tokfile);
+  fclose(astfile);
+  DEBUGS('m', "string set cleanup");
+  string_set_free_globals();
+  DEBUGS('m', "lexing/parsing helper cleanup");
+  lexer_free_globals();
+  DEBUGS('m', "type checker and symbol table cleanup");
+  type_checker_free_globals();
+  return EXIT_SUCCESS;
 }

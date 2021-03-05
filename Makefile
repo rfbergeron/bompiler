@@ -79,7 +79,7 @@ indent:
 	-cli4 -ppi4 -cbi0 -bli0 ${SRC} ${HDR} parser.y
 
 format:
-	clang-format --style=file -i ${SRC} ${HDR} parser.y
+	clang-format --style=Google -i ${SRC} ${HDR} parser.y
 
 ${DEPFILE} :
 	@ touch ${DEPFILE}
