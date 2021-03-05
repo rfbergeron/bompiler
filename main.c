@@ -37,10 +37,12 @@ FILE *astfile;
 FILE *symfile;
 FILE *oilfile;
 
+int do_type_check = 1;
+
 void scan_options(int argc, char **argv) {
   opterr = 0;
   for (;;) {
-    int option = getopt(argc, argv, "@:D:ly");
+    int option = getopt(argc, argv, "@:D:lyc");
 
     if (option == EOF) break;
     switch (option) {
@@ -59,6 +61,9 @@ void scan_options(int argc, char **argv) {
       case 'y':
         // DEBUGH('c', "     yydebug set to 1");
         yydebug = 1;
+        break;
+      case 'c':
+        do_type_check = 0;
         break;
       default:
         fprintf(stderr, "-%c: invalid option\n", (char)optopt);
@@ -135,7 +140,7 @@ int main(int argc, char **argv) {
   } else {
     DEBUGS('m', "Parse successful; dumping strings.");
 
-    make_symbol_table(parser_root);
+    if (do_type_check) make_symbol_table(parser_root);
     string_set_dump(strfile);
     astree_print_tree(parser_root, astfile, 0);
     // type_checker_dump_symbols (symfile);

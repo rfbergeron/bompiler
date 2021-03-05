@@ -358,6 +358,7 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
     case '/':
     case '%':
       // handle int exprs
+      DEBUGS(
       status = validate_stmt_expr(statement->first(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
@@ -475,6 +476,7 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
       llist_push_back(string_constants, (char *)statement->lexinfo);
       break;
     case TOK_IDENT:
+      DEBUGS('t', "bonk");
       status = assign_type_id(statement);
       if (status != 0) return status;
       break;
@@ -669,8 +671,9 @@ int make_global_entry(ASTree *global) {
 
 int make_structure_entry(ASTree *structure) {
   const char *structure_type = extract_type(structure);
+  DEBUGS('t', "ree");
   size_t structure_type_len = strnlen(structure_type, MAX_STRING_LENGTH);
-  DEBUGS('t', "Defining structure type: %s", *structure_type);
+  DEBUGS('t', "Defining structure type: %s", structure_type);
   SymbolValue *structure_value =
       map_get(type_names, (char *)structure_type, structure_type_len);
   if (structure_value) {
@@ -745,8 +748,13 @@ int make_function_entry(ASTree *function) {
   DEBUGS('t', "oof");
 
   function_entry = symbol_value_init(astree_second(type_id), 0, 0);
-  map_init(locals, DEFAULT_MAP_SIZE, NULL, (void (*)(void *))symbol_value_free,
+  locals = malloc(sizeof(*locals));
+  status = map_init(locals, DEFAULT_MAP_SIZE, NULL, (void (*)(void *))symbol_value_free,
            strncmp_wrapper);
+  if (status) {
+      fprintf(stderr, "fuck you\n");
+      abort();
+  }
   // check and add parameters; set block
   set_blocknr(astree_second(function), next_block);
   ASTree *params = astree_second(function);
@@ -818,9 +826,11 @@ int make_function_entry(ASTree *function) {
 int make_local_entry(ASTree *local, size_t *sequence_nr) {
   const char *local_ident = extract_ident(local);
   size_t local_ident_len = strnlen(local_ident, MAX_STRING_LENGTH);
+  DEBUGS('t', "ree: %p", locals);
   SymbolValue *existing_entry =
       map_get(locals, (char *)local_ident, local_ident_len);
 
+  DEBUGS('t', "ree");
   if (existing_entry) {
     DEBUGS('t', "Got symtable entry %p", existing_entry);
     fprintf(stderr,
@@ -986,9 +996,6 @@ void type_checker_init_globals() {
   type_names = malloc(sizeof(*type_names));
   map_init(type_names, DEFAULT_MAP_SIZE, NULL,
            (void (*)(void *))symbol_value_free, strncmp_wrapper);
-  locals = malloc(sizeof(*locals));
-  map_init(locals, DEFAULT_MAP_SIZE, NULL, (void (*)(void *))symbol_value_free,
-           strncmp_wrapper);
 }
 
 void type_checker_free_globals() {
