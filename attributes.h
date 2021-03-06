@@ -1,5 +1,6 @@
 #ifndef __ATTRIBUTES_H__
 #define __ATTRIBUTES_H__
+#include "stdio.h"
 
 // attributes correspond to array indices in the order they are listed here
 enum attr {
@@ -24,4 +25,5 @@ enum attr {
 
 extern char attr_map[][32];
 
+void print_attributes(FILE *out, const int *attributes, const char *type_id);
 #endif

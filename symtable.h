@@ -23,16 +23,7 @@ struct SymbolValue {
   int has_block;
 };
 
-SymbolValue *symbol_value_init(ASTree *tree, size_t sequence_, size_t blocknr_);
-void symbol_value_free(SymbolValue *symbol_value_);
-void symbol_value_print(SymbolValue *symbol_value_, FILE *out);
-void type_checker_init_globals();
-void type_checker_free_globals();
-void type_checker_dump_symbols(FILE *out);
-
-// may need functions for printing attributes and attribute sets
-
-// where the magic happens
-int check_types(ASTree *root);
-int make_symbol_table(ASTree *root);
+int symbol_value_init(SymbolValue *symval, ASTree *tree, size_t sequence_,
+                      size_t blocknr_);
+int symbol_value_destroy(SymbolValue *symbol_value);
 #endif
