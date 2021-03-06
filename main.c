@@ -13,7 +13,7 @@
 #include "debug.h"
 #include "lyutils.h"
 #include "strset.h"
-#include "symtable.h"
+#include "typecheck.h"
 
 #define LINESIZE 1024
 const char *CPP = "/usr/bin/cpp -nostdinc ";
@@ -140,7 +140,7 @@ int main(int argc, char **argv) {
   } else {
     DEBUGS('m', "Parse successful; dumping strings.");
 
-    if (do_type_check) make_symbol_table(parser_root);
+    if (do_type_check) type_checker_make_table(parser_root);
     string_set_dump(strfile);
     astree_print_tree(parser_root, astfile, 0);
     // type_checker_dump_symbols (symfile);
