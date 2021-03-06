@@ -176,7 +176,7 @@ int validate_type_id(ASTree *type, ASTree *identifier) {
   if (type->symbol == TOK_ARRAY) {
     DEBUGS('t', "Setting attribute ARRAY");
     identifier->attributes[ATTR_ARRAY] = 1;
-    type = type->first(type);
+    type = astree_first(type);
   }
   ASTree *type_node = NULL;
   SymbolValue *type_value = NULL;
@@ -191,7 +191,7 @@ int validate_type_id(ASTree *type, ASTree *identifier) {
       break;
     case TOK_PTR:
       DEBUGS('t', "Setting attribute STRUCT");
-      type_node = type->first(type);
+      type_node = astree_first(type);
       type_value = map_get(type_names, (char *)type_node->lexinfo,
                            strnlen(type_node->lexinfo, MAX_STRING_LENGTH));
       if (type_value) {
@@ -274,41 +274,39 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
           return -1;
         }
       } else {
-        validate_stmt_expr(statement->first(statement), function_name,
-                           sequence_nr);
-        status =
-            types_compatible_ast_smv(statement->first(statement), function);
+        validate_stmt_expr(astree_first(statement), function_name, sequence_nr);
+        status = types_compatible_ast_smv(astree_first(statement), function);
         if (status == 0) {
           fprintf(stderr, "ERROR: Incompatible return type\n");
           return status;
         } else {
           statement->attributes[ATTR_VREG] = 1;
-          copy_type_attrs(statement, statement->first(statement));
+          copy_type_attrs(statement, astree_first(statement));
         }
       }
       break;
     case TOK_TYPE_ID:
-      statement->second(statement)->attributes[ATTR_LOCAL] = 1;
+      astree_second(statement)->attributes[ATTR_LOCAL] = 1;
       status = make_local_entry(statement, sequence_nr);
       if (status != 0) return status;
       break;
     case TOK_IF:
-      status = validate_stmt_expr(statement->first(statement), function_name,
+      status = validate_stmt_expr(astree_first(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
-      status = validate_stmt_expr(statement->second(statement), function_name,
+      status = validate_stmt_expr(astree_second(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
       if (llist_size(statement->children) == 3)
-        status = validate_stmt_expr(statement->third(statement), function_name,
+        status = validate_stmt_expr(astree_third(statement), function_name,
                                     sequence_nr);
       if (status != 0) return status;
       break;
     case TOK_WHILE:
-      status = validate_stmt_expr(statement->first(statement), function_name,
+      status = validate_stmt_expr(astree_first(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
-      status = validate_stmt_expr(statement->second(statement), function_name,
+      status = validate_stmt_expr(astree_second(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
       break;
@@ -320,39 +318,39 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
     // expression) can both have an '=' as their root but we handle
     // them the same way
     case '=':
-      status = validate_stmt_expr(statement->first(statement), function_name,
+      status = validate_stmt_expr(astree_first(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
-      status = validate_stmt_expr(statement->second(statement), function_name,
+      status = validate_stmt_expr(astree_second(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
-      if (!types_compatible_ast(statement->first(statement),
-                                statement->second(statement))) {
+      if (!types_compatible_ast(astree_first(statement),
+                                astree_second(statement))) {
         fprintf(stderr, "ERROR: Incompatible types for tokens: %s,%s %s,%s\n",
-                parser_get_tname(statement->first(statement)->symbol),
-                statement->first(statement)->lexinfo,
-                parser_get_tname(statement->second(statement)->symbol),
-                statement->second(statement)->lexinfo);
+                parser_get_tname(astree_first(statement)->symbol),
+                astree_first(statement)->lexinfo,
+                parser_get_tname(astree_second(statement)->symbol),
+                astree_second(statement)->lexinfo);
         return -1;
-      } else if (!statement->first(statement)->attributes[ATTR_LVAL]) {
+      } else if (!astree_first(statement)->attributes[ATTR_LVAL]) {
         fprintf(stderr, "ERROR: Destination is not an LVAL\n");
         return -1;
       }
       // type is the type of the left operand
-      copy_type_attrs(statement, statement->second(statement));
+      copy_type_attrs(statement, astree_second(statement));
       break;
     // here begins the trees made by the "expr" production
     case TOK_EQ:
     case TOK_NE:
       // types can be arbitrary here
-      status = validate_stmt_expr(statement->first(statement), function_name,
+      status = validate_stmt_expr(astree_first(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
-      status = validate_stmt_expr(statement->second(statement), function_name,
+      status = validate_stmt_expr(astree_second(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
-      if (!types_compatible_ast(statement->first(statement),
-                                statement->second(statement))) {
+      if (!types_compatible_ast(astree_first(statement),
+                                astree_second(statement))) {
         fprintf(stderr, "ERROR: Incompatible types for operator: %s\n",
                 statement->symbol);
         return -1;
@@ -368,23 +366,23 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
     case '/':
     case '%':
       // handle int exprs
-      status = validate_stmt_expr(statement->first(statement), function_name,
+      status = validate_stmt_expr(astree_first(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
-      status = validate_stmt_expr(statement->second(statement), function_name,
+      status = validate_stmt_expr(astree_second(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
-      if (!types_compatible_ast(statement->first(statement),
-                                statement->second(statement))) {
+      if (!types_compatible_ast(astree_first(statement),
+                                astree_second(statement))) {
         fprintf(stderr, "ERROR: Incompatible types for operator: %s\n",
                 statement->symbol);
         return -1;
-      } else if (!statement->first(statement)->attributes[ATTR_INT]) {
+      } else if (!astree_first(statement)->attributes[ATTR_INT]) {
         fprintf(stderr, "ERROR: Operator %s must have operands of type int\n",
                 parser_get_tname(statement->symbol));
         fprintf(stderr, "Offending operands: %s %s\n",
-                statement->first(statement)->lexinfo,
-                statement->second(statement)->lexinfo);
+                astree_first(statement)->lexinfo,
+                astree_second(statement)->lexinfo);
         return -1;
       }
       break;
@@ -392,24 +390,24 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
     case TOK_POS:
     case TOK_NEG:
       // unary operators
-      status = validate_stmt_expr(statement->first(statement), function_name,
+      status = validate_stmt_expr(astree_first(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
-      if (!statement->first(statement)->attributes[ATTR_INT]) {
+      if (!astree_first(statement)->attributes[ATTR_INT]) {
         fprintf(stderr, "ERROR: '%s' argument must be of type int\n",
                 statement->lexinfo);
         return -1;
       }
       break;
     case TOK_ALLOC:
-      status = validate_type_id(statement->first(statement), statement);
+      status = validate_type_id(astree_first(statement), statement);
       if (status != 0) return status;
       if (llist_size(statement->children) == 2) {
-        status = validate_stmt_expr(statement->second(statement), function_name,
+        status = validate_stmt_expr(astree_second(statement), function_name,
                                     sequence_nr);
         if (status != 0) return status;
-        if (!statement->second(statement)->attributes[ATTR_INT] ||
-            statement->second(statement)->attributes[ATTR_ARRAY]) {
+        if (!astree_second(statement)->attributes[ATTR_INT] ||
+            astree_second(statement)->attributes[ATTR_ARRAY]) {
           fprintf(stderr, "ERROR: alloc size argument must be of type int!");
           return -1;
         }
@@ -424,17 +422,17 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
       // evaluate left and right side
       // make sure left is an array and right is an int
       // set type to type of array, minus the array
-      status = validate_stmt_expr(statement->first(statement), function_name,
+      status = validate_stmt_expr(astree_first(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
-      status = validate_stmt_expr(statement->second(statement), function_name,
+      status = validate_stmt_expr(astree_second(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
-      if (statement->second(statement)->attributes[ATTR_INT]) {
-        if (statement->first(statement)->attributes[ATTR_ARRAY]) {
-          copy_type_attrs(statement, statement->first(statement));
+      if (astree_second(statement)->attributes[ATTR_INT]) {
+        if (astree_first(statement)->attributes[ATTR_ARRAY]) {
+          copy_type_attrs(statement, astree_first(statement));
           statement->attributes[ATTR_ARRAY] = 0;
-        } else if (statement->first(statement)->attributes[ATTR_STRING]) {
+        } else if (astree_first(statement)->attributes[ATTR_STRING]) {
           statement->attributes[ATTR_INT] = 1;
         } else {
           fprintf(stderr, "ERROR: only strings and arrays may be indexed\n");
@@ -448,29 +446,29 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
     case TOK_ARROW:
       // evaluate left but not right since right
       // is always an ident
-      status = validate_stmt_expr(statement->first(statement), function_name,
+      status = validate_stmt_expr(astree_first(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
-      const char *tid = statement->first(statement)->type_id;
+      const char *tid = astree_first(statement)->type_id;
       SymbolValue *struct_def =
           map_get(type_names, (char *)tid, strnlen(tid, MAX_STRING_LENGTH));
-      if (statement->first(statement)->attributes[ATTR_STRUCT] && struct_def) {
+      if (astree_first(statement)->attributes[ATTR_STRUCT] && struct_def) {
         /* make sure field is defined */
-        const char *tid2 = statement->second(statement)->lexinfo;
+        const char *tid2 = astree_second(statement)->lexinfo;
         SymbolValue *field_def = map_get(struct_def->fields, (char *)tid2,
                                          strnlen(tid2, MAX_STRING_LENGTH));
         if (field_def) {
-          assign_type_id_smv(statement->second(statement), field_def);
+          assign_type_id_smv(astree_second(statement), field_def);
           assign_type_id_smv(statement, field_def);
         } else {
           fprintf(stderr, "ERROR: field %s is not a member of structure\n",
-                  statement->second(statement)->lexinfo);
+                  astree_second(statement)->lexinfo);
           return -1;
         }
       } else {
         fprintf(stderr, "ERROR: structure %s not defined for token %s\n",
-                statement->first(statement)->type_id,
-                statement->first(statement)->lexinfo);
+                astree_first(statement)->type_id,
+                astree_first(statement)->lexinfo);
         return -1;
       }
       break;
@@ -498,7 +496,7 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
 }
 
 int validate_call(ASTree *call) {
-  const char *identifier = call->first(call)->lexinfo;
+  const char *identifier = astree_first(call)->lexinfo;
   // params are at the same level as the id
   SymbolValue *function = map_get(globals, (char *)identifier,
                                   strnlen(identifier, MAX_STRING_LENGTH));
@@ -526,10 +524,11 @@ int validate_call(ASTree *call) {
     }
 
     memcpy(call->attributes, function->attributes, NUM_ATTRIBUTES);
-    memcpy(call->first(call)->attributes, function->attributes, NUM_ATTRIBUTES);
+    memcpy(astree_first(call)->attributes, function->attributes,
+           NUM_ATTRIBUTES);
     call->type_id = function->type_id;
-    call->first(call)->type_id = function->type_id;
-    call->first(call)->decl_loc = function->loc;
+    astree_first(call)->type_id = function->type_id;
+    astree_first(call)->decl_loc = function->loc;
     return 0;
   } else {
     fprintf(stderr, "ERROR: Invalid call to function %s\n", identifier);
@@ -558,26 +557,26 @@ int validate_call(ASTree *call) {
             if(in_sorted) continue;
             if(min_lloc == nullptr) min_lloc = &entry;
 
-            if(entry.second->lloc.filenr < min_lloc->second->
+            if(entry.second->lloc.filenr < astree_second->
                   lloc.filenr) {
                 min_lloc = &entry;
             } else if(
-                    entry.second->lloc.filenr == min_lloc->second->
+                    entry.second->lloc.filenr == astree_second->
                     lloc.filenr &&
-                    entry.second->lloc.linenr < min_lloc->second->
+                    entry.second->lloc.linenr < astree_second->
                     lloc.linenr) {
                 min_lloc = &entry;
             } else if(
-                    entry.second->lloc.filenr == min_lloc->second->
+                    entry.second->lloc.filenr == astree_second->
                     lloc.filenr &&
-                    entry.second->lloc.linenr == min_lloc->second->
+                    entry.second->lloc.linenr == astree_second->
                     lloc.linenr &&
-                    entry.second->lloc.offset <= min_lloc->second->
+                    entry.second->lloc.offset <= astree_second->
                     lloc.offset) {
                 min_lloc = &entry;
             }
         }
-        DEBUGS('9', "Inserting entry " << *(min_lloc->first));
+        DEBUGS('9', "Inserting entry " << *(astree_first));
         sorted.push_back(*min_lloc);
         min_lloc = nullptr;
     }
@@ -600,8 +599,7 @@ int make_global_entry(ASTree *global) {
     ASTree *identifier = astree_second(global);
     identifier->attributes[ATTR_LVAL] = 1;
     identifier->attributes[ATTR_VARIABLE] = 1;
-    int status =
-        validate_type_id(global->first(global), global->second(global));
+    int status = validate_type_id(astree_first(global), astree_second(global));
     if (status != 0) return status;
     if (llist_size(global->children) == 3) {
       size_t dummy_sequence = 0;
@@ -654,7 +652,7 @@ int make_structure_entry(ASTree *structure) {
         return -1;
       } else {
         int status =
-            validate_type_id(field->first(field), field->second(field));
+            validate_type_id(astree_first(field), astree_second(field));
         if (status != 0) return status;
         astree_second(field)->attributes[ATTR_FIELD] = 1;
         astree_second(field)->attributes[ATTR_LVAL] = 1;
@@ -678,8 +676,7 @@ int make_function_entry(ASTree *function) {
   DEBUGS('t', "oof");
   astree_second(type_id)->attributes[ATTR_FUNCTION] = 1;
   DEBUGS('t', "oof");
-  int status =
-      validate_type_id(type_id->first(type_id), type_id->second(type_id));
+  int status = validate_type_id(astree_first(type_id), astree_second(type_id));
   SymbolValue *function_entry = NULL;
   if (status != 0) return status;
   if (type_id->attributes[ATTR_ARRAY]) {
@@ -791,21 +788,21 @@ int make_local_entry(ASTree *local, size_t *sequence_nr) {
             extract_ident(local), existing_entry->loc.linenr);
     return -1;
   } else {
-    ASTree *type = local->first(local);
-    ASTree *identifier = local->second(local);
+    ASTree *type = astree_first(local);
+    ASTree *identifier = astree_second(local);
     DEBUGS('t', "Making entry for local var %s", identifier->lexinfo);
     identifier->attributes[ATTR_LVAL] = 1;
     identifier->attributes[ATTR_VARIABLE] = 1;
-    int status = validate_type_id(local->first(local), local->second(local));
+    int status = validate_type_id(astree_first(local), astree_second(local));
     if (status != 0) return status;
     DEBUGS('t', "Checking to see if var has an initial value");
     if (llist_size(local->children) == 3) {
       size_t dummy_sequence = 0;
       DEBUGS('t', "it do have value");
-      status = validate_stmt_expr(local->third(local), DUMMY_FUNCTION,
+      status = validate_stmt_expr(astree_third(local), DUMMY_FUNCTION,
                                   &dummy_sequence);
       if (status != 0) return status;
-      if (!types_compatible_ast(local->third(local), local->second(local))) {
+      if (!types_compatible_ast(astree_third(local), astree_second(local))) {
         fprintf(stderr, "ERROR: Incompatible type for local variable\n");
         return -1;
       }

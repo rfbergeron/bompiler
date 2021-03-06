@@ -38,9 +38,6 @@ ASTree *astree_init(int symbol_, const Location location, const char *info) {
   ret->firstborn = ret;
   ret->blocknr = 0;
   memset(ret->attributes, 0, NUM_ATTRIBUTES);
-  ret->first = &astree_first;
-  ret->second = &astree_second;
-  ret->third = &astree_third;
 
   // remember, attributes for nodes which adopt a different symbol
   // must have the appropriate attributes set in adopt_symbol

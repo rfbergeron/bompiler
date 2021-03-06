@@ -29,9 +29,6 @@ struct ASTree {
   size_t blocknr;        // block number this node occurs in
   int attributes[16];    // type attributes
   const char *type_id;   // structure type
-  childFunc first;
-  childFunc second;
-  childFunc third;
 };
 
 void location_print(FILE *out, const Location location_);
