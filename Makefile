@@ -67,8 +67,8 @@ cleantest:
 	rm -f *.str *.tok *.ast *.sym *.oil
 
 ci: 
-	git add ${HDR} ${SRC} ${MKFILE} README.md DESIGN.md \
-	.gitignore parser.y scanner.l
+	git add ${HDR} ${SRC} ${MKFILE} README.md DESIGN.md TODO.md DESIGN2.md \
+	IDEAS.md .gitignore parser.y scanner.l
 
 dep: ${ALLSRC}
 	${CDEP} $^ >> ${DEPFILE}

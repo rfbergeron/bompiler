@@ -95,7 +95,7 @@ void astree_destroy(ASTree *astree) {
   free(astree);
 }
 
-void astree_annihilate(size_t count, ...) {
+void astree_vdestroy(size_t count, ...) {
   va_list args;
 
   va_start(args, count);
