@@ -42,3 +42,7 @@ effectively prerequesites for more complex features. For example:
   an even more base concept behind labels, that being function calls. I'll have
   to look at the semantics of function calls in x86, but I believe functions are
   identified by assembler labels, much like break, case, and goto would be.
+
+## Type and attribute implementation
+A variable's/value's type will be represented by a list of type specifiers,
+which have a set of flags used to track modifications to the type

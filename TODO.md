@@ -15,3 +15,6 @@ compiler features
    when implementing other things
 4. if statements
 5. switch statements
+
+# Current commit plans
+- Make attribute and type handling more flexible/extensible

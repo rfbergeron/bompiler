@@ -12,11 +12,11 @@
 typedef struct {
   size_t filenr;
   size_t linenr;
+  size_t blocknr;
   size_t offset;
 } Location;
 
 typedef struct ASTree ASTree;
-typedef ASTree *(*childFunc)(ASTree *);
 
 struct ASTree {
   int symbol;            // token code
