@@ -7,6 +7,30 @@ char attr_map[][32] = {"void",   "int",    "null",      "string",
                        "field",  "typeid", "parameter", "local",
                        "lval",   "const",  "vreg",      "vaddr"};
 
+/* we'll simplify matters internally by limiting base types to structs, unions,
+ * ints (which are also considered chars), floats, doubles, void, and pointers
+ * of each of these types.
+ *
+ * other types and type qualifiers will be implemented as flags on the typespec
+ *
+ * arrays are represented internally as pointers, since in the end they are just
+ * stack-allocated pointers
+ */
+const char type_map[][16] = {"void", "int", "float", "struct", "union"};
+
+/* qualifiers/specifiers that are flags:
+ * - signed/unsigned
+ * - wider/narrower types
+ * - pointer level
+ */
+enum type_attr = {
+    ATTR_LONG,
+    ATTR_LONG_LONG,
+    ATTR_SHORT,
+    ATTR_CHAR,
+    ATTR_DOUBLE
+};
+
 void print_attributes(FILE *out, const int *attributes, const char *type_id) {
   for (size_t i = 0; i < NUM_ATTRIBUTES; ++i) {
     if (attributes[i]) {
