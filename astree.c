@@ -26,9 +26,11 @@ ASTree *astree_init(int symbol_, const Location location, const char *info) {
   ASTree *ret = malloc(sizeof(*ret));
 
   ret->symbol = symbol_;
-  ret->loc = location;
   ret->lexinfo = string_set_intern(info);
-
+  ret->loc = location;
+  ret->decl_loc = {0};
+  ret->type = {0};
+  ret->attributes = 0;
   /* casting function pointers is undefined behavior but it seems like most
    * compiler implementations make it work, and here we're just changing the
    * type of a pointer argument */
@@ -36,8 +38,6 @@ ASTree *astree_init(int symbol_, const Location location, const char *info) {
   llist_init(ret->children, (void (*)(void *))(astree_destroy), NULL);
   ret->next_sibling = NULL;
   ret->firstborn = ret;
-  ret->blocknr = 0;
-  memset(ret->attributes, 0, NUM_ATTRIBUTES);
 
   // remember, attributes for nodes which adopt a different symbol
   // must have the appropriate attributes set in adopt_symbol
@@ -56,29 +56,29 @@ ASTree *astree_init(int symbol_, const Location location, const char *info) {
     case TOK_NOT:
     case TOK_POS:
     case TOK_NEG:
-      ret->attributes[ATTR_INT] = 1;
+      /* ret->attributes[ATTR_INT] = 1; */
     case '=':
     case TOK_ALLOC:
     case TOK_CALL:
-      ret->attributes[ATTR_VREG] = 1;
+      /* ret->attributes[ATTR_VREG] = 1; */
       break;
     case TOK_ARROW:
     case TOK_INDEX:
-      ret->attributes[ATTR_LVAL] = 1;
-      ret->attributes[ATTR_VADDR] = 1;
+      /* ret->attributes[ATTR_LVAL] = 1; */
+      /* ret->attributes[ATTR_VADDR] = 1; */
       break;
     case TOK_NULLPTR:
-      ret->attributes[ATTR_NULL] = 1;
-      ret->attributes[ATTR_CONST] = 1;
+      /* ret->attributes[ATTR_NULL] = 1; */
+      /* ret->attributes[ATTR_CONST] = 1; */
       break;
     case TOK_INTCON:
     case TOK_CHARCON:
-      ret->attributes[ATTR_CONST] = 1;
-      ret->attributes[ATTR_INT] = 1;
+      /* ret->attributes[ATTR_CONST] = 1; */
+      /* ret->attributes[ATTR_INT] = 1; */
       break;
     case TOK_STRINGCON:
-      ret->attributes[ATTR_CONST] = 1;
-      ret->attributes[ATTR_STRING] = 1;
+      /* ret->attributes[ATTR_CONST] = 1; */
+      /* ret->attributes[ATTR_STRING] = 1; */
       break;
   }
   return ret;

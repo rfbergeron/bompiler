@@ -19,16 +19,15 @@ typedef struct {
 typedef struct ASTree ASTree;
 
 struct ASTree {
-  int symbol;            // token code
-  Location loc;          // source location
-  Location decl_loc;     // for identies declaration location
-  const char *lexinfo;   // pointer to lexical information
-  LinkedList *children;  // children of this n-way node
-  ASTree *next_sibling;  // for adopting long lists of siblings
-  ASTree *firstborn;     // head of the list of siblings
-  size_t blocknr;        // block number this node occurs in
-  int attributes[16];    // type attributes
-  const char *type_id;   // structure type
+  int symbol;                 // token code
+  const char *lexinfo;        // lexical information
+  Location loc;               // source location
+  Location decl_loc;          // for identies declaration location
+  struct typespec type;       // type info
+  unsigned int attributes;    // node-specific attributes
+  LinkedList *children;       // children of this n-way node
+  ASTree *next_sibling;       // for adopting long lists of siblings
+  ASTree *firstborn;          // head of the list of siblings
 };
 
 void location_print(FILE *out, const Location location_);

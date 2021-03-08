@@ -15,6 +15,9 @@ char attr_map[][32] = {"void",   "int",    "null",      "string",
  *
  * arrays are represented internally as pointers, since in the end they are just
  * stack-allocated pointers
+ *
+ * maybe don't even have an attributes bit field, just store the base type and
+ * the width
  */
 const char type_map[][16] = {"void", "int", "float", "struct", "union"};
 
@@ -23,14 +26,6 @@ const char type_map[][16] = {"void", "int", "float", "struct", "union"};
  * - wider/narrower types
  * - pointer level
  */
-enum type_attr = {
-    ATTR_LONG,
-    ATTR_LONG_LONG,
-    ATTR_SHORT,
-    ATTR_CHAR,
-    ATTR_DOUBLE
-};
-
 void print_attributes(FILE *out, const int *attributes, const char *type_id) {
   for (size_t i = 0; i < NUM_ATTRIBUTES; ++i) {
     if (attributes[i]) {
