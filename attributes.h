@@ -3,13 +3,6 @@
 #include "stdio.h"
 
 // attributes correspond to array indices in the order they are listed here
-struct typespec {
-  enum base_type base;
-  unsigned int modifiers;
-  size_t width;
-  const char *name;
-};
-
 enum attribute {
     ATTR_REG = 1 << 0,
     ATTR_LVAL = 1 << 1,
@@ -23,11 +16,7 @@ enum base_type {
     TYPE_VOID,
     TYPE_CHAR,
     TYPE_INT,
-    TYPE_FLOAT,
-    TYPE_DOUBLE,
-    TYPE_STRUCT,
-    TYPE_UNION,
-    TYPE_ENUM
+    TYPE_FLOAT
 };
 
 enum type_mod {
@@ -51,5 +40,12 @@ enum type_mod {
     TYPE_MOD_INLINE = 1 << 13
 };
 
-void print_attributes(FILE *out, const int *attributes, const char *type_id);
+struct typespec {
+  enum base_type base;
+  unsigned int modifiers;
+  size_t width;
+  const char *name;
+};
+
+int attributes_to_string(const unsigned int attributes, char *buf, size_t bufsize);
 #endif
