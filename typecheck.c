@@ -20,17 +20,17 @@ const char *DUMMY_FUNCTION = "__DUMMY__";
 static const size_t MAX_STRING_LENGTH = 31;
 static const size_t DEFAULT_MAP_SIZE = 100;
 enum type_checker_status {
-    TCHK_COMPATIBLE,
-    TCHK_IMPLICIT_CAST,
-    TCHK_EXPLICIT_CAST,
-    TCHK_INCOMPATIBLE,
-    TCHK_E_NO_FLAGS
+  TCHK_COMPATIBLE,
+  TCHK_IMPLICIT_CAST,
+  TCHK_EXPLICIT_CAST,
+  TCHK_INCOMPATIBLE,
+  TCHK_E_NO_FLAGS
 };
 enum types_compatible_arg_flags {
-    ARG1_AST = 1 << 0,
-    ARG1_SMV = 1 << 1,
-    ARG2_AST = 1 << 2,
-    ARG2_SMV = 1 << 3
+  ARG1_AST = 1 << 0,
+  ARG1_SMV = 1 << 1,
+  ARG2_AST = 1 << 2,
+  ARG2_SMV = 1 << 3
 };
 
 /*
@@ -101,35 +101,35 @@ int assign_type_id(ASTree *ident, SymbolValue *struct_member_id) {
   return 0;
 }
 
-int types_compatible (void *arg1, void *arg2, unsigned int flags) {
-    struct typespec *type1 = NULL;
-    struct typespec *type2 = NULL;
+int types_compatible(void *arg1, void *arg2, unsigned int flags) {
+  struct typespec *type1 = NULL;
+  struct typespec *type2 = NULL;
 
-    if (flags & ARG1_AST) {
-        type1 = &(((ASTree*)arg1)->type);
-    } else if (flags & ARG1_SMV) {
-        type1 = &(((SymbolValue*)arg1)->type);
-    } else {
-        fprintf(stderr, "ERROR: no flags provided for argument 1\n");
-        return TCHK_E_NO_FLAGS;
-    }
-    if (flags & ARG2_AST) {
-        type2 = &(((ASTree*)arg2)->type);
-    } else if (flags & ARG2_SMV) {
-        type2 = &(((SymbolValue*)arg2)->type);
-    } else {
-        fprintf(stderr, "ERROR: no flags provided for argument 2\n");
-        return TCHK_E_NO_FLAGS;
-    }
+  if (flags & ARG1_AST) {
+    type1 = &(((ASTree *)arg1)->type);
+  } else if (flags & ARG1_SMV) {
+    type1 = &(((SymbolValue *)arg1)->type);
+  } else {
+    fprintf(stderr, "ERROR: no flags provided for argument 1\n");
+    return TCHK_E_NO_FLAGS;
+  }
+  if (flags & ARG2_AST) {
+    type2 = &(((ASTree *)arg2)->type);
+  } else if (flags & ARG2_SMV) {
+    type2 = &(((SymbolValue *)arg2)->type);
+  } else {
+    fprintf(stderr, "ERROR: no flags provided for argument 2\n");
+    return TCHK_E_NO_FLAGS;
+  }
 
-    /* TODO(Robert): check for arrays, pointers, structs, unions, and valid
-     * conversions between types
-     */
-    if (type1->base == type2->base) {
-        return TCHK_COMPATIBLE;
-    } else {
-        return TCHK_INCOMPATIBLE;
-    }
+  /* TODO(Robert): check for arrays, pointers, structs, unions, and valid
+   * conversions between types
+   */
+  if (type1->base == type2->base) {
+    return TCHK_COMPATIBLE;
+  } else {
+    return TCHK_INCOMPATIBLE;
+  }
 };
 
 int validate_type_id(ASTree *type, ASTree *identifier);
@@ -194,7 +194,8 @@ int validate_type_id(ASTree *type, ASTree *identifier) {
       if (type_value) {
         identifier->type = type_value->type;
       } else {
-        fprintf(stderr, "ERROR: type not declared: %s\n", identifier->type.identifier);
+        fprintf(stderr, "ERROR: type not declared: %s\n",
+                identifier->type.identifier);
         return -1;
       }
       break;
@@ -241,7 +242,7 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
       } else {
         validate_stmt_expr(astree_first(statement), function_name, sequence_nr);
         status = types_compatible(astree_first(statement), function,
-                ARG1_AST & ARG2_SMV);
+                                  ARG1_AST & ARG2_SMV);
         if (status == TCHK_INCOMPATIBLE) {
           fprintf(stderr, "ERROR: Incompatible return type\n");
           return status;
@@ -289,9 +290,8 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
       status = validate_stmt_expr(astree_second(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
-      if (types_compatible(astree_first(statement),
-                                astree_second(statement),
-                                ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
+      if (types_compatible(astree_first(statement), astree_second(statement),
+                           ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
         fprintf(stderr, "ERROR: Incompatible types for tokens: %s,%s %s,%s\n",
                 parser_get_tname(astree_first(statement)->symbol),
                 astree_first(statement)->lexinfo,
@@ -315,9 +315,8 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
       status = validate_stmt_expr(astree_second(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
-      if (types_compatible(astree_first(statement),
-                                astree_second(statement),
-                                ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
+      if (types_compatible(astree_first(statement), astree_second(statement),
+                           ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
         fprintf(stderr, "ERROR: Incompatible types for operator: %s\n",
                 statement->symbol);
         return -1;
@@ -339,9 +338,8 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
       status = validate_stmt_expr(astree_second(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
-      if (types_compatible(astree_first(statement),
-                                astree_second(statement),
-                                ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
+      if (types_compatible(astree_first(statement), astree_second(statement),
+                           ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
         fprintf(stderr, "ERROR: Incompatible types for operator: %s\n",
                 statement->symbol);
         return -1;
@@ -361,7 +359,7 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
       status = validate_stmt_expr(astree_first(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
-      if (astree_first(statement)->attributes != TYPE_INT ) {
+      if (astree_first(statement)->attributes != TYPE_INT) {
         fprintf(stderr, "ERROR: '%s' argument must be of type int\n",
                 statement->lexinfo);
         return -1;
@@ -484,7 +482,7 @@ int validate_call(ASTree *call) {
       if (status != 0) return status;
       DEBUGS('t', "Comparing types");
       if (types_compatible(param, llist_get(function->parameters, i),
-                  ARG1_AST & ARG2_SMV) == TCHK_INCOMPATIBLE) {
+                           ARG1_AST & ARG2_SMV) == TCHK_INCOMPATIBLE) {
         fprintf(stderr, "ERROR: incompatible type for argument: %s\n",
                 param->lexinfo);
         return -1;
@@ -570,7 +568,7 @@ int make_global_entry(ASTree *global) {
                                   &dummy_sequence);
       if (status != 0) return status;
       if (types_compatible(astree_third(global), astree_second(global),
-                  ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
+                           ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
         fprintf(stderr, "ERROR: Incompatible type for global variable\n");
         return -1;
       }
@@ -701,7 +699,7 @@ int make_function_entry(ASTree *function) {
       map_get(globals, (char *)function_id, function_id_len);
   if (prototype) {
     if (types_compatible(prototype, function_entry, ARG1_SMV & ARG2_SMV) ==
-            TCHK_INCOMPATIBLE) {
+        TCHK_INCOMPATIBLE) {
       fprintf(stderr, "ERROR: redefinition of function: %s\n", function_id);
       return -1;
     } else if (prototype->has_block) {
@@ -764,7 +762,7 @@ int make_local_entry(ASTree *local, size_t *sequence_nr) {
                                   &dummy_sequence);
       if (status != 0) return status;
       if (types_compatible(astree_third(local), astree_second(local),
-                  ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
+                           ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
         fprintf(stderr, "ERROR: Incompatible type for local variable\n");
         return -1;
       }
@@ -846,7 +844,7 @@ int type_checker_make_table(ASTree *root) {
                                     &dummy_sequence);
         if (status != 0) return status;
         if (types_compatible(astree_first(child), astree_second(child),
-                    ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
+                             ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
           fprintf(stderr, "ERROR: Incompatible types for global\n");
           return -1;
         } else if (!(astree_first(child)->attributes & ATTR_LVAL)) {

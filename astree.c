@@ -14,7 +14,7 @@
 #include "strset.h"
 #define LINESIZE 1024
 
-static const struct typespec EMPTY_TYPESPEC = { 0, 0, 0, 0 };
+static const struct typespec EMPTY_TYPESPEC = {0, 0, 0, 0};
 
 ASTree *astree_first(ASTree *parent) { return llist_get(parent->children, 0); }
 
