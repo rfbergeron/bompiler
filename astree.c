@@ -14,6 +14,8 @@
 #include "strset.h"
 #define LINESIZE 1024
 
+static const struct typespec EMPTY_TYPESPEC = { 0, 0, 0, 0 };
+
 ASTree *astree_first(ASTree *parent) { return llist_get(parent->children, 0); }
 
 ASTree *astree_second(ASTree *parent) { return llist_get(parent->children, 1); }
@@ -28,8 +30,7 @@ ASTree *astree_init(int symbol_, const Location location, const char *info) {
   ret->symbol = symbol_;
   ret->lexinfo = string_set_intern(info);
   ret->loc = location;
-  ret->decl_loc = {0};
-  ret->type = {0};
+  ret->type = EMPTY_TYPESPEC;
   ret->attributes = 0;
   /* casting function pointers is undefined behavior but it seems like most
    * compiler implementations make it work, and here we're just changing the
@@ -199,18 +200,6 @@ void location_to_string(Location location, char *buffer, size_t size) {
                 1;
 }
 
-void attributes_to_string(int *attributes, char *buffer, size_t size) {
-  size_t offset = 0;
-  buffer[0] = 0;
-  for (size_t i = 0, offset = 0; i < NUM_ATTRIBUTES; ++i) {
-    if (attributes[i]) {
-      DEBUGS('a', "Printing attribute %s", attr_map[i]);
-      snprintf(buffer + offset, size - offset, "%s ", attr_map[i]);
-      offset = strlen(buffer);
-    }
-  }
-}
-
 void astree_to_string(ASTree *tree, char *buffer, size_t size) {
   // print token name, lexinfo in quotes, the location, block number,
   // attributes, and the typeid if this is a struct
@@ -224,7 +213,7 @@ void astree_to_string(ASTree *tree, char *buffer, size_t size) {
 
   if (strlen(tname) > 4) tname += 4;
   snprintf(buffer, size, "%s \"%s\" %s {%d} %s", tname, tree->lexinfo, locstr,
-           tree->blocknr, attrstr);
+           tree->loc.blocknr, attrstr);
 }
 
 void astree_print_tree(ASTree *tree, FILE *out, int depth) {

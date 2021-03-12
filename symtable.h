@@ -13,13 +13,17 @@
 typedef struct SymbolValue SymbolValue;
 
 struct SymbolValue {
-  int attributes[(size_t)NUM_ATTRIBUTES];
+  /* TODO(Robert): fields and parameters should be a part of the type, not the
+   * symbol value.
+   *
+   * This structure should be used for grouping together a function or object's
+   * name, type, and declaration location
+   */
+  struct typespec type;
   size_t sequence;
   struct map *fields;
   Location loc;
-  size_t blocknr;
   struct llist *parameters;
-  const char *type_id;
   int has_block;
 };
 
