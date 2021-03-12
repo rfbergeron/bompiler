@@ -17,9 +17,21 @@ struct llist *tables;
 struct llist *string_constants;
 int next_block = 1;
 const char *DUMMY_FUNCTION = "__DUMMY__";
-int TYPE_ATTR_MASK[16];
 static const size_t MAX_STRING_LENGTH = 31;
 static const size_t DEFAULT_MAP_SIZE = 100;
+enum type_checker_status {
+    TCHK_COMPATIBLE,
+    TCHK_IMPLICIT_CAST,
+    TCHK_EXPLICIT_CAST,
+    TCHK_INCOMPATIBLE,
+    TCHK_E_NO_FLAGS
+};
+enum types_compatible_arg_flags {
+    ARG1_AST = 1 << 0,
+    ARG1_SMV = 1 << 1,
+    ARG2_AST = 1 << 2,
+    ARG2_SMV = 1 << 3
+};
 
 /*
  * wrapper functions for use with badlib
@@ -46,74 +58,10 @@ static void symbol_table_destroy(void *table, size_t unused) {
   map_destroy(table);
 }
 
-/*
- * internal functions
- */
-int types_compatible_attr(int *a1, int *a2) {
-  if ((a1[ATTR_ARRAY] || a1[ATTR_STRUCT] || a1[ATTR_STRING] || a1[ATTR_NULL]) &&
-      a2[ATTR_NULL]) {
-    return 1;
-  } else if ((a2[ATTR_ARRAY] || a2[ATTR_STRUCT] || a2[ATTR_STRING] ||
-              a2[ATTR_NULL]) &&
-             a1[ATTR_NULL]) {
-    return 1;
-  } else if (a1[ATTR_ARRAY] != a2[ATTR_ARRAY]) {
-    return 0;
-  } else if (a1[ATTR_VOID] && a2[ATTR_VOID]) {
-    return 1;
-  } else if (a1[ATTR_STRUCT] && a2[ATTR_STRUCT]) {
-    return 1;
-  } else if (a1[ATTR_STRING] && a2[ATTR_STRING]) {
-    return 1;
-  } else if (a1[ATTR_INT] && a2[ATTR_INT]) {
-    return 1;
-  } else {
-    DEBUGS('t', "OOF");
-    return 0;
-  }
-}
-
-int types_compatible_smv(SymbolValue *v1, SymbolValue *v2) {
-  return types_compatible_attr(v1->attributes, v2->attributes);
-}
-
-int types_compatible_ast(ASTree *t1, ASTree *t2) {
-  if (t1->symbol == TOK_TYPE_ID) t1 = astree_second(t1);
-  return types_compatible_attr(t1->attributes, t2->attributes);
-}
-
-int types_compatible_ast_smv(ASTree *tree, SymbolValue *entry) {
-  if (tree->symbol == TOK_TYPE_ID) tree = astree_second(tree);
-  return types_compatible_attr(tree->attributes, entry->attributes);
-}
-
-int functions_equal(SymbolValue *f1, SymbolValue *f2) {
-  if (llist_size(f1->parameters) != llist_size(f2->parameters)) return 0;
-  for (size_t i = 0; i < llist_size(f1->parameters); ++i) {
-    if (!types_compatible_smv(llist_get(f1->parameters, i),
-                              llist_get(f2->parameters, i)))
-      return 0;
-  }
-  return 0;
-}
-
-enum attr get_type_attr(const SymbolValue *symval) {
-  for (size_t i = 0; i < NUM_ATTRIBUTES; ++i) {
-    if (symval->attributes[i] & TYPE_ATTR_MASK[i]) return (enum attr)i;
-  }
-  errx(1, "Symbol entry did not have any type attributes set.");
-}
-
 void set_blocknr(ASTree *tree, size_t nr) {
-  tree->blocknr = nr;
+  tree->loc.blocknr = nr;
   for (size_t i = 0; i < llist_size(tree->children); ++i) {
     set_blocknr(llist_get(tree->children, i), nr);
-  }
-}
-
-void *copy_type_attrs(ASTree *parent, ASTree *child) {
-  for (size_t i = 0; i < NUM_ATTRIBUTES; ++i) {
-    parent->attributes[i] |= (child->attributes[i] & TYPE_ATTR_MASK[i]);
   }
 }
 
@@ -129,29 +77,22 @@ const char *extract_type(ASTree *type_id) {
   return astree_first(type_id)->lexinfo;
 }
 
-int assign_type_id_smv(ASTree *ident, SymbolValue *value) {
-  for (size_t i = 0; i < NUM_ATTRIBUTES; ++i) {
-    ident->attributes[i] = value->attributes[i];
-  }
-  ident->type_id = value->type_id;
-  ident->decl_loc = value->loc;
-  return 0;
-}
-
-int assign_type_id(ASTree *ident) {
+int assign_type_id(ASTree *ident, SymbolValue *struct_member_id) {
   DEBUGS('t', "Attempting to assign a type");
-  int locals_empty, globals_empty;
   const char *id_str = ident->lexinfo;
   size_t id_str_len = strnlen(id_str, MAX_STRING_LENGTH);
   SymbolValue *local_id = map_get(locals, (char *)id_str, id_str_len);
   SymbolValue *global_id = map_get(globals, (char *)id_str, id_str_len);
 
-  if (!locals_empty) {
+  if (struct_member_id) {
+    DEBUGS('t', "Assigning %s a struct member value\n", id_str);
+    ident->type = struct_member_id->type;
+  } else if (local_id) {
     DEBUGS('t', "Assigning %s a local value\n", id_str);
-    assign_type_id_smv(ident, local_id);
-  } else if (!globals_empty) {
+    ident->type = local_id->type;
+  } else if (global_id) {
     DEBUGS('t', "Assigning %s a global value", id_str);
-    assign_type_id_smv(ident, global_id);
+    ident->type = global_id->type;
   } else {
     fprintf(stderr, "ERROR: could not resolve symbol: %s %s\n",
             (ident->lexinfo), parser_get_tname(ident->symbol));
@@ -159,6 +100,37 @@ int assign_type_id(ASTree *ident) {
   }
   return 0;
 }
+
+int types_compatible (void *arg1, void *arg2, unsigned int flags) {
+    struct typespec *type1 = NULL;
+    struct typespec *type2 = NULL;
+
+    if (flags & ARG1_AST) {
+        type1 = &(((ASTree*)arg1)->type);
+    } else if (flags & ARG1_SMV) {
+        type1 = &(((SymbolValue*)arg1)->type);
+    } else {
+        fprintf(stderr, "ERROR: no flags provided for argument 1\n");
+        return TCHK_E_NO_FLAGS;
+    }
+    if (flags & ARG2_AST) {
+        type2 = &(((ASTree*)arg2)->type);
+    } else if (flags & ARG2_SMV) {
+        type2 = &(((SymbolValue*)arg2)->type);
+    } else {
+        fprintf(stderr, "ERROR: no flags provided for argument 2\n");
+        return TCHK_E_NO_FLAGS;
+    }
+
+    /* TODO(Robert): check for arrays, pointers, structs, unions, and valid
+     * conversions between types
+     */
+    if (type1->base == type2->base) {
+        return TCHK_COMPATIBLE;
+    } else {
+        return TCHK_INCOMPATIBLE;
+    }
+};
 
 int validate_type_id(ASTree *type, ASTree *identifier);
 int validate_call(ASTree *call);
@@ -175,7 +147,7 @@ int validate_type_id(ASTree *type, ASTree *identifier) {
   DEBUGS('t', "Validating typeid of symbol %s", identifier->lexinfo);
   if (type->symbol == TOK_ARRAY) {
     DEBUGS('t', "Setting attribute ARRAY");
-    identifier->attributes[ATTR_ARRAY] = 1;
+    identifier->attributes |= ATTR_ARRAY;
     type = astree_first(type);
   }
   ASTree *type_node = NULL;
@@ -183,11 +155,11 @@ int validate_type_id(ASTree *type, ASTree *identifier) {
   switch (type->symbol) {
     case TOK_INT:
       DEBUGS('t', "Setting attribute INT");
-      identifier->attributes[ATTR_INT] = 1;
+      identifier->type.base = TYPE_INT;
       break;
     case TOK_STRING:
       DEBUGS('t', "Setting attribute STRING");
-      identifier->attributes[ATTR_STRING] = 1;
+      identifier->type.base = TYPE_STRING;
       break;
     case TOK_PTR:
       DEBUGS('t', "Setting attribute STRUCT");
@@ -195,10 +167,7 @@ int validate_type_id(ASTree *type, ASTree *identifier) {
       type_value = map_get(type_names, (char *)type_node->lexinfo,
                            strnlen(type_node->lexinfo, MAX_STRING_LENGTH));
       if (type_value) {
-        type_node->decl_loc = type_value->loc;
-        type_node->attributes[ATTR_TYPEID] = 1;
-        identifier->attributes[ATTR_STRUCT] = 1;
-        identifier->type_id = type_node->lexinfo;
+        type_node->type = type_value->type;
       } else {
         fprintf(stderr, "ERROR: Type not declared: %s\n", type_node->lexinfo);
         return -1;
@@ -206,16 +175,16 @@ int validate_type_id(ASTree *type, ASTree *identifier) {
       break;
     case TOK_VOID:
       DEBUGS('t', "Setting attribute VOID");
-      if (identifier->attributes[ATTR_ARRAY]) {
+      if (identifier->attributes & ATTR_ARRAY) {
         fprintf(stderr, "ERROR: you may not have arrays of type void!\n");
         return -1;
-      } else if (!identifier->attributes[ATTR_FUNCTION]) {
+      } else if (identifier->type.base == TYPE_FUNCTION) {
         fprintf(stderr,
                 "ERROR: variables and fields cannot be of type "
                 "void!\n");
         return -1;
       } else {
-        identifier->attributes[ATTR_VOID] = 1;
+        identifier->type.base = TYPE_VOID;
       }
       break;
     case TOK_IDENT:
@@ -223,12 +192,9 @@ int validate_type_id(ASTree *type, ASTree *identifier) {
       type_value = map_get(type_names, (char *)type->lexinfo,
                            strnlen(type->lexinfo, MAX_STRING_LENGTH));
       if (type_value) {
-        identifier->attributes[ATTR_STRUCT] = 1;
-        identifier->type_id = type->lexinfo;
-        type->attributes[ATTR_TYPEID] = 1;
-        type->decl_loc = type_value->loc;
+        identifier->type = type_value->type;
       } else {
-        fprintf(stderr, "ERROR: type not declared: %s\n", identifier->type_id);
+        fprintf(stderr, "ERROR: type not declared: %s\n", identifier->type.identifier);
         return -1;
       }
       break;
@@ -237,7 +203,6 @@ int validate_type_id(ASTree *type, ASTree *identifier) {
       return -1;
       break;
   }
-  identifier->decl_loc = identifier->loc;
   return 0;
 }
 
@@ -266,7 +231,7 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
     // trees generated my the "statement" production
     case TOK_RETURN:
       if (llist_size(statement->children) <= 0) {
-        if (!function->attributes[ATTR_VOID]) {
+        if (function->type.base == TYPE_FUNCTION) {
           fprintf(stderr,
                   "ERROR: Return statement with value in void "
                   "function: %s\n",
@@ -275,18 +240,18 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
         }
       } else {
         validate_stmt_expr(astree_first(statement), function_name, sequence_nr);
-        status = types_compatible_ast_smv(astree_first(statement), function);
-        if (status == 0) {
+        status = types_compatible(astree_first(statement), function,
+                ARG1_AST & ARG2_SMV);
+        if (status == TCHK_INCOMPATIBLE) {
           fprintf(stderr, "ERROR: Incompatible return type\n");
           return status;
         } else {
-          statement->attributes[ATTR_VREG] = 1;
-          copy_type_attrs(statement, astree_first(statement));
+          statement->attributes |= ATTR_VREG;
+          statement->attributes |= astree_first(statement)->attributes;
         }
       }
       break;
     case TOK_TYPE_ID:
-      astree_second(statement)->attributes[ATTR_LOCAL] = 1;
       status = make_local_entry(statement, sequence_nr);
       if (status != 0) return status;
       break;
@@ -324,20 +289,21 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
       status = validate_stmt_expr(astree_second(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
-      if (!types_compatible_ast(astree_first(statement),
-                                astree_second(statement))) {
+      if (types_compatible(astree_first(statement),
+                                astree_second(statement),
+                                ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
         fprintf(stderr, "ERROR: Incompatible types for tokens: %s,%s %s,%s\n",
                 parser_get_tname(astree_first(statement)->symbol),
                 astree_first(statement)->lexinfo,
                 parser_get_tname(astree_second(statement)->symbol),
                 astree_second(statement)->lexinfo);
         return -1;
-      } else if (!astree_first(statement)->attributes[ATTR_LVAL]) {
+      } else if (!(astree_first(statement)->attributes & ATTR_LVAL)) {
         fprintf(stderr, "ERROR: Destination is not an LVAL\n");
         return -1;
       }
       // type is the type of the left operand
-      copy_type_attrs(statement, astree_second(statement));
+      statement->type = astree_second(statement)->type;
       break;
     // here begins the trees made by the "expr" production
     case TOK_EQ:
@@ -349,8 +315,9 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
       status = validate_stmt_expr(astree_second(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
-      if (!types_compatible_ast(astree_first(statement),
-                                astree_second(statement))) {
+      if (types_compatible(astree_first(statement),
+                                astree_second(statement),
+                                ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
         fprintf(stderr, "ERROR: Incompatible types for operator: %s\n",
                 statement->symbol);
         return -1;
@@ -372,12 +339,13 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
       status = validate_stmt_expr(astree_second(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
-      if (!types_compatible_ast(astree_first(statement),
-                                astree_second(statement))) {
+      if (types_compatible(astree_first(statement),
+                                astree_second(statement),
+                                ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
         fprintf(stderr, "ERROR: Incompatible types for operator: %s\n",
                 statement->symbol);
         return -1;
-      } else if (!astree_first(statement)->attributes[ATTR_INT]) {
+      } else if (astree_first(statement)->type.base != TYPE_INT) {
         fprintf(stderr, "ERROR: Operator %s must have operands of type int\n",
                 parser_get_tname(statement->symbol));
         fprintf(stderr, "Offending operands: %s %s\n",
@@ -393,7 +361,7 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
       status = validate_stmt_expr(astree_first(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
-      if (!astree_first(statement)->attributes[ATTR_INT]) {
+      if (astree_first(statement)->attributes != TYPE_INT ) {
         fprintf(stderr, "ERROR: '%s' argument must be of type int\n",
                 statement->lexinfo);
         return -1;
@@ -406,15 +374,15 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
         status = validate_stmt_expr(astree_second(statement), function_name,
                                     sequence_nr);
         if (status != 0) return status;
-        if (!astree_second(statement)->attributes[ATTR_INT] ||
-            astree_second(statement)->attributes[ATTR_ARRAY]) {
+        if (astree_second(statement)->attributes != TYPE_INT ||
+            (astree_second(statement)->attributes & ATTR_ARRAY)) {
           fprintf(stderr, "ERROR: alloc size argument must be of type int!");
           return -1;
         }
       }
       break;
     case TOK_CALL:
-      statement->attributes[ATTR_VREG] = 1;
+      statement->attributes |= ATTR_VREG;
       status = validate_call(statement);
       if (status != 0) return status;
       break;
@@ -428,12 +396,12 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
       status = validate_stmt_expr(astree_second(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
-      if (astree_second(statement)->attributes[ATTR_INT]) {
-        if (astree_first(statement)->attributes[ATTR_ARRAY]) {
-          copy_type_attrs(statement, astree_first(statement));
-          statement->attributes[ATTR_ARRAY] = 0;
-        } else if (astree_first(statement)->attributes[ATTR_STRING]) {
-          statement->attributes[ATTR_INT] = 1;
+      if (astree_second(statement)->attributes == TYPE_INT) {
+        if (astree_first(statement)->attributes & ATTR_ARRAY) {
+          statement->type = astree_first(statement)->type;
+          statement->attributes &= (~ATTR_ARRAY);
+        } else if (astree_first(statement)->type.base == TYPE_STRING) {
+          statement->type.base = TYPE_INT;
         } else {
           fprintf(stderr, "ERROR: only strings and arrays may be indexed\n");
         }
@@ -449,17 +417,17 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
       status = validate_stmt_expr(astree_first(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
-      const char *tid = astree_first(statement)->type_id;
+      const char *tid = astree_first(statement)->type.identifier;
       SymbolValue *struct_def =
           map_get(type_names, (char *)tid, strnlen(tid, MAX_STRING_LENGTH));
-      if (astree_first(statement)->attributes[ATTR_STRUCT] && struct_def) {
+      if (astree_first(statement)->type.base == TYPE_STRUCT && struct_def) {
         /* make sure field is defined */
         const char *tid2 = astree_second(statement)->lexinfo;
         SymbolValue *field_def = map_get(struct_def->fields, (char *)tid2,
                                          strnlen(tid2, MAX_STRING_LENGTH));
         if (field_def) {
-          assign_type_id_smv(astree_second(statement), field_def);
-          assign_type_id_smv(statement, field_def);
+          assign_type_id(astree_second(statement), field_def);
+          assign_type_id(statement, field_def);
         } else {
           fprintf(stderr, "ERROR: field %s is not a member of structure\n",
                   astree_second(statement)->lexinfo);
@@ -467,7 +435,7 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
         }
       } else {
         fprintf(stderr, "ERROR: structure %s not defined for token %s\n",
-                astree_first(statement)->type_id,
+                astree_first(statement)->type.identifier,
                 astree_first(statement)->lexinfo);
         return -1;
       }
@@ -484,7 +452,7 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
       break;
     case TOK_IDENT:
       DEBUGS('t', "bonk");
-      status = assign_type_id(statement);
+      status = assign_type_id(statement, NULL);
       if (status != 0) return status;
       break;
     default:
@@ -515,20 +483,16 @@ int validate_call(ASTree *call) {
       int status = validate_stmt_expr(param, DUMMY_FUNCTION, &dummy_sequence);
       if (status != 0) return status;
       DEBUGS('t', "Comparing types");
-      if (!types_compatible_ast_smv(param,
-                                    llist_get(function->parameters, i))) {
+      if (types_compatible(param, llist_get(function->parameters, i),
+                  ARG1_AST & ARG2_SMV) == TCHK_INCOMPATIBLE) {
         fprintf(stderr, "ERROR: incompatible type for argument: %s\n",
                 param->lexinfo);
         return -1;
       }
     }
 
-    memcpy(call->attributes, function->attributes, NUM_ATTRIBUTES);
-    memcpy(astree_first(call)->attributes, function->attributes,
-           NUM_ATTRIBUTES);
-    call->type_id = function->type_id;
-    astree_first(call)->type_id = function->type_id;
-    astree_first(call)->decl_loc = function->loc;
+    call->type = function->type;
+    astree_first(call)->type = function->type;
     return 0;
   } else {
     fprintf(stderr, "ERROR: Invalid call to function %s\n", identifier);
@@ -597,8 +561,7 @@ int make_global_entry(ASTree *global) {
     DEBUGS('t', "Making global entry for value %s", ident);
     ASTree *type = astree_first(global);
     ASTree *identifier = astree_second(global);
-    identifier->attributes[ATTR_LVAL] = 1;
-    identifier->attributes[ATTR_VARIABLE] = 1;
+    identifier->attributes |= ATTR_LVAL;
     int status = validate_type_id(astree_first(global), astree_second(global));
     if (status != 0) return status;
     if (llist_size(global->children) == 3) {
@@ -606,7 +569,8 @@ int make_global_entry(ASTree *global) {
       status = validate_stmt_expr(astree_third(global), DUMMY_FUNCTION,
                                   &dummy_sequence);
       if (status != 0) return status;
-      if (!types_compatible_ast(astree_third(global), astree_second(global))) {
+      if (types_compatible(astree_third(global), astree_second(global),
+                  ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
         fprintf(stderr, "ERROR: Incompatible type for global variable\n");
         return -1;
       }
@@ -654,8 +618,7 @@ int make_structure_entry(ASTree *structure) {
         int status =
             validate_type_id(astree_first(field), astree_second(field));
         if (status != 0) return status;
-        astree_second(field)->attributes[ATTR_FIELD] = 1;
-        astree_second(field)->attributes[ATTR_LVAL] = 1;
+        astree_second(field)->attributes |= ATTR_LVAL;
         field_value = malloc(sizeof(*field_value));
         symbol_value_init(field_value, astree_second(field), i - 1, 0);
         map_insert(fields, (char *)field_id_str, field_id_str_len, field_value);
@@ -663,7 +626,6 @@ int make_structure_entry(ASTree *structure) {
       }
     }
     structure_value->fields = fields;
-    astree_first(structure)->decl_loc = structure_value->loc;
   }
   return 0;
 }
@@ -674,17 +636,17 @@ int make_function_entry(ASTree *function) {
          parser_get_tname(function->symbol));
   ASTree *type_id = astree_first(function);
   DEBUGS('t', "oof");
-  astree_second(type_id)->attributes[ATTR_FUNCTION] = 1;
+  astree_second(type_id)->type.base = TYPE_FUNCTION;
   DEBUGS('t', "oof");
   int status = validate_type_id(astree_first(type_id), astree_second(type_id));
   SymbolValue *function_entry = NULL;
   if (status != 0) return status;
-  if (type_id->attributes[ATTR_ARRAY]) {
+  if (type_id->attributes |= ATTR_ARRAY) {
     fprintf(stderr, "ERROR: Function %s has an array return type.\n",
             extract_ident(type_id));
     // TODO(rbergero): keep going if we can
     return -1;
-  } else if (type_id->attributes[ATTR_STRUCT]) {
+  } else if (type_id->type.base = TYPE_STRUCT) {
     const char *structure_type = extract_type(type_id);
     size_t structure_type_len = strnlen(structure_type, MAX_STRING_LENGTH);
     SymbolValue *structure_value =
@@ -723,7 +685,6 @@ int make_function_entry(ASTree *function) {
     }
     */
     ASTree *param_identifier = astree_second(param);
-    param_identifier->attributes[ATTR_PARAM] = 1;
     DEBUGS('t', "Defining function parameter %s", extract_ident(param));
     status = make_local_entry(param, &param_sequence_nr);
     if (status != 0) return status;
@@ -739,7 +700,8 @@ int make_function_entry(ASTree *function) {
   SymbolValue *prototype =
       map_get(globals, (char *)function_id, function_id_len);
   if (prototype) {
-    if (!functions_equal(prototype, function_entry)) {
+    if (types_compatible(prototype, function_entry, ARG1_SMV & ARG2_SMV) ==
+            TCHK_INCOMPATIBLE) {
       fprintf(stderr, "ERROR: redefinition of function: %s\n", function_id);
       return -1;
     } else if (prototype->has_block) {
@@ -791,8 +753,7 @@ int make_local_entry(ASTree *local, size_t *sequence_nr) {
     ASTree *type = astree_first(local);
     ASTree *identifier = astree_second(local);
     DEBUGS('t', "Making entry for local var %s", identifier->lexinfo);
-    identifier->attributes[ATTR_LVAL] = 1;
-    identifier->attributes[ATTR_VARIABLE] = 1;
+    identifier->attributes |= ATTR_LVAL;
     int status = validate_type_id(astree_first(local), astree_second(local));
     if (status != 0) return status;
     DEBUGS('t', "Checking to see if var has an initial value");
@@ -802,7 +763,8 @@ int make_local_entry(ASTree *local, size_t *sequence_nr) {
       status = validate_stmt_expr(astree_third(local), DUMMY_FUNCTION,
                                   &dummy_sequence);
       if (status != 0) return status;
-      if (!types_compatible_ast(astree_third(local), astree_second(local))) {
+      if (types_compatible(astree_third(local), astree_second(local),
+                  ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
         fprintf(stderr, "ERROR: Incompatible type for local variable\n");
         return -1;
       }
@@ -823,12 +785,6 @@ int make_local_entry(ASTree *local, size_t *sequence_nr) {
  * external functions
  */
 void type_checker_init_globals() {
-  TYPE_ATTR_MASK[ATTR_INT] = 1;
-  TYPE_ATTR_MASK[ATTR_VOID] = 1;
-  TYPE_ATTR_MASK[ATTR_STRING] = 1;
-  TYPE_ATTR_MASK[ATTR_NULL] = 1;
-  TYPE_ATTR_MASK[ATTR_STRUCT] = 1;
-  TYPE_ATTR_MASK[ATTR_ARRAY] = 1;
   /*
    * structure cleanup is done by foreach functions, while freeing of the
    * structures themselves is handled by the destructor of their container
@@ -889,17 +845,18 @@ int type_checker_make_table(ASTree *root) {
         status = validate_stmt_expr(astree_second(child), DUMMY_FUNCTION,
                                     &dummy_sequence);
         if (status != 0) return status;
-        if (!types_compatible_ast(astree_first(child), astree_second(child))) {
+        if (types_compatible(astree_first(child), astree_second(child),
+                    ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
           fprintf(stderr, "ERROR: Incompatible types for global\n");
           return -1;
-        } else if (!astree_first(child)->attributes[ATTR_LVAL]) {
+        } else if (!(astree_first(child)->attributes & ATTR_LVAL)) {
           fprintf(stderr,
                   "ERROR: Global assignment destination is not an "
                   "LVAL\n");
           return -1;
         }
         // type is the type of the right operand
-        copy_type_attrs(child, astree_second(child));
+        child->type = astree_second(child)->type;
         if (status != 0) return status;
         break;
       default:

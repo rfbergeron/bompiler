@@ -22,7 +22,6 @@ struct ASTree {
   int symbol;                 // token code
   const char *lexinfo;        // lexical information
   Location loc;               // source location
-  Location decl_loc;          // for identies declaration location
   struct typespec type;       // type info
   unsigned int attributes;    // node-specific attributes
   LinkedList *children;       // children of this n-way node

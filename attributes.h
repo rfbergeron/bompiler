@@ -4,19 +4,23 @@
 
 // attributes correspond to array indices in the order they are listed here
 enum attribute {
-    ATTR_REG = 1 << 0,
+    ATTR_VREG = 1 << 0,
     ATTR_LVAL = 1 << 1,
     ATTR_RVAL = 1 << 2,
-    ATTR_ADDR = 1 << 3,
+    ATTR_VADDR = 1 << 3,
     ATTR_CAST = 1 << 4,
-    ATTR_CONST = 1 << 5
+    ATTR_CONST = 1 << 5,
+    ATTR_ARRAY = 1 << 6,
+    ATTR_POINTER = 1 << 7
 };
 
 enum base_type {
     TYPE_VOID,
-    TYPE_CHAR,
+    TYPE_STRING,
     TYPE_INT,
-    TYPE_FLOAT
+    TYPE_STRUCT,
+    TYPE_TYPEID,
+    TYPE_FUNCTION
 };
 
 enum type_mod {
@@ -44,8 +48,9 @@ struct typespec {
   enum base_type base;
   unsigned int modifiers;
   size_t width;
-  const char *name;
+  const char *identifier;
 };
 
 int attributes_to_string(const unsigned int attributes, char *buf, size_t bufsize);
+int type_to_string(struct typespec type, char *buf, size_t bufsize);
 #endif

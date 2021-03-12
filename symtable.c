@@ -21,11 +21,8 @@ static void symbol_value_destroy_wrapper(void *unused, void *symval,
  */
 int symbol_value_init(SymbolValue *symval, ASTree *tree, size_t sequence_,
                       size_t blocknr_) {
-  memcpy(symval->attributes, tree->attributes, NUM_ATTRIBUTES);
   symval->loc = tree->loc;
-  symval->type_id = tree->type_id;
   symval->sequence = sequence_;
-  symval->blocknr = blocknr_;
   return 0;
 }
 
@@ -51,8 +48,9 @@ int symbol_value_destroy(SymbolValue *symbol_value) {
 }
 
 FILE *print_symbol_value(FILE *out, const SymbolValue *symval) {
-  fprintf(out, "{ %u, %u, %u } { %u }", symval->loc.filenr, symval->loc.linenr,
-          symval->loc.offset, symval->blocknr);
-  print_attributes(out, symval->attributes, symval->type_id);
+  char type_buf[256];
+  type_to_string(symval->type, type_buf, 256);
+  fprintf(out, "{ %u, %u, %u } { %u } %s", symval->loc.filenr, symval->loc.linenr,
+          symval->loc.offset, symval->loc.blocknr, type_buf);
   return out;
 }

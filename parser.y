@@ -166,7 +166,7 @@ ASTree *parser_make_type_id(ASTree *type, ASTree *id, ASTree *expr) {
 
 ASTree *parser_make_struct(ASTree *parent, ASTree *structure_id,
                            ASTree *structure_body) {
-  parent->type_id = structure_id->lexinfo;
+  parent->type.identifier = structure_id->lexinfo;
   return astree_adopt(parent, structure_id, structure_body, NULL);
 }
 

@@ -6,8 +6,10 @@ and that somewhere can't be my design document like it was before
 ## Things to hold off on
 There are a few features that seem difficult to implement, not important for the
 purpose of achieving self-hosting, or both. These include:
-- Variably modified types: I don't think I'll be using these, and they seem like
-  a pain in the ass to implement
+- ~~Variably modified types: I don't think I'll be using these, and they seem
+  like a pain in the ass to implement~~ I just realized that I've been looking
+  at a draft of C99, not C89, so I might not have even needed to worry about
+  this in the first place
 - Variadic functions: I'm not sure how much of the heavy lifting is done by the
   standard library here, but we'll see
 - typedefs: might not be that much of a headache to implement, but we'll see
@@ -15,7 +17,7 @@ purpose of achieving self-hosting, or both. These include:
 ## Storage of string constants
 Currently, the type checker/symbol table is repsonsible for tracking string
 constants. It would make more sense for the string set to track them in some
-way, it would also make more sense for the constants to be registered when the
+way; it would also make more sense for the constants to be registered when the
 abstract syntax tree is built, since the value and type of constants are known
 when the tree node is generated.
 
@@ -55,6 +57,16 @@ info would be stored as a pointer to an entry in the 'type_names' map.
 Entries in the 'type_names' map should then additionally include the size of the
 type, and, as they do now, the number and names of its member types.
 
+Storing type names like this might make determining whether types are compatible
+easier, since types that are synonymous on amd64 could store the same values,
+which would be valuable when comparing types.
+
 ## Collapse type/variable names
-Working with names and typeids might be easier if they are somehow collapsed
-into a single node in the tree, instead of separated out
+Instead of keeping the full declaration of a symbol in the syntax tree, it might
+be easier to remove all nodes except for the identifier and immediately store
+the symbol's information in the table. This way, no special handling of typeids
+would be required during the type checking process.
+
+Doing this for functions, structures and unions would be somewhat complicated,
+however. It would also require the inclusion of `typecheck.h` in `astree.c`,
+which may cause dependency issues.
