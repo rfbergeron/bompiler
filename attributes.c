@@ -10,7 +10,8 @@ const char type_map[][16] = {"void", "int", "float", "struct"};
 
 const char attr_map[][16] = {"reg", "lval", "rval", "addr", "const"};
 
-int attributes_to_string(const unsigned int attributes, char *buf, size_t bufsize) {
+int attributes_to_string(const unsigned int attributes, char *buf,
+                         size_t bufsize) {
   size_t i, buf_index = 0;
   for (i = 0; i < NUM_ATTRIBUTES; ++i) {
     if (attributes & (1 << i)) {
