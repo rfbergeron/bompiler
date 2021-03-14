@@ -217,6 +217,259 @@ int validate_block(ASTree *block, const char *function_name,
   return 0;
 }
 
+int validate_stmt(ASTree *statement, const char *function_name,
+                  size_t *sequence_nr) {
+  int status;
+  const char *ident;
+  SymbolValue *function =
+      function_name == DUMMY_FUNCTION
+          ? NULL
+          : map_get(globals, (char *)function_name,
+                    strnlen(function_name, MAX_STRING_LENGTH));
+  DEBUGS('t', "Validating next statement");
+  switch (statement->symbol) {
+    case TOK_RETURN:
+      if (llist_size(statement->children) <= 0) {
+        if (function->type.base == TYPE_FUNCTION) {
+          fprintf(stderr,
+                  "ERROR: Return statement with value in void "
+                  "function: %s\n",
+                  function_name);
+          return -1;
+        }
+      } else {
+        validate_stmt_expr(astree_first(statement), function_name, sequence_nr);
+        status = types_compatible(astree_first(statement), function,
+                                  ARG1_AST & ARG2_SMV);
+        if (status == TCHK_INCOMPATIBLE) {
+          fprintf(stderr, "ERROR: Incompatible return type\n");
+          return status;
+        } else {
+          statement->attributes |= ATTR_VREG;
+          statement->attributes |= astree_first(statement)->attributes;
+        }
+      }
+      break;
+    case TOK_TYPE_ID:
+      status = make_local_entry(statement, sequence_nr);
+      if (status != 0) return status;
+      break;
+    case TOK_IF:
+      status = validate_stmt_expr(astree_first(statement), function_name,
+                                  sequence_nr);
+      if (status != 0) return status;
+      status = validate_stmt_expr(astree_second(statement), function_name,
+                                  sequence_nr);
+      if (status != 0) return status;
+      if (llist_size(statement->children) == 3)
+        status = validate_stmt_expr(astree_third(statement), function_name,
+                                    sequence_nr);
+      if (status != 0) return status;
+      break;
+    case TOK_WHILE:
+      status = validate_stmt_expr(astree_first(statement), function_name,
+                                  sequence_nr);
+      if (status != 0) return status;
+      status = validate_stmt_expr(astree_second(statement), function_name,
+                                  sequence_nr);
+      if (status != 0) return status;
+      break;
+    case TOK_BLOCK:
+      status = validate_block(statement, function_name, sequence_nr);
+      if (status != 0) return status;
+      break;
+  }
+}
+
+int validate_expr(ASTree *expression, const char *function_name,
+                  size_t *sequence_nr) {
+  int status;
+  const char *ident;
+  SymbolValue *function =
+      function_name == DUMMY_FUNCTION
+          ? NULL
+          : map_get(globals, (char *)function_name,
+                    strnlen(function_name, MAX_STRING_LENGTH));
+
+  DEBUGS('t', "Validating next expression");
+  switch (expression->symbol) {
+    case '=':
+      status = validate_stmt_expr(astree_first(expression), function_name,
+                                  sequence_nr);
+      if (status != 0) return status;
+      status = validate_stmt_expr(astree_second(expression), function_name,
+                                  sequence_nr);
+      if (status != 0) return status;
+      if (types_compatible(astree_first(expression), astree_second(expression),
+                           ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
+        fprintf(stderr, "ERROR: Incompatible types for tokens: %s,%s %s,%s\n",
+                parser_get_tname(astree_first(expression)->symbol),
+                astree_first(expression)->lexinfo,
+                parser_get_tname(astree_second(expression)->symbol),
+                astree_second(expression)->lexinfo);
+        return -1;
+      } else if (!(astree_first(expression)->attributes & ATTR_LVAL)) {
+        fprintf(stderr, "ERROR: Destination is not an LVAL\n");
+        return -1;
+      }
+      // type is the type of the left operand
+      expression->type = astree_second(expression)->type;
+      break;
+    // here begins the trees made by the "expr" production
+    case TOK_EQ:
+    case TOK_NE:
+      // types can be arbitrary here
+      status = validate_stmt_expr(astree_first(expression), function_name,
+                                  sequence_nr);
+      if (status != 0) return status;
+      status = validate_stmt_expr(astree_second(expression), function_name,
+                                  sequence_nr);
+      if (status != 0) return status;
+      if (types_compatible(astree_first(expression), astree_second(expression),
+                           ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
+        fprintf(stderr, "ERROR: Incompatible types for operator: %s\n",
+                expression->symbol);
+        return -1;
+      }
+      break;
+    case TOK_LE:
+    case TOK_GE:
+    case TOK_GT:
+    case TOK_LT:
+    case '+':
+    case '-':
+    case '*':
+    case '/':
+    case '%':
+      // handle int exprs
+      status = validate_stmt_expr(astree_first(expression), function_name,
+                                  sequence_nr);
+      if (status != 0) return status;
+      status = validate_stmt_expr(astree_second(expression), function_name,
+                                  sequence_nr);
+      if (status != 0) return status;
+      if (types_compatible(astree_first(expression), astree_second(expression),
+                           ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
+        fprintf(stderr, "ERROR: Incompatible types for operator: %s\n",
+                expression->symbol);
+        return -1;
+      } else if (astree_first(expression)->type.base != TYPE_INT) {
+        fprintf(stderr, "ERROR: Operator %s must have operands of type int\n",
+                parser_get_tname(expression->symbol));
+        fprintf(stderr, "Offending operands: %s %s\n",
+                astree_first(expression)->lexinfo,
+                astree_second(expression)->lexinfo);
+        return -1;
+      }
+      break;
+    case TOK_NOT:
+    case TOK_POS:
+    case TOK_NEG:
+      // unary operators
+      status = validate_stmt_expr(astree_first(expression), function_name,
+                                  sequence_nr);
+      if (status != 0) return status;
+      if (astree_first(expression)->attributes != TYPE_INT) {
+        fprintf(stderr, "ERROR: '%s' argument must be of type int\n",
+                expression->lexinfo);
+        return -1;
+      }
+      break;
+    case TOK_ALLOC:
+      status = validate_type_id(astree_first(expression), expression);
+      if (status != 0) return status;
+      if (llist_size(expression->children) == 2) {
+        status = validate_stmt_expr(astree_second(expression), function_name,
+                                    sequence_nr);
+        if (status != 0) return status;
+        if (astree_second(expression)->attributes != TYPE_INT ||
+            (astree_second(expression)->attributes & ATTR_ARRAY)) {
+          fprintf(stderr, "ERROR: alloc size argument must be of type int!");
+          return -1;
+        }
+      }
+      break;
+    case TOK_CALL:
+      expression->attributes |= ATTR_VREG;
+      status = validate_call(expression);
+      if (status != 0) return status;
+      break;
+    case TOK_INDEX:
+      // evaluate left and right side
+      // make sure left is an array and right is an int
+      // set type to type of array, minus the array
+      status = validate_stmt_expr(astree_first(expression), function_name,
+                                  sequence_nr);
+      if (status != 0) return status;
+      status = validate_stmt_expr(astree_second(expression), function_name,
+                                  sequence_nr);
+      if (status != 0) return status;
+      if (astree_second(expression)->attributes == TYPE_INT) {
+        if (astree_first(expression)->attributes & ATTR_ARRAY) {
+          expression->type = astree_first(expression)->type;
+          expression->attributes &= (~ATTR_ARRAY);
+        } else if (astree_first(expression)->type.base == TYPE_STRING) {
+          expression->type.base = TYPE_INT;
+        } else {
+          fprintf(stderr, "ERROR: only strings and arrays may be indexed\n");
+        }
+      } else {
+        fprintf(stderr,
+                "ERROR: argument to index operator must be of type "
+                "int\n");
+      }
+      break;
+    case TOK_ARROW:
+      // evaluate left but not right since right
+      // is always an ident
+      status = validate_stmt_expr(astree_first(expression), function_name,
+                                  sequence_nr);
+      if (status != 0) return status;
+      const char *tid = astree_first(expression)->type.identifier;
+      SymbolValue *struct_def =
+          map_get(type_names, (char *)tid, strnlen(tid, MAX_STRING_LENGTH));
+      if (astree_first(expression)->type.base == TYPE_STRUCT && struct_def) {
+        /* make sure field is defined */
+        const char *tid2 = astree_second(expression)->lexinfo;
+        SymbolValue *field_def = map_get(struct_def->fields, (char *)tid2,
+                                         strnlen(tid2, MAX_STRING_LENGTH));
+        if (field_def) {
+          assign_type_id(astree_second(expression), field_def);
+          assign_type_id(expression, field_def);
+        } else {
+          fprintf(stderr, "ERROR: field %s is not a member of structure\n",
+                  astree_second(expression)->lexinfo);
+          return -1;
+        }
+      } else {
+        fprintf(stderr, "ERROR: structure %s not defined for token %s\n",
+                astree_first(expression)->type.identifier,
+                astree_first(expression)->lexinfo);
+        return -1;
+      }
+      break;
+    case TOK_INTCON:
+    case TOK_NULLPTR:
+    case TOK_CHARCON:
+      // types are set on construction and we don't need to do
+      // anything else
+      break;
+    case TOK_STRINGCON:
+      // save for intlang
+      llist_push_back(string_constants, (char *)expression->lexinfo);
+      break;
+    case TOK_IDENT:
+      DEBUGS('t', "bonk");
+      status = assign_type_id(expression, NULL);
+      if (status != 0) return status;
+      break;
+    default:
+      fprintf(stderr, "ERROR: UNEXPECTED TOKEN IN STATEMENT/EXPRESSION: %s\n",
+              expression->lexinfo);
+      return -1;
+  }
+}
+
 int validate_stmt_expr(ASTree *statement, const char *function_name,
                        size_t *sequence_nr) {
   int status;

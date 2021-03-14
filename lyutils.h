@@ -49,8 +49,7 @@ void lexer_free_globals();
 const char *parser_get_tname(int symbol);
 ASTree *parser_make_root();
 ASTree *parser_make_type_id(ASTree *type, ASTree *id, ASTree *expr);
-ASTree *parser_make_function(ASTree *type, ASTree *id, ASTree *paren,
-                             ASTree *params, ASTree *block);
+ASTree *parser_make_function(ASTree *type_id, ASTree *paren, ASTree *params);
 ASTree *parser_make_struct(ASTree *parent, ASTree *structure_id,
                            ASTree *structure_body);
 
