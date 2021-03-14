@@ -12,7 +12,6 @@
 #include "attributes.h"
 #include "badlib/badllist.h"
 #include "debug.h"
-//#include "symtable.h"
 
 extern FILE *tokfile;
 size_t lexer_last_yyleng;
@@ -104,8 +103,9 @@ int lexer_token(int symbol) {
   fprintf(tokfile, "%2d  %3d.%3d %3d %-13s %s\n", yylval->loc.filenr,
           yylval->loc.linenr, yylval->loc.offset, yylval->symbol,
           parser_get_tname(yylval->symbol), yylval->lexinfo);
-  // fprintf (tokfile, "%p: [%p]->%s, length: %u\n", symbol, yytext, yytext,
-  // yyleng);
+  /* fprintf (tokfile, "%p: [%p]->%s, length: %u\n", symbol, yytext, yytext,
+   * yyleng);
+   */
   return symbol;
 }
 
@@ -125,7 +125,8 @@ void lexer_error(const char *message) {
 }
 
 void lexer_dump_filenames(FILE *out) {
-  for (size_t index = 0; index < llist_size(lexer_filenames); ++index) {
+  size_t index;
+  for (index = 0; index < llist_size(lexer_filenames); ++index) {
     fprintf(out, "filenames[%2d] = \"%s\"\n", index,
             (const char *)llist_get(lexer_filenames, index));
   }

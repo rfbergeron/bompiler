@@ -60,7 +60,8 @@ static void symbol_table_destroy(void *table, size_t unused) {
 
 void set_blocknr(ASTree *tree, size_t nr) {
   tree->loc.blocknr = nr;
-  for (size_t i = 0; i < llist_size(tree->children); ++i) {
+  size_t i;
+  for (i = 0; i < llist_size(tree->children); ++i) {
     set_blocknr(llist_get(tree->children, i), nr);
   }
 }
@@ -209,7 +210,8 @@ int validate_type_id(ASTree *type, ASTree *identifier) {
 
 int validate_block(ASTree *block, const char *function_name,
                    size_t *sequence_nr) {
-  for (size_t i = 0; i < llist_size(block->children); ++i) {
+  size_t i;
+  for (i = 0; i < llist_size(block->children); ++i) {
     ASTree *statement = llist_get(block->children, i);
     int status = validate_stmt_expr(statement, function_name, sequence_nr);
     if (status != 0) return status;
@@ -312,13 +314,13 @@ int validate_expr(ASTree *expression, const char *function_name,
         fprintf(stderr, "ERROR: Destination is not an LVAL\n");
         return -1;
       }
-      // type is the type of the left operand
+      /* type is the type of the left operand */
       expression->type = astree_second(expression)->type;
       break;
-    // here begins the trees made by the "expr" production
+    /* here begins the trees made by the "expr" production */
     case TOK_EQ:
     case TOK_NE:
-      // types can be arbitrary here
+      /* types can be arbitrary here */
       status = validate_stmt_expr(astree_first(expression), function_name,
                                   sequence_nr);
       if (status != 0) return status;
@@ -341,7 +343,7 @@ int validate_expr(ASTree *expression, const char *function_name,
     case '*':
     case '/':
     case '%':
-      // handle int exprs
+      /* handle int exprs */
       status = validate_stmt_expr(astree_first(expression), function_name,
                                   sequence_nr);
       if (status != 0) return status;
@@ -365,7 +367,7 @@ int validate_expr(ASTree *expression, const char *function_name,
     case TOK_NOT:
     case TOK_POS:
     case TOK_NEG:
-      // unary operators
+      /* unary operators */
       status = validate_stmt_expr(astree_first(expression), function_name,
                                   sequence_nr);
       if (status != 0) return status;
@@ -395,9 +397,10 @@ int validate_expr(ASTree *expression, const char *function_name,
       if (status != 0) return status;
       break;
     case TOK_INDEX:
-      // evaluate left and right side
-      // make sure left is an array and right is an int
-      // set type to type of array, minus the array
+      /* evaluate left and right side
+       * make sure left is an array and right is an int
+       * set type to type of array, minus the array
+       */
       status = validate_stmt_expr(astree_first(expression), function_name,
                                   sequence_nr);
       if (status != 0) return status;
@@ -420,8 +423,9 @@ int validate_expr(ASTree *expression, const char *function_name,
       }
       break;
     case TOK_ARROW:
-      // evaluate left but not right since right
-      // is always an ident
+      /* evaluate left but not right since right
+       * is always an ident
+       */
       status = validate_stmt_expr(astree_first(expression), function_name,
                                   sequence_nr);
       if (status != 0) return status;
@@ -451,11 +455,12 @@ int validate_expr(ASTree *expression, const char *function_name,
     case TOK_INTCON:
     case TOK_NULLPTR:
     case TOK_CHARCON:
-      // types are set on construction and we don't need to do
-      // anything else
+      /* types are set on construction and we don't need to do
+       * anything else
+       */
       break;
     case TOK_STRINGCON:
-      // save for intlang
+      /* save for intlang */
       llist_push_back(string_constants, (char *)expression->lexinfo);
       break;
     case TOK_IDENT:
@@ -482,7 +487,7 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
 
   DEBUGS('t', "Validating next statement/expression");
   switch (statement->symbol) {
-    // trees generated my the "statement" production
+    /* trees generated my the "statement" production */
     case TOK_RETURN:
       if (llist_size(statement->children) <= 0) {
         if (function->type.base == TYPE_FUNCTION) {
@@ -533,9 +538,10 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
       status = validate_block(statement, function_name, sequence_nr);
       if (status != 0) return status;
       break;
-    // gray area; vardecls (a statement) and assignments (an
-    // expression) can both have an '=' as their root but we handle
-    // them the same way
+    /* gray area; vardecls (a statement) and assignments (an
+     * expression) can both have an '=' as their root but we handle
+     * them the same way
+     */
     case '=':
       status = validate_stmt_expr(astree_first(statement), function_name,
                                   sequence_nr);
@@ -555,13 +561,13 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
         fprintf(stderr, "ERROR: Destination is not an LVAL\n");
         return -1;
       }
-      // type is the type of the left operand
+      /* type is the type of the left operand */
       statement->type = astree_second(statement)->type;
       break;
-    // here begins the trees made by the "expr" production
+    /* here begins the trees made by the "expr" production */
     case TOK_EQ:
     case TOK_NE:
-      // types can be arbitrary here
+      /* types can be arbitrary here */
       status = validate_stmt_expr(astree_first(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
@@ -584,7 +590,7 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
     case '*':
     case '/':
     case '%':
-      // handle int exprs
+      /* handle int exprs */
       status = validate_stmt_expr(astree_first(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
@@ -608,7 +614,7 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
     case TOK_NOT:
     case TOK_POS:
     case TOK_NEG:
-      // unary operators
+      /* unary operators */
       status = validate_stmt_expr(astree_first(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
@@ -638,9 +644,10 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
       if (status != 0) return status;
       break;
     case TOK_INDEX:
-      // evaluate left and right side
-      // make sure left is an array and right is an int
-      // set type to type of array, minus the array
+      /* evaluate left and right side
+       * make sure left is an array and right is an int
+       * set type to type of array, minus the array
+       */
       status = validate_stmt_expr(astree_first(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
@@ -663,8 +670,9 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
       }
       break;
     case TOK_ARROW:
-      // evaluate left but not right since right
-      // is always an ident
+      /* evaluate left but not right since right
+       * is always an ident
+       */
       status = validate_stmt_expr(astree_first(statement), function_name,
                                   sequence_nr);
       if (status != 0) return status;
@@ -694,11 +702,12 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
     case TOK_INTCON:
     case TOK_NULLPTR:
     case TOK_CHARCON:
-      // types are set on construction and we don't need to do
-      // anything else
+      /* types are set on construction and we don't need to do
+       * anything else
+       */
       break;
     case TOK_STRINGCON:
-      // save for intlang
+      /* save for intlang */
       llist_push_back(string_constants, (char *)statement->lexinfo);
       break;
     case TOK_IDENT:
@@ -716,7 +725,7 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
 
 int validate_call(ASTree *call) {
   const char *identifier = astree_first(call)->lexinfo;
-  // params are at the same level as the id
+  /* params are at the same level as the id */
   SymbolValue *function = map_get(globals, (char *)identifier,
                                   strnlen(identifier, MAX_STRING_LENGTH));
   if (function) {
@@ -726,7 +735,8 @@ int validate_call(ASTree *call) {
     }
     DEBUGS('t', "Validating arguments for call to %s, num call->children: %d",
            identifier, llist_size(call->children) - 1);
-    for (size_t i = 0; i < llist_size(function->parameters); ++i) {
+    size_t i;
+    for (i = 0; i < llist_size(function->parameters); ++i) {
       DEBUGS('t', "Validating argument %d", i);
       ASTree *param = llist_get(call->children, i + 1);
       size_t dummy_sequence = 0;
@@ -751,8 +761,9 @@ int validate_call(ASTree *call) {
   }
 }
 
-// TODO: function for sorting table entries (not necessary; just makes output
-// prettier for the type checker)
+/* TODO: function for sorting table entries (not necessary; just makes output
+ * prettier for the type checker)
+ */
 /*vector<symbol_entry> type_checker::sort_symtable(symbol_table* table) {
     DEBUGS('9', "Sorting symtable");
     vector<symbol_entry> sorted;
@@ -804,7 +815,7 @@ int make_global_entry(ASTree *global) {
   SymbolValue *exists = map_get(globals, (char *)ident, ident_len);
 
   if (exists) {
-    // error; duplicate declaration
+    /* error; duplicate declaration */
     fprintf(stderr, "ERROR: Global var has already been declared: %s\n",
             extract_ident(global));
     return -1;
@@ -852,7 +863,7 @@ int make_structure_entry(ASTree *structure) {
     map_init(fields, DEFAULT_MAP_SIZE, NULL, free, strncmp_wrapper);
     map_insert(type_names, (char *)structure_type, structure_type_len,
                structure_value);
-    // start from 2nd child; 1st was type name
+    /* start from 2nd child; 1st was type name */
     size_t i;
     for (i = 1; i < llist_size(structure->children); ++i) {
       ASTree *field = llist_get(structure->children, i);
@@ -895,7 +906,7 @@ int make_function_entry(ASTree *function) {
   if (type_id->attributes |= ATTR_ARRAY) {
     fprintf(stderr, "ERROR: Function %s has an array return type.\n",
             extract_ident(type_id));
-    // TODO(rbergero): keep going if we can
+    /* TODO(rbergero): keep going if we can */
     return -1;
   } else if (type_id->type.base = TYPE_STRUCT) {
     const char *structure_type = extract_type(type_id);
@@ -918,11 +929,12 @@ int make_function_entry(ASTree *function) {
     fprintf(stderr, "fuck you\n");
     abort();
   }
-  // check and add parameters; set block
+  /* check and add parameters; set block */
   set_blocknr(astree_second(function), next_block);
   ASTree *params = astree_second(function);
   size_t param_sequence_nr = 0;
-  for (size_t i = 0; i < llist_size(params->children); ++i) {
+  size_t i;
+  for (i = 0; i < llist_size(params->children); ++i) {
     ASTree *param = llist_get(params->children, i);
     const char *param_id_str = extract_ident(param);
     /*
@@ -1063,7 +1075,8 @@ void type_checker_free_globals() {
 
 int type_checker_make_table(ASTree *root) {
   DEBUGS('t', "Making symbol table");
-  for (size_t i = 0; i < llist_size(root->children); ++i) {
+  size_t i;
+  for (i = 0; i < llist_size(root->children); ++i) {
     ASTree *child = llist_get(root->children, i);
     int status;
     /*
@@ -1106,7 +1119,7 @@ int type_checker_make_table(ASTree *root) {
                   "LVAL\n");
           return -1;
         }
-        // type is the type of the right operand
+        /* type is the type of the right operand */
         child->type = astree_second(child)->type;
         if (status != 0) return status;
         break;
@@ -1116,7 +1129,7 @@ int type_checker_make_table(ASTree *root) {
         return -1;
     }
   }
-  // use local table list to group all tables together
+  /* use local table list to group all tables together */
   llist_push_back(tables, globals);
   llist_push_back(tables, type_names);
   return 0;

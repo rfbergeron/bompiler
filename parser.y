@@ -1,5 +1,5 @@
-// clang-format off
-// *INDENT-OFF*
+/* clang-format off */
+/* *INDENT-OFF* */
 %{
 #include <assert.h>
 
@@ -7,7 +7,7 @@
 #include "astree.h"
 #include "debug.h"
 #include "attributes.h"
-//#include "symtable.h"
+/* #include "symtable.h" */
 %}
 
 %debug
@@ -121,16 +121,17 @@ constant    : TOK_INTCON                                                        
             ;
 %%
 
-// functions, structures, typeids, allocs can have their type
-// assigned when they adopt their children
-// *INDENT-ON*
+/* functions, structures, typeids, allocs can have their type
+ * assigned when they adopt their children
+ */
+/* *INDENT-ON* */
 
 const char *parser_get_tname (int symbol) {
     return yytname[YYTRANSLATE (symbol)];
 }
 
-// clang-format performs poorly on the above function for some reason
-// clang-format on
+/* clang-format performs poorly on the above function for some reason */
+/* clang-format on */
 ASTree *parser_make_root() {
   DEBUGS('p', "Initializing AST, root token code: %d", TOK_ROOT);
   DEBUGS('p', "Translation of token code: %s", parser_get_tname(TOK_ROOT));
@@ -156,11 +157,12 @@ ASTree *parser_make_struct(ASTree *parent, ASTree *structure_id,
   return astree_adopt(parent, structure_id, structure_body, NULL);
 }
 
-void parser_cleanup(size_t count;...) {
+void parser_cleanup(size_t count, ...) {
   va_list args;
 
   va_start(args, count);
-  for (size_t i = 0; i < count; ++i) {
+  size_t i;
+  for (i = 0; i < count; ++i) {
     ASTree *tree = va_arg(args, ASTree *);
 
     if (tree != NULL) {
