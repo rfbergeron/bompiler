@@ -7,26 +7,26 @@
 #include "attributes.h"
 #include "badlib/badllist.h"
 #include "debug.h"
-//#include "lyutils.h"
 
-typedef struct {
+typedef struct location Location;
+struct location {
   size_t filenr;
   size_t linenr;
   size_t blocknr;
   size_t offset;
-} Location;
+};
 
 typedef struct ASTree ASTree;
 
 struct ASTree {
-  int symbol;               // token code
-  const char *lexinfo;      // lexical information
-  Location loc;             // source location
-  struct typespec type;     // type info
-  unsigned int attributes;  // node-specific attributes
-  LinkedList *children;     // children of this n-way node
-  ASTree *next_sibling;     // for adopting long lists of siblings
-  ASTree *firstborn;        // head of the list of siblings
+  int symbol;              /* token code */
+  const char *lexinfo;     /* lexical information */
+  Location loc;            /* source location */
+  struct typespec type;    /* type info */
+  unsigned int attributes; /* node-specific attributes */
+  LinkedList *children;    /* children of this n-way node */
+  ASTree *next_sibling;    /* for adopting long lists of siblings */
+  ASTree *firstborn;       /* head of the list of siblings */
 };
 
 void location_print(FILE *out, const Location location_);

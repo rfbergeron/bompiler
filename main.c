@@ -30,7 +30,7 @@ char astname[LINESIZE];
 char symname[LINESIZE];
 char oilname[LINESIZE];
 
-// cpp options go here
+/* cpp options go here */
 FILE *strfile;
 FILE *tokfile;
 FILE *astfile;
@@ -50,16 +50,16 @@ void scan_options(int argc, char **argv) {
         debug_set_flags(optarg);
         break;
       case 'D':
-        // cpp args
-        // DEBUGH('c', "     cpp option: " << optarg);
-        // cpp_opts.append(" -D ").append(optarg);
+        /* cpp args
+           DEBUGH('c', "     cpp option: " << optarg);
+           cpp_opts.append(" -D ").append(optarg); */
         break;
       case 'l':
-        // DEBUGH('c', "     yy_flex_debug set to 1");
+        /* DEBUGH('c', "     yy_flex_debug set to 1"); */
         yy_flex_debug = 1;
         break;
       case 'y':
-        // DEBUGH('c', "     yydebug set to 1");
+        /* DEBUGH('c', "     yydebug set to 1"); */
         yydebug = 1;
         break;
       case 'c':
@@ -127,7 +127,7 @@ int main(int argc, char **argv) {
   if (symfile == NULL) {
     err(1, "%s", symname);
   }
-  // remember to initialize certain things, like the string table
+  /* remember to initialize certain things, like the string table */
   string_set_init_globals();
   lexer_init_globals();
   type_checker_init_globals();
@@ -143,7 +143,7 @@ int main(int argc, char **argv) {
     if (do_type_check) type_checker_make_table(parser_root);
     string_set_dump(strfile);
     astree_print_tree(parser_root, astfile, 0);
-    // type_checker_dump_symbols (symfile);
+    /* type_checker_dump_symbols (symfile); */
   }
 
   DEBUGS('m', "Execution finished; wrapping up.");

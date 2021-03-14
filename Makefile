@@ -2,10 +2,10 @@
 
 WARN = -Wall -Wextra -Werror -Wpedantic -Wshadow
 # full gcc exec command
-C = gcc -g -O0 -std=gnu11
+C = gcc -g -O0 -ansi
 CWARN = ${C} ${WARN} -fdiagnostics-color=never
 CYY = ${C} -Wno-sign-compare
-CDEP = gcc -std=gnu11 -MM ${WARN}
+CDEP = gcc -ansi -MM ${WARN}
 CDBG = ${C} -pg -fsanitize=address
 MKFILE = Makefile
 DEPFILE = ${MKFILE}.dep

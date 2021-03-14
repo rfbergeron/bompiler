@@ -2,7 +2,7 @@
 #define __ATTRIBUTES_H__
 #include "stdio.h"
 
-// attributes correspond to array indices in the order they are listed here
+/* attributes correspond to array indices in the order they are listed here */
 enum attribute {
   ATTR_VREG = 1 << 0,
   ATTR_LVAL = 1 << 1,

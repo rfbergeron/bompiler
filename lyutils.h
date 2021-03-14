@@ -1,7 +1,7 @@
 #ifndef __UTILS_H__
 #define __UTILS_H__
 
-// flex and bison interface utilities
+/* flex and bison interface utilities */
 
 #include <stddef.h>
 #include <stdio.h>
@@ -12,7 +12,7 @@
 #include "attributes.h"
 #include "debug.h"
 
-//#define YYEOF 0
+/* #define YYEOF 0 */
 
 typedef struct ASTree ASTree;
 
@@ -52,6 +52,7 @@ ASTree *parser_make_type_id(ASTree *type, ASTree *id, ASTree *expr);
 ASTree *parser_make_function(ASTree *type_id, ASTree *paren, ASTree *params);
 ASTree *parser_make_struct(ASTree *parent, ASTree *structure_id,
                            ASTree *structure_body);
+void parser_cleanup(size_t count, ...);
 
 #define YYSTYPE_IS_DECLARED
 typedef ASTree *YYSTYPE;
