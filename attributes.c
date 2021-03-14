@@ -23,6 +23,7 @@ int attributes_to_string(const unsigned int attributes, char *buf,
       }
     }
   }
+  buf[buf_index] = 0;
   return 0;
 }
 

@@ -96,22 +96,6 @@ void astree_destroy(ASTree *astree) {
   free(astree);
 }
 
-void astree_vdestroy(size_t count, ...) {
-  va_list args;
-
-  va_start(args, count);
-  for (size_t i = 0; i < count; ++i) {
-    ASTree *tree = va_arg(args, ASTree *);
-
-    if (tree != NULL) {
-      DEBUGS('t', "  ANNIHILATING: %d, %s", tree->symbol,
-             parser_get_tname(tree->symbol));
-      astree_destroy(tree);
-    }
-  }
-  va_end(args);
-}
-
 ASTree *astree_adopt(ASTree *parent, ASTree *child1, ASTree *child2,
                      ASTree *child3) {
   if (child1 != NULL) {
@@ -162,9 +146,10 @@ ASTree *astree_adopt_sym(ASTree *parent, int symbol_, ASTree *child1,
   return astree_adopt(parent, child1, child2, NULL);
 }
 
-ASTree *astree_buddy_up(ASTree *sibling1, ASTree *sibling2) {
-  assert(sibling1 != NULL);
+ASTree *astree_make_siblings(ASTree *sibling1, ASTree *sibling2) {
+  assert(sibling1 != NULL || sibling2 != NULL);
   // if sib is null don't bother doing anything
+  if (sibling1 == NULL) return sibling2;
   if (sibling2 == NULL) return sibling1;
   // if it is the head of the list, this node points to itself
   sibling2->firstborn = sibling1->firstborn;

@@ -33,12 +33,11 @@ void location_print(FILE *out, const Location location_);
 
 ASTree *astree_init(int symbol_, const Location location, const char *lexinfo);
 void astree_destroy(ASTree *astree_);
-void astree_vdestroy(size_t count, ...);
 ASTree *astree_adopt(ASTree *parent, ASTree *child1, ASTree *child2,
                      ASTree *child3);
 ASTree *astree_adopt_sym(ASTree *parent, int symbol, ASTree *child1,
                          ASTree *child2);
-ASTree *astree_buddy_up(ASTree *astree_, ASTree *sibling);
+ASTree *astree_make_siblings(ASTree *astree_, ASTree *sibling);
 ASTree *astree_first(ASTree *parent);
 ASTree *astree_second(ASTree *parent);
 ASTree *astree_third(ASTree *parent);
