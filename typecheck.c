@@ -24,13 +24,17 @@ enum type_checker_status {
   TCHK_IMPLICIT_CAST,
   TCHK_EXPLICIT_CAST,
   TCHK_INCOMPATIBLE,
+  TCHK_PROMOTE_LEFT,
+  TCHK_PROMOTE_RIGHT,
+  TCHK_PROMOTE_BOTH,
   TCHK_E_NO_FLAGS
 };
 enum types_compatible_arg_flags {
   ARG1_AST = 1 << 0,
   ARG1_SMV = 1 << 1,
   ARG2_AST = 1 << 2,
-  ARG2_SMV = 1 << 3
+  ARG2_SMV = 1 << 3,
+  ARG_ASSIGNMENT = 1 << 4
 };
 
 /*
@@ -161,18 +165,6 @@ int validate_type_id(ASTree *type, ASTree *identifier) {
     case TOK_STRING:
       DEBUGS('t', "Setting attribute STRING");
       identifier->type.base = TYPE_STRING;
-      break;
-    case TOK_PTR:
-      DEBUGS('t', "Setting attribute STRUCT");
-      type_node = astree_first(type);
-      type_value = map_get(type_names, (char *)type_node->lexinfo,
-                           strnlen(type_node->lexinfo, MAX_STRING_LENGTH));
-      if (type_value) {
-        type_node->type = type_value->type;
-      } else {
-        fprintf(stderr, "ERROR: Type not declared: %s\n", type_node->lexinfo);
-        return -1;
-      }
       break;
     case TOK_VOID:
       DEBUGS('t', "Setting attribute VOID");
@@ -375,20 +367,6 @@ int validate_expr(ASTree *expression, const char *function_name,
         fprintf(stderr, "ERROR: '%s' argument must be of type int\n",
                 expression->lexinfo);
         return -1;
-      }
-      break;
-    case TOK_ALLOC:
-      status = validate_type_id(astree_first(expression), expression);
-      if (status != 0) return status;
-      if (llist_size(expression->children) == 2) {
-        status = validate_stmt_expr(astree_second(expression), function_name,
-                                    sequence_nr);
-        if (status != 0) return status;
-        if (astree_second(expression)->attributes != TYPE_INT ||
-            (astree_second(expression)->attributes & ATTR_ARRAY)) {
-          fprintf(stderr, "ERROR: alloc size argument must be of type int!");
-          return -1;
-        }
       }
       break;
     case TOK_CALL:
@@ -622,20 +600,6 @@ int validate_stmt_expr(ASTree *statement, const char *function_name,
         fprintf(stderr, "ERROR: '%s' argument must be of type int\n",
                 statement->lexinfo);
         return -1;
-      }
-      break;
-    case TOK_ALLOC:
-      status = validate_type_id(astree_first(statement), statement);
-      if (status != 0) return status;
-      if (llist_size(statement->children) == 2) {
-        status = validate_stmt_expr(astree_second(statement), function_name,
-                                    sequence_nr);
-        if (status != 0) return status;
-        if (astree_second(statement)->attributes != TYPE_INT ||
-            (astree_second(statement)->attributes & ATTR_ARRAY)) {
-          fprintf(stderr, "ERROR: alloc size argument must be of type int!");
-          return -1;
-        }
       }
       break;
     case TOK_CALL:

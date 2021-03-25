@@ -19,14 +19,15 @@
 %destructor { fprintf(stderr, "Cleanup\n"); } <>
 %printer { assert (yyoutput == stderr); astree_dump($$, stderr); } <>
 
-%token TOK_ROOT
-%token TOK_VOID TOK_INT TOK_STRING TOK_TYPE_ID
+/* tokens constructed by parser */
+%token TOK_ROOT TOK_BLOCK TOK_CALL TOK_CAST TOK_INDEX TOK_PARAM TOK_FUNCTION
+%token TOK_TYPE_ID
+/* tokens constructed by lexer */
+%token TOK_VOID TOK_INT TOK_STRING
 %token TOK_IF TOK_ELSE TOK_WHILE TOK_RETURN TOK_STRUCT
-%token TOK_NULLPTR TOK_ARRAY TOK_ARROW TOK_ALLOC TOK_PTR
-%token TOK_EQ TOK_NE TOK_LT TOK_LE TOK_GT TOK_GE TOK_NOT
+%token TOK_NULLPTR TOK_ARRAY TOK_ARROW
+%token TOK_EQ TOK_NE TOK_LT TOK_LE TOK_GT TOK_GE
 %token TOK_IDENT TOK_INTCON TOK_CHARCON TOK_STRINGCON
-%token TOK_BLOCK TOK_CALL TOK_PARAM TOK_FUNCTION
-%token TOK_INDEX
 
 %right '='
 %left  TOK_EQ TOK_NE TOK_LT TOK_LE TOK_GT TOK_GE
@@ -86,7 +87,6 @@ return      : TOK_RETURN expr ';'                                               
             | TOK_RETURN ';'                                                    { $$ = $1; parser_cleanup (1, $2); }
             ;
 expr        : expr '+' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
-            | vardecl                                                           { $$ = $1; }
             | expr '-' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
             | expr '/' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
             | expr '*' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
@@ -94,15 +94,17 @@ expr        : expr '+' expr                                                     
             | expr '=' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
             | expr TOK_EQ expr                                                  { $$ = astree_adopt($2, $1, $3, NULL); }
             | expr TOK_NE expr                                                  { $$ = astree_adopt($2, $1, $3, NULL); }
-            | expr '<' expr %prec TOK_LT                                        { $$ = astree_adopt_sym($2, TOK_LT, $1, $3); }
             | expr TOK_LE expr                                                  { $$ = astree_adopt($2, $1, $3, NULL); }
-            | expr '>' expr %prec TOK_GT                                        { $$ = astree_adopt_sym($2, TOK_GT, $1, $3); }
             | expr TOK_GE expr                                                  { $$ = astree_adopt($2, $1, $3, NULL); }
+            | expr '>' expr %prec TOK_GT                                        { $$ = astree_adopt_sym($2, TOK_GT, $1, $3); }
+            | expr '<' expr %prec TOK_LT                                        { $$ = astree_adopt_sym($2, TOK_LT, $1, $3); }
             | '+' expr %prec TOK_POS                                            { $$ = astree_adopt_sym($1, TOK_POS, $2, NULL); }
             | '-' expr %prec TOK_NEG                                            { $$ = astree_adopt_sym($1, TOK_NEG, $2, NULL); }
+            | '!' expr %prec TOK_NOT                                            { $$ = astree_adopt_sym($1, TOK_NOT, $2, NULL); }
             | TOK_NOT expr                                                      { $$ = astree_adopt($1, $2, NULL, NULL); }
+            | vardecl                                                           { $$ = $1; }
             | call                                                              { $$ = $1; }
-            | pmary_expr                                                        { $$ = $1; }
+            | cast_expr                                                         { $$ = $1; }
             ;
 call        : TOK_IDENT '(' exprs ')'                                           { $$ = astree_adopt_sym($2, TOK_CALL, $1, $3); parser_cleanup (1, $4); }
             ;
@@ -110,6 +112,8 @@ exprs       : %empty                                                            
             | expr ','                                                          { $$ = $1; astree_destroy($2); }
             | exprs expr                                                        { $$ = astree_make_siblings($1, $2); }
             ;
+cast_expr   : pmary_expr                                                        { $$ = $1; }
+            | '(' type ')' cast_expr                                            { $$ = parser_make_cast($2, $4); parser_cleanup(2, $1, $3); }
 pmary_expr  : TOK_IDENT                                                         { $$ = $1; }
             | constant                                                          { $$ = $1; }
             | '(' expr ')'                                                      { $$ = $2; parser_cleanup(2, $1, $3); }
@@ -135,7 +139,7 @@ const char *parser_get_tname (int symbol) {
 ASTree *parser_make_root() {
   DEBUGS('p', "Initializing AST, root token code: %d", TOK_ROOT);
   DEBUGS('p', "Translation of token code: %s", parser_get_tname(TOK_ROOT));
-  return astree_init(TOK_ROOT, (Location){lexer_get_filenr(), 0, 0}, "_root");
+  return astree_init(TOK_ROOT, (Location) { lexer_get_filenr(), 0, 0 }, "_root");
 }
 
 ASTree *parser_make_function(ASTree *type_id, ASTree *paren, ASTree *params) {
@@ -155,6 +159,11 @@ ASTree *parser_make_struct(ASTree *parent, ASTree *structure_id,
                            ASTree *structure_body) {
   parent->type.identifier = structure_id->lexinfo;
   return astree_adopt(parent, structure_id, structure_body, NULL);
+}
+
+ASTree *parser_make_cast(ASTree *type, ASTree *expr) {
+  ASTree *cast = astree_init(TOK_CAST, type->loc, "_cast");
+  return astree_adopt(cast, type, expr, NULL);
 }
 
 void parser_cleanup(size_t count, ...) {
