@@ -51,9 +51,6 @@ NOTSTRING       (\"[^"]*)
 "struct"        { return lexer_token (TOK_STRUCT); }
 "nullptr"       { return lexer_token (TOK_NULLPTR); }
 "array"         { return lexer_token (TOK_ARRAY); }
-"alloc"         { return lexer_token (TOK_ALLOC); }
-"ptr"           { return lexer_token (TOK_PTR); }
-"not"           { return lexer_token (TOK_NOT); }
 {IDENT}         { return lexer_token (TOK_IDENT); }
 {STRINGCON}     { return lexer_token (TOK_STRINGCON); }
 {INTCON}        { return lexer_token (TOK_INTCON); }
@@ -81,6 +78,7 @@ NOTSTRING       (\"[^"]*)
 ";"             { return lexer_token (';'); }
 "<"             { return lexer_token ('<'); }
 ">"             { return lexer_token ('>'); }
+"!"             { return lexer_token ('!'); }
 
 {NOTNUMBER}     { return lexer_bad_token (TOK_INTCON); }
 {NOTCHAR}       { return lexer_bad_token (TOK_CHARCON); }

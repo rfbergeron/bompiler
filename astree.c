@@ -60,7 +60,6 @@ ASTree *astree_init(int symbol_, const Location location, const char *info) {
     case TOK_NEG:
       /* ret->attributes[ATTR_INT] = 1; */
     case '=':
-    case TOK_ALLOC:
     case TOK_CALL:
       /* ret->attributes[ATTR_VREG] = 1; */
       break;
