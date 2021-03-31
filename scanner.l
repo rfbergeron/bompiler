@@ -43,7 +43,6 @@ NOTSTRING       (\"[^"]*)
 
 "void"          { return lexer_token (TOK_VOID); }
 "int"           { return lexer_token (TOK_INT); }
-"string"        { return lexer_token (TOK_STRING); }
 "if"            { return lexer_token (TOK_IF); }
 "else"          { return lexer_token (TOK_ELSE); }
 "while"         { return lexer_token (TOK_WHILE); }

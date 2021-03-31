@@ -19,12 +19,10 @@ struct SymbolValue {
    * This structure should be used for grouping together a function or object's
    * name, type, and declaration location
    */
-  struct typespec type;
+  struct typespec type; /* type of symbol */
   size_t sequence;
-  struct map *fields;
-  Location loc;
-  struct llist *parameters;
-  int has_block;
+  Location loc;  /* declaration location */
+  int has_block; /* whether this is a function definition or prototype */
 };
 
 int symbol_value_init(SymbolValue *symval, ASTree *tree, size_t sequence_,

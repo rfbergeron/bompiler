@@ -13,6 +13,12 @@ purpose of achieving self-hosting, or both. These include:
 - Variadic functions: I'm not sure how much of the heavy lifting is done by the
   standard library here, but we'll see
 - typedefs: might not be that much of a headache to implement, but we'll see
+- floating point: learning x86 is going to be enough trouble without dealing
+  with AVX/SSE extensions
+- passing structs by value: so far as I can tell the standard does not specify
+  how this should be done, only that it must be done. GCC packs them into the
+  registers if they fit. I don't want to worry about this and my compiler will
+  not be doing it so I won't need this to achieve self-hosting
 
 ## Storage of string constants
 Currently, the type checker/symbol table is repsonsible for tracking string
@@ -61,6 +67,35 @@ Storing type names like this might make determining whether types are compatible
 easier, since types that are synonymous on amd64 could store the same values,
 which would be valuable when comparing types.
 
+## Comparing types
+The `types_comatible` function should return more than just an enum describing
+the compatibility of its arguments. It should return a struct that includes the
+enum already returned, in addition to a valid type that is compatible with both
+of the arguments. The returned type is needed to be able to do implicit casting
+and promotion.
+
+Arithmetic promotions may need to be separated from other conversions.
+
+Return types depending on whether or not the arguments are being used in an
+intermediate computation (and will therefore be promoted) or actually need to be
+assigned to a destination, in which case the 
+
+The function(s) responsible for handling casting will be reused when handling
+promotion, and as such promotion will internally be considered as a specific
+case of implicit casting.
+
+## Casting
+In C, there aren't as many legal casts as I had previously assumed. You may not
+cast between struct types, and casting to and from unions is only allowed via an
+extension. This leaves us with few casts which need consideration:
+- Casting between pointer types. Doing so explicitly is allowed, but is
+  undefined behavior if the destination pointer has stricter alignment
+  requirements.
+- Casting and promotion between arithmetic types.
+- Casting between integers and pointers.
+- Casting between function pointer types. I may also allow casting functions to
+  and from void pointers, even though that is not required by the standard.
+
 ## Collapse type/variable names
 Instead of keeping the full declaration of a symbol in the syntax tree, it might
 be easier to remove all nodes except for the identifier and immediately store
@@ -70,3 +105,17 @@ would be required during the type checking process.
 Doing this for functions, structures and unions would be somewhat complicated,
 however. It would also require the inclusion of `typecheck.h` in `astree.c`,
 which may cause dependency issues.
+
+## The arrow operator
+Accessing members of pointers to structs with the arrow operator is equivalent
+to dereferencing them and then accessing them with the dot operator, so maybe
+the parser should just add the necessary tree nodes to make those two operations
+look equivalent in the abstract syntax tree.
+and then accessing them with the dot operator, 
+
+## Passing information during type checking
+The return values of the type checker's internal functions should be a flagset
+which can be used to indicate different things about the status of that branch
+of the recursion. The most obvious one I can think about right now is one where
+the value of an expression is a constant, which is a requirement of global
+variables.

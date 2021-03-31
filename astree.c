@@ -55,7 +55,7 @@ ASTree *astree_init(int symbol_, const Location location, const char *info) {
     case TOK_LE:
     case TOK_GT:
     case TOK_GE:
-    case TOK_NOT:
+    case '!':
     case TOK_POS:
     case TOK_NEG:
       /* ret->attributes[ATTR_INT] = 1; */
@@ -155,12 +155,18 @@ ASTree *astree_make_siblings(ASTree *sibling1, ASTree *sibling2) {
   sibling2->firstborn = sibling1->firstborn;
   /* want to append to the end of the "list" */
   sibling1->next_sibling = sibling2;
-  /*DEBUGH('y', "  buddying up " << parser::get_tname(symbol)
-     << " with " << parser::get_tname(sibling->symbol)
-     << "; oldest sib: " << parser::get_tname(firstborn->symbol)
-     << " " << *(firstborn->lexinfo)); */
   return sibling2;
 }
+
+ASTree *astree_insert_cast(ASTree *parent, size_t index,
+                           struct typespec *type) {
+  ASTree *to_cast = llist_get(parent->children, index);
+  ASTree *cast = astree_init(TOK_CAST, to_cast->loc, "_cast");
+  cast->type = *type;
+  llist_insert(parent->children, astree_adopt(cast, to_cast, NULL, NULL),
+               index);
+  return parent;
+};
 
 void astree_dump_tree(ASTree *tree, FILE *out, int depth) {
   /* Dump formatted tree: current pointer, current token, followed

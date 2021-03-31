@@ -28,21 +28,20 @@ int symbol_value_init(SymbolValue *symval, ASTree *tree, size_t sequence_,
 
 int symbol_value_destroy(SymbolValue *symbol_value) {
   DEBUGS('t', "freeing symbol value");
-  if (symbol_value->fields != NULL) {
-    DEBUGS('t', "destroying fields");
-    map_foreach(symbol_value->fields, symbol_value_destroy_wrapper);
-    map_destroy(symbol_value->fields);
-  }
-
-  if (symbol_value->parameters != NULL) {
-    DEBUGS('t', "destroying parameters");
+  if (symbol_value->type.base == TYPE_STRUCT) {
+    DEBUGS('t', "destroying struct member entries");
+    map_foreach(symbol_value->type.data, symbol_value_destroy_wrapper);
+    map_destroy(symbol_value->type.data);
+  } else if (symbol_value->type.base == TYPE_FUNCTION) {
+    DEBUGS('t', "destroying function parameter entries");
     /* this cast is undefined behavior but Glib uses similar casts and it should
      * work fine on most implementations
      */
-    llist_foreach(symbol_value->parameters,
+    llist_foreach(symbol_value->type.data,
                   (void (*)(void *, size_t))symbol_value_destroy);
-    llist_destroy(symbol_value->parameters);
+    llist_destroy(symbol_value->type.data);
   }
+
   DEBUGS('t', "done");
   return 0;
 }

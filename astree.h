@@ -38,6 +38,7 @@ ASTree *astree_adopt(ASTree *parent, ASTree *child1, ASTree *child2,
 ASTree *astree_adopt_sym(ASTree *parent, int symbol, ASTree *child1,
                          ASTree *child2);
 ASTree *astree_make_siblings(ASTree *astree_, ASTree *sibling);
+ASTree *astree_insert_cast(ASTree *parent, size_t index, struct typespec *type);
 ASTree *astree_first(ASTree *parent);
 ASTree *astree_second(ASTree *parent);
 ASTree *astree_third(ASTree *parent);
