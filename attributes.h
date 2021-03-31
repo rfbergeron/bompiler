@@ -10,26 +10,37 @@ enum attribute {
   ATTR_VADDR = 1 << 3,
   ATTR_CAST = 1 << 4,
   ATTR_CONST = 1 << 5,
-  ATTR_ARRAY = 1 << 6,
-  ATTR_POINTER = 1 << 7
 };
 
 enum base_type {
-  TYPE_VOID,
-  TYPE_STRING,
-  TYPE_INT,
+  /* arithmetic types */
+  TYPE_SIGNED,
+  TYPE_UNSIGNED,
+  TYPE_FLOAT,
+  TYPE_DOUBLE,
+  /* compound types */
+  TYPE_POINTER,
+  TYPE_ARRAY,
   TYPE_STRUCT,
-  TYPE_TYPEID,
-  TYPE_FUNCTION
+  TYPE_UNION,
+  TYPE_FUNCTION,
+  /* other types */
+  TYPE_TYPEDEF,
+  TYPE_VOID
+};
+
+enum conversion_type {
+  CONV_COMPATIBLE,
+  CONV_IMPLICIT_CAST,
+  CONV_EXPLICIT_CAST,
+  CONV_INCOMPATIBLE,
+  CONV_PROMOTE_LEFT,
+  CONV_PROMOTE_RIGHT,
+  CONV_PROMOTE_BOTH,
+  CONV_PROMOTE_WIDER
 };
 
 enum type_mod {
-  /* width and signage */
-  TYPE_MOD_SIGNED = 1 << 0,
-  TYPE_MOD_UNSIGNED = 1 << 1,
-  TYPE_MOD_SHORT = 1 << 2,
-  TYPE_MOD_LONG = 1 << 3,
-  TYPE_MOD_LONG_LONG = 3 << 3, /* set long and long long together */
   /* storage class */
   TYPE_MOD_REGISTER = 1 << 5,
   TYPE_MOD_STATIC = 1 << 6,
@@ -48,6 +59,20 @@ struct typespec {
   enum base_type base;
   unsigned int modifiers;
   size_t width;
+  /* it may be easier to give all structures and unions 8-byte alignment
+   * requirements to make conversions require zero extra code generation
+   */
+  size_t alignment;
+  size_t length; /* only used for arrays */
+  /* Possible values of this pointer depending on base type:
+   * pointers: nested typespec
+   * arrays: nested typespec
+   * function: llist of parameters
+   * struct: symbol table of members
+   * union: symbol table of members
+   * typedef: nested typespec
+   */
+  void *data;
   const char *identifier;
 };
 

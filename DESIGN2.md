@@ -57,6 +57,7 @@ The symbol table will have two types of entries:
     The second kind of entry stores information referring to typeids. Each of
     these entries will have:
     - The base type (integer, float, double, void, array, pointer, function, struct, typedef?)
+    - The signedness of the type?
     - The width of the type
     - The alignment of the type (differs from width for structs)
     - A void pointer to additional data about the type (member info for structs,
@@ -66,7 +67,6 @@ The symbol table will have two types of entries:
 Pointers and arrays will have 8-byte alignment, since they are both represented
 internally as addresses in memory. (the members of arrays have their own respective
 alignment)
-
 
 Should vardecls have their type validated when the syntax tree is generated, or
 when type checking occurs?
@@ -85,7 +85,12 @@ Perhaps the compiler should internally generate a typedef for "pointer to x",
 and store that in the symbol table. The entry would have to include a 
 
 Any function that compares types should make the assumption (or have a flag
-indicating) that 
+indicating) that
+
+IMPORTANT: I think that the spec's statement that any type smaller than signed
+int can be promoted to signed int means that values are loaded as though they
+are their original width/signedness, but in any operation they are used in
+(including the first one) they are promoted
 
 ### Type checking procedures
 
@@ -162,11 +167,8 @@ Promotion rules are as follows:
   compilers but not the change in signedness.
 - integer types are promoted to floating point types of the appropriate width
 
-Casting rules are as follows:
-- any operation 
-
-Casting and promotion will be implented as follows:
-- The tree node 
+I will be refraining from implementing floating point arithmetic for now, so we
+only need to worry about integer width and signedness promotions.
 
 ## Operations that will be identical during assembly generation
 Some operations map pretty well to assembly instructions:
@@ -191,3 +193,5 @@ process:
   registers were in the original intermediate language
 - every variable assignment is automatically put on the stack once it has been
   computed
+- I will not use the x86 feature of using a value directly from memory in
+  operations. This is inefficient, but I feel it will simplify code generation.
