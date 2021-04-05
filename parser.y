@@ -23,10 +23,10 @@
 %token TOK_ROOT TOK_BLOCK TOK_CALL TOK_CAST TOK_INDEX TOK_PARAM TOK_FUNCTION
 %token TOK_TYPE_ID
 /* tokens constructed by lexer */
-%token TOK_VOID TOK_INT
+%token TOK_VOID TOK_INT TOK_SHORT TOK_LONG TOK_CHAR TOK_UNSIGNED TOK_SIGNED
 %token TOK_IF TOK_ELSE TOK_WHILE TOK_RETURN TOK_STRUCT
-%token TOK_NULLPTR TOK_ARRAY TOK_ARROW
-%token TOK_EQ TOK_NE TOK_LT TOK_LE TOK_GT TOK_GE
+%token TOK_ARRAY TOK_ARROW
+%token TOK_EQ TOK_NE TOK_LT TOK_LE TOK_GT TOK_GE TOK_SHL TOK_SHR
 %token TOK_IDENT TOK_INTCON TOK_CHARCON TOK_STRINGCON
 
 %right '='
@@ -37,96 +37,112 @@
 %left TOK_ARROW TOK_INDEX
 %right TOK_ELSE
 
+/* IMPORTANT: because of the way the type nonterm is structured, it will except empty types. Currently,
+ * this mistake is caught by the parser_combine_typespec function. This may not be sufficient in the
+ * future.
+ */
 
 %%
-program     : %empty                                                            { parser_root = parser_make_root(); $$ = parser_root; }
-            | program topdecl                                                   { $$ = astree_adopt($1, $2, NULL, NULL); }
-            | program error '}'                                                 { $$ = $1; parser_cleanup (2, $2, $3); }
-            | program error ';'                                                 { $$ = $1; parser_cleanup (2, $2, $3); }
-            ;
-topdecl     : fndecl block                                                      { $$ = astree_adopt($1, $2, NULL, NULL); }
-            | fndecl ';'                                                        { $$ = $1; astree_destroy($2); }
-            | vardecl ';'                                                       { $$ = $1; parser_cleanup(1, $2); }
-            | ';'                                                               { $$ = NULL; astree_destroy($1); }
-            ;
-fndecl      : declarator '(' param_list ')'                                     { $$ = parser_make_function($1, $2, $3); astree_destroy ($4); }
-            ;
-vardecl     : declarator '=' expr                                               { $$ = astree_adopt($2, $1, $3, NULL); }
-            | declarator                                                        { $$ = $1; }
-            ;
-param_list  : %empty                                                            { $$ = NULL; }
-            | declarator ','                                                    { $$ = $1; astree_destroy($2); }
-            | param_list declarator                                             { $$ = astree_make_siblings($1, $2); }
-            ;
-declarator  : type TOK_IDENT                                                    { $$ = parser_make_type_id($1, $2, NULL); }
-            ;
-type        : plaintype                                                         { $$ = $1; }
-            | TOK_VOID                                                          { $$ = $1; }
-            ;
-plaintype   : TOK_INT                                                           { $$ = $1; }
-            ;
-block       : '{' stmt_list '}'                                                 { $$ = astree_adopt_sym($1, TOK_BLOCK, $2, NULL); parser_cleanup (1, $3); }
-            ;
-stmt_list   : %empty                                                            { $$ = NULL; }
-            | stmt_list stmt                                                    { $$ = astree_make_siblings($1, $2); }
-            ;
-stmt        : block                                                             { $$ = $1; }
-            | while                                                             { $$ = $1; }
-            | ifelse                                                            { $$ = $1; }
-            | return                                                            { $$ = $1; }
-            | expr ';'                                                          { $$ = $1; parser_cleanup (1, $2); }
-            | ';'                                                               { $$ = NULL; astree_destroy($1); }
-            ;
-while       : TOK_WHILE '(' expr ')' stmt                                       { $$ = astree_adopt($1, $3, $5, NULL); parser_cleanup (2, $2, $4); }
-            ;
-ifelse      : TOK_IF '(' expr ')' stmt TOK_ELSE stmt                            { $$ = astree_adopt($1, $3, $5, $7); parser_cleanup (3, $2, $4, $6); }
-            | TOK_IF '(' expr ')' stmt %prec TOK_ELSE                           { $$ = astree_adopt($1, $3, $5, NULL); parser_cleanup (2, $2, $4); }
-            ;
-return      : TOK_RETURN expr ';'                                               { $$ = astree_adopt($1, $2, NULL, NULL); parser_cleanup (1, $3); }
-            | TOK_RETURN ';'                                                    { $$ = $1; parser_cleanup (1, $2); }
-            ;
-expr        : expr '+' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
-            | expr '-' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
-            | expr '/' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
-            | expr '*' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
-            | expr '%' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
-            | expr '=' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
-            | expr TOK_EQ expr                                                  { $$ = astree_adopt($2, $1, $3, NULL); }
-            | expr TOK_NE expr                                                  { $$ = astree_adopt($2, $1, $3, NULL); }
-            | expr TOK_LE expr                                                  { $$ = astree_adopt($2, $1, $3, NULL); }
-            | expr TOK_GE expr                                                  { $$ = astree_adopt($2, $1, $3, NULL); }
-            | expr '>' expr %prec TOK_GT                                        { $$ = astree_adopt_sym($2, TOK_GT, $1, $3); }
-            | expr '<' expr %prec TOK_LT                                        { $$ = astree_adopt_sym($2, TOK_LT, $1, $3); }
-            | '+' expr %prec TOK_POS                                            { $$ = astree_adopt_sym($1, TOK_POS, $2, NULL); }
-            | '-' expr %prec TOK_NEG                                            { $$ = astree_adopt_sym($1, TOK_NEG, $2, NULL); }
-            | '!' expr                                                          { $$ = astree_adopt($1, $2, NULL, NULL); }
-            | vardecl                                                           { $$ = $1; }
-            | call                                                              { $$ = $1; }
-            | cast_expr                                                         { $$ = $1; }
-            ;
-call        : TOK_IDENT '(' exprs ')'                                           { $$ = astree_adopt_sym($2, TOK_CALL, $1, $3); parser_cleanup (1, $4); }
-            ;
-exprs       : %empty                                                            { $$ = NULL; }
-            | expr ','                                                          { $$ = $1; astree_destroy($2); }
-            | exprs expr                                                        { $$ = astree_make_siblings($1, $2); }
-            ;
-cast_expr   : pmary_expr                                                        { $$ = $1; }
-            | '(' type ')' cast_expr                                            { $$ = parser_make_cast($2, $4); parser_cleanup(2, $1, $3); }
-pmary_expr  : TOK_IDENT                                                         { $$ = $1; }
-            | constant                                                          { $$ = $1; }
-            | '(' expr ')'                                                      { $$ = $2; parser_cleanup(2, $1, $3); }
-            ;
-constant    : TOK_INTCON                                                        { $$ = $1; }
-            | TOK_CHARCON                                                       { $$ = $1; }
-            | TOK_STRINGCON                                                     { $$ = $1; }
-            | TOK_NULLPTR                                                       { $$ = $1; }
-            ;
+program       : %empty                                                            { parser_root = parser_make_root(); $$ = parser_root; }
+              | program topdecl                                                   { $$ = astree_adopt($1, $2, NULL, NULL); }
+              | program error '}'                                                 { $$ = $1; parser_cleanup (2, $2, $3); }
+              | program error ';'                                                 { $$ = $1; parser_cleanup (2, $2, $3); }
+              ;
+topdecl       : fndecl block                                                      { $$ = astree_adopt($1, $2, NULL, NULL); }
+              | fndecl ';'                                                        { $$ = $1; astree_destroy($2); }
+              | vardecl ';'                                                       { $$ = $1; parser_cleanup(1, $2); }
+              | ';'                                                               { $$ = NULL; astree_destroy($1); }
+              ;
+fndecl        : declarator '(' param_list ')'                                     { $$ = parser_make_function($1, $2, $3); astree_destroy ($4); }
+              ;
+vardecl       : declarator '=' expr                                               { $$ = astree_adopt($2, $1, $3, NULL); }
+              | declarator                                                        { $$ = $1; }
+              ;
+param_list    : %empty                                                            { $$ = NULL; }
+              | declarator ','                                                    { $$ = $1; astree_destroy($2); }
+              | param_list declarator                                             { $$ = astree_make_siblings($1, $2); }
+              ;
+declarator    : type TOK_IDENT                                                    { $$ = parser_make_type_id($1, $2, NULL); }
+              ;
+type          : TOK_VOID                                                          { $$ = $1; }
+              | typespec_list                                                     { $$ = $1; }
+              ;
+typespec_list : typespec_list typespec                                            { $$ = astree_descend($2, $1); }
+              | typespec                                                          { $$ = $1; }
+              ;
+typespec      : TOK_LONG                                                          { $$ = $1; }
+              | TOK_SIGNED                                                        { $$ = $1; }
+              | TOK_UNSIGNED                                                      { $$ = $1; }
+              | TOK_SHORT                                                         { $$ = $1; }
+              | TOK_INT                                                           { $$ = $1; }
+              | TOK_CHAR                                                          { $$ = $1; }
+              ;
+block         : '{' stmt_list '}'                                                 { $$ = astree_adopt_sym($1, TOK_BLOCK, $2, NULL); parser_cleanup (1, $3); }
+              ;
+stmt_list     : %empty                                                            { $$ = NULL; }
+              | stmt_list stmt                                                    { $$ = astree_make_siblings($1, $2); }
+              ;
+stmt          : block                                                             { $$ = $1; }
+              | while                                                             { $$ = $1; }
+              | ifelse                                                            { $$ = $1; }
+              | return                                                            { $$ = $1; }
+              | expr ';'                                                          { $$ = $1; parser_cleanup (1, $2); }
+              | ';'                                                               { $$ = NULL; astree_destroy($1); }
+              ;
+while         : TOK_WHILE '(' expr ')' stmt                                       { $$ = astree_adopt($1, $3, $5, NULL); parser_cleanup (2, $2, $4); }
+              ;
+ifelse        : TOK_IF '(' expr ')' stmt TOK_ELSE stmt                            { $$ = astree_adopt($1, $3, $5, $7); parser_cleanup (3, $2, $4, $6); }
+              | TOK_IF '(' expr ')' stmt %prec TOK_ELSE                           { $$ = astree_adopt($1, $3, $5, NULL); parser_cleanup (2, $2, $4); }
+              ;
+return        : TOK_RETURN expr ';'                                               { $$ = astree_adopt($1, $2, NULL, NULL); parser_cleanup (1, $3); }
+              | TOK_RETURN ';'                                                    { $$ = $1; parser_cleanup (1, $2); }
+              ;
+expr          : expr '+' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
+              | expr '-' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
+              | expr '/' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
+              | expr '*' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
+              | expr '%' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
+              | expr '=' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
+              | expr TOK_EQ expr                                                  { $$ = astree_adopt($2, $1, $3, NULL); }
+              | expr TOK_NE expr                                                  { $$ = astree_adopt($2, $1, $3, NULL); }
+              | expr TOK_LE expr                                                  { $$ = astree_adopt($2, $1, $3, NULL); }
+              | expr TOK_GE expr                                                  { $$ = astree_adopt($2, $1, $3, NULL); }
+              | expr '>' expr %prec TOK_GT                                        { $$ = astree_adopt_sym($2, TOK_GT, $1, $3); }
+              | expr '<' expr %prec TOK_LT                                        { $$ = astree_adopt_sym($2, TOK_LT, $1, $3); }
+              | '+' expr %prec TOK_POS                                            { $$ = astree_adopt_sym($1, TOK_POS, $2, NULL); }
+              | '-' expr %prec TOK_NEG                                            { $$ = astree_adopt_sym($1, TOK_NEG, $2, NULL); }
+              | '!' expr                                                          { $$ = astree_adopt($1, $2, NULL, NULL); }
+              | vardecl                                                           { $$ = $1; }
+              | call                                                              { $$ = $1; }
+              | cast_expr                                                         { $$ = $1; }
+              ;
+call          : TOK_IDENT '(' exprs ')'                                           { $$ = astree_adopt_sym($2, TOK_CALL, $1, $3); parser_cleanup (1, $4); }
+              ;
+exprs         : %empty                                                            { $$ = NULL; }
+              | expr ','                                                          { $$ = $1; astree_destroy($2); }
+              | exprs expr                                                        { $$ = astree_make_siblings($1, $2); }
+              ;
+cast_expr     : pmary_expr                                                        { $$ = $1; }
+              | '(' type ')' cast_expr                                            { $$ = parser_make_cast($2, $4); parser_cleanup(2, $1, $3); }
+pmary_expr    : TOK_IDENT                                                         { $$ = $1; }
+              | constant                                                          { $$ = $1; }
+              | '(' expr ')'                                                      { $$ = $2; parser_cleanup(2, $1, $3); }
+              ;
+constant      : TOK_INTCON                                                        { $$ = $1; }
+              | TOK_CHARCON                                                       { $$ = $1; }
+              | TOK_STRINGCON                                                     { $$ = $1; }
+              | TOK_NULLPTR                                                       { $$ = $1; }
+              ;
 %%
 
 /* functions, structures, typeids, allocs can have their type
  * assigned when they adopt their children
  */
 /* *INDENT-ON* */
+static const size_t SIZEOF_LONG = 8;
+static const size_t SIZEOF_INT = 4;
+static const size_t SIZEOF_SHORT = 2;
+static const size_t SIZEOF_CHAR = 1;
 
 const char *parser_get_tname (int symbol) {
     return yytname[YYTRANSLATE (symbol)];
@@ -142,14 +158,12 @@ ASTree *parser_make_root() {
 
 ASTree *parser_make_function(ASTree *type_id, ASTree *paren, ASTree *params) {
   ASTree *function = astree_init(TOK_FUNCTION, type_id->loc, "_function");
-
   return astree_adopt(function, type_id,
                       astree_adopt_sym(paren, TOK_PARAM, params, NULL), NULL);
 }
 
 ASTree *parser_make_type_id(ASTree *type, ASTree *id, ASTree *expr) {
   ASTree *type_id = astree_init(TOK_TYPE_ID, type->loc, "_type_id");
-
   return astree_adopt(type_id, type, id, expr);
 }
 
@@ -162,6 +176,87 @@ ASTree *parser_make_struct(ASTree *parent, ASTree *structure_id,
 ASTree *parser_make_cast(ASTree *type, ASTree *expr) {
   ASTree *cast = astree_init(TOK_CAST, type->loc, "_cast");
   return astree_adopt(cast, type, expr, NULL);
+}
+
+ASTree *parser_combine_typespec(ASTree *spec1, ASTree *spec2) {
+  /* Only the left operand may have TOK_SIGNED or TOK_UNSIGNED.
+   * If the right operand is int or char, the left operand cannot be type int or
+   * char.
+   * If the left operand is int or char, the right operand cannot be anything
+   * except null, since int or char should be the last specifier present, if
+   * they are present at all.
+   * To ensure that detection of misplaced tokens works, if either of the
+   * operands are TOK_CHAR or TOK_INT, the token of the return value will be
+   * TOK_INT.
+   */
+  if (spec1 == NULL) {
+    /* error: empty typespec; spec2 may be NULL but not spec1 */
+  } else if (spec2 == NULL) {
+    /* first token in specifier list */
+    switch (spec2->token) {
+      case TOK_SHORT:
+        spec2->type.base = TYPE_SIGNED;
+        spec2->type.width = SIZEOF_SHORT;
+        spec2->type.alignment = SIZEOF_SHORT;
+        break;
+      case TOK_INT:
+      case TOK_SIGNED:
+        spec2->type.base = TYPE_SIGNED;
+        spec2->type.width = SIZEOF_INT;
+        spec2->type.alignment = SIZEOF_INT;
+        break;
+      case TOK_CHAR:
+        spec2->type.base = TYPE_SIGNED;
+        spec2->type.width = SIZEOF_CHAR;
+        spec2->type.alignment = SIZEOF_CHAR;
+        break;
+      case TOK_LONG:
+        spec2->type.base = TYPE_SIGNED;
+        spec2->type.width = SIZEOF_LONG;
+        spec2->type.alignment = SIZEOF_LONG;
+        break;
+      case TOK_UNSIGNED:
+        spec2->type.base = TYPE_UNSIGNED;
+        spec2->type.width = SIZEOF_INT;
+        spec2->type.alignment = SIZEOF_INT;
+        break;
+      default:
+        break;
+    }
+  } else if ((spec1->token == TOK_INT || spec1->token == TOK_CHAR) && spec2) {
+    /* error; int and char must be last token */
+  } else if ((spec2->token == TOK_SIGNED || spec2->token == TOK_UNSIGNED)
+        && spec1) {
+    /* error: no tokens may come before signed/unsigned */
+  } else if ((spec1->token == TOK_SHORT || spec1->token == TOK_LONG) &&
+             (spec2->token == TOK_SHORT || spec2->token == TOK_LONG)) {
+    /* error; multiple short or long tokens */
+  } else if ((spec1->token == TOK_SHORT || spec1->token == TOK_LONG) &&
+             (spec2->token == TOK_CHAR)) {
+    /* error; invalid type adjectives for char */
+  } else {
+    /* valid combination of type specifiers */
+    spec2->type.base = spec1->type.base;
+    switch (spec2->token) {
+      case TOK_SHORT:
+        spec2->type.width = SIZEOF_SHORT;
+        spec2->type.alignment = SIZEOF_SHORT;
+        break;
+      case TOK_LONG:
+        spec2->type.width = SIZEOF_LONG;
+        spec2->type.alignment = SIZEOF_LONG;
+        break;
+      case TOK_CHAR:
+        spec2->type.width = SIZEOF_CHAR;
+        spec2->type.alignment = SIZEOF_CHAR;
+        break;
+      default:
+        spec2->type.width = spec1->type.width;
+        spec2->type.alignment = spec1->type.alignment;
+    }
+  }
+
+  return spec2;
 }
 
 void parser_cleanup(size_t count, ...) {

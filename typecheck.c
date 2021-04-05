@@ -2,6 +2,7 @@
 
 #include "astree.h"
 #include "attributes.h"
+#include "simplestack.h"
 #include "badlib/badllist.h"
 #include "badlib/badmap.h"
 #include "debug.h"
@@ -13,10 +14,39 @@
 struct map *type_names;
 struct map *globals;
 struct map *locals;
+/* the 'stack' of tables */
 struct llist *tables;
 struct llist *string_constants;
-int next_block = 1;
-const char *DUMMY_FUNCTION = "__DUMMY__";
+DECLARE_STACK(symstack, SymbolValue);
+DECLARE_STACK(nrstack, size_t);
+/*
+ * used to store function names; required to handle nested functions and to
+ * verify that the type of a return statement matches that of the function it
+ * is in
+ */
+struct symstack function_symbols;
+/*
+ * used to store sequence numbers of declarations in nested blocks, including
+ * compound statements, functions, if, do, while, and for
+ */
+struct nrstack sequence_nrs;
+/*
+ * used to count the number of sub-blocks in a given block, or, when at global
+ * scope, the number of function, union, and struct definitions/prototypes
+ *
+ * the 'size' member can be used to determine the depth of blocks currently
+ * being counted
+ */
+struct nrstack block_nrs;
+/*
+ * Function_symbols will have a dummy value on top representing global scope.
+ * This way, all three of the above stacks will always have at least one value
+ * for the duration of type checking, and will always have the same number of
+ * items on the stack.
+ *
+ * Maybe the three values should be combined into a single structure and stack,
+ * to make managing them simpler.
+ */
 static const size_t MAX_STRING_LENGTH = 31;
 static const size_t DEFAULT_MAP_SIZE = 100;
 enum type_checker_action {
@@ -43,35 +73,24 @@ enum types_compatible_arg_flags {
  */
 
 /* for traversing the syntax tree */
-int validate_type_id(ASTree *tid, const char *function_name,
-                     size_t *sequence_nr);
-int validate_call(ASTree *call, const char *function_name, size_t *sequence_nr);
-int validate_block(ASTree *block, const char *function_name,
-                   size_t *sequence_nr);
-int validate_expr(ASTree *statement, const char *function_name,
-                  size_t *sequence_nr);
-int validate_stmt(ASTree *statement, const char *function_name,
-                  size_t *sequence_nr);
-int validate_assignment(ASTree *assignment, const char *function_name,
-                        size_t *sequence_nr);
-int validate_binop(ASTree *operator, const char * function_name,
-                   size_t *sequence_nr);
-int validate_unop(ASTree *operator, const char * function_name,
-                  size_t *sequence_nr);
-int validate_equality(ASTree *operator, const char * function_name,
-                      size_t *sequence_nr);
-int validate_return(ASTree *loop, const char *function_name,
-                    size_t *sequence_nr);
-int validate_ifelse(ASTree *loop, const char *function_name,
-                    size_t *sequence_nr);
-int validate_while(ASTree *loop, const char *function_name,
-                   size_t *sequence_nr);
+int validate_type_id(ASTree *tid);
+int validate_call(ASTree *call);
+int validate_block(ASTree *block);
+int validate_expr(ASTree *statement);
+int validate_stmt(ASTree *statement);
+int validate_assignment(ASTree *assignment);
+int validate_binop(ASTree *operator);
+int validate_unop(ASTree *operator);
+int validate_equality(ASTree *operator);
+int validate_return(ASTree *loop);
+int validate_ifelse(ASTree *loop);
+int validate_while(ASTree *loop);
 
 /* for making entries in the symbol table */
-int make_local_entry(ASTree *local, size_t *sequence_nr);
-int make_global_entry(ASTree *global);
+int make_object_entry(ASTree *object);
 int make_function_entry(ASTree *function);
 int make_structure_entry(ASTree *structure);
+int make_union_entry(ASTree *onion);
 
 /*
  * wrapper functions for use with badlib
@@ -98,6 +117,11 @@ static void symbol_table_destroy(void *table, size_t unused) {
   map_destroy(table);
 }
 
+/*
+ * TODO(Robert): recursively setting the block number no longer works because
+ * of nested scoping; instead block numbers should be set during the validation
+ * of expressions, at which point it is not possible to further nest scopes.
+ */
 void set_blocknr(ASTree *tree, size_t nr) {
   tree->loc.blocknr = nr;
   size_t i;
@@ -119,6 +143,14 @@ const char *extract_ident(ASTree *type_id) {
 
 const char *extract_type(ASTree *type_id) {
   return astree_first(type_id)->lexinfo;
+}
+
+void insert_cast(ASTree *tree, size_t index, struct typespec *type) {
+  ASTree *to_cast = llist_get(tree->children, index);
+  ASTree *cast = astree_init(TOK_CAST, to_cast->loc, "_cast");
+  cast->type = *type;
+  llist_insert(tree->children, astree_adopt(cast, to_cast, NULL, NULL),
+               index);
 }
 
 int assign_type_id(ASTree *ident, SymbolValue *struct_member_id) {
@@ -211,8 +243,106 @@ int types_compatible(void *arg1, void *arg2, unsigned int flags) {
   }
 }
 
+int aggregate_typespec(ASTree *type, char *spec_list) {
+    strcat(spec_list, type->lexinfo);
+}
+
+int construct_typespec(ASTree *type, ASTree *ident, size_t depth) {
+  /* Only the left operand may have TOK_SIGNED or TOK_UNSIGNED.
+   * If the right operand is int or char, the left operand cannot be type int or
+   * char.
+   * If the left operand is int or char, the right operand cannot be anything
+   * except null, since int or char should be the last specifier present, if
+   * they are present at all.
+   * To ensure that detection of misplaced tokens works, if either of the
+   * operands are TOK_CHAR or TOK_INT, the token of the return value will be
+   * TOK_INT.
+   */
+
+  if (depth == 0) {
+    /* first token in specifier list */
+    switch (type->token) {
+      case TOK_SHORT:
+        ident->type.base = TYPE_SIGNED;
+        ident->type.width = SIZEOF_SHORT;
+        ident->type.alignment = SIZEOF_SHORT;
+        break;
+      case TOK_INT:
+      case TOK_SIGNED:
+        ident->type.base = TYPE_SIGNED;
+        ident->type.width = SIZEOF_INT;
+        ident->type.alignment = SIZEOF_INT;
+        break;
+      case TOK_CHAR:
+        ident->type.base = TYPE_SIGNED;
+        ident->type.width = SIZEOF_CHAR;
+        ident->type.alignment = SIZEOF_CHAR;
+        break;
+      case TOK_LONG:
+        ident->type.base = TYPE_SIGNED;
+        ident->type.width = SIZEOF_LONG;
+        ident->type.alignment = SIZEOF_LONG;
+        break;
+      case TOK_UNSIGNED:
+        ident->type.base = TYPE_UNSIGNED;
+        ident->type.width = SIZEOF_INT;
+        ident->type.alignment = SIZEOF_INT;
+        break;
+      default:
+        break;
+    }
+  } else if ((type->token == TOK_INT || type->token == TOK_CHAR) &&
+             astree_first(type)) {
+    /* error; int and char must be last token */
+  } else if ((type->token == TOK_SIGNED || type->token == TOK_UNSIGNED)
+        && depth > 0) {
+    /* error: no tokens may come before signed/unsigned */
+  } else if ((type->token == TOK_SHORT || type->token == TOK_LONG) &&
+             (ident->type.width == 2 || ident->type.width == 8)) {
+    /* error; multiple short or long tokens */
+  } else if ((type->token == TOK_SHORT || type->token == TOK_LONG) &&
+             (ident->type.width == 1)) {
+    /* error; invalid type adjectives for char */
+  } else {
+    /* valid combination of type specifiers */
+    switch (spec2->token) {
+      case TOK_SHORT:
+        ident->type.width = SIZEOF_SHORT;
+        ident->type.alignment = SIZEOF_SHORT;
+        break;
+      case TOK_LONG:
+        ident->type.width = SIZEOF_LONG;
+        ident->type.alignment = SIZEOF_LONG;
+        break;
+      case TOK_CHAR:
+        ident->type.width = SIZEOF_CHAR;
+        ident->type.alignment = SIZEOF_CHAR;
+        break;
+      default:
+        ident->type.width = spec1->type.width;
+        ident->type.alignment = spec1->type.alignment;
+    }
+  }
+
+  return spec2;
+}
+
 /* this function only determines the promoted type of its arguments, and even
  * then only if the arguments are valid
+ *
+ * integer types, in order of priority, are as follows:
+ * NOTE: long long won't be supported for the moment; words in parentheses are
+ * optional and may be omitted; the signedness of char is implementation-defined
+ * and here I have chosen that it is signed by default
+ *
+ * unsigned long (int)
+ * (signed) long (int)
+ * unsigned (int)
+ * signed, int, singed int
+ * unsigned short (int)
+ * (signed) short (int)
+ * unsigned char
+ * (signed) char
  */
 int determine_promotion(ASTree *arg1, ASTree *arg2, struct typespec *out) {
   int action = CONV_COMPATIBLE;
@@ -253,25 +383,35 @@ int determine_promotion(ASTree *arg1, ASTree *arg2, struct typespec *out) {
   return action;
 }
 
-int validate_stmt(ASTree *statement, const char *function_name,
-                  size_t *sequence_nr) {
+int locate_symbol (const char* ident, size_t ident_len, SymbolValue** out) {
+  size_t i;
+  for (i = 0; i < llist_size(tables); ++i) {
+    struct map *current_table = llist_get(tables, i);
+    *out = map_get(current_table, (char*) ident, ident_len);
+    if(*out) break;
+  }
+  /* true if the top of the stack (current scope) contains the symbol */
+  return !i;
+}
+
+int validate_stmt(ASTree *statement) {
   int status;
   DEBUGS('t', "Validating next statement");
   switch (statement->symbol) {
     case TOK_RETURN:
-      status = validate_return(statement, function_name, sequence_nr);
+      status = validate_return(statement);
       break;
     case TOK_TYPE_ID:
-      status = make_local_entry(statement, sequence_nr);
+      status = make_object_entry(statement);
       break;
     case TOK_IF:
-      status = validate_ifelse(statement, function_name, sequence_nr);
+      status = validate_ifelse(statement);
       break;
     case TOK_WHILE:
-      status = validate_while(statement, function_name, sequence_nr);
+      status = validate_while(statement);
       break;
     case TOK_BLOCK:
-      status = validate_block(statement, function_name, sequence_nr);
+      status = validate_block(statement);
       break;
     default:
       fprintf(stderr, "ERROR: UNEXPECTED TOKEN IN STATEMENT: %s\n",
@@ -281,27 +421,20 @@ int validate_stmt(ASTree *statement, const char *function_name,
   return status;
 }
 
-int validate_expr(ASTree *expression, const char *function_name,
-                  size_t *sequence_nr) {
+int validate_expr(ASTree *expression) {
   int status;
   const char *ident;
-  SymbolValue *function =
-      function_name == DUMMY_FUNCTION
-          ? NULL
-          : map_get(globals, (char *)function_name,
-                    strnlen(function_name, MAX_STRING_LENGTH));
   ASTree *left;
   ASTree *right;
 
   DEBUGS('t', "Validating next expression");
   switch (expression->symbol) {
     case '=':
-      status = validate_assignment(expression, function_name, sequence_nr);
+      status = validate_assignment(expression);
       break;
     case TOK_EQ:
     case TOK_NE:
-      /* types can be arbitrary here */
-      status = validate_equality(expression, function_name, sequence_nr);
+      status = validate_equality(expression);
       break;
     case TOK_LE:
     case TOK_GE:
@@ -312,50 +445,32 @@ int validate_expr(ASTree *expression, const char *function_name,
     case '*':
     case '/':
     case '%':
-      status = validate_binop(expression, function_name, sequence_nr);
+    /* case '|':
+     * case '^':
+     * case '&':
+     * case TOK_SHL:
+     * case TOK_SHR: */
+      status = validate_binop(expression);
       break;
     case '!':
-    case TOK_POS:
+    case TOK_POS: /* promotion operator */
     case TOK_NEG:
-      status = validate_unop(expression, function_name, sequence_nr);
+    /* case '~': */
+      status = validate_unop(expression);
       break;
     case TOK_CALL:
       expression->attributes |= ATTR_VREG;
-      status = validate_call(expression, function_name, sequence_nr);
+      status = validate_call(expression);
       break;
     case TOK_INDEX:
       /* TODO(Robert): indexing */
       status = -1;
       break;
     case TOK_ARROW:
+      /* TODO(Robert): pointers and struct member access */
       /* evaluate left but not right since right
        * is always an ident
        */
-      status =
-          validate_expr(astree_first(expression), function_name, sequence_nr);
-      if (status != 0) break;
-      const char *tid = astree_first(expression)->type.identifier;
-      SymbolValue *struct_def =
-          map_get(type_names, (char *)tid, strnlen(tid, MAX_STRING_LENGTH));
-      if (astree_first(expression)->type.base == TYPE_STRUCT && struct_def) {
-        /* make sure field is defined */
-        const char *tid2 = astree_second(expression)->lexinfo;
-        SymbolValue *field_def = map_get(struct_def->type.data, (char *)tid2,
-                                         strnlen(tid2, MAX_STRING_LENGTH));
-        if (field_def) {
-          assign_type_id(astree_second(expression), field_def);
-          assign_type_id(expression, field_def);
-        } else {
-          fprintf(stderr, "ERROR: field %s is not a member of structure\n",
-                  astree_second(expression)->lexinfo);
-          status = -1;
-        }
-      } else {
-        fprintf(stderr, "ERROR: structure %s not defined for token %s\n",
-                astree_first(expression)->type.identifier,
-                astree_first(expression)->lexinfo);
-        status = -1;
-      }
       break;
     case TOK_INTCON:
     case TOK_NULLPTR:
@@ -380,9 +495,12 @@ int validate_expr(ASTree *expression, const char *function_name,
   return status;
 }
 
-int validate_type_id(ASTree *tid, const char *function_name,
-                     size_t *sequence_nr) {
-  /* TODO(Robert): arrays, structures, pointers */
+int construct_int_type(ASTree *type, ASTree *identifier) {
+
+}
+
+int validate_type_id(ASTree *tid) {
+  /* TODO(Robert): arrays, structures, pointers, multiple integer widths */
   ASTree *type = astree_first(tid);
   ASTree *identifier = astree_second(tid);
   ASTree *type_node = NULL;
@@ -411,19 +529,18 @@ int validate_type_id(ASTree *tid, const char *function_name,
   return 0;
 }
 
-int validate_block(ASTree *block, const char *function_name,
-                   size_t *sequence_nr) {
+int validate_block(ASTree *block) {
   size_t i;
+  int status = 0;
   for (i = 0; i < llist_size(block->children); ++i) {
     ASTree *statement = llist_get(block->children, i);
-    int status = validate_stmt(statement, function_name, sequence_nr);
-    if (status != 0) return status;
+    status = validate_stmt(statement);
+    if (status) break;
   }
-  return 0;
+  return status;
 }
 
-int validate_call(ASTree *call, const char *function_name,
-                  size_t *sequence_nr) {
+int validate_call(ASTree *call) {
   const char *identifier = astree_first(call)->lexinfo;
   /* params are at the same level as the id */
   SymbolValue *function = map_get(globals, (char *)identifier,
@@ -439,9 +556,7 @@ int validate_call(ASTree *call, const char *function_name,
     for (i = 0; i < llist_size(function->type.data); ++i) {
       DEBUGS('t', "Validating argument %d", i);
       ASTree *param = llist_get(call->children, i + 1);
-      size_t dummy_sequence = 0;
-      DEBUGS('t', "Argument was not null");
-      int status = validate_expr(param, DUMMY_FUNCTION, &dummy_sequence);
+      int status = validate_expr(param);
 
       if (status != 0) return status;
       DEBUGS('t', "Comparing types");
@@ -462,12 +577,11 @@ int validate_call(ASTree *call, const char *function_name,
   }
 }
 
-int validate_assignment(ASTree *assignment, const char *function_name,
-                        size_t *sequence_nr) {
+int validate_assignment(ASTree *assignment) {
   int status = 0;
-  status = validate_expr(astree_first(assignment), function_name, sequence_nr);
+  status = validate_expr(astree_first(assignment));
   if (status != 0) return status;
-  status = validate_expr(astree_second(assignment), function_name, sequence_nr);
+  status = validate_expr(astree_second(assignment));
   if (status != 0) return status;
   if (types_compatible(astree_first(assignment), astree_second(assignment),
                        ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
@@ -476,7 +590,7 @@ int validate_assignment(ASTree *assignment, const char *function_name,
             astree_first(assignment)->lexinfo,
             parser_get_tname(astree_second(assignment)->symbol),
             astree_second(assignment)->lexinfo);
-    status = -1;
+    status = -2;
   } else if (!(astree_first(assignment)->attributes & ATTR_LVAL)) {
     fprintf(stderr, "ERROR: Destination is not an LVAL\n");
     status = -1;
@@ -486,15 +600,14 @@ int validate_assignment(ASTree *assignment, const char *function_name,
   return status;
 }
 
-int validate_binop(ASTree *operator, const char * function_name,
-                   size_t *sequence_nr) {
+int validate_binop(ASTree *operator) {
   ASTree *left = astree_first(operator);
   ASTree *right = astree_second(operator);
   int status = 0;
 
-  status = validate_expr(left, function_name, sequence_nr);
+  status = validate_expr(left);
   if (status != 0) return status;
-  status = validate_expr(right, function_name, sequence_nr);
+  status = validate_expr(right);
   if (status != 0) return status;
 
   struct typespec promoted_type = {0};
@@ -504,7 +617,7 @@ int validate_binop(ASTree *operator, const char * function_name,
 
   status = types_compatible(left, &promoted_type, ARG1_AST & ARG2_TYPE);
   if (status == CONV_IMPLICIT_CAST) {
-    astree_insert_cast(operator, 0, &promoted_type);
+    insert_cast(operator, 0, &promoted_type);
   } else if (status == CONV_INCOMPATIBLE || status == CONV_EXPLICIT_CAST) {
     /* should not happen but I am bad at programming so it would be worth
      * checking for
@@ -513,7 +626,7 @@ int validate_binop(ASTree *operator, const char * function_name,
 
   status = types_compatible(right, &promoted_type, ARG1_AST & ARG2_TYPE);
   if (status == CONV_IMPLICIT_CAST) {
-    astree_insert_cast(operator, 1, &promoted_type);
+    insert_cast(operator, 1, &promoted_type);
   } else if (status == CONV_INCOMPATIBLE || status == CONV_EXPLICIT_CAST) {
     /* should not happen but I am bad at programming so it would be worth
      * checking for
@@ -523,10 +636,9 @@ int validate_binop(ASTree *operator, const char * function_name,
   return status;
 }
 
-int validate_unop(ASTree *operator, const char * function_name,
-                  size_t *sequence_nr) {
+int validate_unop(ASTree *operator) {
   int status = 0;
-  status = validate_expr(astree_first(operator), function_name, sequence_nr);
+  status = validate_expr(astree_first(operator));
   if (status != 0) return status;
   if (astree_first(operator)->attributes != TYPE_SIGNED) {
     fprintf(stderr,
@@ -536,15 +648,14 @@ int validate_unop(ASTree *operator, const char * function_name,
   return status;
 }
 
-int validate_equality(ASTree *operator, const char * function_name,
-                      size_t *sequence_nr) {
+int validate_equality(ASTree *operator) {
   ASTree *dest = astree_first(operator);
   ASTree *src = astree_second(operator);
   /* types can be arbitrary here */
   int status = 0;
-  status = validate_expr(dest, function_name, sequence_nr);
+  status = validate_expr(dest);
   if (status != 0) return status;
-  status = validate_expr(src, function_name, sequence_nr);
+  status = validate_expr(src);
   if (status != 0) return status;
   if (types_compatible(dest, src, ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
     fprintf(stderr,
@@ -554,24 +665,21 @@ int validate_equality(ASTree *operator, const char * function_name,
   return status;
 }
 
-int validate_return(ASTree *ret, const char *function_name,
-                    size_t *sequence_nr) {
+int validate_return(ASTree *ret) {
   int status = 0;
-  SymbolValue *function =
-      function_name == DUMMY_FUNCTION
-          ? NULL
-          : map_get(globals, (char *)function_name,
-                    strnlen(function_name, MAX_STRING_LENGTH));
+  SymbolValue *function = NULL;
   if (llist_size(ret->children) <= 0) {
     if (function->type.base == TYPE_FUNCTION) {
+      /*
       fprintf(stderr,
               "ERROR: Return statement with value in void "
               "function: %s\n",
               function_name);
+      */
       status = -1;
     }
   } else {
-    validate_expr(astree_first(ret), function_name, sequence_nr);
+    validate_expr(astree_first(ret));
     status = types_compatible(astree_first(ret), function, ARG1_AST & ARG2_SMV);
     if (status == TCHK_INCOMPATIBLE) {
       fprintf(stderr, "ERROR: Incompatible return type\n");
@@ -584,62 +692,23 @@ int validate_return(ASTree *ret, const char *function_name,
   return status;
 }
 
-int validate_ifelse(ASTree *ifelse, const char *function_name,
-                    size_t *sequence_nr) {
-  int status = validate_expr(astree_first(ifelse), function_name, sequence_nr);
-  if (status != 0) return status;
-  status = validate_stmt(astree_second(ifelse), function_name, sequence_nr);
-  if (status != 0) return status;
+int validate_ifelse(ASTree *ifelse) {
+  int status = validate_expr(astree_first(ifelse));
+  if (status) return status;
+  status = validate_stmt(astree_second(ifelse));
+  if (status) return status;
   if (llist_size(ifelse->children) == 3)
-    status = validate_stmt(astree_third(ifelse), function_name, sequence_nr);
-  if (status != 0) return status;
+    status = validate_stmt(astree_third(ifelse));
+  if (status) return status;
   return status;
 }
 
-int validate_while(ASTree *loop, const char *function_name,
-                   size_t *sequence_nr) {
-  int status = validate_expr(astree_first(loop), function_name, sequence_nr);
+int validate_while(ASTree *whole) {
+  int status = validate_expr(astree_first(whole));
   if (status != 0) return status;
-  status = validate_stmt(astree_second(loop), function_name, sequence_nr);
+  status = validate_stmt(astree_second(whole));
   if (status != 0) return status;
   return status;
-}
-
-int make_global_entry(ASTree *global) {
-  const char *ident = extract_ident(global);
-  size_t ident_len = strnlen(ident, MAX_STRING_LENGTH);
-  size_t dummy_sequence = 0;
-  SymbolValue *exists = map_get(globals, (char *)ident, ident_len);
-
-  if (exists) {
-    /* error; duplicate declaration */
-    fprintf(stderr, "ERROR: Global var has already been declared: %s\n",
-            extract_ident(global));
-    return -1;
-  } else {
-    DEBUGS('t', "Making global entry for value %s", ident);
-    ASTree *type = astree_first(global);
-    ASTree *identifier = astree_second(global);
-    identifier->attributes |= ATTR_LVAL;
-    int status = validate_type_id(global, DUMMY_FUNCTION, &dummy_sequence);
-    if (status != 0) return status;
-    if (llist_size(global->children) == 3) {
-      size_t dummy_sequence = 0;
-      status =
-          validate_expr(astree_third(global), DUMMY_FUNCTION, &dummy_sequence);
-      if (status != 0) return status;
-      if (types_compatible(astree_third(global), astree_second(global),
-                           ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
-        fprintf(stderr, "ERROR: Incompatible type for global variable\n");
-        return -1;
-      }
-    }
-
-    SymbolValue *global_value = malloc(sizeof(*global_value));
-    symbol_value_init(global_value, identifier, 0, 0);
-    map_insert(globals, (char *)extract_ident(global), ident_len, global_value);
-    return 0;
-  }
 }
 
 int make_structure_entry(ASTree *structure) {
@@ -675,7 +744,7 @@ int make_structure_entry(ASTree *structure) {
                 field_id_str);
         return -1;
       } else {
-        int status = validate_type_id(field, DUMMY_FUNCTION, &dummy_sequence);
+        int status = validate_type_id(field);
         if (status != 0) return status;
         astree_second(field)->attributes |= ATTR_LVAL;
         field_value = malloc(sizeof(*field_value));
@@ -698,8 +767,7 @@ int make_function_entry(ASTree *function) {
   DEBUGS('t', "oof");
   astree_second(type_id)->type.base = TYPE_FUNCTION;
   DEBUGS('t', "oof");
-  int status = validate_type_id(type_id, DUMMY_FUNCTION, &dummy_sequence);
-  SymbolValue *function_entry = NULL;
+  int status = validate_type_id(type_id);
   if (status != 0) return status;
   if (type_id->type.base == TYPE_ARRAY) {
     fprintf(stderr, "ERROR: Function %s has an array return type.\n",
@@ -719,7 +787,7 @@ int make_function_entry(ASTree *function) {
   }
   DEBUGS('t', "oof");
 
-  function_entry = malloc(sizeof(*function_entry));
+  SymbolValue *function_entry = malloc(sizeof(*function_entry));
   symbol_value_init(function_entry, astree_second(type_id), 0, 0);
   locals = malloc(sizeof(*locals));
   status = map_init(locals, DEFAULT_MAP_SIZE, NULL, free, strncmp_wrapper);
@@ -728,7 +796,7 @@ int make_function_entry(ASTree *function) {
     abort();
   }
   /* check and add parameters; set block */
-  set_blocknr(astree_second(function), next_block);
+  /* set_blocknr(astree_second(function)); */
   ASTree *params = astree_second(function);
   size_t param_sequence_nr = 0;
   size_t i;
@@ -736,18 +804,12 @@ int make_function_entry(ASTree *function) {
     ASTree *param = llist_get(params->children, i);
     const char *param_id_str = extract_ident(param);
     /*
-    int empty;
-    khiter_t k = kh_get (SymbolTable, locals, param_id_str);
-    if (!empty) {
-        fprintf (stderr,
-                 "ERROR: Duplicate declaration of parameter: %s\n",
-                 param_id_str);
-        return -1;
-    }
-    */
+     * TODO(Robert): implement find function(s) in badlib and search for duplicate
+     * parameters
+     */
     ASTree *param_identifier = astree_second(param);
     DEBUGS('t', "Defining function parameter %s", extract_ident(param));
-    status = make_local_entry(param, &param_sequence_nr);
+    status = make_object_entry(param);
     if (status != 0) return status;
     size_t param_id_str_len = strnlen(param_id_str, MAX_STRING_LENGTH);
     SymbolValue *param_entry =
@@ -755,7 +817,7 @@ int make_function_entry(ASTree *function) {
     llist_push_back(function_entry->type.data, param_entry);
   }
 
-  DEBUGS('t', "Inserting function entry with block id %u", next_block);
+  DEBUGS('t', "Inserting function entry with block id %u", nrstack_top(&block_nrs));
   const char *function_id = extract_ident(type_id);
   size_t function_id_len = strnlen(function_id, MAX_STRING_LENGTH);
   SymbolValue *prototype =
@@ -772,9 +834,8 @@ int make_function_entry(ASTree *function) {
     } else if (llist_size(function->children) == 3) {
       DEBUGS('t', "Completing entry for prototype %s", function_id);
       size_t new_sequence_nr = 0;
-      status =
-          validate_block(astree_third(function), function_id, &new_sequence_nr);
-      if (status != 0) return status;
+      status = validate_block(astree_third(function));
+      if (status) return status;
       prototype->has_block = 1;
     }
   } else {
@@ -782,9 +843,8 @@ int make_function_entry(ASTree *function) {
     if (llist_size(function->children) == 3) {
       DEBUGS('t', "No protoype; defining function %s", function_id);
       size_t new_sequence_nr = 0;
-      set_blocknr(astree_third(function), next_block);
-      status =
-          validate_block(astree_third(function), function_id, &new_sequence_nr);
+      /* set_blocknr(astree_third(function), next_block); */
+      status = validate_block(astree_third(function));
       if (status != 0) return status;
       function_entry->has_block = 1;
     }
@@ -792,54 +852,50 @@ int make_function_entry(ASTree *function) {
 
   llist_push_back(tables, locals);
   locals = NULL;
-  ++next_block;
+  nrstack_replace(&block_nrs, nrstack_top(&block_nrs) + 1);
   return 0;
 }
 
-int make_local_entry(ASTree *local, size_t *sequence_nr) {
-  const char *local_ident = extract_ident(local);
-  size_t local_ident_len = strnlen(local_ident, MAX_STRING_LENGTH);
-  DEBUGS('t', "ree: %p", locals);
-  SymbolValue *existing_entry =
-      map_get(locals, (char *)local_ident, local_ident_len);
+int make_object_entry(ASTree *object) {
+  const char *ident = extract_ident(object);
+  size_t ident_len = strnlen(ident, MAX_STRING_LENGTH);
+  SymbolValue *exists = NULL;
+  int status = 0;
 
-  DEBUGS('t', "ree");
-  if (existing_entry) {
-    DEBUGS('t', "Got symtable entry %p", existing_entry);
-    fprintf(stderr,
-            "ERROR: Duplicate declaration of variable %s at location %d\n",
-            extract_ident(local), existing_entry->loc.linenr);
-    return -1;
+  if (locate_symbol (ident, ident_len, &exists)) {
+    /* TODO(Robert): duplicate declarations are fine so long as the types match,
+     * so we should check that first instead of erroring straight away.
+     */
+    fprintf(stderr, "ERROR: symbol has already been declared: %s\n",
+            extract_ident(object));
+    status = -1;
   } else {
-    ASTree *type = astree_first(local);
-    ASTree *identifier = astree_second(local);
-    DEBUGS('t', "Making entry for local var %s", identifier->lexinfo);
+    DEBUGS('t', "Making object entry for value %s", ident);
+    ASTree *type = astree_first(object);
+    ASTree *identifier = astree_second(object);
     identifier->attributes |= ATTR_LVAL;
-    int status = validate_type_id(local, DUMMY_FUNCTION, sequence_nr);
+    status = validate_type_id(object);
     if (status != 0) return status;
-    DEBUGS('t', "Checking to see if var has an initial value");
-    if (llist_size(local->children) == 3) {
+    if (llist_size(object->children) == 3) {
       size_t dummy_sequence = 0;
-      DEBUGS('t', "it do have value");
-      status =
-          validate_expr(astree_third(local), DUMMY_FUNCTION, &dummy_sequence);
-      if (status != 0) return status;
-      if (types_compatible(astree_third(local), astree_second(local),
+      status = validate_expr(astree_third(object));
+      if (status) return status;
+      if (types_compatible(astree_third(object), astree_second(object),
                            ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
-        fprintf(stderr, "ERROR: Incompatible type for local variable\n");
-        return -1;
+        fprintf(stderr, "ERROR: Incompatible type for object variable\n");
+        status = -1;
       }
     }
 
-    SymbolValue *local_value = malloc(sizeof(*local_value));
-    symbol_value_init(local_value, astree_second(local), *sequence_nr,
-                      next_block);
+    SymbolValue *symbol = malloc(sizeof(*symbol));
+    symbol_value_init(symbol, astree_second(object), nrstack_top(&sequence_nrs),
+                      nrstack_top(&block_nrs));
     size_t identifier_len = strnlen(identifier->lexinfo, MAX_STRING_LENGTH);
-    map_insert(locals, (char *)identifier->lexinfo, identifier_len,
-               local_value);
-    ++sequence_nr;
-    return 0;
+    map_insert(llist_front(tables), (char *)identifier->lexinfo, identifier_len,
+               symbol);
+    nrstack_replace(&block_nrs, nrstack_top(&block_nrs) + 1);
   }
+  return status;
 }
 
 /*
@@ -857,6 +913,10 @@ void type_checker_init_globals() {
   tables = malloc(sizeof(*tables));
   llist_init(tables, free, NULL);
   /* maps */
+  struct map *file_scope = malloc(sizeof(*file_scope));
+  map_init(file_scope, DEFAULT_MAP_SIZE, NULL, free, strncmp_wrapper);
+  llist_push_front(tables, file_scope);
+
   globals = malloc(sizeof(*globals));
   map_init(globals, DEFAULT_MAP_SIZE, NULL, free, strncmp_wrapper);
   type_names = malloc(sizeof(*type_names));
@@ -877,12 +937,6 @@ int type_checker_make_table(ASTree *root) {
   for (i = 0; i < llist_size(root->children); ++i) {
     ASTree *child = llist_get(root->children, i);
     int status;
-    /*
-     * validation method requires a sequence number but expressions
-     * as defined by the parser cannot have vardecls below them in
-     * the tree so we don't actually need to track sequence once we
-     * get down that far, even though much of the code is the same
-     */
     size_t dummy_sequence = 0;
     switch (child->symbol) {
       case TOK_FUNCTION:
@@ -892,15 +946,14 @@ int type_checker_make_table(ASTree *root) {
         break;
       case TOK_TYPE_ID:
         DEBUGS('t', "boing");
-        status = make_global_entry(child);
+        status = make_object_entry(child);
         if (status != 0) return status;
         break;
       case '=':
         DEBUGS('t', "bonk");
-        status = make_global_entry(astree_first(child));
+        status = make_object_entry(astree_first(child));
         if (status != 0) return status;
-        status = validate_expr(astree_second(child), DUMMY_FUNCTION,
-                               &dummy_sequence);
+        status = validate_expr(astree_second(child));
         if (status != 0) return status;
         if (types_compatible(astree_first(child), astree_second(child),
                              ARG1_AST & ARG2_AST) == TCHK_INCOMPATIBLE) {
