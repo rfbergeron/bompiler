@@ -146,7 +146,7 @@ ASTree *astree_adopt_sym(ASTree *parent, int symbol_, ASTree *child1,
   return astree_adopt(parent, child1, child2, NULL);
 }
 
-ASTree *astree_make_siblings(ASTree *sibling1, ASTree *sibling2) {
+ASTree *astree_twin(ASTree *sibling1, ASTree *sibling2) {
   assert(sibling1 != NULL || sibling2 != NULL);
   /* if sib is null don't bother doing anything */
   if (sibling1 == NULL) return sibling2;
@@ -158,15 +158,14 @@ ASTree *astree_make_siblings(ASTree *sibling1, ASTree *sibling2) {
   return sibling2;
 }
 
-ASTree *astree_insert_cast(ASTree *parent, size_t index,
-                           struct typespec *type) {
-  ASTree *to_cast = llist_get(parent->children, index);
-  ASTree *cast = astree_init(TOK_CAST, to_cast->loc, "_cast");
-  cast->type = *type;
-  llist_insert(parent->children, astree_adopt(cast, to_cast, NULL, NULL),
-               index);
+ASTree *astree_descend(ASTree *parent, ASTree *descendant) {
+  ASTree *current = parent;
+  while(astree_first(current)) {
+    current = astree_first(current);
+  }
+  astree_adopt(current, descendant, NULL, NULL);
   return parent;
-};
+}
 
 void astree_dump_tree(ASTree *tree, FILE *out, int depth) {
   /* Dump formatted tree: current pointer, current token, followed

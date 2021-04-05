@@ -158,6 +158,23 @@ parameters do not matter; only the types.
 As a consequence of this, the names of the parameters of a function prototype
 should be overwritten by the parameters used in the definition.
 
+Each scope will have its own unique map used to track symbols. These maps will
+be pushed onto a stack in order of increasing depth, and new symbols will always
+be placed into the map on the top of the stack. The map at the bottom of the
+stack will always be global/file scope.
+
+Each scope will also have sequence numbers, which are used in ordering variables
+by declaration location. This number will be pushed and popped in the same way
+as the symbol tables are.
+
+To handle labels, which have function scope, the name of the function being
+worked with will be stored as a global variable. When function labels need to be
+verified or inserted into the symbol table, the function's symbol table will be
+retrieved from the global table for use.
+
+The function which resolves symbols (besides labels) will search each symbol
+table, starting at the top, for the corresponding symbol.
+
 ## Promotion and casting
 Promotion rules are as follows:
 - unsigned types are promoted to signed types
@@ -195,3 +212,4 @@ process:
   computed
 - I will not use the x86 feature of using a value directly from memory in
   operations. This is inefficient, but I feel it will simplify code generation.
+  Values will enter registers via the `mov` instruction.
