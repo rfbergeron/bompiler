@@ -14,8 +14,6 @@
 #include "strset.h"
 #define LINESIZE 1024
 
-static const struct typespec EMPTY_TYPESPEC = {0, 0, 0, 0};
-
 ASTree *astree_first(ASTree *parent) { return llist_get(parent->children, 0); }
 
 ASTree *astree_second(ASTree *parent) { return llist_get(parent->children, 1); }
@@ -30,7 +28,7 @@ ASTree *astree_init(int symbol_, const Location location, const char *info) {
   ret->symbol = symbol_;
   ret->lexinfo = string_set_intern(info);
   ret->loc = location;
-  ret->type = EMPTY_TYPESPEC;
+  ret->type = TYPE_EMPTY;
   ret->attributes = 0;
   /* casting function pointers is undefined behavior but it seems like most
    * compiler implementations make it work, and here we're just changing the
@@ -67,10 +65,6 @@ ASTree *astree_init(int symbol_, const Location location, const char *info) {
     case TOK_INDEX:
       /* ret->attributes[ATTR_LVAL] = 1; */
       /* ret->attributes[ATTR_VADDR] = 1; */
-      break;
-    case TOK_NULLPTR:
-      /* ret->attributes[ATTR_NULL] = 1; */
-      /* ret->attributes[ATTR_CONST] = 1; */
       break;
     case TOK_INTCON:
     case TOK_CHARCON:
@@ -160,7 +154,7 @@ ASTree *astree_twin(ASTree *sibling1, ASTree *sibling2) {
 
 ASTree *astree_descend(ASTree *parent, ASTree *descendant) {
   ASTree *current = parent;
-  while(astree_first(current)) {
+  while (astree_first(current)) {
     current = astree_first(current);
   }
   astree_adopt(current, descendant, NULL, NULL);
@@ -187,7 +181,7 @@ void astree_dump(ASTree *tree, FILE *out) {
 }
 
 void location_to_string(Location location, char *buffer, size_t size) {
-  int bufsize = snprintf(buffer, size, "{%d, %d, %d}", location.filenr,
+  int bufsize = snprintf(buffer, size, "{%lu, %lu, %lu}", location.filenr,
                          location.linenr, location.offset) +
                 1;
 }
@@ -205,7 +199,7 @@ void astree_to_string(ASTree *tree, char *buffer, size_t size) {
   attributes_to_string(tree->attributes, attrstr, LINESIZE);
 
   if (strlen(tname) > 4) tname += 4;
-  snprintf(buffer, size, "%s \"%s\" %s {%d} %s", tname, tree->lexinfo, locstr,
+  snprintf(buffer, size, "%s \"%s\" %s {%lu} %s", tname, tree->lexinfo, locstr,
            tree->loc.blocknr, attrstr);
 }
 

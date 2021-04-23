@@ -8,25 +8,16 @@
 #include "badlib/badllist.h"
 #include "debug.h"
 
-typedef struct location Location;
-struct location {
-  size_t filenr;
-  size_t linenr;
-  size_t blocknr;
-  size_t offset;
-};
-
 typedef struct ASTree ASTree;
-
 struct ASTree {
-  int symbol;              /* token code */
-  const char *lexinfo;     /* lexical information */
-  Location loc;            /* source location */
-  struct typespec type;    /* type info */
-  unsigned int attributes; /* node-specific attributes */
   LinkedList *children;    /* children of this n-way node */
   ASTree *next_sibling;    /* for adopting long lists of siblings */
   ASTree *firstborn;       /* head of the list of siblings */
+  Location loc;            /* source location */
+  int symbol;              /* token code */
+  unsigned int attributes; /* node-specific attributes */
+  struct typespec type;    /* type info */
+  const char *lexinfo;     /* lexical information */
 };
 
 void location_print(FILE *out, const Location location_);

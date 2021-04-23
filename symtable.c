@@ -19,10 +19,11 @@ static void symbol_value_destroy_wrapper(void *unused, void *symval,
 /*
  * external functions
  */
-int symbol_value_init(SymbolValue *symval, ASTree *tree, size_t sequence_,
-                      size_t blocknr_) {
-  symval->loc = tree->loc;
-  symval->sequence = sequence_;
+int symbol_value_init(SymbolValue *symval, const TypeSpec *type,
+                      const Location *loc, const size_t sequence) {
+  symval->type = *type;
+  symval->loc = *loc;
+  symval->sequence = sequence;
   return 0;
 }
 
@@ -30,16 +31,21 @@ int symbol_value_destroy(SymbolValue *symbol_value) {
   DEBUGS('t', "freeing symbol value");
   if (symbol_value->type.base == TYPE_STRUCT) {
     DEBUGS('t', "destroying struct member entries");
-    map_foreach(symbol_value->type.data, symbol_value_destroy_wrapper);
-    map_destroy(symbol_value->type.data);
+    map_foreach(symbol_value->type.data.members, symbol_value_destroy_wrapper);
+    map_destroy(symbol_value->type.data.members);
   } else if (symbol_value->type.base == TYPE_FUNCTION) {
     DEBUGS('t', "destroying function parameter entries");
     /* this cast is undefined behavior but Glib uses similar casts and it should
      * work fine on most implementations
      */
-    llist_foreach(symbol_value->type.data,
+    llist_foreach(symbol_value->type.data.params,
                   (void (*)(void *, size_t))symbol_value_destroy);
-    llist_destroy(symbol_value->type.data);
+    llist_destroy(symbol_value->type.data.params);
+  }
+
+  if (symbol_value->type.nested) {
+    /* TODO(Robert): write function to recursively free symbol values */
+    free(symbol_value->type.nested);
   }
 
   DEBUGS('t', "done");
@@ -49,7 +55,7 @@ int symbol_value_destroy(SymbolValue *symbol_value) {
 FILE *print_symbol_value(FILE *out, const SymbolValue *symval) {
   char type_buf[256];
   type_to_string(symval->type, type_buf, 256);
-  fprintf(out, "{ %u, %u, %u } { %u } %s", symval->loc.filenr,
+  fprintf(out, "{ %lu, %lu, %lu } { %lu } %s", symval->loc.filenr,
           symval->loc.linenr, symval->loc.offset, symval->loc.blocknr,
           type_buf);
   return out;
