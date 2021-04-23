@@ -14,8 +14,7 @@ enum attribute {
 
 enum base_type {
   /* arithmetic types */
-  TYPE_SIGNED,
-  TYPE_UNSIGNED,
+  TYPE_INT,
   TYPE_FLOAT,
   TYPE_DOUBLE,
   /* compound types */
@@ -40,43 +39,85 @@ enum conversion_type {
   CONV_PROMOTE_WIDER
 };
 
-enum type_mod {
+enum type_flag {
+  TYPE_FLAG_NONE = 0,
+  /* signedness */
+  TYPE_FLAG_SIGNED = 1 << 0,
+  TYPE_FLAG_UNSIGNED = 1 << 1,
   /* storage class */
-  TYPE_MOD_REGISTER = 1 << 5,
-  TYPE_MOD_STATIC = 1 << 6,
-  TYPE_MOD_EXTERN = 1 << 7,
-  TYPE_MOD_AUTO = 1 << 8,
-  TYPE_MOD_TYPEDEF = 1 << 9,
+  TYPE_FLAG_REGISTER = 1 << 2,
+  TYPE_FLAG_STATIC = 1 << 3,
+  TYPE_FLAG_EXTERN = 1 << 4,
+  TYPE_FLAG_AUTO = 1 << 5,
   /* qualifiers */
-  TYPE_MOD_CONST = 1 << 10,
-  TYPE_MOD_RESTRICT = 1 << 11,
-  TYPE_MOD_VOLATILE = 1 << 12,
+  TYPE_FLAG_CONST = 1 << 6,
+  TYPE_FLAG_VOLATILE = 1 << 7,
   /* function only */
-  TYPE_MOD_INLINE = 1 << 13
+  TYPE_FLAG_INLINE = 1 << 8
 };
 
-struct typespec {
-  enum base_type base;
-  unsigned int modifiers;
+typedef struct typespec {
   size_t width;
-  /* it may be easier to give all structures and unions 8-byte alignment
-   * requirements to make conversions require zero extra code generation
+  /*
+   * 1. only structures and unions need their alignment specified
+   * 2. only structures and unions need a map
+   * 3. only arrays need length
+   * 4. only functions need  parameters
+   * 5. only functions, pointers, and arrays need nested types
    */
   size_t alignment;
-  size_t length; /* only used for arrays */
-  /* Possible values of this pointer depending on base type:
-   * pointers: nested typespec
-   * arrays: nested typespec
-   * function: llist of parameters
-   * struct: symbol table of members
-   * union: symbol table of members
-   * typedef: nested typespec
-   */
-  void *data;
+  struct typespec *nested; /* for functions, pointers and arrays */
+  union {
+    struct llist *params; /* for functions */
+    struct map *members;  /* for structs and unions */
+    size_t length;        /* for arrays */
+  } data;
+  unsigned int flags;
+  enum base_type base;
   const char *identifier;
-};
+} TypeSpec;
+
+typedef struct location {
+  size_t filenr;
+  size_t linenr;
+  size_t offset;
+  size_t blocknr;
+} Location;
 
 int attributes_to_string(const unsigned int attributes, char *buf,
                          size_t bufsize);
 int type_to_string(struct typespec type, char *buf, size_t bufsize);
+
+/* NOTE: it may be easier to give all structures and unions 8-byte alignment
+ * requirements to make conversions require zero extra code generation
+ */
+
+extern const size_t SIZEOF_LONG, ALIGNOF_LONG;
+extern const size_t SIZEOF_INT, ALIGNOF_INT;
+extern const size_t SIZEOF_SHORT, ALIGNOF_SHORT;
+extern const size_t SIZEOF_CHAR, ALIGNOF_CHAR;
+
+extern const char STRING_ULONG[];
+extern const char STRING_SLONG[];
+extern const char STRING_UINT[];
+extern const char STRING_SINT[];
+extern const char STRING_USHORT[];
+extern const char STRING_SSHORT[];
+extern const char STRING_UCHAR[];
+extern const char STRING_SCHAR[];
+
+extern const TypeSpec TYPE_ULONG;
+extern const TypeSpec TYPE_SLONG;
+extern const TypeSpec TYPE_UINT;
+extern const TypeSpec TYPE_SINT;
+extern const TypeSpec TYPE_USHORT;
+extern const TypeSpec TYPE_SSHORT;
+extern const TypeSpec TYPE_UCHAR;
+extern const TypeSpec TYPE_SCHAR;
+
+extern const TypeSpec TYPE_PTR;
+extern const TypeSpec TYPE_EMPTY;
+
+extern const Location LOC_EMPTY;
+
 #endif
