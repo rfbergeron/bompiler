@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include "astree.h"
@@ -106,11 +107,50 @@ int main(int argc, char **argv) {
   memcpy(cppcmd, CPP, strlen(CPP));
   memcpy(cppcmd + strlen(CPP), oc_name, strlen(oc_name));
 
-  DEBUGS('m', "Opening files and pipes");
-  yyin = popen(cppcmd, "r");
+  DEBUGS('m', "Opening preprocessor pipe");
+  /* this is way more complicated than it would normally be since -ansi does
+   * not allow the use of the popen() function, so we have to do all the
+   * heavy lifting ourselves
+   */
+  int pipedes[2];
+  status = pipe(pipedes);
+  if(status) {
+    err(EXIT_FAILURE, NULL);
+  }
+
+  pid_t parent = fork();
+
+  if(parent) {
+    goto parent_run_parser;
+  }
+
+child_run_preprocessor:
+  /* child process procedures*/
+  /* duplicate the write end of the pipe to fd 1, or stdout */
+  dup2(pipedes[1], STDOUT_FILENO);
+  /* close extra fds */
+  close(pipedes[0]);
+  close(pipedes[1]);
+  /* execute the preprocessor */
+  execlp("/usr/bin/cpp", "cpp", oc_name, NULL);
+  /* error if the preprocessor was unable to run */
+  err(EXIT_FAILURE, "Failed to lay pipe\n");
+
+parent_run_parser:
+  /* parent process procedures */
+  /* duplicate the read end of the pipe to stdin */
+  dup2(pipedes[0], STDIN_FILENO);
+  /* close extra fds */
+  close(pipedes[0]);
+  close(pipedes[1]);
+  /* set yyin to standard input, which should be the read end of the pipe */
+  yyin = stdin;
+  DEBUGS('m', "value of yyin: %p", yyin);
   if (yyin == NULL) {
     err(1, "%s", cppcmd);
   }
+
+  DEBUGS('m', "Opening output files");
   strfile = fopen(strname, "w");
   if (strfile == NULL) {
     err(1, "%s", strname);

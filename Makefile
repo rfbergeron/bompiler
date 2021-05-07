@@ -2,11 +2,10 @@
 
 WARN = -Wall -Wextra -Werror -Wpedantic -Wshadow
 # full gcc exec command
-C = gcc -g -O0 -ansi
+C = gcc -ggdb -pg -O0 -ansi
 CWARN = ${C} ${WARN} -fdiagnostics-color=never
 CYY = ${C} -Wno-sign-compare
 CDEP = gcc -ansi -MM ${WARN}
-CDBG = ${C} -pg -fsanitize=address
 MKFILE = Makefile
 DEPFILE = ${MKFILE}.dep
 GMAKE = ${MAKE} --no-print-directory
@@ -38,9 +37,6 @@ all : ${DEPFILE} ${EXECNAME}
 
 ${EXECNAME} : ${OBJ}
 	${C} -o $@ $^
-
-debug : ${OBJ}
-	${CDBG} -o ${EXECNAME} $^
 
 yylex.o : yylex.c
 	${CYY} -c $^
