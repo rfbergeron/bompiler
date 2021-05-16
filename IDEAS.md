@@ -84,6 +84,64 @@ The function(s) responsible for handling casting will be reused when handling
 promotion, and as such promotion will internally be considered as a specific
 case of implicit casting.
 
+## Parsing integer/character types
+Integer and character types are surprisingly complicated to parse.
+There are a couple of rules governing their specifiers:
+- each specifier can only occur once (long long does not exist in ANSI)
+- char and int are mutually exclusive
+- long and short are mutually exclusive
+- signed and unsigned are mutually exclusive
+- long and short may not occur in a specifier that includes char
+
+The standard lists valid combinations. It appears that the standard intends
+that the order of specifiers matters, which would make legal combinations
+less permissive, but much like requiring variable declarations at the beginning
+of the block, this is more difficult to implement than allowing them to occur in
+any order.
+
+Actually, it doesn't really make sense to have type flags for signedness, since
+they only get used for integers, unlike all of the other type flags, which are
+storage class modifiers and type qualifiers.
+
+So going back to SIGNED and UNSIGNED instead of INT might make sense. It would
+require a little more thought when processing integer types though. The above
+rules need to be mapped to a base type and a width.
+
+An integer will be passed around to the integer type checking functions, which
+is used to track which tokens have occurred so far in the specifier. Each of
+"short", "long", "int", "char", "signed", and "unsigned" will have their own
+bit in this integer.
+
+The function will descend into the list of specifiers, marking which ones have
+occurred as it goes. If any of the flags are set twice, the function errors. If
+any flags that may not co-occur are set, the function errors.
+
+Afterwards, there will be a switch statement with a case corresponding to valid
+combinations of flags. The default case will result in an error.
+
+## Parsing function types
+Structure of a function definition in the syntax tree, as a reminder:
+- FUNCTION
+  - TYPE_ID
+    - TYPE
+    - IDENT
+  - PARAM
+    - TYPE_ID ...
+  - BLOCK (optional)
+
+First, validate_type_id will be called on the TYPE_ID node. The type of this
+node will be assigned to the nested field of FUNCTION's type. The data field
+of the function's type structure will be allocated and initialized as a linked
+list for storing its parameters. A SymbolValue structure associated with this
+function will be initialized, but not inserted into the global table yet. 
+
+Second, validate_type_id will be called on each TYPE_ID child of PARAM. Once
+validated, a SymbolValue structure will be initialized for each parameter and
+appended to the list in FUNCTION's type structure.
+
+Once all parameters have been validated, only then will the type checker attempt
+to insert FUNCTION's symbol into the table.
+
 ## Casting
 In C, there aren't as many legal casts as I had previously assumed. You may not
 cast between struct types, and casting to and from unions is only allowed via an

@@ -54,7 +54,7 @@ int symbol_value_destroy(SymbolValue *symbol_value) {
 
 FILE *print_symbol_value(FILE *out, const SymbolValue *symval) {
   char type_buf[256];
-  type_to_string(symval->type, type_buf, 256);
+  type_to_string(&(symval->type), type_buf, 256);
   fprintf(out, "{ %lu, %lu, %lu } { %lu } %s", symval->loc.filenr,
           symval->loc.linenr, symval->loc.offset, symval->loc.blocknr,
           type_buf);

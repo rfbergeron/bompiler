@@ -13,8 +13,10 @@ enum attribute {
 };
 
 enum base_type {
+  TYPE_NONE,
   /* arithmetic types */
-  TYPE_INT,
+  TYPE_SIGNED,
+  TYPE_UNSIGNED,
   TYPE_FLOAT,
   TYPE_DOUBLE,
   /* compound types */
@@ -41,19 +43,16 @@ enum conversion_type {
 
 enum type_flag {
   TYPE_FLAG_NONE = 0,
-  /* signedness */
-  TYPE_FLAG_SIGNED = 1 << 0,
-  TYPE_FLAG_UNSIGNED = 1 << 1,
   /* storage class */
-  TYPE_FLAG_REGISTER = 1 << 2,
-  TYPE_FLAG_STATIC = 1 << 3,
-  TYPE_FLAG_EXTERN = 1 << 4,
-  TYPE_FLAG_AUTO = 1 << 5,
+  TYPE_FLAG_REGISTER = 1 << 0,
+  TYPE_FLAG_STATIC = 1 << 1,
+  TYPE_FLAG_EXTERN = 1 << 2,
+  TYPE_FLAG_AUTO = 1 << 2,
   /* qualifiers */
-  TYPE_FLAG_CONST = 1 << 6,
-  TYPE_FLAG_VOLATILE = 1 << 7,
+  TYPE_FLAG_CONST = 1 << 4,
+  TYPE_FLAG_VOLATILE = 1 << 5,
   /* function only */
-  TYPE_FLAG_INLINE = 1 << 8
+  TYPE_FLAG_INLINE = 1 << 6
 };
 
 typedef struct typespec {
@@ -86,7 +85,7 @@ typedef struct location {
 
 int attributes_to_string(const unsigned int attributes, char *buf,
                          size_t bufsize);
-int type_to_string(struct typespec type, char *buf, size_t bufsize);
+int type_to_string(const TypeSpec *type, char *buf, size_t bufsize);
 
 /* NOTE: it may be easier to give all structures and unions 8-byte alignment
  * requirements to make conversions require zero extra code generation
@@ -97,26 +96,9 @@ extern const size_t SIZEOF_INT, ALIGNOF_INT;
 extern const size_t SIZEOF_SHORT, ALIGNOF_SHORT;
 extern const size_t SIZEOF_CHAR, ALIGNOF_CHAR;
 
-extern const char STRING_ULONG[];
-extern const char STRING_SLONG[];
-extern const char STRING_UINT[];
-extern const char STRING_SINT[];
-extern const char STRING_USHORT[];
-extern const char STRING_SSHORT[];
-extern const char STRING_UCHAR[];
-extern const char STRING_SCHAR[];
-
-extern const TypeSpec TYPE_ULONG;
-extern const TypeSpec TYPE_SLONG;
-extern const TypeSpec TYPE_UINT;
-extern const TypeSpec TYPE_SINT;
-extern const TypeSpec TYPE_USHORT;
-extern const TypeSpec TYPE_SSHORT;
-extern const TypeSpec TYPE_UCHAR;
-extern const TypeSpec TYPE_SCHAR;
-
-extern const TypeSpec TYPE_PTR;
-extern const TypeSpec TYPE_EMPTY;
+extern const TypeSpec SPEC_PTR;
+extern const TypeSpec SPEC_EMPTY;
+extern const TypeSpec SPEC_FUNCTION;
 
 extern const Location LOC_EMPTY;
 
