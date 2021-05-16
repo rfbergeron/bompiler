@@ -21,7 +21,7 @@
 
 /* tokens constructed by parser */
 %token TOK_ROOT TOK_BLOCK TOK_CALL TOK_CAST TOK_INDEX TOK_PARAM TOK_FUNCTION
-%token TOK_TYPE_ID
+%token TOK_TYPE_ID TOK_INT_SPEC
 /* tokens constructed by lexer */
 %token TOK_VOID TOK_INT TOK_SHORT TOK_LONG TOK_CHAR TOK_UNSIGNED TOK_SIGNED
 %token TOK_CONST TOK_VOLATILE TOK_RESTRICT
@@ -51,21 +51,23 @@ topdecl       : fndecl block                                                    
               ;
 fndecl        : declarator '(' param_list ')'                                     { $$ = parser_make_function($1, $2, $3); astree_destroy ($4); }
               ;
-vardecl       : declarator '=' expr                                               { $$ = astree_adopt($2, $1, $3, NULL); }
+vardecl       : declarator '=' expr                                               { $$ = astree_adopt($1, $3, NULL, NULL); astree_destroy($2); }
               | declarator                                                        { $$ = $1; }
               ;
 param_list    : %empty                                                            { $$ = NULL; }
               | TOK_VOID                                                          { $$ = NULL; astree_destroy($1); }
-              | declarator ','                                                    { $$ = $1; astree_destroy($2); }
               | param_list declarator                                             { $$ = astree_twin($1, $2); }
+              | param_list param                                                  { $$ = astree_twin($1, $2); }
               ;
-declarator    : type TOK_IDENT                                                    { astree_descend($2, $1); $$ = parser_make_type_id($1, $2, NULL); }
+param         : declarator ','                                                    { $$ = $1; astree_destroy($2); }
+              ;
+declarator    : type TOK_IDENT                                                    { $$ = parser_make_type_id($1, $2); }
               ;
 type          : TOK_VOID                                                          { $$ = $1; }
               | TOK_IDENT                                                         { $$ = $1; }
-              | typespec_list                                                     { $$ = $1; }
+              | typespec_list                                                     { $$ = parser_make_int_spec($1); }
               ;
-typespec_list : typespec_list typespec                                            { $$ = astree_descend($2, $1); } /* want last specifier to be on top */
+typespec_list : typespec_list typespec                                            { $$ = astree_twin($1, $2); }
               | typespec                                                          { $$ = $1; }
               ;
 typespec      : TOK_LONG                                                          { $$ = $1; }
@@ -85,6 +87,7 @@ stmt          : block                                                           
               | ifelse                                                            { $$ = $1; }
               | return                                                            { $$ = $1; }
               | expr ';'                                                          { $$ = $1; parser_cleanup (1, $2); }
+              | vardecl ';'                                                       { $$ = $1; parser_cleanup (1, $2); }
               | ';'                                                               { $$ = NULL; astree_destroy($1); }
               ;
 while         : TOK_WHILE '(' expr ')' stmt                                       { $$ = astree_adopt($1, $3, $5, NULL); parser_cleanup (2, $2, $4); }
@@ -110,7 +113,6 @@ expr          : expr '+' expr                                                   
               | '+' expr %prec TOK_POS                                            { $$ = astree_adopt_sym($1, TOK_POS, $2, NULL); }
               | '-' expr %prec TOK_NEG                                            { $$ = astree_adopt_sym($1, TOK_NEG, $2, NULL); }
               | '!' expr                                                          { $$ = astree_adopt($1, $2, NULL, NULL); }
-              | vardecl                                                           { $$ = $1; }
               | call                                                              { $$ = $1; }
               | cast_expr                                                         { $$ = $1; }
               ;
@@ -135,13 +137,14 @@ constant      : TOK_INTCON                                                      
 /* functions, structures, typeids, allocs can have their type
  * assigned when they adopt their children
  */
+
 /* *INDENT-ON* */
-const char *parser_get_tname (int symbol) {
-    return yytname[YYTRANSLATE (symbol)];
+    /* clang-format on */
+
+    const char *parser_get_tname(int symbol) {
+  return yytname[YYTRANSLATE(symbol)];
 }
 
-/* clang-format performs poorly on the above function for some reason */
-/* clang-format on */
 ASTree *parser_make_root() {
   DEBUGS('p', "Initializing AST, root token code: %d", TOK_ROOT);
   DEBUGS('p', "Translation of token code: %s", parser_get_tname(TOK_ROOT));
@@ -154,9 +157,9 @@ ASTree *parser_make_function(ASTree *type_id, ASTree *paren, ASTree *params) {
                       astree_adopt_sym(paren, TOK_PARAM, params, NULL), NULL);
 }
 
-ASTree *parser_make_type_id(ASTree *type, ASTree *id, ASTree *expr) {
+ASTree *parser_make_type_id(ASTree *type, ASTree *id) {
   ASTree *type_id = astree_init(TOK_TYPE_ID, type->loc, "_type_id");
-  return astree_adopt(type_id, type, id, expr);
+  return astree_adopt(type_id, type, id, NULL);
 }
 
 ASTree *parser_make_struct(ASTree *parent, ASTree *structure_id,
@@ -168,6 +171,11 @@ ASTree *parser_make_struct(ASTree *parent, ASTree *structure_id,
 ASTree *parser_make_cast(ASTree *type, ASTree *expr) {
   ASTree *cast = astree_init(TOK_CAST, type->loc, "_cast");
   return astree_adopt(cast, type, expr, NULL);
+}
+
+ASTree *parser_make_int_spec(ASTree *list) {
+  ASTree *int_spec = astree_init(TOK_INT_SPEC, list->loc, "_int_spec");
+  return astree_adopt(int_spec, list, NULL, NULL);
 }
 
 void parser_cleanup(size_t count, ...) {

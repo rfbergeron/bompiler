@@ -28,7 +28,7 @@ ASTree *astree_init(int symbol_, const Location location, const char *info) {
   ret->symbol = symbol_;
   ret->lexinfo = string_set_intern(info);
   ret->loc = location;
-  ret->type = TYPE_EMPTY;
+  ret->type = SPEC_EMPTY;
   ret->attributes = 0;
   /* casting function pointers is undefined behavior but it seems like most
    * compiler implementations make it work, and here we're just changing the
@@ -181,8 +181,8 @@ void astree_dump(ASTree *tree, FILE *out) {
 }
 
 void location_to_string(Location location, char *buffer, size_t size) {
-  int bufsize = snprintf(buffer, size, "{%lu, %lu, %lu}", location.filenr,
-                         location.linenr, location.offset) +
+  int bufsize = snprintf(buffer, size, "%lu, %lu, %lu, %lu", location.filenr,
+                         location.linenr, location.offset, location.blocknr) +
                 1;
 }
 
@@ -197,10 +197,12 @@ void astree_to_string(ASTree *tree, char *buffer, size_t size) {
   location_to_string(tree->loc, locstr, LINESIZE);
   char attrstr[LINESIZE];
   attributes_to_string(tree->attributes, attrstr, LINESIZE);
+  char typestr[LINESIZE];
+  type_to_string(&(tree->type), typestr, LINESIZE);
 
   if (strlen(tname) > 4) tname += 4;
-  snprintf(buffer, size, "%s \"%s\" %s {%lu} %s", tname, tree->lexinfo, locstr,
-           tree->loc.blocknr, attrstr);
+  snprintf(buffer, size, "%s \"%s\" {%s} {%s} {%s}", tname, tree->lexinfo,
+           locstr, typestr, attrstr);
 }
 
 void astree_print_tree(ASTree *tree, FILE *out, int depth) {

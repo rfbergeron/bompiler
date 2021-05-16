@@ -17,12 +17,10 @@ extern FILE *strfile;
 static int strncmp_wrapper(void *s1, void *s2) {
   int ret = 0;
   if (!s1 || !s2) {
-    DEBUGS('w', "Comparing strings '%s' and '%s': %i", s1, s2, ret);
     ret = s1 == s2;
   } else {
     ret = !strncmp(s1, s2, MAX_STRING_LENGTH);
   }
-  DEBUGS('w', "Comparing strings '%s' and '%s': %i", s1, s2, ret);
   return ret;
 }
 
@@ -34,10 +32,11 @@ void dump_string(void *string, void *unused, size_t i, size_t j) {
  * should be set.
  */
 void string_set_init_globals() {
-  int status = map_init(&string_set, starting_size, free, NULL, strncmp_wrapper);
+  int status =
+      map_init(&string_set, starting_size, free, NULL, strncmp_wrapper);
   if (status) {
-      fprintf(stderr, "fuck you\n");
-      abort();
+    fprintf(stderr, "fuck you\n");
+    abort();
   }
 }
 

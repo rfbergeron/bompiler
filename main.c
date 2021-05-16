@@ -114,13 +114,13 @@ int main(int argc, char **argv) {
    */
   int pipedes[2];
   status = pipe(pipedes);
-  if(status) {
+  if (status) {
     err(EXIT_FAILURE, NULL);
   }
 
   pid_t parent = fork();
 
-  if(parent) {
+  if (parent) {
     goto parent_run_parser;
   }
 

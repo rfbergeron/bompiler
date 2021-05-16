@@ -48,11 +48,12 @@ void lexer_free_globals();
 
 const char *parser_get_tname(int symbol);
 ASTree *parser_make_root();
-ASTree *parser_make_type_id(ASTree *type, ASTree *id, ASTree *expr);
+ASTree *parser_make_type_id(ASTree *type, ASTree *id);
 ASTree *parser_make_function(ASTree *type_id, ASTree *paren, ASTree *params);
 ASTree *parser_make_struct(ASTree *parent, ASTree *structure_id,
                            ASTree *structure_body);
 ASTree *parser_make_cast(ASTree *type, ASTree *expr);
+ASTree *parser_make_int_spec(ASTree *list);
 void parser_cleanup(size_t count, ...);
 
 #define YYSTYPE_IS_DECLARED

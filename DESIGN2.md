@@ -50,24 +50,23 @@ registers and instructions.
 A variable's/value's type will be represented by a list of type specifiers,
 which have a set of flags used to track modifications to the type.
 
-The symbol table will have a single format for entries, but the format will be
-used for two different purposes:
-1. Type identifiers for all types, including basic ones, will be stored in the
-   symbol table. When objects, functions, structures, and unions have their
-   symbol entries created, their values will be copied from these entries and
-   then modified.
-2. Symbols for objects, functions, structures, and unions will also be stored.
-   Unlike the entries for type identifiers, these symbols will have their
-   storage class, constness, arrayness and pointerness set.
+The symbol table will have two types of entries:
+    The first kind of entry is used for the identifiers (objects and functions)
+    themselves. They will hold a name that refers to a typeid.
 
-Base types will be stored in a very similar manner to typedefs, struct and union
-definitions. They will have a type entry with the appropriate attributes for the
-base type linked with the most verbose version of their name that the standard
-accepts. Other names for the type will be handled as though they were typedefs.
+    The second kind of entry stores information referring to typeids. Each of
+    these entries will have:
+    - The base type (integer, float, double, void, array, pointer, function, struct, typedef?)
+    - The signedness of the type?
+    - The width of the type
+    - The alignment of the type (differs from width for structs)
+    - A void pointer to additional data about the type (member info for structs,
+      length for arrays, parameters for functions, and nested type for arrays
+      and pointers)
 
 Pointers and arrays will have 8-byte alignment, since they are both represented
-internally as addresses in memory. (the members of arrays have their own
-respective alignment)
+internally as addresses in memory. (the members of arrays have their own respective
+alignment)
 
 Should vardecls have their type validated when the syntax tree is generated, or
 when type checking occurs?
@@ -82,22 +81,11 @@ the type might be more complicated, as we would have to account for some degree
 of nesting of arrays and pointers. The order in which the nesting occurs would
 matter.
 
+Perhaps the compiler should internally generate a typedef for "pointer to x",
+and store that in the symbol table. The entry would have to include a 
+
 Any function that compares types should make the assumption (or have a flag
-indicating) that the left operand is the destination of an assignment or cast
-operation
-
-It appears that the `auto`, `register`, and `volatile` storage class
-specifiers/type qualifiers can be ignored for the most part. `const` can also
-be ignored, though the compiler should attempt to enforce it. `static`,
-`extern`, and `typedef` must be respected.
-
-Because direct declarators and pointers can be nested and may be type qualified,
-maybe type qualifiers and specifiers should be stored in a different manner than
-just stacking them all together, to make differentiating between the qualifiers
-and the nested types easier. Type qualifiers, specifiers, and storage classes
-will be stored in a stack as the first child of a node. If the node has a nested
-type, such as arrays and pointers, then the tree for the nested type will be
-stored as the second child.
+indicating) that
 
 IMPORTANT: I think that the spec's statement that any type smaller than signed
 int can be promoted to signed int means that values are loaded as though they
@@ -170,6 +158,10 @@ parameters do not matter; only the types.
 As a consequence of this, the names of the parameters of a function prototype
 should be overwritten by the parameters used in the definition.
 
+Each new scope will need:
+- its own depth
+- a counter for the number 
+
 Each scope will have its own unique map used to track symbols. These maps will
 be pushed onto a stack in order of increasing depth, and new symbols will always
 be placed into the map on the top of the stack. The map at the bottom of the
@@ -198,39 +190,6 @@ Promotion rules are as follows:
 
 I will be refraining from implementing floating point arithmetic for now, so we
 only need to worry about integer width and signedness promotions.
-
-## Incomplete types
-Incomplete types would include:
-- structures whose members have not been defined
-- unions whose members have not bee defined
-- arrays with unspecified length
-- void
-
-Incomplete types may be used to declare pointers, functions, and typedefs. They
-only become an error when the size of the type becomes relevant (this is what
-I think is the real definition of an incomplete type; a type with unknown size).
-
-Specific situations when the above uses of incomplete types becomes an error:
-1. Struct and union member access
-2. Function calls and definitons (prototypes are fine)
-3. Dereferencing or doing pointer arithmetic with a pointer to an incomplete
-   type
-
-Incomplete types may not be used in expressions where the size of the operands
-matter, which is most types of expressions. Exceptions include:
-
-1. The `&` operator, since you are taking the address of the value and therefore
-   don't need to know its size
-2. The left/first operand of the comma operator, since it's value is considered
-   to be void and is discarded anyways. Note that this means that the expression
-   on the left hand side of the operator _evaluates_ to an incomplete type. If
-   the sub-expression attempts to use the incomplete type in an invalid way,
-   that would violate the standard, but the type's use in the comma operator
-   would not.
-3. Expressions using pointers to incomplete types are generally fine, except
-   for pointer arithmetic (e.g. array element access), since you would need to
-   know the size of the type to know at which byte the next array element
-   starts.
 
 ## Operations that will be identical during assembly generation
 Some operations map pretty well to assembly instructions:
