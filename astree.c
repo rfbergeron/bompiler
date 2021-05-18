@@ -47,11 +47,11 @@ ASTree *astree_init(int symbol_, const Location location, const char *info) {
     case '/':
     case '*':
     case '%':
+    case '<':
+    case '>':
     case TOK_EQ:
     case TOK_NE:
-    case TOK_LT:
     case TOK_LE:
-    case TOK_GT:
     case TOK_GE:
     case '!':
     case TOK_POS:
@@ -128,7 +128,7 @@ ASTree *astree_adopt(ASTree *parent, ASTree *child1, ASTree *child2,
 ASTree *astree_adopt_sym(ASTree *parent, int symbol_, ASTree *child1,
                          ASTree *child2) {
   parent->symbol = symbol_;
-  if (symbol_ == TOK_LT || symbol_ == TOK_GT) {
+  if (symbol_ == '<' || symbol_ == '>') {
     /* attributes.set((size_t)attr::INT); */
     /* attributes.set((size_t)attr::VREG); */
   } else if (symbol_ == TOK_INDEX) {
