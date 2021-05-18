@@ -35,6 +35,8 @@ const TypeSpec SPEC_EMPTY = {0,         0,       NULL, NULL, TYPE_FLAG_NONE,
                              TYPE_NONE, "_empty"};
 const TypeSpec SPEC_FUNCTION = {
     0, 0, NULL, NULL, TYPE_FLAG_NONE, TYPE_FUNCTION, "_function"};
+const TypeSpec SPEC_INT = {SIZEOF_INT,     ALIGNOF_INT, NULL,        NULL,
+                           TYPE_FLAG_NONE, TYPE_SIGNED, "signed int"};
 
 const Location LOC_EMPTY = {0, 0, 0, 0};
 

@@ -99,6 +99,7 @@ extern const size_t SIZEOF_CHAR, ALIGNOF_CHAR;
 extern const TypeSpec SPEC_PTR;
 extern const TypeSpec SPEC_EMPTY;
 extern const TypeSpec SPEC_FUNCTION;
+extern const TypeSpec SPEC_INT;
 
 extern const Location LOC_EMPTY;
 

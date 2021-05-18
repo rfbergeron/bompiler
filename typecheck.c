@@ -81,6 +81,7 @@ int validate_expr(ASTree *statement);
 int validate_stmt(ASTree *statement, int new_scope);
 int validate_assignment(ASTree *assignment);
 int validate_binop(ASTree *operator);
+int validate_cast(ASTree *cast);
 int validate_unop(ASTree *operator);
 int validate_equality(ASTree *operator);
 int validate_return(ASTree *loop);
@@ -192,7 +193,7 @@ int assign_type_id(ASTree *ident) {
   const char *id_str = ident->lexinfo;
   size_t id_str_len = strnlen(id_str, MAX_STRING_LENGTH);
   SymbolValue *symval = NULL;
-  int status = locate_symbol(id_str, id_str_len, &symval);
+  int in_current_scope = locate_symbol(id_str, id_str_len, &symval);
 
   if (symval) {
     DEBUGS('t', "Assigning %s a symbol", id_str);
@@ -217,6 +218,19 @@ int type_is_integer(struct typespec *type) {
 int type_is_int_or_ptr(struct typespec *type) {
   return (type->base == TYPE_SIGNED || type->base == TYPE_UNSIGNED ||
           type->base == TYPE_POINTER);
+}
+
+int type_is_comparable(TypeSpec *type) {
+  switch (type->base) {
+    case TYPE_SIGNED:
+    case TYPE_UNSIGNED:
+    case TYPE_POINTER:
+    case TYPE_FLOAT:
+    case TYPE_DOUBLE:
+      return 1;
+    default:
+      return 0;
+  }
 }
 
 /* Remember that this function is not directly called during arithmetic,
@@ -305,10 +319,13 @@ int types_compatible(void *arg1, void *arg2, unsigned int flags) {
  */
 int determine_promotion(ASTree *arg1, ASTree *arg2, struct typespec *out) {
   int status = 0;
-  struct typespec *type1 = &(arg1->type);
-  struct typespec *type2 = &(arg2->type);
+  const struct typespec *type1 = arg1 ? &(arg1->type) : NULL;
+  const struct typespec *type2 = arg2 ? &(arg2->type) : &SPEC_INT;
 
-  if (type1->base == TYPE_POINTER || type2->base == TYPE_POINTER) {
+  if (type1 == NULL) {
+    fprintf(stderr, "First argument not provided to promotion routine\n");
+    status = -1;
+  } else if (type1->base == TYPE_POINTER || type2->base == TYPE_POINTER) {
     /* promote to pointer if either operand is one */
     out->base = TYPE_POINTER;
     out->width = SIZEOF_LONG;
@@ -395,26 +412,30 @@ int validate_expr(ASTree *expression) {
     case TOK_NE:
       status = validate_equality(expression);
       break;
+    case TOK_OR:
+    case TOK_AND:
     case TOK_LE:
     case TOK_GE:
-    case TOK_GT:
-    case TOK_LT:
+    case '>':
+    case '<':
     case '+':
     case '-':
     case '*':
     case '/':
     case '%':
-      /* case '|':
-       * case '^':
-       * case '&':
-       * case TOK_SHL:
-       * case TOK_SHR: */
+    case '|':
+    case '^':
+    case '&':
+    case TOK_SHL:
+    case TOK_SHR:
       status = validate_binop(expression);
       break;
     case '!':
     case TOK_POS: /* promotion operator */
     case TOK_NEG:
-      /* case '~': */
+    case '~':
+    case TOK_INC:
+    case TOK_DEC:
       status = validate_unop(expression);
       break;
     case TOK_CALL:
@@ -446,6 +467,9 @@ int validate_expr(ASTree *expression) {
     case TOK_IDENT:
       DEBUGS('t', "bonk");
       status = assign_type_id(expression);
+      break;
+    case TOK_CAST:
+      status = validate_cast(expression);
       break;
     default:
       fprintf(stderr, "ERROR: UNEXPECTED TOKEN IN EXPRESSION: %s\n",
@@ -672,9 +696,10 @@ int validate_call(ASTree *call) {
 
       if (status != 0) return status;
       DEBUGS('t', "Comparing types");
-      status =
+      int compatibility =
           types_compatible(param, llist_get(params, i), ARG1_AST | ARG2_SMV);
-      if (status == TCHK_INCOMPATIBLE || status == TCHK_EXPLICIT_CAST) {
+      if (compatibility == TCHK_INCOMPATIBLE ||
+          compatibility == TCHK_EXPLICIT_CAST) {
         fprintf(stderr, "ERROR: incompatible type for argument: %s\n",
                 param->lexinfo);
         return -1;
@@ -700,16 +725,17 @@ int validate_assignment(ASTree *assignment) {
   status = validate_expr(src);
   if (status != 0) return status;
 
-  status = types_compatible(astree_first(assignment), astree_second(assignment),
-                            ARG1_AST | ARG2_AST);
-  if (status == TCHK_INCOMPATIBLE || status == TCHK_EXPLICIT_CAST) {
+  int compatibility = types_compatible(
+      astree_first(assignment), astree_second(assignment), ARG1_AST | ARG2_AST);
+  if (compatibility == TCHK_INCOMPATIBLE ||
+      compatibility == TCHK_EXPLICIT_CAST) {
     fprintf(stderr, "ERROR: Incompatible types for tokens: %s,%s %s,%s\n",
             parser_get_tname(astree_first(assignment)->symbol),
             astree_first(assignment)->lexinfo,
             parser_get_tname(astree_second(assignment)->symbol),
             astree_second(assignment)->lexinfo);
     status = -2;
-  } else if (status == TCHK_IMPLICIT_CAST) {
+  } else if (compatibility == TCHK_IMPLICIT_CAST) {
     insert_cast(assignment, 1, &(dest->type));
   } else if (!(astree_first(assignment)->attributes & ATTR_LVAL)) {
     fprintf(stderr, "ERROR: Destination is not an LVAL\n");
@@ -718,6 +744,46 @@ int validate_assignment(ASTree *assignment) {
   /* type is the type of the left operand */
   assignment->type = astree_second(assignment)->type;
   return status;
+}
+
+int validate_cast(ASTree *cast) {
+  ASTree *to_cast = astree_first(cast);
+  int compatibility = types_compatible(cast, to_cast, ARG1_AST | ARG2_AST);
+  if (compatibility == TCHK_INCOMPATIBLE)
+    return -1;
+  else
+    return 0;
+}
+
+int is_logical_op(ASTree *operator) {
+  switch (operator->symbol) {
+    case TOK_EQ:
+    case TOK_NE:
+    case TOK_LE:
+    case TOK_GE:
+    case TOK_AND:
+    case TOK_OR:
+    case '<':
+    case '>':
+    case '!':
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+int is_bitwise_op(ASTree *operator) {
+  switch (operator->symbol) {
+    case TOK_SHR:
+    case TOK_SHL:
+    case '|':
+    case '&':
+    case '^':
+    case '~':
+      return 1;
+    default:
+      return 0;
+  }
 }
 
 int validate_binop(ASTree *operator) {
@@ -730,14 +796,16 @@ int validate_binop(ASTree *operator) {
   status = validate_expr(right);
   if (status != 0) return status;
 
-  TypeSpec *promoted_type = &(operator->type);
-  status = determine_promotion(left, right, promoted_type);
+  TypeSpec promoted_type = SPEC_EMPTY;
+  status = determine_promotion(left, right, &promoted_type);
   if (status != 0) return status;
 
-  status = types_compatible(promoted_type, left, ARG1_TYPE | ARG2_AST);
-  if (status == CONV_IMPLICIT_CAST) {
-    insert_cast(operator, 0, promoted_type);
-  } else if (status == CONV_INCOMPATIBLE || status == CONV_EXPLICIT_CAST) {
+  int compatibility =
+      types_compatible(&promoted_type, left, ARG1_TYPE | ARG2_AST);
+  if (compatibility == CONV_IMPLICIT_CAST) {
+    insert_cast(operator, 0, &promoted_type);
+  } else if (compatibility == CONV_INCOMPATIBLE ||
+             compatibility == CONV_EXPLICIT_CAST) {
     /* should not happen but I am bad at programming so it would be worth
      * checking for
      */
@@ -745,15 +813,36 @@ int validate_binop(ASTree *operator) {
     abort();
   }
 
-  status = types_compatible(promoted_type, right, ARG1_TYPE | ARG2_AST);
-  if (status == CONV_IMPLICIT_CAST) {
-    insert_cast(operator, 1, promoted_type);
-  } else if (status == CONV_INCOMPATIBLE || status == CONV_EXPLICIT_CAST) {
+  compatibility = types_compatible(&promoted_type, right, ARG1_TYPE | ARG2_AST);
+  if (compatibility == CONV_IMPLICIT_CAST) {
+    insert_cast(operator, 1, &promoted_type);
+  } else if (compatibility == CONV_INCOMPATIBLE ||
+             compatibility == CONV_EXPLICIT_CAST) {
     /* should not happen but I am bad at programming so it would be worth
      * checking for
      */
     fprintf(stderr, "Promotion failed on right operand; aborting.");
     abort();
+  }
+
+  if (is_logical_op(operator)) {
+    if (!(type_is_comparable(&(left->type)) &&
+          type_is_comparable(&(right->type)))) {
+      fprintf(stderr,
+              "ERROR: '%s' arguments were not comparable\n", operator->lexinfo);
+      status = -1;
+    } else {
+      operator->type = SPEC_INT;
+    }
+  } else {
+    if (is_bitwise_op(operator) && !(type_is_int_or_ptr(&(left->type)) &&
+                                     type_is_int_or_ptr(&(right->type)))) {
+      fprintf(stderr,
+              "ERROR: '%s' arguments must be of type int\n", operator->lexinfo);
+      status = -1;
+    } else {
+      operator->type = promoted_type;
+    }
   }
 
   return status;
@@ -764,13 +853,30 @@ int validate_unop(ASTree *operator) {
   ASTree *operand = astree_first(operator);
   status = validate_expr(operand);
   if (status != 0) return status;
-  if (!type_is_int_or_ptr(&(operand->type))) {
-    fprintf(stderr,
-            "ERROR: '%s' argument must be of type int\n", operator->lexinfo);
-    status = -1;
+
+  if (is_logical_op(operator)) {
+    if (!type_is_comparable(&(operand->type))) {
+      fprintf(stderr,
+              "ERROR: '%s' argument must be comparable\n", operator->lexinfo);
+      status = -1;
+    } else {
+      operator->type = SPEC_INT;
+    }
   } else {
-    operator->type = operand->type;
+    if (is_bitwise_op(operator) && !type_is_int_or_ptr(&(operand->type))) {
+      fprintf(stderr, "ERROR: '%s' argument must be an int or pointer\n",
+                      operator->lexinfo);
+      status = -1;
+    } else if (operator->symbol ==
+               '+' && !type_is_arithmetic(&(operand->type))) {
+      fprintf(stderr, "ERROR: '%s' argument must be of arithmetic type\n",
+                      operator->lexinfo);
+      status = -1;
+    } else {
+      status = determine_promotion(operand, NULL, &(operator->type));
+    }
   }
+
   return status;
 }
 
@@ -784,9 +890,7 @@ int validate_equality(ASTree *operator) {
   status = validate_expr(right);
   if (status != 0) return status;
 
-  operator->type.base = TYPE_SIGNED;
-  operator->type.width = SIZEOF_INT;
-  operator->type.alignment = ALIGNOF_INT;
+  operator->type = SPEC_INT;
   /* comparison of types is limited to the following:
    * 1. between arithmetic types
    * 2. between pointers, which can be qualified, unqualified, incomplete,
@@ -798,10 +902,12 @@ int validate_equality(ASTree *operator) {
     TypeSpec promoted_type = SPEC_EMPTY;
     status = determine_promotion(left, right, &promoted_type);
     if (status) return status;
-    status = types_compatible(left, &promoted_type, ARG1_AST | ARG2_TYPE);
-    if (status == CONV_IMPLICIT_CAST) {
+    int compatibility =
+        types_compatible(left, &promoted_type, ARG1_AST | ARG2_TYPE);
+    if (compatibility == CONV_IMPLICIT_CAST) {
       insert_cast(operator, 0, &promoted_type);
-    } else if (status == CONV_INCOMPATIBLE || status == CONV_EXPLICIT_CAST) {
+    } else if (compatibility == CONV_INCOMPATIBLE ||
+               compatibility == CONV_EXPLICIT_CAST) {
       /* should not happen but I am bad at programming so it would be worth
        * checking for
        */
@@ -809,10 +915,12 @@ int validate_equality(ASTree *operator) {
       abort();
     }
 
-    status = types_compatible(right, &promoted_type, ARG1_AST | ARG2_TYPE);
-    if (status == CONV_IMPLICIT_CAST) {
+    compatibility =
+        types_compatible(right, &promoted_type, ARG1_AST | ARG2_TYPE);
+    if (compatibility == CONV_IMPLICIT_CAST) {
       insert_cast(operator, 1, &promoted_type);
-    } else if (status == CONV_INCOMPATIBLE || status == CONV_EXPLICIT_CAST) {
+    } else if (compatibility == CONV_INCOMPATIBLE ||
+               compatibility == CONV_EXPLICIT_CAST) {
       /* should not happen but I am bad at programming so it would be worth
        * checking for
        */
@@ -842,9 +950,10 @@ int validate_return(ASTree *ret) {
       status = validate_expr(astree_first(ret));
       if (status) return status;
       TypeSpec *return_type = current_function->type.nested;
-      status = types_compatible(return_type, astree_first(ret),
-                                ARG1_TYPE | ARG2_AST);
-      if (status == TCHK_INCOMPATIBLE || status == TCHK_EXPLICIT_CAST) {
+      int compatibility = types_compatible(return_type, astree_first(ret),
+                                           ARG1_TYPE | ARG2_AST);
+      if (compatibility == TCHK_INCOMPATIBLE ||
+          compatibility == TCHK_EXPLICIT_CAST) {
         fprintf(stderr, "ERROR: Incompatible return type\n");
         status = -1;
       } else {
@@ -898,8 +1007,8 @@ int make_structure_entry(ASTree *structure) {
   size_t structure_type_len = strnlen(structure_type, MAX_STRING_LENGTH);
   DEBUGS('t', "Defining structure type: %s", structure_type);
   SymbolValue *structure_value = NULL;
-  int status = locate_symbol((char *)structure_type, structure_type_len,
-                             &structure_value);
+  int status = 0;
+  locate_symbol((char *)structure_type, structure_type_len, &structure_value);
   if (structure_value) {
     /* TODO(Robert): allow duplicates if definition matches */
     fprintf(stderr, "ERROR: Duplicate definition of structure %s\n",
@@ -997,13 +1106,13 @@ int make_function_entry(ASTree *function) {
 
   const char *function_id = extract_ident(type_id);
   size_t function_id_len = strnlen(function_id, MAX_STRING_LENGTH);
-  SymbolValue *existing_entry = NULL;
   /* functions cannot be nested and so can only be declared at global scope,
    * and we've already pushed a new scope to the table for parameters, so
    * we just check the bottom of the stock directly
    */
-  int prototype = locate_symbol(function_id, function_id_len, &existing_entry);
-  if (prototype) {
+  SymbolValue *existing_entry =
+      map_get(llist_back(tables), (char *)function_id, function_id_len);
+  if (existing_entry) {
     if (types_compatible(existing_entry, ident, ARG1_SMV | ARG2_AST) ==
         TCHK_INCOMPATIBLE) {
       fprintf(stderr, "ERROR: redefinition of function: %s\n", function_id);
@@ -1063,12 +1172,20 @@ int make_object_entry(ASTree *object) {
     status = validate_type_id(object);
     if (status != 0) return status;
     if (llist_size(object->children) == 3) {
-      status = validate_expr(astree_third(object));
+      ASTree *init_value = astree_third(object);
+      status = validate_expr(init_value);
       if (status) return status;
-      if (types_compatible(astree_third(object), astree_second(object),
-                           ARG1_AST | ARG2_AST) == TCHK_INCOMPATIBLE) {
+      TypeSpec promoted_type = SPEC_EMPTY;
+      status = determine_promotion(identifier, init_value, &promoted_type);
+      if (status) return status;
+      int compatibility =
+          types_compatible(identifier, init_value, ARG1_AST | ARG2_AST);
+      if (compatibility == TCHK_INCOMPATIBLE ||
+          compatibility == TCHK_EXPLICIT_CAST) {
         fprintf(stderr, "ERROR: Incompatible type for object variable\n");
         status = -1;
+      } else if (compatibility == TCHK_IMPLICIT_CAST) {
+        insert_cast(object, 2, &promoted_type);
       }
     }
 
