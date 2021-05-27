@@ -25,10 +25,11 @@ static int strncmp_wrapper(void *s1, void *s2) {
 }
 
 void dump_string(void *string) {
-  size_t map_location[] = { -1, -1 };
-  map_find(&string_set, string, strnlen(string, MAX_STRING_LENGTH), map_location);
+  size_t map_location[] = {-1, -1};
+  map_find(&string_set, string, strnlen(string, MAX_STRING_LENGTH),
+           map_location);
   int result = fprintf(strfile, entry_format, map_location[0], map_location[1],
-          string, (char *)string);
+                       string, (char *)string);
 }
 
 /* the key and value will point to the same thing so only one of the destructors

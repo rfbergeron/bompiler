@@ -111,7 +111,7 @@ static int strncmp_wrapper(void *s1, void *s2) {
 
 static void symbol_table_destroy(void *table) {
   /* cleanup symbol values */
-  map_foreach_value(table, (void(*)(void*))symbol_value_destroy);
+  map_foreach_value(table, (void (*)(void *))symbol_value_destroy);
   /* destroy table, which frees symbol values */
   map_destroy(table);
 }
