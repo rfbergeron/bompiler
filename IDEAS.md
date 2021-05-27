@@ -51,22 +51,6 @@ are all considered to be separate things.
 As an aside, should labels be aware of their scope? I'm not sure if the type
 checker needs to be aware of scope when it comes to labels.
 
-## Type ids
-Currently, types besides structs are hard-coded attributes. It may be easier to
-incrementally add types if all types (including primitives) are stored in the
-'type_names' map.
-
-The 'attributes' enum would probably have to be expanded out to a full struct,
-with a bitset used to define attributes like 'lval' or 'vreg', while other type
-info would be stored as a pointer to an entry in the 'type_names' map.
-
-Entries in the 'type_names' map should then additionally include the size of the
-type, and, as they do now, the number and names of its member types.
-
-Storing type names like this might make determining whether types are compatible
-easier, since types that are synonymous on amd64 could store the same values,
-which would be valuable when comparing types.
-
 ## Comparing types
 The `types_comatible` function should return more than just an enum describing
 the compatibility of its arguments. It should return a struct that includes the
@@ -119,6 +103,36 @@ any flags that may not co-occur are set, the function errors.
 Afterwards, there will be a switch statement with a case corresponding to valid
 combinations of flags. The default case will result in an error.
 
+## How to evaluate types
+With only one token of lookahead, the parser cannot distinguish between an
+identifier that refers to a typedef'd type and an identifier that refers to an
+object when it occurs between parentheses.
+
+This may mean that the type checker will be responsible for determining whether
+such statements are valid. This would mean that the following construction would
+be legal:
+```
+cast_expr : pexpr_list expr
+          ;
+pexpr_list: pexpr_list pexpr
+          | pexpr
+          ;
+pexpr     : '(' expr ')'
+          ;
+```
+
+----------------------------------------------------------------
+Expressions may only occur directly next to each other if all of them,
+with the exception of the rightmost expression, are surrounded by parentheses.
+If this is the case, all but the rightmost expression are interpreted as being
+a part of a cast operator.
+
+`pexpr` must have its own rule in the grammar, and it will occur in both the
+rules for expressions and for casting. Expressions cannot normally occur
+immediately next to each other. The parser should be able to reduce an expression
+in parentheses to a pexpr, at which point it begins constructing the next
+nonterminal. If the next nonterminal is another pexpr, or a 
+
 ## Parsing function types
 Structure of a function definition in the syntax tree, as a reminder:
 - FUNCTION
@@ -154,22 +168,11 @@ extension. This leaves us with few casts which need consideration:
 - Casting between function pointer types. I may also allow casting functions to
   and from void pointers, even though that is not required by the standard.
 
-## Collapse type/variable names
-Instead of keeping the full declaration of a symbol in the syntax tree, it might
-be easier to remove all nodes except for the identifier and immediately store
-the symbol's information in the table. This way, no special handling of typeids
-would be required during the type checking process.
-
-Doing this for functions, structures and unions would be somewhat complicated,
-however. It would also require the inclusion of `typecheck.h` in `astree.c`,
-which may cause dependency issues.
-
 ## The arrow operator
 Accessing members of pointers to structs with the arrow operator is equivalent
 to dereferencing them and then accessing them with the dot operator, so maybe
 the parser should just add the necessary tree nodes to make those two operations
 look equivalent in the abstract syntax tree.
-and then accessing them with the dot operator, 
 
 ## Passing information during type checking
 The return values of the type checker's internal functions should be a flagset

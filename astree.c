@@ -20,23 +20,23 @@ ASTree *astree_second(ASTree *parent) { return llist_get(parent->children, 1); }
 
 ASTree *astree_third(ASTree *parent) { return llist_get(parent->children, 2); }
 
-ASTree *astree_init(int symbol_, const Location location, const char *info) {
+int astree_init(ASTree *tree, int symbol_, const Location location,
+        const char *info) {
   DEBUGS('t', "Initializing new astree node with code: %s, lexinfo: '%s'",
          parser_get_tname(symbol_), info);
-  ASTree *ret = malloc(sizeof(*ret));
 
-  ret->symbol = symbol_;
-  ret->lexinfo = string_set_intern(info);
-  ret->loc = location;
-  ret->type = SPEC_EMPTY;
-  ret->attributes = 0;
+  tree->symbol = symbol_;
+  tree->lexinfo = string_set_intern(info);
+  tree->loc = location;
+  tree->type = SPEC_EMPTY;
+  tree->attributes = 0;
   /* casting function pointers is undefined behavior but it seems like most
    * compiler implementations make it work, and here we're just changing the
    * type of a pointer argument */
-  ret->children = malloc(sizeof(*(ret->children)));
-  llist_init(ret->children, (void (*)(void *))(astree_destroy), NULL);
-  ret->next_sibling = NULL;
-  ret->firstborn = ret;
+  tree->children = malloc(sizeof(*(tree->children)));
+  llist_init(tree->children, (void (*)(void *))(astree_destroy), NULL);
+  tree->next_sibling = NULL;
+  tree->firstborn = tree;
 
   /* remember, attributes for nodes which adopt a different symbol
    * must have the appropriate attributes set in adopt_symbol
@@ -56,38 +56,40 @@ ASTree *astree_init(int symbol_, const Location location, const char *info) {
     case '!':
     case TOK_POS:
     case TOK_NEG:
-      /* ret->attributes[ATTR_INT] = 1; */
+      /* tree->attributes[ATTR_INT] = 1; */
     case '=':
     case TOK_CALL:
-      /* ret->attributes[ATTR_VREG] = 1; */
+      /* tree->attributes[ATTR_VREG] = 1; */
       break;
     case TOK_ARROW:
     case TOK_INDEX:
-      /* ret->attributes[ATTR_LVAL] = 1; */
-      /* ret->attributes[ATTR_VADDR] = 1; */
+      /* tree->attributes[ATTR_LVAL] = 1; */
+      /* tree->attributes[ATTR_VADDR] = 1; */
       break;
     case TOK_INTCON:
     case TOK_CHARCON:
-      /* ret->attributes[ATTR_CONST] = 1; */
-      /* ret->attributes[ATTR_INT] = 1; */
+      /* tree->attributes[ATTR_CONST] = 1; */
+      /* tree->attributes[ATTR_INT] = 1; */
       break;
     case TOK_STRINGCON:
-      /* ret->attributes[ATTR_CONST] = 1; */
-      /* ret->attributes[ATTR_STRING] = 1; */
+      /* tree->attributes[ATTR_CONST] = 1; */
+      /* tree->attributes[ATTR_STRING] = 1; */
       break;
   }
-  return ret;
+
+  return 0;
 }
 
-void astree_destroy(ASTree *astree) {
-  if (astree == NULL) return;
+int astree_destroy(ASTree *astree) {
+  if (astree == NULL) return 1;
   DEBUGS('t', "Freeing an astree with sym %d, %s.", astree->symbol,
          parser_get_tname(astree->symbol));
   llist_destroy(astree->children);
   if (yydebug) {
     /* print tree contents to stderr */
   }
-  free(astree);
+
+  return 0;
 }
 
 ASTree *astree_adopt(ASTree *parent, ASTree *child1, ASTree *child2,

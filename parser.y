@@ -47,8 +47,11 @@
 %left TOK_SHR TOK_SHL
 %left '+' '-'
 %left '*' '/' '%'
-/*%right PREC_PREFIX TOK_POS TOK_NEG '!' '~' TOK_CAST PREC_DEREF PREC_ADDROF */
+//%right PREC_PREFIX TOK_POS TOK_NEG '!' '~' TOK_CAST PREC_DEREF PREC_ADDROF
+%right TOK_CAST PREC_PREFIX
 /*%left PREC_POSTFIX TOK_CALL TOK_ARROW '.' TOK_INDEX */
+%right PREC_POSTFIX
+
 /* precedence of TOK_ELSE doesn't matter because it doesn't co-occur with operators, but it does need to be right-associative */
 %right TOK_ELSE
 
@@ -125,22 +128,20 @@ expr          : expr '+' expr                                                   
               | expr TOK_SHR expr                                                 { $$ = astree_adopt($2, $1, $3, NULL); }
               | expr TOK_SHL expr                                                 { $$ = astree_adopt($2, $1, $3, NULL); }
               | expr '=' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
-              | cast_expr                                                         { $$ = $1; }
-              ;
-cast_expr     : unary_expr                                                        { $$ = $1; }
-              | '(' type       ')' cast_expr                                      { $$ = parser_make_cast($2, $4); parser_cleanup(2, $1, $3); }
+              | unary_expr                                                        { $$ = $1; }
               ;
 unary_expr    : postfix_expr                                                      { $$ = $1; }
-              | TOK_INC unary_expr                                                { $$ = astree_adopt($1, $2, NULL, NULL); }
-              | TOK_DEC unary_expr                                                { $$ = astree_adopt($1, $2, NULL, NULL); }
-              | '!' cast_expr                                                     { $$ = astree_adopt($1, $2, NULL, NULL); }
-              | '~' cast_expr                                                     { $$ = astree_adopt($1, $2, NULL, NULL); }
-              | '+' cast_expr                                                     { $$ = astree_adopt_sym($1, TOK_POS, $2, NULL); }
-              | '-' cast_expr                                                     { $$ = astree_adopt_sym($1, TOK_NEG, $2, NULL); }
+              | TOK_INC unary_expr %prec PREC_PREFIX                              { $$ = astree_adopt($1, $2, NULL, NULL); }
+              | TOK_DEC unary_expr %prec PREC_PREFIX                              { $$ = astree_adopt($1, $2, NULL, NULL); }
+              | '!' unary_expr                                                    { $$ = astree_adopt($1, $2, NULL, NULL); }
+              | '~' unary_expr                                                    { $$ = astree_adopt($1, $2, NULL, NULL); }
+              | '+' unary_expr %prec TOK_CAST                                     { $$ = astree_adopt_sym($1, TOK_POS, $2, NULL); }
+              | '-' unary_expr %prec TOK_CAST                                     { $$ = astree_adopt_sym($1, TOK_NEG, $2, NULL); }
+              | paren_toks unary_expr %prec TOK_CAST                              { $$ = parser_make_cast($1, $2); }
               ;
 postfix_expr  : primary_expr                                                      { $$ = $1; }
-              | primary_expr TOK_INC                                              { $$ = astree_adopt($2, $1, NULL, NULL); }
-              | primary_expr TOK_DEC                                              { $$ = astree_adopt($2, $1, NULL, NULL); }
+              | primary_expr TOK_INC %prec PREC_POSTFIX                           { $$ = astree_adopt($2, $1, NULL, NULL); }
+              | primary_expr TOK_DEC %prec PREC_POSTFIX                           { $$ = astree_adopt($2, $1, NULL, NULL); }
               | primary_expr '(' arg_list ')'                                     { $$ = astree_adopt_sym($2, TOK_CALL, $1, $3); parser_cleanup (1, $4); }
               ;
 arg_list      : %empty                                                            { $$ = NULL; }
@@ -149,7 +150,10 @@ arg_list      : %empty                                                          
               ;
 primary_expr  : TOK_IDENT                                                         { $$ = $1; }
               | constant                                                          { $$ = $1; }
-              | '(' expr ')'                                                      { $$ = $2; parser_cleanup(2, $1, $3); }
+              | paren_toks   %prec TOK_CAST                                       { $$ = $1; }
+              ;
+paren_toks    : '(' expr ')'   %prec TOK_CAST                                     { $$ = $2; parser_cleanup(2, $1, $3); }
+              | '(' type ')'   %prec TOK_CAST                                     { $$ = $2; parser_cleanup(2, $1, $3); }
               ;
 type          : TOK_VOID                                                          { $$ = $1;}
               | typespec_list                                                     { $$ = parser_make_int_spec($1); }
@@ -174,17 +178,21 @@ constant      : TOK_INTCON                                                      
 ASTree *parser_make_root() {
   DEBUGS('p', "Initializing AST, root token code: %d", TOK_ROOT);
   DEBUGS('p', "Translation of token code: %s", parser_get_tname(TOK_ROOT));
-  return astree_init(TOK_ROOT, (Location){lexer_get_filenr(), 0, 0}, "_root");
+  ASTree *root = malloc(sizeof(*root));
+  astree_init(root, TOK_ROOT, (Location){lexer_get_filenr(), 0, 0}, "_root");
+  return root;
 }
 
 ASTree *parser_make_function(ASTree *type_id, ASTree *paren, ASTree *params) {
-  ASTree *function = astree_init(TOK_FUNCTION, type_id->loc, "_function");
+  ASTree *function = malloc(sizeof(*function));
+  astree_init(function, TOK_FUNCTION, type_id->loc, "_function");
   return astree_adopt(function, type_id,
                       astree_adopt_sym(paren, TOK_PARAM, params, NULL), NULL);
 }
 
 ASTree *parser_make_type_id(ASTree *type, ASTree *id) {
-  ASTree *type_id = astree_init(TOK_TYPE_ID, type->loc, "_type_id");
+  ASTree *type_id = malloc(sizeof(*type_id));
+  astree_init(type_id, TOK_TYPE_ID, type->loc, "_type_id");
   return astree_adopt(type_id, type, id, NULL);
 }
 
@@ -200,12 +208,14 @@ ASTree *parser_make_struct(ASTree *parent, ASTree *structure_id,
  * TOK_IDENT is all that occurs between the parentheses.
  */
 ASTree *parser_make_cast(ASTree *type, ASTree *expr) {
-  ASTree *cast = astree_init(TOK_CAST, type->loc, "_cast");
+  ASTree *cast = malloc(sizeof(*cast));
+  astree_init(cast, TOK_CAST, type->loc, "_cast");
   return astree_adopt(cast, type, expr, NULL);
 }
 
 ASTree *parser_make_int_spec(ASTree *list) {
-  ASTree *int_spec = astree_init(TOK_INT_SPEC, list->loc, "_int_spec");
+  ASTree *int_spec = malloc(sizeof(*int_spec));
+  astree_init(int_spec, TOK_INT_SPEC, list->loc, "_int_spec");
   return astree_adopt(int_spec, list, NULL, NULL);
 }
 
