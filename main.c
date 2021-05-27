@@ -121,33 +121,29 @@ int main(int argc, char **argv) {
   pid_t parent = fork();
 
   if (parent) {
-    goto parent_run_parser;
-  }
-
-child_run_preprocessor:
-  /* child process procedures*/
-  /* duplicate the write end of the pipe to fd 1, or stdout */
-  dup2(pipedes[1], STDOUT_FILENO);
-  /* close extra fds */
-  close(pipedes[0]);
-  close(pipedes[1]);
-  /* execute the preprocessor */
-  execlp("/usr/bin/cpp", "cpp", oc_name, NULL);
-  /* error if the preprocessor was unable to run */
-  err(EXIT_FAILURE, "Failed to lay pipe\n");
-
-parent_run_parser:
-  /* parent process procedures */
-  /* duplicate the read end of the pipe to stdin */
-  dup2(pipedes[0], STDIN_FILENO);
-  /* close extra fds */
-  close(pipedes[0]);
-  close(pipedes[1]);
-  /* set yyin to standard input, which should be the read end of the pipe */
-  yyin = stdin;
-  DEBUGS('m', "value of yyin: %p", yyin);
-  if (yyin == NULL) {
-    err(1, "%s", cppcmd);
+    /* parent process procedures */
+    /* duplicate the read end of the pipe to stdin */
+    dup2(pipedes[0], STDIN_FILENO);
+    /* close extra fds */
+    close(pipedes[0]);
+    close(pipedes[1]);
+    /* set yyin to standard input, which should be the read end of the pipe */
+    yyin = stdin;
+    DEBUGS('m', "value of yyin: %p", yyin);
+    if (yyin == NULL) {
+      err(1, "%s", cppcmd);
+    }
+  } else {
+    /* child process procedures*/
+    /* duplicate the write end of the pipe to fd 1, or stdout */
+    dup2(pipedes[1], STDOUT_FILENO);
+    /* close extra fds */
+    close(pipedes[0]);
+    close(pipedes[1]);
+    /* execute the preprocessor; if successful execution should stop here */
+    execlp("/usr/bin/cpp", "cpp", oc_name, NULL);
+    /* error if the preprocessor was unable to run */
+    err(EXIT_FAILURE, "Failed to lay pipe\n");
   }
 
   DEBUGS('m', "Opening output files");
@@ -167,6 +163,7 @@ parent_run_parser:
   if (symfile == NULL) {
     err(1, "%s", symname);
   }
+
   /* remember to initialize certain things, like the string table */
   string_set_init_globals();
   lexer_init_globals();

@@ -22,8 +22,9 @@ struct ASTree {
 
 void location_print(FILE *out, const Location location_);
 
-ASTree *astree_init(int symbol_, const Location location, const char *lexinfo);
-void astree_destroy(ASTree *tree);
+int astree_init(ASTree *tree, int symbol_, const Location location,
+        const char *lexinfo);
+int astree_destroy(ASTree *tree);
 ASTree *astree_adopt(ASTree *parent, ASTree *child1, ASTree *child2,
                      ASTree *child3);
 ASTree *astree_adopt_sym(ASTree *parent, int symbol, ASTree *child1,

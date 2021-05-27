@@ -3,7 +3,7 @@
 #include "badlib/badllist.h"
 #include "stdio.h"
 #include "string.h"
-#include "symtable.h"
+#include "symval.h"
 
 struct conversion_entry {
   enum base_type from;

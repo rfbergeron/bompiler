@@ -10,7 +10,7 @@
 #include "math.h"
 #include "simplestack.h"
 #include "string.h"
-#include "symtable.h"
+#include "symval.h"
 
 DECLARE_STACK(nrstack, size_t);
 
@@ -109,14 +109,9 @@ static int strncmp_wrapper(void *s1, void *s2) {
   return ret;
 }
 
-static void symbol_value_destroy_wrapper(void *unused, void *symval,
-                                         size_t unused2, size_t unused3) {
-  symbol_value_destroy(symval);
-}
-
-static void symbol_table_destroy(void *table, size_t unused) {
+static void symbol_table_destroy(void *table) {
   /* cleanup symbol values */
-  map_foreach(table, symbol_value_destroy_wrapper);
+  map_foreach_value(table, (void(*)(void*))symbol_value_destroy);
   /* destroy table, which frees symbol values */
   map_destroy(table);
 }
@@ -182,8 +177,14 @@ int locate_symbol(const char *ident, size_t ident_len, SymbolValue **out) {
 }
 
 void insert_cast(ASTree *tree, size_t index, struct typespec *type) {
+  /* since the linked list has a destructor defined for elements, we can't just
+   * use llist_get and llist_delete here, since that will call astree_destroy
+   * on the node. Instead we call extract, which removes the element from the
+   * list and returns the value
+   */
   ASTree *to_cast = llist_extract(tree->children, index);
-  ASTree *cast = astree_init(TOK_CAST, to_cast->loc, "_cast");
+  ASTree *cast = malloc(sizeof(*cast));
+  astree_init(cast, TOK_CAST, to_cast->loc, "_cast");
   cast->type = *type;
   llist_insert(tree->children, astree_adopt(cast, to_cast, NULL, NULL), index);
 }
