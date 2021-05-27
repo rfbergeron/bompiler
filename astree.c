@@ -21,7 +21,7 @@ ASTree *astree_second(ASTree *parent) { return llist_get(parent->children, 1); }
 ASTree *astree_third(ASTree *parent) { return llist_get(parent->children, 2); }
 
 int astree_init(ASTree *tree, int symbol_, const Location location,
-        const char *info) {
+                const char *info) {
   DEBUGS('t', "Initializing new astree node with code: %s, lexinfo: '%s'",
          parser_get_tname(symbol_), info);
 

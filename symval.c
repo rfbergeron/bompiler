@@ -24,7 +24,7 @@ int symbol_value_destroy(SymbolValue *symbol_value) {
   if (symbol_value->type.base == TYPE_STRUCT) {
     DEBUGS('t', "destroying struct member entries");
     map_foreach_value(symbol_value->type.data.members,
-            (void(*)(void*))symbol_value_destroy);
+                      (void (*)(void *))symbol_value_destroy);
     map_destroy(symbol_value->type.data.members);
   } else if (symbol_value->type.base == TYPE_FUNCTION) {
     DEBUGS('t', "destroying function parameter entries");
