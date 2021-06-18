@@ -748,7 +748,22 @@ int validate_assignment(ASTree *assignment) {
 }
 
 int validate_cast(ASTree *cast) {
-  ASTree *to_cast = astree_first(cast);
+  ASTree *to_cast = NULL;
+  int status = 0;
+
+  if (llist_size(cast->children) > 1) {
+    ASTree *cast_spec = astree_first(cast);
+    status = validate_type(cast_spec, &(cast->type));
+    if (status) return status;
+
+    to_cast = astree_second(cast);
+  } else {
+    /* implicit cast/promotion; no type specifiers */
+    to_cast = astree_first(cast);
+  }
+
+  status = validate_expr(to_cast);
+  if (status) return status;
   int compatibility = types_compatible(cast, to_cast, ARG1_AST | ARG2_AST);
   if (compatibility == TCHK_INCOMPATIBLE)
     return -1;
@@ -835,15 +850,13 @@ int validate_binop(ASTree *operator) {
     } else {
       operator->type = SPEC_INT;
     }
+  } else if (is_bitwise_op(operator) && !(type_is_int_or_ptr(&(left->type)) &&
+                                          type_is_int_or_ptr(&(right->type)))) {
+    fprintf(stderr,
+            "ERROR: '%s' arguments must be of type int\n", operator->lexinfo);
+    status = -1;
   } else {
-    if (is_bitwise_op(operator) && !(type_is_int_or_ptr(&(left->type)) &&
-                                     type_is_int_or_ptr(&(right->type)))) {
-      fprintf(stderr,
-              "ERROR: '%s' arguments must be of type int\n", operator->lexinfo);
-      status = -1;
-    } else {
-      operator->type = promoted_type;
-    }
+    operator->type = promoted_type;
   }
 
   return status;
