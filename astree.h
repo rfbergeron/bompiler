@@ -7,15 +7,15 @@
 #include "debug.h"
 
 typedef struct astree {
-  LinkedList *children;     /* children of this n-way node */
-  struct astree *next_sibling;     /* for adopting long lists of siblings */
-  struct astree *firstborn;        /* head of the list of siblings */
-  Location loc;             /* source location */
-  int symbol;               /* token code */
-  unsigned int attributes;  /* node-specific attributes */
-  struct typespec type;     /* type info */
-  const char *lexinfo;      /* lexical information */
-  Map *symbol_table;        /* symbol table for scope, if applicable */
+  LinkedList *children;        /* children of this n-way node */
+  struct astree *next_sibling; /* for adopting long lists of siblings */
+  struct astree *firstborn;    /* head of the list of siblings */
+  Location loc;                /* source location */
+  int symbol;                  /* token code */
+  unsigned int attributes;     /* node-specific attributes */
+  struct typespec type;        /* type info */
+  const char *lexinfo;         /* lexical information */
+  Map *symbol_table;           /* symbol table for scope, if applicable */
 } ASTree;
 
 void location_print(FILE *out, const Location location_);
