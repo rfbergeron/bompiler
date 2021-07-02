@@ -11,53 +11,8 @@
 #include "simplestack.h"
 #include "string.h"
 #include "symval.h"
+#include "stdint.h"
 
-DECLARE_STACK(nrstack, size_t);
-
-/* the 'stack' of tables */
-struct llist *tables;
-/* store string constants for assembly generation */
-struct llist *string_constants;
-/*
- * used to store function names; required to handle nested functions and to
- * verify that the type of a return statement matches that of the function it
- * is in
- */
-SymbolValue *current_function = NULL;
-/*
- * used to store sequence numbers of declarations in nested blocks, including
- * compound statements, functions, if, do, while, and for
- */
-struct nrstack sequence_nrs = {NULL, 0, 0};
-/*
- * used to count the number of sub-blocks in a given block, or, when at global
- * scope, the number of function, union, and struct definitions/prototypes
- *
- * the 'size' member can be used to determine the depth of blocks currently
- * being counted
- */
-struct nrstack block_nrs = {NULL, 0, 0};
-/*
- * Function_symbols will have a dummy value on top representing global scope.
- * This way, all three of the above stacks will always have at least one value
- * for the duration of type checking, and will always have the same number of
- * items on the stack.
- *
- * Maybe the three values should be combined into a single structure and stack,
- * to make managing them simpler.
- */
-static const size_t MAX_STRING_LENGTH = 31;
-static const size_t DEFAULT_MAP_SIZE = 100;
-enum type_checker_action {
-  TCHK_COMPATIBLE,
-  TCHK_IMPLICIT_CAST,
-  TCHK_EXPLICIT_CAST,
-  TCHK_INCOMPATIBLE,
-  TCHK_PROMOTE_LEFT,
-  TCHK_PROMOTE_RIGHT,
-  TCHK_PROMOTE_BOTH,
-  TCHK_E_NO_FLAGS
-};
 #define ARG1_AST (1 << 0)
 #define ARG1_SMV (1 << 1)
 #define ARG1_TYPE (1 << 2)
@@ -71,6 +26,35 @@ enum type_checker_action {
 #define IFLAG_LONG (1 << 3)
 #define IFLAG_SIGNED (1 << 4)
 #define IFLAG_UNSIGNED (1 << 5)
+
+DECLARE_STACK(nrstack, size_t);
+
+enum type_checker_action {
+  TCHK_COMPATIBLE,
+  TCHK_IMPLICIT_CAST,
+  TCHK_EXPLICIT_CAST,
+  TCHK_INCOMPATIBLE,
+  TCHK_PROMOTE_LEFT,
+  TCHK_PROMOTE_RIGHT,
+  TCHK_PROMOTE_BOTH,
+  TCHK_E_NO_FLAGS
+};
+
+static SymbolValue *current_function = NULL;
+/*
+ * used to store sequence numbers of declarations in nested blocks, including
+ * compound statements, functions, if, do, while, and for
+ */
+static struct nrstack sequence_nrs = {NULL, 0, 0};
+/*
+ * used to count the number of sub-blocks in a given block, or, when at global
+ * scope, the number of function, union, and struct definitions/prototypes
+ *
+ * the 'size' member can be used to determine the depth of blocks currently
+ * being counted
+ */
+static struct nrstack block_nrs = {NULL, 0, 0};
+static const size_t MAX_STRING_LENGTH = 31;
 
 /* for traversing the syntax tree */
 int validate_intcon(ASTree *intcon);
@@ -163,17 +147,6 @@ void exit_scope() {
   llist_pop_front(tables);
   nrstack_pop(&block_nrs);
   nrstack_replace(&block_nrs, nrstack_top(&block_nrs) + 1);
-}
-
-int locate_symbol(const char *ident, size_t ident_len, SymbolValue **out) {
-  size_t i;
-  for (i = 0; i < llist_size(tables); ++i) {
-    struct map *current_table = llist_get(tables, i);
-    *out = map_get(current_table, (char *)ident, ident_len);
-    if (*out) break;
-  }
-  /* true if the top of the stack (current scope) contains the symbol */
-  return !i;
 }
 
 void insert_cast(ASTree *tree, size_t index, struct typespec *type) {
@@ -329,13 +302,13 @@ int determine_promotion(ASTree *arg1, ASTree *arg2, struct typespec *out) {
   } else if (type1->base == TYPE_POINTER || type2->base == TYPE_POINTER) {
     /* promote to pointer if either operand is one */
     out->base = TYPE_POINTER;
-    out->width = SIZEOF_LONG;
-    out->width = ALIGNOF_LONG;
-  } else if (type1->width < SIZEOF_INT && type2->width < SIZEOF_INT) {
+    out->width = X64_SIZEOF_LONG;
+    out->width = X64_ALIGNOF_LONG;
+  } else if (type1->width < X64_SIZEOF_INT && type2->width < X64_SIZEOF_INT) {
     /* promote to signed int if both operands could be represented as one */
     out->base = TYPE_SIGNED;
-    out->width = SIZEOF_INT;
-    out->alignment = ALIGNOF_INT;
+    out->width = X64_SIZEOF_INT;
+    out->alignment = X64_ALIGNOF_INT;
   } else if (type1->width > type2->width) {
     /* promote to wider type; disregard signedness of type2 */
     out->base = type1->base;
@@ -495,25 +468,25 @@ int validate_intcon(ASTree *intcon) {
       /* error: constant too large */
     } else {
       intcon->type.base = TYPE_UNSIGNED;
-      intcon->type.width = SIZEOF_LONG;
-      intcon->type.alignment = ALIGNOF_LONG;
+      intcon->type.width = X64_SIZEOF_LONG;
+      intcon->type.alignment = X64_ALIGNOF_LONG;
     }
   } else if (signed_value > INT8_MIN && signed_value < INT8_MAX) {
     intcon->type.base = TYPE_SIGNED;
-    intcon->type.width = SIZEOF_CHAR;
-    intcon->type.alignment = ALIGNOF_CHAR;
+    intcon->type.width = X64_SIZEOF_CHAR;
+    intcon->type.alignment = X64_ALIGNOF_CHAR;
   } else if (signed_value > INT16_MIN && signed_value < INT16_MAX) {
     intcon->type.base = TYPE_SIGNED;
-    intcon->type.width = SIZEOF_SHORT;
-    intcon->type.alignment = ALIGNOF_SHORT;
+    intcon->type.width = X64_SIZEOF_SHORT;
+    intcon->type.alignment = X64_ALIGNOF_SHORT;
   } else if (signed_value > INT32_MIN && signed_value < INT32_MAX) {
     intcon->type.base = TYPE_SIGNED;
-    intcon->type.width = SIZEOF_INT;
-    intcon->type.alignment = ALIGNOF_INT;
+    intcon->type.width = X64_SIZEOF_INT;
+    intcon->type.alignment = X64_ALIGNOF_INT;
   } else {
     intcon->type.base = TYPE_SIGNED;
-    intcon->type.width = SIZEOF_LONG;
-    intcon->type.alignment = ALIGNOF_LONG;
+    intcon->type.width = X64_SIZEOF_LONG;
+    intcon->type.alignment = X64_ALIGNOF_LONG;
   }
 
   return status;
@@ -612,8 +585,8 @@ int validate_int_spec(ASTree *spec_list, TypeSpec *out) {
   }
   if (!(out->alignment || out->width)) {
     /* set width and alignment if necessary */
-    out->alignment = ALIGNOF_INT;
-    out->width = SIZEOF_INT;
+    out->alignment = X64_ALIGNOF_INT;
+    out->width = X64_SIZEOF_INT;
   }
   return status;
 }
@@ -862,6 +835,9 @@ int validate_binop(ASTree *operator) {
   return status;
 }
 
+/* TODO(Robert): postfix increment/decrement and promotion operators should get
+ * their own token codes to make assembly generation easier.
+ */
 int validate_unop(ASTree *operator) {
   int status = 0;
   ASTree *operand = astree_first(operator);
@@ -1074,6 +1050,7 @@ int nest_type(ASTree *ident, const TypeSpec *to_copy) {
   return 0;
 }
 
+/* TODO(Robert): some of this should be put into separate functions (parameters?) */
 int make_function_entry(ASTree *function) {
   int status = 0;
 
@@ -1248,7 +1225,7 @@ void type_checker_init_globals() {
   map_init(file_scope, DEFAULT_MAP_SIZE, NULL, free, strncmp_wrapper);
   llist_push_front(tables, file_scope);
 
-  /* insert integer types into the global table */
+  /* TODO(Robert): insert integer types into the global table? */
 }
 
 void type_checker_free_globals() {

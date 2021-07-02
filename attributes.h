@@ -2,14 +2,27 @@
 #define __ATTRIBUTES_H__
 #include "stdio.h"
 
+#define X64_SIZEOF_LONG (size_t) 8
+#define X64_ALIGNOF_LONG (size_t) 8
+#define X64_SIZEOF_INT (size_t) 4
+#define X64_ALIGNOF_INT (size_t) 4
+#define X64_SIZEOF_SHORT (size_t) 2
+#define X64_ALIGNOF_SHORT (size_t) 2
+#define X64_SIZEOF_CHAR (size_t) 1
+#define X64_ALIGNOF_CHAR (size_t) 1
+
 /* attributes correspond to array indices in the order they are listed here */
+/* the following operations resolve to an lvalue:
+ * - identifiers
+ * - the result of the arrow operator
+ * - the result of the dot operator
+ * - the result of the dereference operator
+ * - the result of the array indexing operator
+ */
 enum attribute {
-  ATTR_VREG = 1 << 0,
-  ATTR_LVAL = 1 << 1,
-  ATTR_RVAL = 1 << 2,
-  ATTR_VADDR = 1 << 3,
-  ATTR_CAST = 1 << 4,
-  ATTR_CONST = 1 << 5,
+  ATTR_VREG = 1 << 0,       /* does this node require a virtual register */
+  ATTR_LVAL = 1 << 1,       /* does this node refer to an assignable location */
+  ATTR_CONSTEXPR = 1 << 2,  /* does this node refer to a compile-time constant */
 };
 
 enum base_type {
@@ -86,15 +99,6 @@ typedef struct location {
 int attributes_to_string(const unsigned int attributes, char *buf,
                          size_t bufsize);
 int type_to_string(const TypeSpec *type, char *buf, size_t bufsize);
-
-/* NOTE: it may be easier to give all structures and unions 8-byte alignment
- * requirements to make conversions require zero extra code generation
- */
-
-extern const size_t SIZEOF_LONG, ALIGNOF_LONG;
-extern const size_t SIZEOF_INT, ALIGNOF_INT;
-extern const size_t SIZEOF_SHORT, ALIGNOF_SHORT;
-extern const size_t SIZEOF_CHAR, ALIGNOF_CHAR;
 
 extern const TypeSpec SPEC_PTR;
 extern const TypeSpec SPEC_EMPTY;

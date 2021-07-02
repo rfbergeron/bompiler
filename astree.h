@@ -1,24 +1,22 @@
 #ifndef __ASTREE_H__
 #define __ASTREE_H__
 
-#include <stdio.h>
-#include <string.h>
-
 #include "attributes.h"
 #include "badlib/badllist.h"
+#include "badlib/badmap.h"
 #include "debug.h"
 
-typedef struct ASTree ASTree;
-struct ASTree {
-  LinkedList *children;    /* children of this n-way node */
-  ASTree *next_sibling;    /* for adopting long lists of siblings */
-  ASTree *firstborn;       /* head of the list of siblings */
-  Location loc;            /* source location */
-  int symbol;              /* token code */
-  unsigned int attributes; /* node-specific attributes */
-  struct typespec type;    /* type info */
-  const char *lexinfo;     /* lexical information */
-};
+typedef struct astree {
+  LinkedList *children;     /* children of this n-way node */
+  struct astree *next_sibling;     /* for adopting long lists of siblings */
+  struct astree *firstborn;        /* head of the list of siblings */
+  Location loc;             /* source location */
+  int symbol;               /* token code */
+  unsigned int attributes;  /* node-specific attributes */
+  struct typespec type;     /* type info */
+  const char *lexinfo;      /* lexical information */
+  Map *symbol_table;        /* symbol table for scope, if applicable */
+} ASTree;
 
 void location_print(FILE *out, const Location location_);
 

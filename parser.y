@@ -19,6 +19,10 @@
 %destructor { fprintf(stderr, "Cleanup\n"); } <>
 %printer { assert (yyoutput == stderr); astree_dump($$, stderr); } <>
 
+/* TODO(Robert): postfix increment/decrement should get
+ * their own token codes to make assembly generation easier.
+ */
+
 /* dummy tokens used for precedence */
 %token PREC_PREFIX PREC_POSTFIX
 %token PREC_DEREF PREC_ADDROF PREC_TERNARY PREC_COMMA
