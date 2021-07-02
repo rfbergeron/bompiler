@@ -9,9 +9,9 @@
 #include "lyutils.h"
 #include "math.h"
 #include "simplestack.h"
+#include "stdint.h"
 #include "string.h"
 #include "symval.h"
-#include "stdint.h"
 
 #define ARG1_AST (1 << 0)
 #define ARG1_SMV (1 << 1)
@@ -1050,7 +1050,8 @@ int nest_type(ASTree *ident, const TypeSpec *to_copy) {
   return 0;
 }
 
-/* TODO(Robert): some of this should be put into separate functions (parameters?) */
+/* TODO(Robert): some of this should be put into separate functions
+ * (parameters?) */
 int make_function_entry(ASTree *function) {
   int status = 0;
 

@@ -1,8 +1,8 @@
 #ifndef __ASMGEN_H__
 #define __ASMGEN_H__
 
-#include "attributes.h"
 #include "astree.h"
+#include "attributes.h"
 #include "lyutils.h"
 
 void intlang_init_globals();

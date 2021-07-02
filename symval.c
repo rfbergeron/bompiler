@@ -66,4 +66,3 @@ int locate_symbol(const char *ident, size_t ident_len, SymbolValue **out) {
   /* true if the top of the stack (current scope) contains the symbol */
   return !i;
 }
-
