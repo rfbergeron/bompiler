@@ -13,12 +13,6 @@ struct conversion_entry {
 
 static const size_t NUM_ATTRIBUTES = 6;
 static const size_t NUM_TYPES = 4;
-const size_t SIZEOF_LONG = 8, ALIGNOF_LONG = 8;
-const size_t SIZEOF_INT = 4, ALIGNOF_INT = 4;
-const size_t SIZEOF_SHORT = 2, ALIGNOF_SHORT = 2;
-const size_t SIZEOF_CHAR = 1, ALIGNOF_CHAR = 1;
-const signed char BOMP_SCHAR_MAX = (1 << 7) - 1;
-const signed char BOMP_SCHAR_MIN = ((1 << 7) - 1) * -1;
 
 const char STRING_ULONG[] = "unsigned long int";
 const char STRING_SLONG[] = "signed long int";
@@ -29,13 +23,13 @@ const char STRING_SSHORT[] = "signed short int";
 const char STRING_UCHAR[] = "unsigned char";
 const char STRING_SCHAR[] = "signed char";
 
-const TypeSpec SPEC_PTR = {SIZEOF_LONG,    ALIGNOF_LONG, NULL,        NULL,
+const TypeSpec SPEC_PTR = {X64_SIZEOF_LONG,    X64_ALIGNOF_LONG, NULL,        NULL,
                            TYPE_FLAG_NONE, TYPE_POINTER, "_ptr_empty"};
 const TypeSpec SPEC_EMPTY = {0,         0,       NULL, NULL, TYPE_FLAG_NONE,
                              TYPE_NONE, "_empty"};
 const TypeSpec SPEC_FUNCTION = {
     0, 0, NULL, NULL, TYPE_FLAG_NONE, TYPE_FUNCTION, "_function"};
-const TypeSpec SPEC_INT = {SIZEOF_INT,     ALIGNOF_INT, NULL,        NULL,
+const TypeSpec SPEC_INT = {X64_SIZEOF_INT,     X64_ALIGNOF_INT, NULL,        NULL,
                            TYPE_FLAG_NONE, TYPE_SIGNED, "signed int"};
 
 const Location LOC_EMPTY = {0, 0, 0, 0};
@@ -74,8 +68,10 @@ int attributes_to_string(const unsigned int attributes, char *buf,
       if (buf_index + strlen(attr_map[i]) > bufsize) {
         fprintf(stderr, "WARN: buffer too small to print all attributes");
         return 1;
-      } else {
+      } else if (i == 0) {
         buf_index += sprintf(buf, " %s", attr_map[i]);
+      } else {
+        buf_index += sprintf(buf, "%s", attr_map[i]);
       }
     }
   }

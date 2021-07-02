@@ -217,3 +217,144 @@ process:
 - I will not use the x86 feature of using a value directly from memory in
   operations. This is inefficient, but I feel it will simplify code generation.
   Values will enter registers via the `mov` instruction.
+
+# Assembler generation
+The most basic assembly to be generated is the assembly having to do with
+integer/arithmetic expressions. This involves loading objects from memory,
+performing operations on them, then storing new values back to memory in the
+appropriate location.
+
+I will try to list all of the components needed to do this:
+1. Each (stack-allocated) object will need to have a particular address on the
+   stack assigned to it. I'm not sure if it will ever be correct to have
+   memory addresses for a single object. Probably not.
+2. Values should probably not be loaded into multiple registers at the same
+   time; instead, they should be reused where possible. However, there may be
+   instruction sequences that explicitly move/copy the contents of a register
+   to another register. This should be allowed.
+3. Intermediate values in computations may need to be temporarily stored on the
+   stack. They will have a fake object name generated to track them.
+4. Some data structure must be used to track where a value is currently located
+   in memory/registers, and updated when this value is destroyed by operators or
+   when the value changes and other instances are invalid.
+5. Some data structure must be used to track whether a register currently
+   contains a (valid) value.
+6. It may make sense to have the system that tracks whether or not values are
+   currently loaded into registers also be used to determine whether or not an
+   operand should be addressed from memory, instead of being loaded first.
+
+The initial implementation will not do any register allocation, or even refer
+to registers by their proper names. Instead, it will refer registers as r0, r1,
+r2, etc. in ascending order. These fake registers will not be reused. They are
+not immutable; because of the way x64 works, they will be clobbered by
+arithmetic operations. However, there will be at most one MOV/LOAD instruction
+where that register is the destination. This includes subregisters; if a value
+is moved into r0d, then at no point will values be moved into r0, r0w, or r0b.
+
+The generator will need to distinguish between `.data`, `.text`, and `.bss`
+sections, and decide which symbols belong in which location. It will also need
+to decide whether or not a symbol should be exported with the `global`
+directive, and whether or not a symbol needs to/should be imported with the
+`extern` directive. There is also `static` to consider, but I don't know if
+it is actually necessary.
+
+The generator will need to have access to the root of the abstract syntax tree.
+I do not think it will need to access the symbol tables, since all type info
+should be encoded in the tree already.
+
+All file-scope declarations will go in either the `.data` or `.bss` sections,
+depending on whether or not they have been initialized, and will be exported
+with the `global` directive unless they are declared `static` in the source
+file.
+
+All function declarations will be exported with the `global` directive, unless
+they were declared with the `static` keyword in the source file.
+
+The order in which these must be done is:
+1. other directives (`global`, `extern`, `default rel`, etc.)
+2. text segment
+3. data segment
+4. bss segment
+
+Since I am allowing declarations to occur anywhere, I should use a stack upon
+which function and global variable declarations are pushed so that they can be
+emitted later, and so that I can determine whether symbols need to be declared
+`extern`.
+
+Notes:
+- Division and multiplication are special; the destination operand is implied
+  and hardcoded to AX. AX is divided by the single operand. The lower half of
+  the result or the dividend will be stored in AX. The upper half of the result
+  or the remainder is stored in DX.
+- Unlike C, `extern` can't be used to reference any (non-static) function; the
+  function must have been exported with the `global` directive in the module
+  that defined it.
+
+# Assembly generation procudures
+Assembly generation for each instruction or type of instruction will have a
+dedicated method, each with responsibilities mirroring the ones in the type
+checker. There will be one "primary" function, `write_instruction`, that is
+mutually recursive with all other `write_X` functions. These functions will
+only recursively call into `write_instruction`.
+
+All of these functions will have three parameters:
+- the `ASTree` node to generate instruction(s) for
+- the `InstructionData` object, which will hold the output of the function
+- an `unsigned int`, with some flags holding information about what's going on
+  higher up in the recursion
+
+# Assembly Expression Generation
+By default, the left(destination) operand of every instruction is a register,
+while the right operand may be addressed from memory. This is not a restriction
+of x64, but it makes generation a little simpler.
+
+The function definition for most assembly evaluation functions will look like
+this:
+- the tree node to operate on
+- a set of flags indicating whether the result will be the source or destination
+  of the parent assembly instruction, among other things
+- the `InstructionData` structure, which the function will output its results to
+
+Structure of a generator function:
+- Recursively call into generator for first subtree(left/unary operand), if any
+- Recursively call into generator for second subtree(right operand), if any
+- Determine operation performed and the corresponding assembly instruction to be
+  emitted
+
+General procedure by token type:
+- For binary and unary ops, subexpressions are evaluated. The locations returned
+  are used as the operands in the instruction data.
+- For postfix increment and decrement specifically, the single subexpression is
+  evaluated, and the value stored at the resulting address is loaded into
+  another register; this register will be the one returned by the function. An
+  add command is emitted, with the left operand being the memory address of the
+  lval and the right being either an immediate 1 or -1.
+- For identifiers, the address of the identifier is loaded into a register,
+  which will be returned.
+- For constants/immediate integers and characters:
+  - if a left operand, the value will be loaded into a register with the `mov`
+    instruction
+  - if a right operand, the raw value will be returned
+
+# Instruction/Source Line Data
+Source line data will be tracked as follows:
+
+## Label
+Since some labels will be pre-existing `const char *`, while others will be
+short, simple and generated like `.S0, .L1, .C2, .E3` etc., the `label` field
+of the struct will be a union of `size_t` and `const char *`. There will be
+an additional field indicating the type of the label (string constant, function,
+global variable, conditional, loop body, loop end, etc.) which the label printer
+function will use to determine how the label should be printed.
+
+# Register Allocation
+Before register allocation is done, all lines that will be written to the output
+file will first be stored in a linearly traversible and maybe random access data
+structure. Instructions will use virtual registers as operands.
+
+The x64 use of the left operand as destination will be respected when these
+lines are generated; the function that puts instruction data into the list will
+return the name of the register the result was placed into.
+
+The contents of source lines to be written out will be tracked in a struct with
+fields for label, instruction, left/right operands, and comment.

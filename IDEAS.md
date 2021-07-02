@@ -20,6 +20,14 @@ purpose of achieving self-hosting, or both. These include:
   registers if they fit. I don't want to worry about this and my compiler will
   not be doing it so I won't need this to achieve self-hosting
 
+## Identifier Labels
+Based on the language definition, it looks like labels are attached to the
+statement immediately following them. Just something to note for later.
+
+## Increment and decrement
+These operators must have an lval argument. They must also have unique tokens
+so that they may be distinguished outside of the parser.
+
 ## Storage of string constants
 Currently, the type checker/symbol table is repsonsible for tracking string
 constants. It would make more sense for the string set to track them in some
@@ -50,6 +58,17 @@ are all considered to be separate things.
 
 As an aside, should labels be aware of their scope? I'm not sure if the type
 checker needs to be aware of scope when it comes to labels.
+
+## Storing types
+Have types stored by value is inconvenient because it makes assigning types to
+identifiers unnecessarily complicated, since the whole structure needs to be
+copied rather than just assigning a pointer. However, if each `struct typespec`
+was a pointer, then functions which assign types to intermediate values in
+expressions would either need to:
+- figure out if the intermediate node can reuse the value from one of its
+  children
+- allocate a new `struct TypeSpec` for each intermediate value
+- use a predefined value
 
 ## Comparing types
 The `types_comatible` function should return more than just an enum describing
@@ -180,3 +199,36 @@ which can be used to indicate different things about the status of that branch
 of the recursion. The most obvious one I can think about right now is one where
 the value of an expression is a constant, which is a requirement of global
 variables.
+
+## Determining what instructions and registers to output
+My current thinking is that there should be a single function with a switch
+statement, `write_instruction`, which is mutually recursive with a bunch of
+other functions that do all the work related to writing the outputs of other
+functions. For uniformity's sake, this function should not allocate any space
+itself and should be provided the space that the handler function should write
+to, which it passes along.
+
+## Mapping operators to instructions
+It would be convenient to have a mapping from tokens to instructions (a map from
+`enum` to `const char *`, but because of the way my map data structure is
+written this is currently not possible, as both arguments must be pointers and
+you cannot take the address of an enum.
+
+## Resolving symbols in assembly
+Actually why not just have a character field in each symbol value that stores
+a string identifying the address. Labels are addresses, as are offset in the
+form `rsp + N`. Both can be put in square brackets to refer to the location
+in memory instead of the value. Both can be used in both the `lea` and `mov`
+instructions.
+
+The function that resolves symbols should, for now, just move the location
+where the symbol lives into a register using the `lea` instruction, so that
+either representation can have the same code emitted.
+
+## Handling function parameters
+To make accessing variables uniform, parameters should be immediately written
+to the stack at the beginning of the function. This sequence of operations will
+look similar to the way a local variable declaration appears in assembly.
+
+## Declarations in assembly
+Declarations 
