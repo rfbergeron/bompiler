@@ -1,9 +1,9 @@
-#ifndef __SYMVAL_H__
-#define __SYMVAL_H__
+#ifndef __SYMTABLE_H__
+#define __SYMTABLE_H__
 
 #include "attributes.h"
 #include "badlib/badllist.h"
-#include "lyutils.h"
+#include "badlib/badmap.h"
 
 #define DEFAULT_MAP_SIZE 100
 
@@ -13,23 +13,25 @@
 typedef struct symbol_value {
   size_t sequence;  /* used to order declarations in a given block */
   Location loc;     /* declaration location */
-  int has_block;    /* whether this is a function definition or prototype */
+  int is_defined;   /* whether this is a function definition or declaration */
   TypeSpec type;    /* type of symbol */
   int stack_offset; /* location in the current stack frame */
   char obj_loc[64]; /* location, represented as a string */
 } SymbolValue;
 
-/* the 'stack' of tables */
-extern struct llist *tables;
-/* store string constants for assembly generation */
-extern struct llist *string_constants;
-
 /* SymbolValue functions */
-int symbol_value_init(SymbolValue *symbol, const TypeSpec *type,
-                      const Location *loc, const size_t sequence);
+SymbolValue *symbol_value_init(const TypeSpec *type, const Location *loc);
 int symbol_value_destroy(SymbolValue *symbol_value);
 void symbol_value_print(const SymbolValue *symbol, FILE *out);
 
-/* symbol utility functions */
-int locate_symbol(const char *ident, size_t ident_len, SymbolValue **out);
+/* symbol table functions */
+void symbol_table_init_globals();
+void symbol_table_free_globals();
+int insert_symbol(const char *ident, const size_t ident_len,
+                  SymbolValue *symval);
+int locate_symbol(const char *ident, const size_t ident_len, SymbolValue **out);
+void create_scope(Map **scope_location);
+void finalize_scope();
+void enter_scope(Map *scope);
+void leave_scope();
 #endif
