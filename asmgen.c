@@ -5,7 +5,7 @@
 #include "badlib/badalist.h"
 #include "debug.h"
 #include "lyutils.h"
-#include "symval.h"
+#include "symtable.h"
 
 #define MAX_INSTRUCTION_LENGTH 8
 #define MAX_OP_LENGTH 16
@@ -467,6 +467,8 @@ static int translate_expr(ASTree *tree, InstructionData *out,
 
 static int translate_stmt(ASTree *stmt) {
   InstructionData *data;
+
+  if (stmt->symbol_table) enter_scope(stmt->symbol_table);
   switch (stmt->symbol) {
     case TOK_BLOCK:
       translate_block(stmt);
@@ -491,6 +493,8 @@ static int translate_stmt(ASTree *stmt) {
       llist_push_back(text_section, data);
       break;
   }
+
+  if (stmt->symbol_table) leave_scope();
   return 0;
 }
 
@@ -523,13 +527,14 @@ int translate_function_decl(ASTree *function, InstructionData *data) {
     llist_push_back(text_section, param_data);
   }
 
-  translate_block(astree_third(function));
+  translate_stmt(astree_third(function));
   /* TODO: write function epilog */
   return 0;
 }
 
 int translate_file(ASTree *root) {
   size_t i;
+  enter_scope(root->symbol_table);
   for (i = 0; i < llist_size(root->children); ++i) {
     ASTree *topdecl = llist_get(root->children, i);
     InstructionData *topdecl_data = malloc(sizeof(*topdecl_data));
@@ -556,6 +561,7 @@ int translate_file(ASTree *root) {
     }
   }
 
+  leave_scope();
   return 0;
 }
 
