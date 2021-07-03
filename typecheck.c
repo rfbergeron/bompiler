@@ -27,8 +27,6 @@
 #define IFLAG_SIGNED (1 << 4)
 #define IFLAG_UNSIGNED (1 << 5)
 
-DECLARE_STACK(nrstack, size_t);
-
 enum type_checker_action {
   TCHK_COMPATIBLE,
   TCHK_IMPLICIT_CAST,
@@ -41,19 +39,6 @@ enum type_checker_action {
 };
 
 static SymbolValue *current_function = NULL;
-/*
- * used to store sequence numbers of declarations in nested blocks, including
- * compound statements, functions, if, do, while, and for
- */
-static struct nrstack sequence_nrs = {NULL, 0, 0};
-/*
- * used to count the number of sub-blocks in a given block, or, when at global
- * scope, the number of function, union, and struct definitions/prototypes
- *
- * the 'size' member can be used to determine the depth of blocks currently
- * being counted
- */
-static struct nrstack block_nrs = {NULL, 0, 0};
 static const size_t MAX_STRING_LENGTH = 31;
 
 /* for traversing the syntax tree */
@@ -62,7 +47,7 @@ int validate_type_id(ASTree *tid);
 int validate_call(ASTree *call);
 int validate_block(ASTree *block);
 int validate_expr(ASTree *statement);
-int validate_stmt(ASTree *statement, int new_scope);
+int validate_stmt(ASTree *statement);
 int validate_assignment(ASTree *assignment);
 int validate_binop(ASTree *operator);
 int validate_cast(ASTree *cast);
@@ -120,34 +105,6 @@ const char *extract_type(ASTree *type_id) {
  * of nested scoping; instead block numbers should be set during the validation
  * of expressions, at which point it is not possible to further nest scopes.
  */
-void set_blocknr(ASTree *tree, size_t nr) {
-  tree->loc.blocknr = nr;
-  size_t i;
-  for (i = 0; i < llist_size(tree->children); ++i) {
-    set_blocknr(llist_get(tree->children, i), nr);
-  }
-}
-
-/* scopes and blocks are kept separate; although a new scope is created with
- * each block, it is not the case that a new block is created with each scope
- */
-void enter_scope() {
-  struct map *new_table = malloc(sizeof(*new_table));
-  int status =
-      map_init(new_table, DEFAULT_MAP_SIZE, NULL, free, strncmp_wrapper);
-  if (status) {
-    fprintf(stderr, "fuck you\n");
-    abort();
-  }
-  llist_push_front(tables, new_table);
-  nrstack_push(&block_nrs, 0);
-}
-
-void exit_scope() {
-  llist_pop_front(tables);
-  nrstack_pop(&block_nrs);
-  nrstack_replace(&block_nrs, nrstack_top(&block_nrs) + 1);
-}
 
 void insert_cast(ASTree *tree, size_t index, struct typespec *type) {
   /* since the linked list has a destructor defined for elements, we can't just
@@ -337,10 +294,9 @@ int determine_promotion(ASTree *arg1, ASTree *arg2, struct typespec *out) {
   return status;
 }
 
-int validate_stmt(ASTree *statement, int new_scope) {
+int validate_stmt(ASTree *statement) {
   int status;
   DEBUGS('t', "Validating next statement");
-  if (new_scope) enter_scope();
   switch (statement->symbol) {
     case TOK_RETURN:
       status = validate_return(statement);
@@ -355,10 +311,7 @@ int validate_stmt(ASTree *statement, int new_scope) {
       status = validate_while(statement);
       break;
     case TOK_BLOCK:
-      enter_scope();
-      if (!new_scope) enter_scope();
       status = validate_block(statement);
-      if (!new_scope) exit_scope();
       break;
     default:
       /* parser will catch anything that we don't want, so at this point the
@@ -367,7 +320,6 @@ int validate_stmt(ASTree *statement, int new_scope) {
       status = validate_expr(statement);
       break;
   }
-  if (new_scope) exit_scope();
   return status;
 }
 
@@ -413,7 +365,7 @@ int validate_expr(ASTree *expression) {
       status = validate_unop(expression);
       break;
     case TOK_CALL:
-      expression->attributes |= ATTR_VREG;
+      expression->attributes |= ATTR_EXPR_VREG;
       status = validate_call(expression);
       break;
     case TOK_INDEX:
@@ -435,8 +387,7 @@ int validate_expr(ASTree *expression) {
        */
       break;
     case TOK_STRINGCON:
-      /* save for intlang */
-      llist_push_front(string_constants, (char *)expression->lexinfo);
+      /* do nothing? this will get taking of during assembly generation */
       break;
     case TOK_IDENT:
       DEBUGS('t', "bonk");
@@ -637,12 +588,17 @@ int validate_type_id(ASTree *tid) {
 
 int validate_block(ASTree *block) {
   size_t i;
-  int status = 0;
+  /* create a new scope if it hasn't already been */
+  int status = 0, needs_scope = !block->symbol_table;
+  if(needs_scope)
+      create_scope(&(block->symbol_table));
   for (i = 0; i < llist_size(block->children); ++i) {
     ASTree *statement = llist_get(block->children, i);
-    status = validate_stmt(statement, 0);
+    status = validate_stmt(statement);
     if (status) break;
   }
+  if(needs_scope)
+      finalize_scope();
   return status;
 }
 
@@ -711,7 +667,7 @@ int validate_assignment(ASTree *assignment) {
     status = -2;
   } else if (compatibility == TCHK_IMPLICIT_CAST) {
     insert_cast(assignment, 1, &(dest->type));
-  } else if (!(astree_first(assignment)->attributes & ATTR_LVAL)) {
+  } else if (!(astree_first(assignment)->attributes & ATTR_EXPR_LVAL)) {
     fprintf(stderr, "ERROR: Destination is not an LVAL\n");
     status = -1;
   }
@@ -947,7 +903,7 @@ int validate_return(ASTree *ret) {
         fprintf(stderr, "ERROR: Incompatible return type\n");
         status = -1;
       } else {
-        ret->attributes |= ATTR_VREG;
+        ret->attributes |= ATTR_EXPR_VREG;
         ret->attributes |= astree_first(ret)->attributes;
       }
     }
@@ -971,10 +927,14 @@ int validate_ifelse(ASTree *ifelse) {
    * example, if the single statement was a declaration, that object would not
    * be visible anywhere
    */
-  status = validate_stmt(astree_second(ifelse), 1);
+  create_scope(&(astree_second(ifelse)->symbol_table));
+  status = validate_stmt(astree_second(ifelse));
+  finalize_scope();
   if (status) return status;
   if (llist_size(ifelse->children) == 3) {
-    status = validate_stmt(astree_third(ifelse), 1);
+    create_scope(&(astree_third(ifelse)->symbol_table));
+    status = validate_stmt(astree_third(ifelse));
+    finalize_scope();
   }
   return status;
 }
@@ -987,7 +947,9 @@ int validate_while(ASTree *whole) {
     status = -1;
     return status;
   }
-  status = validate_stmt(astree_second(whole), 1);
+  create_scope(&(astree_second(whole)->symbol_table));
+  status = validate_stmt(astree_second(whole));
+  finalize_scope();
   return status;
 }
 
@@ -1005,14 +967,11 @@ int make_structure_entry(ASTree *structure) {
             structure_type);
     return -1;
   } else {
-    structure_value = malloc(sizeof(*structure_value));
-    symbol_value_init(structure_value, &(astree_first(structure)->type),
-                      &(astree_first(structure)->loc),
-                      nrstack_top(&sequence_nrs));
+    structure_value = symbol_value_init(&(astree_first(structure)->type),
+            &(astree_first(structure)->loc));
+    insert_symbol(structure_type, structure_type_len, structure_value);
     struct map *fields = malloc(sizeof(*fields));
     map_init(fields, DEFAULT_MAP_SIZE, NULL, free, strncmp_wrapper);
-    map_insert(llist_front(tables), (char *)structure_type, structure_type_len,
-               structure_value);
     /* start from 2nd child; 1st was type name */
     size_t i;
     for (i = 1; i < llist_size(structure->children); ++i) {
@@ -1029,10 +988,8 @@ int make_structure_entry(ASTree *structure) {
       } else {
         status = validate_type_id(field);
         if (status != 0) return status;
-        field_value = malloc(sizeof(*field_value));
-        symbol_value_init(field_value, &(astree_second(field)->type),
-                          &(astree_second(field)->loc),
-                          nrstack_top(&sequence_nrs));
+        field_value = symbol_value_init(&(astree_second(field)->type),
+                          &(astree_second(field)->loc));
         map_insert(fields, (char *)field_id_str, field_id_str_len, field_value);
         DEBUGS('t', "Field inserted at %s", astree_second(field)->lexinfo);
       }
@@ -1066,7 +1023,11 @@ int make_function_entry(ASTree *function) {
     return -1;
   }
 
-  enter_scope();
+  /* Currently, a new scope is created for function prototypes, which only holds
+   * the parameters. This is fine; the standard even specifies a scope
+   * specifically for function declarations
+   */
+  create_scope(&(function->symbol_table));
   ASTree *ident = astree_second(type_id);
   nest_type(ident, &SPEC_FUNCTION);
   ident->type.data.params = malloc(sizeof(struct llist));
@@ -1097,48 +1058,41 @@ int make_function_entry(ASTree *function) {
 
   const char *function_id = extract_ident(type_id);
   size_t function_id_len = strnlen(function_id, MAX_STRING_LENGTH);
-  /* functions cannot be nested and so can only be declared at global scope,
-   * and we've already pushed a new scope to the table for parameters, so
-   * we just check the bottom of the stock directly
-   */
-  SymbolValue *existing_entry =
-      map_get(llist_back(tables), (char *)function_id, function_id_len);
+  SymbolValue *existing_entry = NULL;
+  locate_symbol(function_id, function_id_len, &existing_entry);
   if (existing_entry) {
     if (types_compatible(existing_entry, ident, ARG1_SMV | ARG2_AST) ==
         TCHK_INCOMPATIBLE) {
       fprintf(stderr, "ERROR: redefinition of function: %s\n", function_id);
       return -1;
-    } else if (existing_entry->has_block) {
+    } else if (existing_entry->is_defined) {
       fprintf(stderr, "ERROR: function has already been defined: %s\n",
               function_id);
       return -1;
     } else if (llist_size(function->children) == 3) {
       DEBUGS('t', "Completing entry for prototype %s", function_id);
       current_function = existing_entry;
-      status = validate_block(astree_third(function));
+      status = validate_stmt(astree_third(function));
       if (status) return status;
       current_function = NULL;
-      existing_entry->has_block = 1;
+      existing_entry->is_defined = 1;
     }
   } else {
     /* create function symbol */
-    SymbolValue *function_entry = malloc(sizeof(*function_entry));
-    symbol_value_init(function_entry, &(ident->type), &(ident->loc),
-                      nrstack_top(&sequence_nrs));
-    map_insert(llist_front(tables), (char *)function_id, function_id_len,
-               function_entry);
+    SymbolValue *function_entry = symbol_value_init(&(ident->type), &(ident->loc));
+    insert_symbol(function_id, function_id_len, function_entry);
     if (llist_size(function->children) == 3) {
+      /* define function */
       DEBUGS('t', "No protoype; defining function %s", function_id);
       current_function = function_entry;
-      status = validate_block(astree_third(function));
+      status = validate_stmt(astree_third(function));
       if (status) return status;
       current_function = NULL;
-      function_entry->has_block = 1;
+      function_entry->is_defined = 1;
     }
   }
 
-  exit_scope();
-  nrstack_replace(&block_nrs, nrstack_top(&block_nrs) + 1);
+  finalize_scope();
   return 0;
 }
 
@@ -1159,7 +1113,7 @@ int make_object_entry(ASTree *object) {
     DEBUGS('t', "Making object entry for value %s", ident);
     ASTree *type = astree_first(object);
     ASTree *identifier = astree_second(object);
-    identifier->attributes |= ATTR_LVAL;
+    identifier->attributes |= ATTR_EXPR_LVAL;
     status = validate_type_id(object);
     if (status != 0) return status;
     if (llist_size(object->children) == 3) {
@@ -1180,19 +1134,14 @@ int make_object_entry(ASTree *object) {
       }
     }
 
-    SymbolValue *symbol = malloc(sizeof(*symbol));
-    status = symbol_value_init(symbol, &(astree_second(object)->type),
-                               &(astree_second(object)->loc),
-                               nrstack_top(&sequence_nrs));
-    if (status) return status;
+    SymbolValue *symbol = symbol_value_init(&(astree_second(object)->type),
+                               &(astree_second(object)->loc));
     size_t identifier_len = strnlen(identifier->lexinfo, MAX_STRING_LENGTH);
-    map_insert(llist_front(tables), (char *)identifier->lexinfo, identifier_len,
-               symbol);
+    insert_symbol(identifier->lexinfo, identifier_len, symbol);
     if (status) {
       fprintf(stderr, "your data structure library sucks.\n");
       abort();
     }
-    nrstack_replace(&block_nrs, nrstack_top(&block_nrs) + 1);
   }
   return status;
 }
@@ -1206,38 +1155,10 @@ int make_typedef_entry(ASTree *tipedef) {
 /*
  * external functions
  */
-void type_checker_init_globals() {
-  /*
-   * structure cleanup is done by foreach functions, while freeing of the
-   * structures themselves is handled by the destructor of their container
-   */
-
-  /* stacks */
-  nrstack_init(&block_nrs, 120);
-  nrstack_init(&sequence_nrs, 120);
-  /* linked lists */
-  string_constants = malloc(sizeof(*string_constants));
-  llist_init(string_constants, NULL, NULL);
-  tables = malloc(sizeof(*tables));
-  llist_init(tables, free, NULL);
-  /* maps */
-  struct map *file_scope = malloc(sizeof(*file_scope));
-  map_init(file_scope, DEFAULT_MAP_SIZE, NULL, free, strncmp_wrapper);
-  llist_push_front(tables, file_scope);
-
-  /* TODO(Robert): insert integer types into the global table? */
-}
-
-void type_checker_free_globals() {
-  DEBUGS('t', "DESTROYING SYMTABLES");
-  /* recursive cleanup of tables */
-  llist_foreach(tables, symbol_table_destroy);
-  llist_destroy(tables);
-  DEBUGS('t', "  SYMTABLES DESTROYED");
-}
 
 int type_checker_make_table(ASTree *root) {
   DEBUGS('t', "Making symbol table");
+  create_scope(&(root->symbol_table));
   size_t i;
   for (i = 0; i < llist_size(root->children); ++i) {
     ASTree *child = llist_get(root->children, i);
@@ -1253,32 +1174,12 @@ int type_checker_make_table(ASTree *root) {
         status = make_object_entry(child);
         if (status != 0) return status;
         break;
-      case '=':
-        DEBUGS('t', "bonk");
-        status = make_object_entry(astree_first(child));
-        if (status != 0) return status;
-        status = validate_expr(astree_second(child));
-        if (status != 0) return status;
-        if (types_compatible(astree_first(child), astree_second(child),
-                             ARG1_AST | ARG2_AST) == TCHK_INCOMPATIBLE) {
-          fprintf(stderr, "ERROR: Incompatible types for global\n");
-          return -1;
-        } else if (!(astree_first(child)->attributes & ATTR_LVAL)) {
-          fprintf(stderr,
-                  "ERROR: Global assignment destination is not an "
-                  "LVAL\n");
-          return -1;
-        }
-        /* type is the type of the right operand */
-        child->type = astree_second(child)->type;
-        if (status != 0) return status;
-        break;
       default:
         fprintf(stderr, "ERROR: Unexpected symbol at top level: %s\n",
                 parser_get_tname(child->symbol));
         return -1;
     }
   }
-  /* use local table list to group all tables together */
+  finalize_scope();
   return 0;
 }
