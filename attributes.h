@@ -20,9 +20,9 @@
  * - the result of the array indexing operator
  */
 enum attribute {
-  ATTR_VREG = 1 << 0,       /* does this node require a virtual register */
-  ATTR_LVAL = 1 << 1,       /* does this node refer to an assignable location */
-  ATTR_CONSTEXPR = 1 << 2,  /* does this node refer to a compile-time constant */
+  ATTR_EXPR_VREG = 1 << 0,  /* does this node require a virtual register */
+  ATTR_EXPR_LVAL = 1 << 1,  /* does this node refer to an assignable location */
+  ATTR_EXPR_CONST = 1 << 2, /* does this node refer to a compile-time constant */
 };
 
 enum base_type {
