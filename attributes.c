@@ -3,7 +3,7 @@
 #include "badlib/badllist.h"
 #include "stdio.h"
 #include "string.h"
-#include "symval.h"
+#include "symtable.h"
 
 struct conversion_entry {
   enum base_type from;
@@ -23,14 +23,14 @@ const char STRING_SSHORT[] = "signed short int";
 const char STRING_UCHAR[] = "unsigned char";
 const char STRING_SCHAR[] = "signed char";
 
-const TypeSpec SPEC_PTR = {X64_SIZEOF_LONG,    X64_ALIGNOF_LONG, NULL,        NULL,
-                           TYPE_FLAG_NONE, TYPE_POINTER, "_ptr_empty"};
+const TypeSpec SPEC_PTR = {X64_SIZEOF_LONG, X64_ALIGNOF_LONG, NULL,        NULL,
+                           TYPE_FLAG_NONE,  TYPE_POINTER,     "_ptr_empty"};
 const TypeSpec SPEC_EMPTY = {0,         0,       NULL, NULL, TYPE_FLAG_NONE,
                              TYPE_NONE, "_empty"};
 const TypeSpec SPEC_FUNCTION = {
     0, 0, NULL, NULL, TYPE_FLAG_NONE, TYPE_FUNCTION, "_function"};
-const TypeSpec SPEC_INT = {X64_SIZEOF_INT,     X64_ALIGNOF_INT, NULL,        NULL,
-                           TYPE_FLAG_NONE, TYPE_SIGNED, "signed int"};
+const TypeSpec SPEC_INT = {X64_SIZEOF_INT, X64_ALIGNOF_INT, NULL,        NULL,
+                           TYPE_FLAG_NONE, TYPE_SIGNED,     "signed int"};
 
 const Location LOC_EMPTY = {0, 0, 0, 0};
 

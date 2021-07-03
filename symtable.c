@@ -1,14 +1,13 @@
-#include "symval.h"
-
-#include "stdlib.h"
 #include "astree.h"
 #include "attributes.h"
 #include "badlib/badllist.h"
 #include "badlib/badmap.h"
-#include "simplestack.h"
 #include "debug.h"
 #include "err.h"
+#include "simplestack.h"
+#include "stdlib.h"
 #include "string.h"
+#include "symtable.h"
 
 DECLARE_STACK(nrstack, size_t);
 /* the 'stack' of tables */
@@ -83,7 +82,7 @@ void symbol_table_init_globals() {
   nrstack_init(&sequence_nrs, 120);
   /* linked lists */
   tables = malloc(sizeof(*tables));
-  llist_init(tables, (void (*)(void *)) symbol_table_destroy, NULL);
+  llist_init(tables, (void (*)(void *))symbol_table_destroy, NULL);
 }
 
 void symbol_table_free_globals() {
@@ -94,11 +93,13 @@ void symbol_table_free_globals() {
   DEBUGS('t', "  SYMTABLES DESTROYED");
 }
 
-int insert_symbol(const char *ident, const size_t ident_len, SymbolValue *symval) {
-    return map_insert(llist_front(tables), (void *) ident, ident_len, symval);
+int insert_symbol(const char *ident, const size_t ident_len,
+                  SymbolValue *symval) {
+  return map_insert(llist_front(tables), (void *)ident, ident_len, symval);
 }
 
-int locate_symbol(const char *ident, const size_t ident_len, SymbolValue **out) {
+int locate_symbol(const char *ident, const size_t ident_len,
+                  SymbolValue **out) {
   size_t i;
   for (i = 0; i < llist_size(tables); ++i) {
     struct map *current_table = llist_get(tables, i);
@@ -117,8 +118,9 @@ int locate_symbol(const char *ident, const size_t ident_len, SymbolValue **out) 
  */
 void create_scope(Map **scope_location) {
   *scope_location = malloc(sizeof(Map));
-  int status = map_init(*scope_location, DEFAULT_MAP_SIZE, NULL,
-              (void (*)(void *)) symbol_value_destroy, strncmp_wrapper);
+  int status =
+      map_init(*scope_location, DEFAULT_MAP_SIZE, NULL,
+               (void (*)(void *))symbol_value_destroy, strncmp_wrapper);
   if (status) {
     fprintf(stderr, "fuck you\n");
     abort();
@@ -135,10 +137,6 @@ void finalize_scope() {
   nrstack_postfix_inc(&block_nrs);
 }
 
-void enter_scope(Map *scope) {
-    llist_push_front(tables, scope);
-}
+void enter_scope(Map *scope) { llist_push_front(tables, scope); }
 
-void leave_scope() {
-    llist_pop_front(tables);
-}
+void leave_scope() { llist_pop_front(tables); }
