@@ -14,6 +14,7 @@
 #include "debug.h"
 #include "lyutils.h"
 #include "strset.h"
+#include "symtable.h"
 #include "typecheck.h"
 
 #define LINESIZE 1024
@@ -167,7 +168,7 @@ int main(int argc, char **argv) {
   /* remember to initialize certain things, like the string table */
   string_set_init_globals();
   lexer_init_globals();
-  type_checker_init_globals();
+  symbol_table_init_globals();
 
   DEBUGS('m', "Parsing");
   int parse_status = yyparse();
@@ -193,7 +194,7 @@ int main(int argc, char **argv) {
   string_set_free_globals();
   DEBUGS('m', "lexing/parsing helper cleanup");
   lexer_free_globals();
-  DEBUGS('m', "type checker and symbol table cleanup");
-  type_checker_free_globals();
+  DEBUGS('m', "symbol table cleanup");
+  symbol_table_free_globals();
   return EXIT_SUCCESS;
 }

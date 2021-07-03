@@ -44,6 +44,9 @@
   void stack_name##_replace(struct stack_name *stack, stack_type value) {     \
     stack->stack[stack->size] = value;                                        \
   }                                                                           \
+  stack_type stack_name##_postfix_inc(struct stack_name *stack) {             \
+    return (stack->stack[stack->size])++;                                     \
+  }                                                                           \
   size_t stack_name##_size(struct stack_name *stack) { return stack->size; }
 
 #endif
