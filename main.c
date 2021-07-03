@@ -11,10 +11,10 @@
 #include <unistd.h>
 
 #include "astree.h"
-#include "symval.h"
 #include "debug.h"
 #include "lyutils.h"
 #include "strset.h"
+#include "symtable.h"
 #include "typecheck.h"
 
 #define LINESIZE 1024

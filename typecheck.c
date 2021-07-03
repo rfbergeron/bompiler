@@ -9,9 +9,9 @@
 #include "lyutils.h"
 #include "math.h"
 #include "simplestack.h"
-#include "string.h"
-#include "symval.h"
 #include "stdint.h"
+#include "string.h"
+#include "symtable.h"
 
 #define ARG1_AST (1 << 0)
 #define ARG1_SMV (1 << 1)
@@ -590,15 +590,13 @@ int validate_block(ASTree *block) {
   size_t i;
   /* create a new scope if it hasn't already been */
   int status = 0, needs_scope = !block->symbol_table;
-  if(needs_scope)
-      create_scope(&(block->symbol_table));
+  if (needs_scope) create_scope(&(block->symbol_table));
   for (i = 0; i < llist_size(block->children); ++i) {
     ASTree *statement = llist_get(block->children, i);
     status = validate_stmt(statement);
     if (status) break;
   }
-  if(needs_scope)
-      finalize_scope();
+  if (needs_scope) finalize_scope();
   return status;
 }
 
@@ -968,7 +966,7 @@ int make_structure_entry(ASTree *structure) {
     return -1;
   } else {
     structure_value = symbol_value_init(&(astree_first(structure)->type),
-            &(astree_first(structure)->loc));
+                                        &(astree_first(structure)->loc));
     insert_symbol(structure_type, structure_type_len, structure_value);
     struct map *fields = malloc(sizeof(*fields));
     map_init(fields, DEFAULT_MAP_SIZE, NULL, free, strncmp_wrapper);
@@ -989,7 +987,7 @@ int make_structure_entry(ASTree *structure) {
         status = validate_type_id(field);
         if (status != 0) return status;
         field_value = symbol_value_init(&(astree_second(field)->type),
-                          &(astree_second(field)->loc));
+                                        &(astree_second(field)->loc));
         map_insert(fields, (char *)field_id_str, field_id_str_len, field_value);
         DEBUGS('t', "Field inserted at %s", astree_second(field)->lexinfo);
       }
@@ -1007,7 +1005,8 @@ int nest_type(ASTree *ident, const TypeSpec *to_copy) {
   return 0;
 }
 
-/* TODO(Robert): some of this should be put into separate functions (parameters?) */
+/* TODO(Robert): some of this should be put into separate functions
+ * (parameters?) */
 int make_function_entry(ASTree *function) {
   int status = 0;
 
@@ -1079,7 +1078,8 @@ int make_function_entry(ASTree *function) {
     }
   } else {
     /* create function symbol */
-    SymbolValue *function_entry = symbol_value_init(&(ident->type), &(ident->loc));
+    SymbolValue *function_entry =
+        symbol_value_init(&(ident->type), &(ident->loc));
     insert_symbol(function_id, function_id_len, function_entry);
     if (llist_size(function->children) == 3) {
       /* define function */
@@ -1135,7 +1135,7 @@ int make_object_entry(ASTree *object) {
     }
 
     SymbolValue *symbol = symbol_value_init(&(astree_second(object)->type),
-                               &(astree_second(object)->loc));
+                                            &(astree_second(object)->loc));
     size_t identifier_len = strnlen(identifier->lexinfo, MAX_STRING_LENGTH);
     insert_symbol(identifier->lexinfo, identifier_len, symbol);
     if (status) {
