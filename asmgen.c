@@ -10,6 +10,12 @@
 #define MAX_INSTRUCTION_LENGTH 8
 #define MAX_OP_LENGTH 16
 #define MAX_LABEL_LENGTH 32
+/* TODO(Robert):
+ * write epilog function
+ * generalize return, prolog, epilog to use vregs instead of explicit x64
+ * registers
+ * make function calls respect error codes
+ */
 
 /* macros used to generate string constants for instructions */
 #define FOREACH_INSTRUCTION(GENERATOR) \
@@ -84,6 +90,7 @@ typedef enum instruction_flags {
   DEST_OPERAND = 1 << 1,   /* result does need to be in a register */
   WANT_OBJ_VADDR = 1 << 2, /* result should be object address, not value */
   MOV_TO_MEM = 1 << 3,     /* parent instruction is MOV */
+  RETURN_REG = 1 << 4,     /* result is to be place in a return register */
 } InstructionFlags;
 
 const char instructions[][MAX_INSTRUCTION_LENGTH] = {
@@ -94,33 +101,20 @@ const char instructions[][MAX_INSTRUCTION_LENGTH] = {
  * affect the validity of the code.
  *
  * stars indicate that field width is an argument
+ * TODO(Robert): make field width an argument
  */
 static const char INDEX_FMT[] = "[%s+%s*%hhu+%i]";
 static const char OFFSET_FMT[] = "[%s+%i]";
-static const char SRC_LINE_FMT[] = "%*s:%*s %*s %s\n";
 static const char VREG_FMT[] = "vr%zu%c";
-static const char UNOP_FMT[] = "%s %s";
-static const char BINOP_FMT[] = "%s %s,%s";
-static const char LABEL_FMT[] = "%s: ";
-static const char COND_FMT[] = ".C%u\n";
-static const char END_FMT[] = ".E%u\n";
-static const char LOOP_FMT[] = ".L%u\n";
+static const char BINOP_FMT[] = "%8s%8s%s,%s";
+static const char UNOP_FMT[] = "%8s%8s%s";
+static const char NULLOP_FMT[] = "%8s%s\n";
+static const char LABEL_FMT[] = "%s\n";
+static const char COND_FMT[] = ".C%u:\n";
+static const char END_FMT[] = ".E%u:\n";
+static const char LOOP_FMT[] = ".L%u:\n";
 static const char SECTION_FMT[] = ".section %s\n";
-static const char FUNCTION_PROLOG[] =
-    "PUSH rbp\n"
-    "MOV rbp, rsp\n"
-    "PUSH r12\n"
-    "PUSH r13\n"
-    "PUSH r14\n"
-    "PUSH r15\n";
-static const char FUNCTION_EPILOG[] =
-    "POP r15\n"
-    "POP r14\n"
-    "POP r13\n"
-    "POP r12\n"
-    "MOV rsp, rbp\n"
-    "POP rbp\n"
-    "RET\n\n";
+static const char EMPTY_FMT[] = "";
 
 /* not sure if field width is an (unsigned) int or a size_t */
 static size_t branch_count = 0;
@@ -134,8 +128,12 @@ static LinkedList *text_section;
 static LinkedList *data_section;
 static LinkedList *bss_section;
 
-extern FILE *oilfile;
-
+/* the function that mallocs the InstructionData is also responsible
+ * for pushing the InstructionData onto its respective stack
+ *
+ * if the function called to populate the InstructionData fails, it should not
+ * be pushed onto the stack
+ */
 static char *translate_stride(ASTree *index, ASTree *memblock);
 static char *translate_reg_type(ASTree *);
 static char *translate_type(void *type, int flags);
@@ -164,6 +162,10 @@ static int translate_expr(ASTree *tree, InstructionData *data,
 int assign_space(ASTree *tree) {
   SymbolValue *symval =
       map_get(current_symtable, (void *)tree->lexinfo, strlen(tree->lexinfo));
+  if (symval == NULL) {
+    fprintf(stderr, "ERROR: unable to resolve symbol %s\n", tree->lexinfo);
+    return -1;
+  }
   size_t required_padding =
       tree->type.alignment - (stack_window % tree->type.alignment);
   stack_window += required_padding;
@@ -196,6 +198,11 @@ int assign_vreg(TypeSpec *type, InstructionData *data, const size_t vreg_num,
       case X64_SIZEOF_CHAR:
         reg_width = 'b';
         break;
+      default:
+        fprintf(stderr, "ERROR: unable to assign vreg of width %zu\n",
+                type->width);
+        return -1;
+        break;
     }
   }
   sprintf(dest, VREG_FMT, vreg_num, reg_width);
@@ -206,6 +213,11 @@ int resolve_object(ASTree *ident, InstructionData *out, unsigned int flags) {
   char *dest = flags & SOURCE_OPERAND ? out->src_operand : out->dest_operand;
   SymbolValue *symval =
       map_get(current_symtable, (void *)ident->lexinfo, strlen(ident->lexinfo));
+  if (symval == NULL) {
+    fprintf(stderr, "ERROR: unable to resolve symbol %s\n", ident->lexinfo);
+    return -1;
+  }
+
   if (flags & WANT_OBJ_VADDR) {
     sprintf(dest, "%s", symval->obj_loc);
   } else {
@@ -218,7 +230,8 @@ int translate_return(ASTree *ret, InstructionData *data) {
   data->instruction = instructions[INSTR_RET];
 
   InstructionData *value_data = malloc(sizeof(*value_data));
-  translate_expr(astree_first(ret), value_data, SOURCE_OPERAND);
+  int status = translate_expr(astree_first(ret), value_data, SOURCE_OPERAND);
+  if (status) return status;
   llist_push_back(text_section, value_data);
 
   InstructionData *mov_data = malloc(sizeof(*mov_data));
@@ -226,6 +239,7 @@ int translate_return(ASTree *ret, InstructionData *data) {
   strcpy(mov_data->src_operand, value_data->dest_operand);
 
   /* choose between rax, eax, ax, and al */
+  /* TODO(Robert): have assign_vreg handle this */
   switch (current_function->type.nested->width) {
     case X64_SIZEOF_LONG:
       sprintf(mov_data->dest_operand, "rax");
@@ -239,6 +253,10 @@ int translate_return(ASTree *ret, InstructionData *data) {
     case X64_SIZEOF_CHAR:
       sprintf(mov_data->dest_operand, "al");
       break;
+    default:
+      fprintf(stderr, "ERROR: unable to assign vreg of width %zu\n",
+              current_function->type.nested->width);
+      return -1;
   }
 
   llist_push_back(text_section, mov_data);
@@ -249,13 +267,17 @@ int translate_return(ASTree *ret, InstructionData *data) {
 int translate_ident(ASTree *ident, InstructionData *data, unsigned int flags) {
   if (flags & WANT_OBJ_VADDR) {
     data->instruction = instructions[INSTR_LEA];
-    resolve_object(ident, data, SOURCE_OPERAND & WANT_OBJ_VADDR);
-    assign_vreg(&(ident->type), data, vreg_count++,
-                DEST_OPERAND & WANT_OBJ_VADDR);
+    int status = resolve_object(ident, data, SOURCE_OPERAND & WANT_OBJ_VADDR);
+    if (status) return status;
+    status = assign_vreg(&(ident->type), data, vreg_count++,
+                         DEST_OPERAND & WANT_OBJ_VADDR);
+    if (status) return status;
   } else {
     data->instruction = instructions[INSTR_MOV];
-    resolve_object(ident, data, SOURCE_OPERAND);
-    assign_vreg(&(ident->type), data, vreg_count++, DEST_OPERAND);
+    int status = resolve_object(ident, data, SOURCE_OPERAND);
+    if (status) return status;
+    status = assign_vreg(&(ident->type), data, vreg_count++, DEST_OPERAND);
+    if (status) return status;
   }
 
   return 0;
@@ -274,10 +296,12 @@ int translate_conversion(ASTree *operator, InstructionData * data) {
    */
 
   InstructionData *src_data = malloc(sizeof(*src_data));
-  translate_expr(astree_first(operator), src_data, SOURCE_OPERAND);
+  int status = translate_expr(astree_first(operator), src_data, SOURCE_OPERAND);
+  if (status) return status;
   llist_push_back(text_section, src_data);
   strcpy(data->src_operand, src_data->dest_operand);
-  assign_vreg(&(operator->type), data, vreg_count++, DEST_OPERAND);
+  status = assign_vreg(&(operator->type), data, vreg_count++, DEST_OPERAND);
+  if (status) return status;
 
   TypeSpec target_type = operator->type;
   TypeSpec source_type = astree_first(operator)->type;
@@ -297,6 +321,7 @@ int translate_conversion(ASTree *operator, InstructionData * data) {
   } else if (source_type.base == TYPE_UNSIGNED) {
     data->instruction = instructions[INSTR_MOVZX];
   } else {
+    fprintf(stderr, "ERROR: unable to determine conversion\n");
     return -1;
   }
 
@@ -307,7 +332,8 @@ int translate_unop(ASTree *operator, InstructionData * data,
                    InstructionEnum num, unsigned int flags) {
   data->instruction = instructions[num];
   InstructionData *dest_data = malloc(sizeof(*dest_data));
-  translate_expr(astree_first(operator), dest_data, DEST_OPERAND);
+  int status = translate_expr(astree_first(operator), dest_data, DEST_OPERAND);
+  if (status) return status;
   llist_push_back(text_section, dest_data);
   strcpy(data->dest_operand, dest_data->dest_operand);
   return 0;
@@ -320,12 +346,15 @@ int translate_binop(ASTree *operator, InstructionData * data,
    * correct
    */
   InstructionData *src_data = malloc(sizeof(*src_data));
-  translate_expr(astree_second(operator), src_data, SOURCE_OPERAND);
+  int status =
+      translate_expr(astree_second(operator), src_data, SOURCE_OPERAND);
+  if (status) return status;
   llist_push_back(text_section, src_data);
   strcpy(data->src_operand, src_data->dest_operand);
 
   InstructionData *dest_data = malloc(sizeof(*dest_data));
-  translate_expr(astree_first(operator), dest_data, DEST_OPERAND);
+  status = translate_expr(astree_first(operator), dest_data, DEST_OPERAND);
+  if (status) return status;
   llist_push_back(text_section, dest_data);
   strcpy(data->dest_operand, dest_data->dest_operand);
 
@@ -337,14 +366,16 @@ int translate_assignment(ASTree *assignment, InstructionData *data,
   data->instruction = instructions[INSTR_MOV];
 
   InstructionData *src_data = malloc(sizeof(*src_data));
-  translate_expr(astree_second(assignment), src_data,
-                 SOURCE_OPERAND & MOV_TO_MEM);
+  int status = translate_expr(astree_second(assignment), src_data,
+                              SOURCE_OPERAND & MOV_TO_MEM);
+  if (status) return status;
   llist_push_back(text_section, src_data);
   strcpy(data->src_operand, src_data->dest_operand);
 
   InstructionData *dest_data = malloc(sizeof(*dest_data));
-  translate_expr(astree_first(assignment), dest_data,
-                 DEST_OPERAND & MOV_TO_MEM);
+  status = translate_expr(astree_first(assignment), dest_data,
+                          DEST_OPERAND & MOV_TO_MEM);
+  if (status) return status;
   llist_push_back(text_section, dest_data);
   strcpy(data->dest_operand, dest_data->dest_operand);
 
@@ -353,8 +384,10 @@ int translate_assignment(ASTree *assignment, InstructionData *data,
 
 int translate_param(ASTree *param, InstructionData *data) {
   data->instruction = instructions[INSTR_MOV];
-  assign_vreg(&(param->type), data, vreg_count++, SOURCE_OPERAND);
-  assign_space(param);
+  int status = assign_vreg(&(param->type), data, vreg_count++, SOURCE_OPERAND);
+  if (status) return status;
+  status = assign_space(param);
+  if (status) return status;
   resolve_object(param, data, DEST_OPERAND & MOV_TO_MEM);
   return 0;
 }
@@ -365,14 +398,17 @@ int translate_local_decl(ASTree *type_id, InstructionData *data) {
    * declaration, write out the instructions which assign the value
    */
   ASTree *ident = astree_second(type_id);
-  assign_space(ident);
+  int status = assign_space(ident);
+  if (status) return status;
 
   if (type_id->children->size == 3) {
     data->instruction = instructions[INSTR_MOV];
-    resolve_object(ident, data, DEST_OPERAND & MOV_TO_MEM);
+    int status = resolve_object(ident, data, DEST_OPERAND & MOV_TO_MEM);
+    if (status) return status;
     InstructionData *value_data = malloc(sizeof(*value_data));
-    translate_expr(astree_third(type_id), value_data,
-                   SOURCE_OPERAND & MOV_TO_MEM);
+    status = translate_expr(astree_third(type_id), value_data,
+                            SOURCE_OPERAND & MOV_TO_MEM);
+    if (status) return status;
     llist_push_back(text_section, value_data);
     strcpy(data->src_operand, value_data->dest_operand);
   }
@@ -381,7 +417,7 @@ int translate_local_decl(ASTree *type_id, InstructionData *data) {
 
 int translate_global_decl(ASTree *type_id, InstructionData *data) {
   ASTree *ident = astree_second(type_id);
-  strcpy(data->label, ident->lexinfo);
+  sprintf(data->label, "%s:", ident->lexinfo);
   /* TODO(Robert): indicate somehow in the tree or symbol table that this
    * is a global variable and should be referenced by its name, as
    * opposed to a stack offset
@@ -391,14 +427,10 @@ int translate_global_decl(ASTree *type_id, InstructionData *data) {
    */
   if (type_id->children->size == 3) {
     /* put in data section */
-    /* TODO(Robert): this is very unsafe and the complier also needs to
-     * optimize away constant expressions so they can be used to initialize
-     * global variables. None of the expressions in the subtree should
-     * resolve to assembly instructions, since they should collapse down to
-     * a single constant that can be evaluated at compile time.
+    /* TODO(Robert): have the compiler evaluate compile-time constants
      */
     ASTree *init_value = astree_third(type_id);
-    strcpy(data->dest_operand, init_value->lexinfo);
+    strcpy(data->dest_operand, "COMPILE-TIME CONSTANT");
 
     switch (ident->type.width) {
       case X64_SIZEOF_LONG:
@@ -412,6 +444,13 @@ int translate_global_decl(ASTree *type_id, InstructionData *data) {
         break;
       case X64_SIZEOF_CHAR:
         data->instruction = instructions[INSTR_DB];
+        break;
+      default:
+        fprintf(stderr,
+                "ERROR: unable to determine instruction for initialized"
+                " data of width %zu\n",
+                ident->type.width);
+        return -1;
         break;
     }
   } else {
@@ -431,6 +470,13 @@ int translate_global_decl(ASTree *type_id, InstructionData *data) {
       case X64_SIZEOF_CHAR:
         data->instruction = instructions[INSTR_RESB];
         break;
+      default:
+        fprintf(stderr,
+                "ERROR: unable to determine instruction for uninitialized"
+                " data of width %zu\n",
+                ident->type.width);
+        return -1;
+        break;
     }
   }
   return 0;
@@ -442,60 +488,77 @@ static int translate_expr(ASTree *tree, InstructionData *out,
 
   switch (tree->symbol) {
     case '+':
-      translate_binop(tree, out, INSTR_ADD, flags);
+      status = translate_binop(tree, out, INSTR_ADD, flags);
       break;
     case '-':
-      translate_binop(tree, out, INSTR_SUB, flags);
+      status = translate_binop(tree, out, INSTR_SUB, flags);
       break;
     case '*':
-      translate_binop(tree, out, INSTR_MUL, flags);
+      status = translate_binop(tree, out, INSTR_MUL, flags);
       break;
     case '/':
-      translate_binop(tree, out, INSTR_DIV, flags);
+      status = translate_binop(tree, out, INSTR_DIV, flags);
       break;
     case TOK_IDENT:
-      translate_ident(tree, out, flags);
+      status = translate_ident(tree, out, flags);
       break;
     case '=':
-      translate_assignment(tree, out, flags);
+      status = translate_assignment(tree, out, flags);
       break;
     default:
+      fprintf(stderr, "ERROR: Unimplemented token: %s, lexinfo: %s\n",
+              parser_get_tname(tree->symbol), tree->lexinfo);
+      status = -1;
       break;
   }
-  return 0;
+  return status;
 }
 
 static int translate_stmt(ASTree *stmt) {
   InstructionData *data;
+  int status = 0;
 
   if (stmt->symbol_table) enter_scope(stmt->symbol_table);
   switch (stmt->symbol) {
     case TOK_BLOCK:
-      translate_block(stmt);
+      status = translate_block(stmt);
       break;
     case TOK_RETURN:
       data = malloc(sizeof(*data));
-      translate_return(stmt, data);
+      status = translate_return(stmt, data);
+      if (status) break;
       llist_push_back(text_section, data);
       break;
     case TOK_WHILE:
+      fprintf(stderr, "ERROR: while constructs not implemented\n");
+      status = -1;
       break;
+    /*
+    case TOK_DO:
+      fprintf(stderr, "ERROR: do-while constructs not implemented\n");
+      status = -1;
+        break;
+    */
     case TOK_IF:
+      fprintf(stderr, "ERROR: if-else constructs not implemented\n");
+      status = -1;
       break;
     case TOK_TYPE_ID:
       data = malloc(sizeof(*data));
-      translate_local_decl(stmt, data);
+      status = translate_local_decl(stmt, data);
+      if (status) break;
       llist_push_back(text_section, data);
       break;
     default:
       data = malloc(sizeof(*data));
-      translate_expr(stmt, data, 0);
+      status = translate_expr(stmt, data, 0);
+      if (status) break;
       llist_push_back(text_section, data);
       break;
   }
 
   if (stmt->symbol_table) leave_scope();
-  return 0;
+  return status;
 }
 
 static int translate_block(ASTree *block) {
@@ -503,32 +566,103 @@ static int translate_block(ASTree *block) {
   size_t i;
   for (i = 0; i < stmts->size; ++i) {
     ASTree *stmt = llist_get(stmts, i);
-    translate_stmt(stmt);
+    int status = translate_stmt(stmt);
+    if (status) return status;
   }
   return 0;
 }
 
-int translate_function_decl(ASTree *function, InstructionData *data) {
-  /* do nothing if this is just a prototype */
-  if (function->children->size < 3) return 0;
-  /* write function header (type, name, args, etc) */
+/* TODO(Robert): consider writing a more generic form of the function prolog,
+ * by reserving N saved registers (including general purpose ones and stack,
+ * base, and frame pointers) and handling those before anything else.
+ */
+int translate_prolog(ASTree *function) {
+  InstructionData *push_rbp_data = malloc(sizeof(InstructionData));
+  push_rbp_data->instruction = instructions[INSTR_PUSH];
+  sprintf(push_rbp_data->src_operand, "rbp");
+  llist_push_back(text_section, push_rbp_data);
+
+  InstructionData *mov_rbp_data = malloc(sizeof(InstructionData));
+  mov_rbp_data->instruction = instructions[INSTR_MOV];
+  sprintf(mov_rbp_data->src_operand, "rsp");
+  sprintf(mov_rbp_data->dest_operand, "rbp");
+  llist_push_back(text_section, mov_rbp_data);
+
+  InstructionData *push_r12_data = malloc(sizeof(InstructionData));
+  push_r12_data->instruction = instructions[INSTR_PUSH];
+  sprintf(push_r12_data->src_operand, "r12");
+  llist_push_back(text_section, push_r12_data);
+
+  InstructionData *push_r13_data = malloc(sizeof(InstructionData));
+  push_r13_data->instruction = instructions[INSTR_PUSH];
+  sprintf(push_r13_data->src_operand, "r13");
+  llist_push_back(text_section, push_r13_data);
+
+  InstructionData *push_r14_data = malloc(sizeof(InstructionData));
+  push_r14_data->instruction = instructions[INSTR_PUSH];
+  sprintf(push_r14_data->src_operand, "r14");
+  llist_push_back(text_section, push_r14_data);
+
+  InstructionData *push_r15_data = malloc(sizeof(InstructionData));
+  push_r15_data->instruction = instructions[INSTR_PUSH];
+  sprintf(push_r15_data->src_operand, "r15");
+  llist_push_back(text_section, push_r15_data);
+
+  return 0;
+}
+
+int translate_epilog(ASTree *function) {
+  InstructionData *pop_r15_data = malloc(sizeof(InstructionData));
+  pop_r15_data->instruction = instructions[INSTR_POP];
+  sprintf(pop_r15_data->src_operand, "r15");
+  llist_push_back(text_section, pop_r15_data);
+
+  InstructionData *pop_r14_data = malloc(sizeof(InstructionData));
+  pop_r14_data->instruction = instructions[INSTR_POP];
+  sprintf(pop_r14_data->src_operand, "r14");
+  llist_push_back(text_section, pop_r14_data);
+
+  InstructionData *pop_r13_data = malloc(sizeof(InstructionData));
+  pop_r13_data->instruction = instructions[INSTR_POP];
+  sprintf(pop_r13_data->src_operand, "r13");
+  llist_push_back(text_section, pop_r13_data);
+
+  InstructionData *pop_r12_data = malloc(sizeof(InstructionData));
+  pop_r12_data->instruction = instructions[INSTR_POP];
+  sprintf(pop_r12_data->src_operand, "r12");
+  llist_push_back(text_section, pop_r12_data);
+
+  InstructionData *mov_rsp_data = malloc(sizeof(InstructionData));
+  mov_rsp_data->instruction = instructions[INSTR_MOV];
+  sprintf(mov_rsp_data->src_operand, "rbp");
+  sprintf(mov_rsp_data->dest_operand, "rsp");
+  llist_push_back(text_section, mov_rsp_data);
+
+  InstructionData *push_rbp_data = malloc(sizeof(InstructionData));
+  push_rbp_data->instruction = instructions[INSTR_POP];
+  sprintf(push_rbp_data->src_operand, "rbp");
+  llist_push_back(text_section, push_rbp_data);
+
+  return 0;
+}
+
+int translate_function(ASTree *function, InstructionData *data) {
   ASTree *name_node = astree_second(astree_first(function));
-  /* assign function label */
-  strcpy(data->label, name_node->lexinfo);
-  /* TODO: write function prolog - push base pointer and all preserved registers
-   * onto the stack
-   */
+  sprintf(data->label, "%s:", name_node->lexinfo);
+  translate_prolog(function);
   size_t i;
   LinkedList *params = astree_second(function)->children;
   for (i = 0; i < params->size; ++i) {
     ASTree *param = llist_get(params, i);
     InstructionData *param_data = malloc(sizeof(*param_data));
-    translate_param(param, param_data);
+    int status = translate_param(param, param_data);
+    if (status) return status;
     llist_push_back(text_section, param_data);
   }
 
-  translate_stmt(astree_third(function));
-  /* TODO: write function epilog */
+  int status = translate_stmt(astree_third(function));
+  if (status) return status;
+  translate_epilog(function);
   return 0;
 }
 
@@ -538,17 +672,21 @@ int translate_file(ASTree *root) {
   for (i = 0; i < llist_size(root->children); ++i) {
     ASTree *topdecl = llist_get(root->children, i);
     InstructionData *topdecl_data = malloc(sizeof(*topdecl_data));
+    int status = 0;
     switch (topdecl->symbol) {
       case TOK_TYPE_ID:
-        translate_global_decl(topdecl, topdecl_data);
+        status = translate_global_decl(topdecl, topdecl_data);
         llist_push_back(data_section, topdecl_data);
         break;
       case TOK_FUNCTION:
-        /* data will hold the function label, which should appear before
-         * the function body
-         */
-        llist_push_back(text_section, topdecl_data);
-        translate_function_decl(topdecl, topdecl_data);
+        /* do nothing if this is just a prototype */
+        if (topdecl->children->size > 2) {
+          /* data will hold the function label, which should appear before
+           * the function body
+           */
+          llist_push_back(text_section, topdecl_data);
+          status = translate_function(topdecl, topdecl_data);
+        }
         break;
       /*
       case TOK_STRUCT:
@@ -557,16 +695,89 @@ int translate_file(ASTree *root) {
       */
       default:
         fprintf(stderr, "ERROR: unrecognized symbol at top level\n");
-        return -1;
+        status = -1;
     }
+
+    if (status) return status;
   }
 
   leave_scope();
   return 0;
 }
 
-int write_text_section() { return 0; }
+int write_instruction(InstructionData *data, FILE *out) {
+  /* all fields except for the instruction are character arrays, not pointers,
+   * which are always legal to pass to printf and co., so we only need to
+   * check to see whether or not the instruction is NULL before printing
+   */
+  /* we want to defer as much of the formatting as possible until we get to this
+   * point so that we have as much information as possible to align fields in
+   * the generated assembly
+   */
 
-int write_data_section(struct llist *global_var_stack) { return 0; }
+  if (data->instruction == NULL && strlen(data->label) > 0) {
+    /* only a label */
+    fprintf(out, LABEL_FMT, data->label);
+  } else if (data->instruction != NULL) {
+    /* instruction, possible with a label */
+    int instruction_type =
+        (!!data->dest_operand[0]) | (!!data->src_operand[0] << 1);
+    switch (instruction_type) {
+      case 0:
+        /* nullary */
+        fprintf(out, NULLOP_FMT, data->label, data->instruction);
+        break;
+      case 1:
+        /* unary, destination */
+        fprintf(out, UNOP_FMT, data->label, data->instruction,
+                data->dest_operand);
+        break;
+      case 2:
+        /* unary, source */
+        fprintf(out, UNOP_FMT, data->label, data->instruction,
+                data->src_operand);
+        break;
+      case 3:
+        /* binary operation */
+        fprintf(out, BINOP_FMT, data->label, data->instruction,
+                data->dest_operand, data->src_operand);
+        break;
+      default:
+        break;
+    }
+  }
 
-int write_bss_section(struct llist *uninitialized_data_stack) { return 0; }
+  return 0;
+}
+
+int write_text_section(FILE *out) {
+  size_t i;
+  for (i = 0; i < text_section->size; ++i) {
+    write_instruction(llist_get(text_section, i), out);
+  }
+  return 0;
+}
+
+int write_data_section(FILE *out) {
+  size_t i;
+  for (i = 0; i < text_section->size; ++i) {
+    write_instruction(llist_get(data_section, i), out);
+  }
+  return 0;
+}
+
+int write_bss_section(FILE *out) {
+  size_t i;
+  for (i = 0; i < text_section->size; ++i) {
+    write_instruction(llist_get(bss_section, i), out);
+  }
+  return 0;
+}
+
+int write_asm(FILE *out) {
+  /* TODO(Robert): write assembler directives */
+  write_text_section(out);
+  write_data_section(out);
+  write_bss_section(out);
+  return 0;
+}
