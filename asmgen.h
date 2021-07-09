@@ -5,8 +5,9 @@
 #include "attributes.h"
 #include "lyutils.h"
 
-void intlang_init_globals();
-void intlang_free_globals();
-int intlang_generate();
+void asmgen_init_globals();
+void asmgen_free_globals();
+int translate_file(ASTree *root);
+int write_asm(FILE *out);
 
 #endif

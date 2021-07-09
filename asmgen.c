@@ -106,9 +106,9 @@ const char instructions[][MAX_INSTRUCTION_LENGTH] = {
 static const char INDEX_FMT[] = "[%s+%s*%hhu+%i]";
 static const char OFFSET_FMT[] = "[%s+%i]";
 static const char VREG_FMT[] = "vr%zu%c";
-static const char BINOP_FMT[] = "%8s%8s%s,%s";
-static const char UNOP_FMT[] = "%8s%8s%s";
-static const char NULLOP_FMT[] = "%8s%s\n";
+static const char BINOP_FMT[] = "%8s%8s%8s,%s\n";
+static const char UNOP_FMT[] = "%8s%8s%8s\n";
+static const char NULLOP_FMT[] = "%8s%8s\n";
 static const char LABEL_FMT[] = "%s\n";
 static const char COND_FMT[] = ".C%u:\n";
 static const char END_FMT[] = ".E%u:\n";
@@ -122,7 +122,6 @@ static size_t vreg_count = 0;
 static size_t stack_window = 0;
 static char current_label[MAX_LABEL_LENGTH];
 static SymbolValue *current_function;
-static Map *current_symtable;
 
 static LinkedList *text_section;
 static LinkedList *data_section;
@@ -160,8 +159,8 @@ static int translate_expr(ASTree *tree, InstructionData *data,
  * stack pointer
  */
 int assign_space(ASTree *tree) {
-  SymbolValue *symval =
-      map_get(current_symtable, (void *)tree->lexinfo, strlen(tree->lexinfo));
+  SymbolValue *symval = NULL;
+  locate_symbol((void *)tree->lexinfo, strlen(tree->lexinfo), &symval);
   if (symval == NULL) {
     fprintf(stderr, "ERROR: unable to resolve symbol %s\n", tree->lexinfo);
     return -1;
@@ -211,8 +210,8 @@ int assign_vreg(TypeSpec *type, InstructionData *data, const size_t vreg_num,
 
 int resolve_object(ASTree *ident, InstructionData *out, unsigned int flags) {
   char *dest = flags & SOURCE_OPERAND ? out->src_operand : out->dest_operand;
-  SymbolValue *symval =
-      map_get(current_symtable, (void *)ident->lexinfo, strlen(ident->lexinfo));
+  SymbolValue *symval = NULL;
+  locate_symbol((void *)ident->lexinfo, strlen(ident->lexinfo), &symval);
   if (symval == NULL) {
     fprintf(stderr, "ERROR: unable to resolve symbol %s\n", ident->lexinfo);
     return -1;
@@ -227,14 +226,15 @@ int resolve_object(ASTree *ident, InstructionData *out, unsigned int flags) {
 }
 
 int translate_return(ASTree *ret, InstructionData *data) {
+  DEBUGS('g', "Translating return statement");
   data->instruction = instructions[INSTR_RET];
 
-  InstructionData *value_data = malloc(sizeof(*value_data));
+  InstructionData *value_data = calloc(1, sizeof(*value_data));
   int status = translate_expr(astree_first(ret), value_data, SOURCE_OPERAND);
   if (status) return status;
   llist_push_back(text_section, value_data);
 
-  InstructionData *mov_data = malloc(sizeof(*mov_data));
+  InstructionData *mov_data = calloc(1, sizeof(*mov_data));
   mov_data->instruction = instructions[INSTR_MOV];
   strcpy(mov_data->src_operand, value_data->dest_operand);
 
@@ -283,7 +283,8 @@ int translate_ident(ASTree *ident, InstructionData *data, unsigned int flags) {
   return 0;
 }
 
-int translate_conversion(ASTree *operator, InstructionData * data) {
+int translate_conversion(ASTree *operator, InstructionData * data,
+                         unsigned int flags) {
   /* NOTE: on x64, most operations that write to the lower 32 bits of a
    * register will zero the upper 32 bits. However, I will be zero- and
    * sign-extensions whenever the conversion requires it, just to be safe.
@@ -294,9 +295,15 @@ int translate_conversion(ASTree *operator, InstructionData * data) {
    * any int -> any narrower int: simple mov
    * any int -> any int of same width: nop
    */
+  DEBUGS('g', "Translating conversion");
 
-  InstructionData *src_data = malloc(sizeof(*src_data));
-  int status = translate_expr(astree_first(operator), src_data, SOURCE_OPERAND);
+  InstructionData *src_data = calloc(1, sizeof(*src_data));
+  ASTree *converted_expr = NULL;
+  if (operator->children->size == 1)
+    converted_expr = astree_first(operator);
+  else
+    converted_expr = astree_second(operator);
+  int status = translate_expr(converted_expr, src_data, SOURCE_OPERAND);
   if (status) return status;
   llist_push_back(text_section, src_data);
   strcpy(data->src_operand, src_data->dest_operand);
@@ -304,7 +311,7 @@ int translate_conversion(ASTree *operator, InstructionData * data) {
   if (status) return status;
 
   TypeSpec target_type = operator->type;
-  TypeSpec source_type = astree_first(operator)->type;
+  TypeSpec source_type = converted_expr->type;
 
   if (source_type.width > target_type.width) {
     data->instruction = instructions[INSTR_MOV];
@@ -328,10 +335,30 @@ int translate_conversion(ASTree *operator, InstructionData * data) {
   return 0;
 }
 
+int translate_intcon(ASTree *constant, InstructionData *data,
+                     unsigned int flags) {
+  DEBUGS('g', "Translating integer constant");
+  if (flags & DEST_OPERAND) {
+    /* result will be destination register of parent operand; mov constant
+     * into a register first
+     */
+    data->instruction = instructions[INSTR_MOV];
+    int status =
+        assign_vreg(&(constant->type), data, vreg_count++, DEST_OPERAND);
+    if (status) return status;
+    strcpy(data->src_operand, constant->lexinfo);
+  } else {
+    /* result does not need to be in a register */
+    strcpy(data->dest_operand, constant->lexinfo);
+  }
+  return 0;
+}
+
 int translate_unop(ASTree *operator, InstructionData * data,
                    InstructionEnum num, unsigned int flags) {
+  DEBUGS('g', "Translating unary operation: %s", instructions[num]);
   data->instruction = instructions[num];
-  InstructionData *dest_data = malloc(sizeof(*dest_data));
+  InstructionData *dest_data = calloc(1, sizeof(*dest_data));
   int status = translate_expr(astree_first(operator), dest_data, DEST_OPERAND);
   if (status) return status;
   llist_push_back(text_section, dest_data);
@@ -341,18 +368,19 @@ int translate_unop(ASTree *operator, InstructionData * data,
 
 int translate_binop(ASTree *operator, InstructionData * data,
                     InstructionEnum num, unsigned int flags) {
+  DEBUGS('g', "Translating binary operation: %s", instructions[num]);
   data->instruction = instructions[num];
   /* TODO(Robert): make sure that the order (left or right op first) is
    * correct
    */
-  InstructionData *src_data = malloc(sizeof(*src_data));
+  InstructionData *src_data = calloc(1, sizeof(*src_data));
   int status =
       translate_expr(astree_second(operator), src_data, SOURCE_OPERAND);
   if (status) return status;
   llist_push_back(text_section, src_data);
   strcpy(data->src_operand, src_data->dest_operand);
 
-  InstructionData *dest_data = malloc(sizeof(*dest_data));
+  InstructionData *dest_data = calloc(1, sizeof(*dest_data));
   status = translate_expr(astree_first(operator), dest_data, DEST_OPERAND);
   if (status) return status;
   llist_push_back(text_section, dest_data);
@@ -361,18 +389,28 @@ int translate_binop(ASTree *operator, InstructionData * data,
   return 0;
 }
 
+int translate_cast(ASTree *cast, InstructionData *data) {
+  ASTree *casted_expr = NULL;
+  if (cast->children->size == 1)
+    casted_expr = astree_first(cast);
+  else
+    casted_expr = astree_second(cast);
+  return 0;
+}
+
 int translate_assignment(ASTree *assignment, InstructionData *data,
                          unsigned int flags) {
+  DEBUGS('g', "Translating assignment");
   data->instruction = instructions[INSTR_MOV];
 
-  InstructionData *src_data = malloc(sizeof(*src_data));
+  InstructionData *src_data = calloc(1, sizeof(*src_data));
   int status = translate_expr(astree_second(assignment), src_data,
                               SOURCE_OPERAND & MOV_TO_MEM);
   if (status) return status;
   llist_push_back(text_section, src_data);
   strcpy(data->src_operand, src_data->dest_operand);
 
-  InstructionData *dest_data = malloc(sizeof(*dest_data));
+  InstructionData *dest_data = calloc(1, sizeof(*dest_data));
   status = translate_expr(astree_first(assignment), dest_data,
                           DEST_OPERAND & MOV_TO_MEM);
   if (status) return status;
@@ -383,12 +421,15 @@ int translate_assignment(ASTree *assignment, InstructionData *data,
 }
 
 int translate_param(ASTree *param, InstructionData *data) {
+  DEBUGS('g', "Translating parameter");
   data->instruction = instructions[INSTR_MOV];
-  int status = assign_vreg(&(param->type), data, vreg_count++, SOURCE_OPERAND);
+  ASTree *param_ident = astree_second(param);
+  int status =
+      assign_vreg(&(param_ident->type), data, vreg_count++, SOURCE_OPERAND);
   if (status) return status;
-  status = assign_space(param);
+  status = assign_space(param_ident);
   if (status) return status;
-  resolve_object(param, data, DEST_OPERAND & MOV_TO_MEM);
+  resolve_object(param_ident, data, DEST_OPERAND & MOV_TO_MEM);
   return 0;
 }
 
@@ -397,6 +438,7 @@ int translate_local_decl(ASTree *type_id, InstructionData *data) {
    * location for this object and, if the value is initialized upon
    * declaration, write out the instructions which assign the value
    */
+  DEBUGS('g', "Translating local declaration");
   ASTree *ident = astree_second(type_id);
   int status = assign_space(ident);
   if (status) return status;
@@ -405,7 +447,7 @@ int translate_local_decl(ASTree *type_id, InstructionData *data) {
     data->instruction = instructions[INSTR_MOV];
     int status = resolve_object(ident, data, DEST_OPERAND & MOV_TO_MEM);
     if (status) return status;
-    InstructionData *value_data = malloc(sizeof(*value_data));
+    InstructionData *value_data = calloc(1, sizeof(*value_data));
     status = translate_expr(astree_third(type_id), value_data,
                             SOURCE_OPERAND & MOV_TO_MEM);
     if (status) return status;
@@ -416,6 +458,7 @@ int translate_local_decl(ASTree *type_id, InstructionData *data) {
 }
 
 int translate_global_decl(ASTree *type_id, InstructionData *data) {
+  DEBUGS('g', "Translating global declaration");
   ASTree *ident = astree_second(type_id);
   sprintf(data->label, "%s:", ident->lexinfo);
   /* TODO(Robert): indicate somehow in the tree or symbol table that this
@@ -505,6 +548,14 @@ static int translate_expr(ASTree *tree, InstructionData *out,
     case '=':
       status = translate_assignment(tree, out, flags);
       break;
+    case TOK_CAST:
+      status = translate_conversion(tree, out, flags);
+      break;
+    case TOK_INTCON:
+      status = translate_intcon(tree, out, flags);
+      break;
+    case TOK_CHARCON:
+      break;
     default:
       fprintf(stderr, "ERROR: Unimplemented token: %s, lexinfo: %s\n",
               parser_get_tname(tree->symbol), tree->lexinfo);
@@ -524,7 +575,7 @@ static int translate_stmt(ASTree *stmt) {
       status = translate_block(stmt);
       break;
     case TOK_RETURN:
-      data = malloc(sizeof(*data));
+      data = calloc(1, sizeof(*data));
       status = translate_return(stmt, data);
       if (status) break;
       llist_push_back(text_section, data);
@@ -544,13 +595,13 @@ static int translate_stmt(ASTree *stmt) {
       status = -1;
       break;
     case TOK_TYPE_ID:
-      data = malloc(sizeof(*data));
+      data = calloc(1, sizeof(*data));
       status = translate_local_decl(stmt, data);
       if (status) break;
       llist_push_back(text_section, data);
       break;
     default:
-      data = malloc(sizeof(*data));
+      data = calloc(1, sizeof(*data));
       status = translate_expr(stmt, data, 0);
       if (status) break;
       llist_push_back(text_section, data);
@@ -562,6 +613,7 @@ static int translate_stmt(ASTree *stmt) {
 }
 
 static int translate_block(ASTree *block) {
+  DEBUGS('g', "Translating compound statement");
   LinkedList *stmts = block->children;
   size_t i;
   for (i = 0; i < stmts->size; ++i) {
@@ -577,33 +629,33 @@ static int translate_block(ASTree *block) {
  * base, and frame pointers) and handling those before anything else.
  */
 int translate_prolog(ASTree *function) {
-  InstructionData *push_rbp_data = malloc(sizeof(InstructionData));
+  InstructionData *push_rbp_data = calloc(1, sizeof(InstructionData));
   push_rbp_data->instruction = instructions[INSTR_PUSH];
   sprintf(push_rbp_data->src_operand, "rbp");
   llist_push_back(text_section, push_rbp_data);
 
-  InstructionData *mov_rbp_data = malloc(sizeof(InstructionData));
+  InstructionData *mov_rbp_data = calloc(1, sizeof(InstructionData));
   mov_rbp_data->instruction = instructions[INSTR_MOV];
   sprintf(mov_rbp_data->src_operand, "rsp");
   sprintf(mov_rbp_data->dest_operand, "rbp");
   llist_push_back(text_section, mov_rbp_data);
 
-  InstructionData *push_r12_data = malloc(sizeof(InstructionData));
+  InstructionData *push_r12_data = calloc(1, sizeof(InstructionData));
   push_r12_data->instruction = instructions[INSTR_PUSH];
   sprintf(push_r12_data->src_operand, "r12");
   llist_push_back(text_section, push_r12_data);
 
-  InstructionData *push_r13_data = malloc(sizeof(InstructionData));
+  InstructionData *push_r13_data = calloc(1, sizeof(InstructionData));
   push_r13_data->instruction = instructions[INSTR_PUSH];
   sprintf(push_r13_data->src_operand, "r13");
   llist_push_back(text_section, push_r13_data);
 
-  InstructionData *push_r14_data = malloc(sizeof(InstructionData));
+  InstructionData *push_r14_data = calloc(1, sizeof(InstructionData));
   push_r14_data->instruction = instructions[INSTR_PUSH];
   sprintf(push_r14_data->src_operand, "r14");
   llist_push_back(text_section, push_r14_data);
 
-  InstructionData *push_r15_data = malloc(sizeof(InstructionData));
+  InstructionData *push_r15_data = calloc(1, sizeof(InstructionData));
   push_r15_data->instruction = instructions[INSTR_PUSH];
   sprintf(push_r15_data->src_operand, "r15");
   llist_push_back(text_section, push_r15_data);
@@ -612,33 +664,33 @@ int translate_prolog(ASTree *function) {
 }
 
 int translate_epilog(ASTree *function) {
-  InstructionData *pop_r15_data = malloc(sizeof(InstructionData));
+  InstructionData *pop_r15_data = calloc(1, sizeof(InstructionData));
   pop_r15_data->instruction = instructions[INSTR_POP];
   sprintf(pop_r15_data->src_operand, "r15");
   llist_push_back(text_section, pop_r15_data);
 
-  InstructionData *pop_r14_data = malloc(sizeof(InstructionData));
+  InstructionData *pop_r14_data = calloc(1, sizeof(InstructionData));
   pop_r14_data->instruction = instructions[INSTR_POP];
   sprintf(pop_r14_data->src_operand, "r14");
   llist_push_back(text_section, pop_r14_data);
 
-  InstructionData *pop_r13_data = malloc(sizeof(InstructionData));
+  InstructionData *pop_r13_data = calloc(1, sizeof(InstructionData));
   pop_r13_data->instruction = instructions[INSTR_POP];
   sprintf(pop_r13_data->src_operand, "r13");
   llist_push_back(text_section, pop_r13_data);
 
-  InstructionData *pop_r12_data = malloc(sizeof(InstructionData));
+  InstructionData *pop_r12_data = calloc(1, sizeof(InstructionData));
   pop_r12_data->instruction = instructions[INSTR_POP];
   sprintf(pop_r12_data->src_operand, "r12");
   llist_push_back(text_section, pop_r12_data);
 
-  InstructionData *mov_rsp_data = malloc(sizeof(InstructionData));
+  InstructionData *mov_rsp_data = calloc(1, sizeof(InstructionData));
   mov_rsp_data->instruction = instructions[INSTR_MOV];
   sprintf(mov_rsp_data->src_operand, "rbp");
   sprintf(mov_rsp_data->dest_operand, "rsp");
   llist_push_back(text_section, mov_rsp_data);
 
-  InstructionData *push_rbp_data = malloc(sizeof(InstructionData));
+  InstructionData *push_rbp_data = calloc(1, sizeof(InstructionData));
   push_rbp_data->instruction = instructions[INSTR_POP];
   sprintf(push_rbp_data->src_operand, "rbp");
   llist_push_back(text_section, push_rbp_data);
@@ -647,18 +699,31 @@ int translate_epilog(ASTree *function) {
 }
 
 int translate_function(ASTree *function, InstructionData *data) {
+  DEBUGS('g', "Translating function definition");
   ASTree *name_node = astree_second(astree_first(function));
+  locate_symbol(name_node->lexinfo, strlen(name_node->lexinfo),
+                &current_function);
+  if (current_function == NULL) {
+    fprintf(stderr, "ERROR: unable to resolve symbol %s\n", name_node->lexinfo);
+    return -1;
+  }
   sprintf(data->label, "%s:", name_node->lexinfo);
   translate_prolog(function);
+
+  /* enter function parameter/body scope briefly to handle parameters, then exit
+   * again
+   */
   size_t i;
-  LinkedList *params = astree_second(function)->children;
-  for (i = 0; i < params->size; ++i) {
-    ASTree *param = llist_get(params, i);
-    InstructionData *param_data = malloc(sizeof(*param_data));
+  ASTree *params = astree_second(function);
+  enter_scope(params->symbol_table);
+  for (i = 0; i < params->children->size; ++i) {
+    ASTree *param = llist_get(params->children, i);
+    InstructionData *param_data = calloc(1, sizeof(*param_data));
     int status = translate_param(param, param_data);
     if (status) return status;
     llist_push_back(text_section, param_data);
   }
+  leave_scope();
 
   int status = translate_stmt(astree_third(function));
   if (status) return status;
@@ -671,7 +736,7 @@ int translate_file(ASTree *root) {
   enter_scope(root->symbol_table);
   for (i = 0; i < llist_size(root->children); ++i) {
     ASTree *topdecl = llist_get(root->children, i);
-    InstructionData *topdecl_data = malloc(sizeof(*topdecl_data));
+    InstructionData *topdecl_data = calloc(1, sizeof(*topdecl_data));
     int status = 0;
     switch (topdecl->symbol) {
       case TOK_TYPE_ID:
@@ -760,7 +825,7 @@ int write_text_section(FILE *out) {
 
 int write_data_section(FILE *out) {
   size_t i;
-  for (i = 0; i < text_section->size; ++i) {
+  for (i = 0; i < data_section->size; ++i) {
     write_instruction(llist_get(data_section, i), out);
   }
   return 0;
@@ -768,7 +833,7 @@ int write_data_section(FILE *out) {
 
 int write_bss_section(FILE *out) {
   size_t i;
-  for (i = 0; i < text_section->size; ++i) {
+  for (i = 0; i < bss_section->size; ++i) {
     write_instruction(llist_get(bss_section, i), out);
   }
   return 0;
@@ -780,4 +845,20 @@ int write_asm(FILE *out) {
   write_data_section(out);
   write_bss_section(out);
   return 0;
+}
+
+void asmgen_init_globals() {
+  text_section = malloc(sizeof(*text_section));
+  llist_init(text_section, free, NULL);
+  data_section = malloc(sizeof(*data_section));
+  llist_init(data_section, free, NULL);
+  bss_section = malloc(sizeof(*bss_section));
+  llist_init(bss_section, free, NULL);
+  memset(current_label, 0, MAX_LABEL_LENGTH);
+}
+
+void asmgen_free_globals() {
+  llist_destroy(text_section);
+  llist_destroy(data_section);
+  llist_destroy(bss_section);
 }
