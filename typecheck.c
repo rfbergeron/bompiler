@@ -1008,12 +1008,8 @@ int nest_type(ASTree *ident, const TypeSpec *to_copy) {
 /* TODO(Robert): some of this should be put into separate functions
  * (parameters?) */
 int make_function_entry(ASTree *function) {
-  int status = 0;
-
-  DEBUGS('t', "Making entry for node with symbol: %s",
-         parser_get_tname(function->symbol));
   ASTree *type_id = astree_first(function);
-  status = validate_type_id(type_id);
+  int status = validate_type_id(type_id);
   if (status != 0) return status;
   if (type_id->type.base == TYPE_ARRAY) {
     fprintf(stderr, "ERROR: Function %s has an array return type.\n",
@@ -1022,16 +1018,19 @@ int make_function_entry(ASTree *function) {
     return -1;
   }
 
-  /* Currently, a new scope is created for function prototypes, which only holds
-   * the parameters. This is fine; the standard even specifies a scope
-   * specifically for function declarations
-   */
-  create_scope(&(function->symbol_table));
   ASTree *ident = astree_second(type_id);
   nest_type(ident, &SPEC_FUNCTION);
   ident->type.data.params = malloc(sizeof(struct llist));
   llist_init(ident->type.data.params, free, NULL);
   ASTree *params = astree_second(function);
+  /* Currently, a new scope is created for function prototypes, which only holds
+   * the parameters. This is fine; the standard even specifies a scope
+   * specifically for function declarations.
+   *
+   * The symbol table for the function's scope and the symbol table for the
+   * parameters will be shared in the function definition.
+   */
+  create_scope(&(params->symbol_table));
   size_t i;
   for (i = 0; i < llist_size(params->children); ++i) {
     ASTree *param = llist_get(params->children, i);
@@ -1055,6 +1054,12 @@ int make_function_entry(ASTree *function) {
     llist_push_back(ident->type.data.params, param_entry);
   }
 
+  /* temporarily leave function prototype scope so that we can check the
+   * global table, and also insert this function's symbol into the global
+   * table if we need to
+   */
+  leave_scope();
+
   const char *function_id = extract_ident(type_id);
   size_t function_id_len = strnlen(function_id, MAX_STRING_LENGTH);
   SymbolValue *existing_entry = NULL;
@@ -1062,30 +1067,39 @@ int make_function_entry(ASTree *function) {
   if (existing_entry) {
     if (types_compatible(existing_entry, ident, ARG1_SMV | ARG2_AST) ==
         TCHK_INCOMPATIBLE) {
-      fprintf(stderr, "ERROR: redefinition of function: %s\n", function_id);
+      fprintf(stderr, "ERROR: redeclaration of function: %s\n", function_id);
       return -1;
     } else if (existing_entry->is_defined) {
-      fprintf(stderr, "ERROR: function has already been defined: %s\n",
-              function_id);
+      fprintf(stderr, "ERROR: redefinition of function: %s\n", function_id);
       return -1;
     } else if (llist_size(function->children) == 3) {
-      DEBUGS('t', "Completing entry for prototype %s", function_id);
+      DEBUGS('t', "Defining function: %s", function_id);
+      ASTree *fn_body = astree_third(function);
+      /* set 3rd child's symbol table to the parameter symbol table */
+      fn_body->symbol_table = params->symbol_table;
+      /* enter block scope again */
+      enter_scope(fn_body->symbol_table);
       current_function = existing_entry;
-      status = validate_stmt(astree_third(function));
+      status = validate_stmt(fn_body);
       if (status) return status;
       current_function = NULL;
       existing_entry->is_defined = 1;
     }
   } else {
-    /* create function symbol */
+    /* declare function */
     SymbolValue *function_entry =
         symbol_value_init(&(ident->type), &(ident->loc));
     insert_symbol(function_id, function_id_len, function_entry);
     if (llist_size(function->children) == 3) {
       /* define function */
-      DEBUGS('t', "No protoype; defining function %s", function_id);
+      DEBUGS('t', "No prototype; defining function %s", function_id);
+      ASTree *fn_body = astree_third(function);
+      /* set 3rd child's symbol table to the parameter symbol table */
+      fn_body->symbol_table = params->symbol_table;
+      /* enter block scope again */
+      enter_scope(fn_body->symbol_table);
       current_function = function_entry;
-      status = validate_stmt(astree_third(function));
+      status = validate_stmt(fn_body);
       if (status) return status;
       current_function = NULL;
       function_entry->is_defined = 1;
