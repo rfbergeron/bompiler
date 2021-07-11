@@ -380,13 +380,13 @@ int cvt_to_bool(ASTree *tree, InstructionData *data, unsigned int logical_not) {
    */
 
   /* evaluate operand */
-  InstructionData *tree_data = malloc(sizeof(InstructionData));
+  InstructionData *tree_data = calloc(1, sizeof(InstructionData));
   int status = translate_expr(tree, tree_data, DEST_OPERAND);
   if (status) return status;
   llist_push_back(text_section, tree_data);
 
   /* TEST operand with itself */
-  InstructionData *test_data = malloc(sizeof(InstructionData));
+  InstructionData *test_data = calloc(1, sizeof(InstructionData));
   test_data->instruction = instructions[INSTR_TEST];
   strcpy(test_data->dest_operand, tree_data->dest_operand);
   strcpy(test_data->src_operand, tree_data->dest_operand);
@@ -408,19 +408,19 @@ int translate_logical(ASTree *operator, InstructionData * data,
     int status = cvt_to_bool(astree_first(operator), data, 1);
     return status;
   } else {
-    InstructionData *set_first_data = malloc(sizeof(InstructionData));
+    InstructionData *set_first_data = calloc(1, sizeof(InstructionData));
     int status = cvt_to_bool(astree_first(operator), set_first_data, 0);
     if (status) return status;
     llist_push_back(text_section, set_first_data);
 
-    InstructionData *set_second_data = malloc(sizeof(InstructionData));
+    InstructionData *set_second_data = calloc(1, sizeof(InstructionData));
     status = cvt_to_bool(astree_second(operator), set_second_data, 0);
     if (status) return status;
     llist_push_back(text_section, set_second_data);
 
     data->instruction = instructions[num];
     strcpy(data->dest_operand, set_first_data->dest_operand);
-    strcpy(data->dest_operand, set_second_data->dest_operand);
+    strcpy(data->src_operand, set_second_data->dest_operand);
     return 0;
   }
 }
@@ -717,6 +717,7 @@ static int translate_expr(ASTree *tree, InstructionData *out,
       break;
     case TOK_OR:
       translate_logical(tree, out, INSTR_OR, flags);
+      break;
     /* constants */
     case TOK_INTCON:
       status = translate_intcon(tree, out, flags);
@@ -887,11 +888,11 @@ int translate_function(ASTree *function, InstructionData *data) {
   sprintf(data->label, "%s:", name_node->lexinfo);
   translate_prolog(function);
 
-  /* enter function parameter/body scope briefly to handle parameters, then exit
-   * again
-   */
   size_t i;
   ASTree *params = astree_second(function);
+  /* cleanup vregs from last function */
+  vreg_count = 0;
+  /* enter function parameter/body scope briefly to handle parameters */
   enter_scope(params->symbol_table);
   for (i = 0; i < params->children->size; ++i) {
     ASTree *param = llist_get(params->children, i);
@@ -902,6 +903,8 @@ int translate_function(ASTree *function, InstructionData *data) {
   }
   leave_scope();
 
+  /* reset vregs since they are now all available */
+  vreg_count = 0;
   int status = translate_stmt(astree_third(function));
   if (status) return status;
   translate_epilog(function);
