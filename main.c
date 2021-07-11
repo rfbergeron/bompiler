@@ -26,6 +26,7 @@ const char *AST_EXT = ".ast";
 const char *SYM_EXT = ".sym";
 const char *OIL_EXT = ".oil";
 char cppcmd[LINESIZE];
+char name[LINESIZE];
 char strname[LINESIZE];
 char tokname[LINESIZE];
 char astname[LINESIZE];
@@ -40,6 +41,7 @@ FILE *symfile;
 FILE *oilfile;
 
 int do_type_check = 1;
+int stdin_tmp_fileno;
 
 void scan_options(int argc, char **argv) {
   opterr = 0;
@@ -79,34 +81,40 @@ int main(int argc, char **argv) {
   yy_flex_debug = 0;
   scan_options(argc, argv);
 
-  char *oc_name = basename(argv[optind]);
-  char *ext_ptr = strstr(oc_name, SRC_EXT);
-  ptrdiff_t name_len = ext_ptr - oc_name;
+  char *ocname = basename(argv[optind]);
+  char *ext_ptr = strstr(ocname, SRC_EXT);
+  ptrdiff_t name_len = ext_ptr - ocname;
 
   assert(name_len < LINESIZE);
 
   if (ext_ptr == NULL || name_len <= 0) {
-    errx(1, "%s: Not an oc file.", oc_name);
+    errx(1, "%s: Not an oc file.", ocname);
   }
 
   struct stat statbuf;
-  int status = stat(oc_name, &statbuf);
+  int status = stat(ocname, &statbuf);
 
   if (status == -1) {
-    err(1, "%s", oc_name);
+    err(1, "%s", ocname);
   }
 
+  /* chop off the source extension */
+  strcpy(name, ocname);
+  name[name_len] = 0;
+
   DEBUGS('m', "Creating names of output files and cpp exec line");
-  memcpy(strname, oc_name, name_len);
-  memcpy(strname + name_len, STR_EXT, strlen(STR_EXT));
-  memcpy(tokname, oc_name, name_len);
-  memcpy(tokname + name_len, TOK_EXT, strlen(TOK_EXT));
-  memcpy(astname, oc_name, name_len);
-  memcpy(astname + name_len, AST_EXT, strlen(AST_EXT));
-  memcpy(symname, oc_name, name_len);
-  memcpy(symname + name_len, SYM_EXT, strlen(SYM_EXT));
-  memcpy(cppcmd, CPP, strlen(CPP));
-  memcpy(cppcmd + strlen(CPP), oc_name, strlen(oc_name));
+  strcpy(strname, name);
+  strcat(strname, STR_EXT);
+  strcpy(tokname, name);
+  strcat(tokname, TOK_EXT);
+  strcpy(astname, name);
+  strcat(astname, AST_EXT);
+  strcpy(symname, name);
+  strcat(symname, SYM_EXT);
+  strcpy(oilname, name);
+  strcat(oilname, OIL_EXT);
+  strcpy(cppcmd, CPP);
+  strcat(cppcmd, ocname);
 
   DEBUGS('m', "Opening preprocessor pipe");
   /* this is way more complicated than it would normally be since -ansi does
@@ -123,6 +131,8 @@ int main(int argc, char **argv) {
 
   if (parent) {
     /* parent process procedures */
+    /* save stdin for later */
+    stdin_tmp_fileno = dup(STDIN_FILENO);
     /* duplicate the read end of the pipe to stdin */
     dup2(pipedes[0], STDIN_FILENO);
     /* close extra fds */
@@ -142,7 +152,7 @@ int main(int argc, char **argv) {
     close(pipedes[0]);
     close(pipedes[1]);
     /* execute the preprocessor; if successful execution should stop here */
-    execlp("/usr/bin/cpp", "cpp", oc_name, NULL);
+    execlp("/usr/bin/cpp", "cpp", ocname, NULL);
     /* error if the preprocessor was unable to run */
     err(EXIT_FAILURE, "Failed to lay pipe\n");
   }
@@ -185,7 +195,10 @@ int main(int argc, char **argv) {
   }
 
   DEBUGS('m', "Execution finished; wrapping up.");
-  int pclose_status = pclose(yyin);
+
+  /* restore stdin */
+  dup2(stdin_tmp_fileno, STDIN_FILENO);
+  close(stdin_tmp_fileno);
 
   fclose(strfile);
   fclose(tokfile);
@@ -196,5 +209,6 @@ int main(int argc, char **argv) {
   lexer_free_globals();
   DEBUGS('m', "symbol table cleanup");
   symbol_table_free_globals();
+  DEBUGS('m', "assembly generator cleanup");
   return EXIT_SUCCESS;
 }
