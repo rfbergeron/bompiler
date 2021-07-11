@@ -11,10 +11,8 @@
 #define MAX_OP_LENGTH 16
 #define MAX_LABEL_LENGTH 32
 /* TODO(Robert):
- * write epilog function
  * generalize return, prolog, epilog to use vregs instead of explicit x64
  * registers
- * make function calls respect error codes
  */
 
 /* macros used to generate string constants for instructions */
@@ -32,6 +30,18 @@
   /* compare and test */               \
   GENERATOR(TEST)                      \
   GENERATOR(CMP)                       \
+  GENERATOR(SETE)                      \
+  GENERATOR(SETNE)                     \
+  GENERATOR(SETG)                      \
+  GENERATOR(SETGE)                     \
+  GENERATOR(SETL)                      \
+  GENERATOR(SETLE)                     \
+  GENERATOR(SETA)                      \
+  GENERATOR(SETAE)                     \
+  GENERATOR(SETB)                      \
+  GENERATOR(SETBE)                     \
+  GENERATOR(SETZ)                      \
+  GENERATOR(SETNZ)                     \
   /* logical and bitwise */            \
   GENERATOR(NOT)                       \
   GENERATOR(OR)                        \
@@ -61,7 +71,13 @@
   GENERATOR(RESB)                      \
   GENERATOR(RESW)                      \
   GENERATOR(RESD)                      \
-  GENERATOR(RESQ)
+  GENERATOR(RESQ)                      \
+  /* pseudo-ops; should not be present \
+   * in generated code                 \
+   */                                  \
+  GENERATOR(POINC)                     \
+  GENERATOR(PODEC)                     \
+  GENERATOR(MOD)
 
 #define GENERATE_ENUM(ENUM) INSTR_##ENUM,
 #define GENERATE_STRING(STRING) #STRING,
@@ -131,7 +147,8 @@ static LinkedList *bss_section;
  * for pushing the InstructionData onto its respective stack
  *
  * if the function called to populate the InstructionData fails, it should not
- * be pushed onto the stack
+ * be pushed onto the stack, and ideally should not modify the InstructionData
+ * until it cannot/should not fail
  */
 static char *translate_stride(ASTree *index, ASTree *memblock);
 static char *translate_reg_type(ASTree *);
@@ -141,24 +158,11 @@ static int translate_block(ASTree *block);
 static int translate_expr(ASTree *tree, InstructionData *data,
                           unsigned int flags);
 
-/* TODO(Robert): turn into C if necessary
-#define WRLABEL(LABEL,CODE) { \
-            *out << setw(10) << left << LABEL << CODE << endl; \
-        }
-#define IDLABEL(LABEL,CODE) { \
-            *out << setw(10) << *NO_LABEL << LABEL \
-                 << CODE << endl; \
-        }
-#define INDENT(CODE) { \
-            *out << setw(10) << *NO_LABEL << CODE << endl; \
-        }
-*/
-
 /* TODO(Robert): it may be a good idea to generalize this so that an object's
  * location can be an offset from any register or label, rather than just the
  * stack pointer
  */
-int assign_space(ASTree *tree) {
+int assign_space(const ASTree *tree) {
   SymbolValue *symval = NULL;
   locate_symbol((void *)tree->lexinfo, strlen(tree->lexinfo), &symval);
   if (symval == NULL) {
@@ -174,8 +178,8 @@ int assign_space(ASTree *tree) {
   return 0;
 }
 
-int assign_vreg(TypeSpec *type, InstructionData *data, const size_t vreg_num,
-                unsigned int opflags) {
+int assign_vreg(const TypeSpec *type, InstructionData *data,
+                const size_t vreg_num, unsigned int opflags) {
   char *dest =
       opflags & SOURCE_OPERAND ? data->src_operand : data->dest_operand;
   char reg_width = 0;
@@ -183,7 +187,6 @@ int assign_vreg(TypeSpec *type, InstructionData *data, const size_t vreg_num,
   if (opflags & WANT_OBJ_VADDR) {
     reg_width = 'q';
   } else {
-    /* TODO(Robert): use fancy bit things to get rid of the switch statement */
     switch (type->width) {
       case X64_SIZEOF_LONG:
         reg_width = 'q';
@@ -208,7 +211,8 @@ int assign_vreg(TypeSpec *type, InstructionData *data, const size_t vreg_num,
   return 0;
 }
 
-int resolve_object(ASTree *ident, InstructionData *out, unsigned int flags) {
+int resolve_object(const ASTree *ident, InstructionData *out,
+                   unsigned int flags) {
   char *dest = flags & SOURCE_OPERAND ? out->src_operand : out->dest_operand;
   SymbolValue *symval = NULL;
   locate_symbol((void *)ident->lexinfo, strlen(ident->lexinfo), &symval);
@@ -227,7 +231,6 @@ int resolve_object(ASTree *ident, InstructionData *out, unsigned int flags) {
 
 int translate_return(ASTree *ret, InstructionData *data) {
   DEBUGS('g', "Translating return statement");
-  data->instruction = instructions[INSTR_RET];
 
   InstructionData *value_data = calloc(1, sizeof(*value_data));
   int status = translate_expr(astree_first(ret), value_data, SOURCE_OPERAND);
@@ -261,23 +264,26 @@ int translate_return(ASTree *ret, InstructionData *data) {
 
   llist_push_back(text_section, mov_data);
 
+  data->instruction = instructions[INSTR_RET];
   return 0;
 }
 
 int translate_ident(ASTree *ident, InstructionData *data, unsigned int flags) {
   if (flags & WANT_OBJ_VADDR) {
-    data->instruction = instructions[INSTR_LEA];
     int status = resolve_object(ident, data, SOURCE_OPERAND & WANT_OBJ_VADDR);
     if (status) return status;
     status = assign_vreg(&(ident->type), data, vreg_count++,
                          DEST_OPERAND & WANT_OBJ_VADDR);
     if (status) return status;
+
+    data->instruction = instructions[INSTR_LEA];
   } else {
-    data->instruction = instructions[INSTR_MOV];
     int status = resolve_object(ident, data, SOURCE_OPERAND);
     if (status) return status;
     status = assign_vreg(&(ident->type), data, vreg_count++, DEST_OPERAND);
     if (status) return status;
+
+    data->instruction = instructions[INSTR_MOV];
   }
 
   return 0;
@@ -342,11 +348,11 @@ int translate_intcon(ASTree *constant, InstructionData *data,
     /* result will be destination register of parent operand; mov constant
      * into a register first
      */
-    data->instruction = instructions[INSTR_MOV];
     int status =
         assign_vreg(&(constant->type), data, vreg_count++, DEST_OPERAND);
     if (status) return status;
     strcpy(data->src_operand, constant->lexinfo);
+    data->instruction = instructions[INSTR_MOV];
   } else {
     /* result does not need to be in a register */
     strcpy(data->dest_operand, constant->lexinfo);
@@ -354,14 +360,104 @@ int translate_intcon(ASTree *constant, InstructionData *data,
   return 0;
 }
 
+/* Two classes of operators whose result is a boolean:
+ * - comparison: >, <, >=, <=, ==, !=
+ * - logical: &&, ||, !
+ *
+ * logical operators require their operands to be a boolean value (0 or 1)
+ *
+ * logical NOT does the same thing as the conversion from an arbitrary value to
+ * a boolean except instead of using SETNZ it does SETZ
+ */
+int cvt_to_bool(ASTree *tree, InstructionData *data, unsigned int logical_not) {
+  /* TODO(Robert): this function does not follow the convention that only the
+   * translate_* function recur, which may be confusing when coming back to
+   * modify this
+   *
+   * TODO(Robert): add attribute indicating when the result of an expression is
+   * boolean so that we can skip doing all of this if we don't need to, or maybe
+   * even add a whole boolean type, though that may be overkill
+   */
+
+  /* evaluate operand */
+  InstructionData *tree_data = malloc(sizeof(InstructionData));
+  int status = translate_expr(tree, tree_data, DEST_OPERAND);
+  if (status) return status;
+  llist_push_back(text_section, tree_data);
+
+  /* TEST operand with itself */
+  InstructionData *test_data = malloc(sizeof(InstructionData));
+  test_data->instruction = instructions[INSTR_TEST];
+  strcpy(test_data->dest_operand, tree_data->dest_operand);
+  strcpy(test_data->src_operand, tree_data->dest_operand);
+  llist_push_back(text_section, test_data);
+
+  /* invert result if parent is logical not */
+  if (logical_not)
+    data->instruction = instructions[INSTR_SETZ];
+  else
+    data->instruction = instructions[INSTR_SETNZ];
+  status = assign_vreg(&SPEC_INT, data, vreg_count++, DEST_OPERAND);
+  return status;
+}
+
+int translate_logical(ASTree *operator, InstructionData * data,
+                      InstructionEnum num, unsigned int flags) {
+  /* TODO(Robert): implement short-circuiting */
+  if (operator->symbol == '!') {
+    int status = cvt_to_bool(astree_first(operator), data, 1);
+    return status;
+  } else {
+    InstructionData *set_first_data = malloc(sizeof(InstructionData));
+    int status = cvt_to_bool(astree_first(operator), set_first_data, 0);
+    if (status) return status;
+    llist_push_back(text_section, set_first_data);
+
+    InstructionData *set_second_data = malloc(sizeof(InstructionData));
+    status = cvt_to_bool(astree_second(operator), set_second_data, 0);
+    if (status) return status;
+    llist_push_back(text_section, set_second_data);
+
+    data->instruction = instructions[num];
+    strcpy(data->dest_operand, set_first_data->dest_operand);
+    strcpy(data->dest_operand, set_second_data->dest_operand);
+    return 0;
+  }
+}
+
+int translate_comparison(ASTree *operator, InstructionData * data,
+                         InstructionEnum num, unsigned int flags) {
+  /* CMP operands, then SETG/SETGE/SETL/SETLE/SETE/SETNE */
+  InstructionData *first_data = calloc(1, sizeof(*first_data));
+  int status = translate_expr(astree_first(operator), first_data, DEST_OPERAND);
+  if (status) return status;
+  llist_push_back(text_section, first_data);
+
+  InstructionData *second_data = calloc(1, sizeof(*second_data));
+  status = translate_expr(astree_second(operator), second_data, SOURCE_OPERAND);
+  if (status) return status;
+  llist_push_back(text_section, second_data);
+
+  InstructionData *cmp_data = calloc(1, sizeof(InstructionData));
+  cmp_data->instruction = instructions[INSTR_CMP];
+  strcpy(cmp_data->dest_operand, first_data->dest_operand);
+  strcpy(cmp_data->src_operand, second_data->dest_operand);
+  llist_push_back(text_section, cmp_data);
+
+  data->instruction = instructions[num];
+  status = assign_vreg(&SPEC_INT, data, vreg_count++, DEST_OPERAND);
+  return status;
+}
+
 int translate_unop(ASTree *operator, InstructionData * data,
                    InstructionEnum num, unsigned int flags) {
   DEBUGS('g', "Translating unary operation: %s", instructions[num]);
-  data->instruction = instructions[num];
   InstructionData *dest_data = calloc(1, sizeof(*dest_data));
   int status = translate_expr(astree_first(operator), dest_data, DEST_OPERAND);
   if (status) return status;
   llist_push_back(text_section, dest_data);
+
+  data->instruction = instructions[num];
   strcpy(data->dest_operand, dest_data->dest_operand);
   return 0;
 }
@@ -369,7 +465,6 @@ int translate_unop(ASTree *operator, InstructionData * data,
 int translate_binop(ASTree *operator, InstructionData * data,
                     InstructionEnum num, unsigned int flags) {
   DEBUGS('g', "Translating binary operation: %s", instructions[num]);
-  data->instruction = instructions[num];
   /* TODO(Robert): make sure that the order (left or right op first) is
    * correct
    */
@@ -378,13 +473,15 @@ int translate_binop(ASTree *operator, InstructionData * data,
       translate_expr(astree_second(operator), src_data, SOURCE_OPERAND);
   if (status) return status;
   llist_push_back(text_section, src_data);
-  strcpy(data->src_operand, src_data->dest_operand);
 
   InstructionData *dest_data = calloc(1, sizeof(*dest_data));
   status = translate_expr(astree_first(operator), dest_data, DEST_OPERAND);
   if (status) return status;
   llist_push_back(text_section, dest_data);
+
   strcpy(data->dest_operand, dest_data->dest_operand);
+  strcpy(data->src_operand, src_data->dest_operand);
+  data->instruction = instructions[num];
 
   return 0;
 }
@@ -401,28 +498,28 @@ int translate_cast(ASTree *cast, InstructionData *data) {
 int translate_assignment(ASTree *assignment, InstructionData *data,
                          unsigned int flags) {
   DEBUGS('g', "Translating assignment");
-  data->instruction = instructions[INSTR_MOV];
 
   InstructionData *src_data = calloc(1, sizeof(*src_data));
   int status = translate_expr(astree_second(assignment), src_data,
                               SOURCE_OPERAND & MOV_TO_MEM);
   if (status) return status;
   llist_push_back(text_section, src_data);
-  strcpy(data->src_operand, src_data->dest_operand);
 
   InstructionData *dest_data = calloc(1, sizeof(*dest_data));
   status = translate_expr(astree_first(assignment), dest_data,
                           DEST_OPERAND & MOV_TO_MEM);
   if (status) return status;
   llist_push_back(text_section, dest_data);
+
   strcpy(data->dest_operand, dest_data->dest_operand);
+  strcpy(data->src_operand, src_data->dest_operand);
+  data->instruction = instructions[INSTR_MOV];
 
   return 0;
 }
 
 int translate_param(ASTree *param, InstructionData *data) {
   DEBUGS('g', "Translating parameter");
-  data->instruction = instructions[INSTR_MOV];
   ASTree *param_ident = astree_second(param);
   int status =
       assign_vreg(&(param_ident->type), data, vreg_count++, SOURCE_OPERAND);
@@ -430,6 +527,7 @@ int translate_param(ASTree *param, InstructionData *data) {
   status = assign_space(param_ident);
   if (status) return status;
   resolve_object(param_ident, data, DEST_OPERAND & MOV_TO_MEM);
+  data->instruction = instructions[INSTR_MOV];
   return 0;
 }
 
@@ -444,7 +542,6 @@ int translate_local_decl(ASTree *type_id, InstructionData *data) {
   if (status) return status;
 
   if (type_id->children->size == 3) {
-    data->instruction = instructions[INSTR_MOV];
     int status = resolve_object(ident, data, DEST_OPERAND & MOV_TO_MEM);
     if (status) return status;
     InstructionData *value_data = calloc(1, sizeof(*value_data));
@@ -452,7 +549,9 @@ int translate_local_decl(ASTree *type_id, InstructionData *data) {
                             SOURCE_OPERAND & MOV_TO_MEM);
     if (status) return status;
     llist_push_back(text_section, value_data);
+
     strcpy(data->src_operand, value_data->dest_operand);
+    data->instruction = instructions[INSTR_MOV];
   }
   return 0;
 }
@@ -529,7 +628,11 @@ static int translate_expr(ASTree *tree, InstructionData *out,
                           unsigned int flags) {
   int status = 0;
 
+  /* TODO(Robert): make a mapping from symbols to instructions so that most
+   * of the case statements can be collapsed together
+   */
   switch (tree->symbol) {
+    /* arithmetic operators */
     case '+':
       status = translate_binop(tree, out, INSTR_ADD, flags);
       break;
@@ -537,11 +640,90 @@ static int translate_expr(ASTree *tree, InstructionData *out,
       status = translate_binop(tree, out, INSTR_SUB, flags);
       break;
     case '*':
+      /* TODO(Robert): determine whether to use mul or imul */
       status = translate_binop(tree, out, INSTR_MUL, flags);
       break;
     case '/':
+      /* TODO(Robert): determine whether to use div or idiv */
       status = translate_binop(tree, out, INSTR_DIV, flags);
       break;
+    case '%':
+      /* TODO(Robert): determine whether to use div or idiv */
+      /* TODO(Robert): translate pseudo-op */
+      break;
+    case TOK_INC:
+      /* TODO(Robert): postfix increment */
+      status = translate_unop(tree, out, INSTR_INC, flags);
+      break;
+    case TOK_DEC:
+      /* TODO(Robert): postfix decrement */
+      status = translate_unop(tree, out, INSTR_DEC, flags);
+      break;
+    case TOK_NEG:
+      status = translate_unop(tree, out, INSTR_NEG, flags);
+      break;
+    case TOK_POS:
+      /* TODO(Robert): promotion operator */
+      break;
+    /* bitwise operators */
+    case '&':
+      status = translate_binop(tree, out, INSTR_AND, flags);
+      break;
+    case '|':
+      status = translate_binop(tree, out, INSTR_OR, flags);
+      break;
+    case '^':
+      status = translate_binop(tree, out, INSTR_XOR, flags);
+      break;
+    case '~':
+      status = translate_unop(tree, out, INSTR_NOT, flags);
+      break;
+    /* shifts */
+    case TOK_SHL:
+      status = translate_binop(tree, out, INSTR_SHL, flags);
+      break;
+    case TOK_SHR:
+      /* TODO(Robert): the implementation may choose behavior in this case,
+       * but I should try to use arithmetic shift on signed values
+       */
+      status = translate_unop(tree, out, INSTR_SHR, flags);
+      break;
+    /* comparison operators */
+    case '>':
+      status = translate_comparison(tree, out, INSTR_SETG, flags);
+      break;
+    case TOK_GE:
+      status = translate_comparison(tree, out, INSTR_SETGE, flags);
+      break;
+    case '<':
+      status = translate_comparison(tree, out, INSTR_SETL, flags);
+      break;
+    case TOK_LE:
+      status = translate_comparison(tree, out, INSTR_SETLE, flags);
+      break;
+    case TOK_EQ:
+      status = translate_comparison(tree, out, INSTR_SETE, flags);
+      break;
+    case TOK_NE:
+      status = translate_comparison(tree, out, INSTR_SETNE, flags);
+      break;
+    /* logical operators */
+    case '!':
+      /* instruction does not matter and is ignored */
+      translate_logical(tree, out, INSTR_SETZ, flags);
+      break;
+    case TOK_AND:
+      translate_logical(tree, out, INSTR_AND, flags);
+      break;
+    case TOK_OR:
+      translate_logical(tree, out, INSTR_OR, flags);
+    /* constants */
+    case TOK_INTCON:
+      status = translate_intcon(tree, out, flags);
+      break;
+    case TOK_CHARCON:
+      break;
+    /* miscellaneous */
     case TOK_IDENT:
       status = translate_ident(tree, out, flags);
       break;
@@ -550,11 +732,6 @@ static int translate_expr(ASTree *tree, InstructionData *out,
       break;
     case TOK_CAST:
       status = translate_conversion(tree, out, flags);
-      break;
-    case TOK_INTCON:
-      status = translate_intcon(tree, out, flags);
-      break;
-    case TOK_CHARCON:
       break;
     default:
       fprintf(stderr, "ERROR: Unimplemented token: %s, lexinfo: %s\n",
