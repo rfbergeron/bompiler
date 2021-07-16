@@ -34,13 +34,20 @@ currently generates an intermediate language that may not map well to x86, and
 struggles to do even that.
 
 ## Order of implementation
-Some components of the compiler seem like low-hanging fruit, while others are
-effectively prerequesites for more complex features. For example:
-- Nested scoping (with curly braces) is required for `switch`, `if`, `for`, and
-  `while` statements, as well as functions
-- Labels are a required feature for `break`, `case`, and `goto`. However, the
-  implementation of labels in case statements and labels for others will differ
-  a bit.
+- arithmetic/bitwise/logical/comparison operators on integers
+- integer conversions
+- function definitions
+- function calls
+- nested scoping
+- if/else statements
+- for/while/do while statements
+- labels
+- case statements
+- pointers and pointer math
+- arrays
+- structures and unions
+- register allocation
+- minor optimizations
 
 ## Floating point
 The x87 stack and instructions are deprecated; modern ABIs use the MMX/SSE/AVX

@@ -36,6 +36,7 @@ void push_linenr(size_t linenr) {
   }
   lexer_include_linenrs.data[lexer_include_linenrs.count++] = linenr;
 }
+
 /* external functions */
 size_t lexer_get_filenr() { return lexer_loc.filenr; }
 
@@ -99,8 +100,7 @@ void lexer_include() {
 
 int lexer_token(int symbol) {
   DEBUGS('l', "Found token with code: %p, length: %p", symbol, yyleng);
-  yylval = malloc(sizeof(ASTree));
-  astree_init(yylval, symbol, lexer_loc, yytext);
+  yylval = astree_init(symbol, lexer_loc, yytext);
   fprintf(tokfile, "%2lu  %3lu.%3lu %3d %-13s %s\n", yylval->loc.filenr,
           yylval->loc.linenr, yylval->loc.offset, yylval->symbol,
           parser_get_tname(yylval->symbol), yylval->lexinfo);

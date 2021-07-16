@@ -20,7 +20,7 @@ typedef struct symbol_value {
 } SymbolValue;
 
 /* SymbolValue functions */
-SymbolValue *symbol_value_init(const TypeSpec *type, const Location *loc);
+SymbolValue *symbol_value_init(const Location *loc);
 int symbol_value_destroy(SymbolValue *symbol_value);
 void symbol_value_print(const SymbolValue *symbol, FILE *out);
 
@@ -30,8 +30,8 @@ void symbol_table_free_globals();
 int insert_symbol(const char *ident, const size_t ident_len,
                   SymbolValue *symval);
 int locate_symbol(const char *ident, const size_t ident_len, SymbolValue **out);
-void create_scope(Map **scope_location);
-void finalize_scope();
-void enter_scope(Map *scope);
-void leave_scope();
+int create_scope(Map *scope);
+int finalize_scope(Map *scope);
+int enter_scope(Map *scope);
+int leave_scope(Map *scope);
 #endif

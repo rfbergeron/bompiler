@@ -1,9 +1,21 @@
 #include "attributes.h"
 
 #include "badlib/badllist.h"
+#include "badlib/badmap.h"
 #include "stdio.h"
+#include "stdlib.h"
 #include "string.h"
 #include "symtable.h"
+
+#define INDEX_FROM_INT(sign, width) INDEX_##sign##_##width
+#define SPECIFY_INT(sign, width) \
+  {X64_SIZEOF_##width,           \
+   X64_ALIGNOF_##width,          \
+   NULL,                         \
+   BLIB_MAP_EMPTY,               \
+   TYPE_FLAG_NONE,               \
+   TYPE_##sign,                  \
+   STRING_INT_MAP[INDEX_FROM_INT(sign, width)]};
 
 struct conversion_entry {
   enum base_type from;
@@ -14,23 +26,48 @@ struct conversion_entry {
 static const size_t NUM_ATTRIBUTES = 6;
 static const size_t NUM_TYPES = 4;
 
-const char STRING_ULONG[] = "unsigned long int";
-const char STRING_SLONG[] = "signed long int";
-const char STRING_UINT[] = "unsigned int";
-const char STRING_SINT[] = "signed int";
-const char STRING_USHORT[] = "unsigned short int";
-const char STRING_SSHORT[] = "signed short int";
-const char STRING_UCHAR[] = "unsigned char";
-const char STRING_SCHAR[] = "signed char";
+enum string_int_index {
+  INDEX_FROM_INT(UNSIGNED, LONG),
+  INDEX_FROM_INT(SIGNED, LONG),
+  INDEX_FROM_INT(UNSIGNED, INT),
+  INDEX_FROM_INT(SIGNED, INT),
+  INDEX_FROM_INT(UNSIGNED, SHORT),
+  INDEX_FROM_INT(SIGNED, SHORT),
+  INDEX_FROM_INT(UNSIGNED, CHAR),
+  INDEX_FROM_INT(SIGNED, CHAR),
+};
 
-const TypeSpec SPEC_PTR = {X64_SIZEOF_LONG, X64_ALIGNOF_LONG, NULL,        NULL,
-                           TYPE_FLAG_NONE,  TYPE_POINTER,     "_ptr_empty"};
-const TypeSpec SPEC_EMPTY = {0,         0,       NULL, NULL, TYPE_FLAG_NONE,
-                             TYPE_NONE, "_empty"};
+const char STRING_INT_MAP[][32] = {
+    "unsigned long int",  "signed long int",  "unsigned int",  "signed int",
+    "unsigned short int", "signed short int", "unsigned char", "signed char",
+};
+
+const char *STRING_ULONG = STRING_INT_MAP[INDEX_FROM_INT(UNSIGNED, LONG)];
+const char *STRING_SLONG = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, LONG)];
+const char *STRING_UINT = STRING_INT_MAP[INDEX_FROM_INT(UNSIGNED, INT)];
+const char *STRING_SINT = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, INT)];
+const char *STRING_USHORT = STRING_INT_MAP[INDEX_FROM_INT(UNSIGNED, SHORT)];
+const char *STRING_SSHORT = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, SHORT)];
+const char *STRING_UCHAR = STRING_INT_MAP[INDEX_FROM_INT(UNSIGNED, CHAR)];
+const char *STRING_SCHAR = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, CHAR)];
+
+const TypeSpec SPEC_PTR = {X64_SIZEOF_LONG, X64_ALIGNOF_LONG, NULL,
+                           BLIB_MAP_EMPTY,  TYPE_FLAG_NONE,   TYPE_POINTER,
+                           "_ptr_empty"};
+const TypeSpec SPEC_EMPTY = {
+    0, 0, NULL, BLIB_MAP_EMPTY, TYPE_FLAG_NONE, TYPE_NONE, "_empty"};
 const TypeSpec SPEC_FUNCTION = {
-    0, 0, NULL, NULL, TYPE_FLAG_NONE, TYPE_FUNCTION, "_function"};
-const TypeSpec SPEC_INT = {X64_SIZEOF_INT, X64_ALIGNOF_INT, NULL,        NULL,
-                           TYPE_FLAG_NONE, TYPE_SIGNED,     "signed int"};
+    0, 0, NULL, BLIB_MAP_EMPTY, TYPE_FLAG_NONE, TYPE_FUNCTION, "_function"};
+const TypeSpec SPEC_STRUCT = {
+    0, 0, NULL, BLIB_MAP_EMPTY, TYPE_FLAG_NONE, TYPE_STRUCT, "_struct"};
+const TypeSpec SPEC_ULONG = SPECIFY_INT(UNSIGNED, LONG);
+const TypeSpec SPEC_SLONG = SPECIFY_INT(SIGNED, LONG);
+const TypeSpec SPEC_UINT = SPECIFY_INT(UNSIGNED, INT);
+const TypeSpec SPEC_SINT = SPECIFY_INT(SIGNED, INT);
+const TypeSpec SPEC_USHORT = SPECIFY_INT(UNSIGNED, SHORT);
+const TypeSpec SPEC_SSHORT = SPECIFY_INT(SIGNED, SHORT);
+const TypeSpec SPEC_UCHAR = SPECIFY_INT(UNSIGNED, CHAR);
+const TypeSpec SPEC_SCHAR = SPECIFY_INT(SIGNED, CHAR);
 
 const Location LOC_EMPTY = {0, 0, 0, 0};
 
@@ -79,9 +116,18 @@ int attributes_to_string(const unsigned int attributes, char *buf,
   return 0;
 }
 
+void location_to_string(const Location *loc, char *buffer, size_t size) {
+  int bufsize = snprintf(buffer, size, "%lu, %lu, %lu, %lu", loc->filenr,
+                         loc->linenr, loc->offset, loc->blocknr) +
+                1;
+}
+
 int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {
   int ret = 0;
   int i = 0;
+  /* TODO(Robert): use the mappings defined above to print instead of this
+   * silly shit
+   */
   switch (type->base) {
     case TYPE_VOID:
       ret = sprintf(buf, "void");
@@ -89,12 +135,12 @@ int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {
     case TYPE_FUNCTION:
       ret += type_to_string(type->nested, buf, bufsize);
       ret += sprintf((buf + ret), " ()(");
-      if (llist_size(type->data.params) > 0) {
-        for (i = 0; i < llist_size(type->data.params); ++i) {
-          SymbolValue *param_symval = llist_get(type->data.params, i);
+      if (type->data.params.size > 0) {
+        for (i = 0; i < type->data.params.size; ++i) {
+          SymbolValue *param_symval = llist_get((void *)&type->data.params, i);
           ret +=
               type_to_string(&(param_symval->type), (buf + ret), bufsize - ret);
-          if (i + 1 < llist_size(type->data.params)) {
+          if (i + 1 < llist_size((void *)&type->data.params)) {
             ret += sprintf((buf + ret), ", ");
           }
         }
@@ -150,4 +196,47 @@ int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {
       break;
   }
   return ret;
+}
+
+int typespec_copy(TypeSpec *dst, const TypeSpec *src) {
+  /* copy contents of source type
+   * allocate new space to copy nested type into
+   * recursively call typespec_copy on nested type
+   */
+  *dst = *src;
+  if (src->nested != NULL) {
+    dst->nested = malloc(sizeof(TypeSpec));
+    return typespec_copy(dst->nested, src->nested);
+  } else {
+    dst->nested = NULL;
+    return 0;
+  }
+}
+
+int typespec_destroy(TypeSpec *type) {
+  /* the badlib functions won't segfault when attempting to destroy a data
+   * structure a second time because they do a paranoid free (free and set to
+   * NULL) on the fields of the structure, so we can repeat the process as
+   * many times as we like
+   */
+  if (type == NULL) return -1;
+  switch (type->base) {
+    case TYPE_FUNCTION:
+      llist_destroy(&(type->data.params));
+      goto free_nested_typesec;
+    case TYPE_STRUCT:
+    case TYPE_UNION:
+      map_destroy(&(type->data.members));
+      goto free_nested_typesec;
+    case TYPE_POINTER:
+    case TYPE_ARRAY:
+    free_nested_typesec:
+      typespec_destroy(type->nested);
+      free(type->nested);
+      break;
+    default:
+      /* do nothing */
+      break;
+  }
+  return 0;
 }

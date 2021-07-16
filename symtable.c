@@ -1,3 +1,5 @@
+#include "symtable.h"
+
 #include "astree.h"
 #include "attributes.h"
 #include "badlib/badllist.h"
@@ -7,11 +9,10 @@
 #include "simplestack.h"
 #include "stdlib.h"
 #include "string.h"
-#include "symtable.h"
 
 DECLARE_STACK(nrstack, size_t);
 /* the 'stack' of tables */
-static struct llist *tables;
+static struct llist tables;
 static struct nrstack block_nrs = {NULL, 0, 0};
 static struct nrstack sequence_nrs = {NULL, 0, 0};
 static const size_t MAX_STRING_LENGTH = 31;
@@ -29,19 +30,12 @@ static int strncmp_wrapper(void *s1, void *s2) {
   return ret;
 }
 
-void symbol_table_destroy(Map *table) {
-  /* destroy table, which frees symbol values */
-  map_destroy(table);
-  /* free the space allocated for the table itself */
-  free(table);
-}
-
 /*
  * SymbolValue functions
  */
-SymbolValue *symbol_value_init(const TypeSpec *type, const Location *loc) {
+SymbolValue *symbol_value_init(const Location *loc) {
   SymbolValue *ret = malloc(sizeof(*ret));
-  ret->type = *type;
+  ret->type = SPEC_EMPTY;
   ret->loc = *loc;
   ret->sequence = nrstack_postfix_inc(&sequence_nrs);
   return ret;
@@ -49,19 +43,7 @@ SymbolValue *symbol_value_init(const TypeSpec *type, const Location *loc) {
 
 int symbol_value_destroy(SymbolValue *symbol_value) {
   DEBUGS('t', "freeing symbol value");
-  if (symbol_value->type.base == TYPE_STRUCT) {
-    DEBUGS('t', "destroying struct member entries");
-    map_destroy(symbol_value->type.data.members);
-  } else if (symbol_value->type.base == TYPE_FUNCTION) {
-    DEBUGS('t', "destroying function parameter entries");
-    llist_destroy(symbol_value->type.data.params);
-  }
-
-  if (symbol_value->type.nested) {
-    /* TODO(Robert): write function to recursively free symbol values */
-    free(symbol_value->type.nested);
-  }
-
+  typespec_destroy(&(symbol_value->type));
   free(symbol_value);
 
   DEBUGS('t', "done");
@@ -80,14 +62,15 @@ void symbol_table_init_globals() {
   /* stacks */
   nrstack_init(&block_nrs, 120);
   nrstack_init(&sequence_nrs, 120);
-  /* linked lists */
-  tables = malloc(sizeof(*tables));
-  llist_init(tables, (void (*)(void *))symbol_table_destroy, NULL);
+  /* linked lists, the syntax tree is responsible for freeing symbol tables so
+   * the linked list just has to clean itself up
+   */
+  llist_init(&tables, NULL, NULL);
 }
 
 void symbol_table_free_globals() {
   DEBUGS('t', "DESTROYING SYMTABLES");
-  llist_destroy(tables);
+  llist_destroy(&tables);
   nrstack_destroy(&block_nrs);
   nrstack_destroy(&sequence_nrs);
   DEBUGS('t', "  SYMTABLES DESTROYED");
@@ -95,14 +78,14 @@ void symbol_table_free_globals() {
 
 int insert_symbol(const char *ident, const size_t ident_len,
                   SymbolValue *symval) {
-  return map_insert(llist_front(tables), (void *)ident, ident_len, symval);
+  return map_insert(llist_front(&tables), (void *)ident, ident_len, symval);
 }
 
 int locate_symbol(const char *ident, const size_t ident_len,
                   SymbolValue **out) {
   size_t i;
-  for (i = 0; i < llist_size(tables); ++i) {
-    struct map *current_table = llist_get(tables, i);
+  for (i = 0; i < llist_size(&tables); ++i) {
+    struct map *current_table = llist_get(&tables, i);
     *out = map_get(current_table, (char *)ident, ident_len);
     if (*out) break;
   }
@@ -113,30 +96,46 @@ int locate_symbol(const char *ident, const size_t ident_len,
 /* scopes and blocks are kept separate; although a new scope is created with
  * each block, it is not the case that a new block is created with each scope
  */
-/* create_scope and finalize_scope are for use by the type checker; enter_scope
- * and leave_scope are for use by the assembly generator
- */
-void create_scope(Map **scope_location) {
-  *scope_location = malloc(sizeof(Map));
+int create_scope(Map *scope) {
+  /* prevent scope from being created twice, specifically for compound
+   * statements
+   */
+  if (llist_front(&tables) == scope) return 1;
   int status =
-      map_init(*scope_location, DEFAULT_MAP_SIZE, NULL,
+      map_init(scope, DEFAULT_MAP_SIZE, NULL,
                (void (*)(void *))symbol_value_destroy, strncmp_wrapper);
   if (status) {
     fprintf(stderr, "fuck you\n");
     abort();
   }
-  llist_push_front(tables, *scope_location);
+  llist_push_front(&tables, scope);
   nrstack_push(&block_nrs, 0);
   nrstack_push(&sequence_nrs, 0);
+  return 0;
 }
 
-void finalize_scope() {
-  llist_pop_front(tables);
+int finalize_scope(Map *scope) {
+  /* make sure that the caller is finalizing the scope they think they are */
+  if (llist_front(&tables) != scope) return 1;
+  llist_pop_front(&tables);
   nrstack_pop(&sequence_nrs);
   nrstack_pop(&block_nrs);
   nrstack_postfix_inc(&block_nrs);
+  return 0;
 }
 
-void enter_scope(Map *scope) { llist_push_front(tables, scope); }
+int enter_scope(Map *scope) {
+  /* prevent scope from being entered twice; this should not happen during a
+   * correct execution, but we will try to prevent it here anyways
+   */
+  if (llist_front(&tables) == scope) return 1;
+  llist_push_front(&tables, scope);
+  return 0;
+}
 
-void leave_scope() { llist_pop_front(tables); }
+int leave_scope(Map *scope) {
+  /* make sure that the caller is leaving the scope they think they are */
+  if (llist_front(&tables) != scope) return 1;
+  llist_pop_front(&tables);
+  return 0;
+}
