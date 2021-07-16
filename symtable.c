@@ -12,10 +12,9 @@
 
 DECLARE_STACK(nrstack, size_t);
 /* the 'stack' of tables */
-static struct llist tables;
+static struct llist tables = BLIB_LLIST_EMPTY;
 static struct nrstack block_nrs = {NULL, 0, 0};
 static struct nrstack sequence_nrs = {NULL, 0, 0};
-static const size_t MAX_STRING_LENGTH = 31;
 
 /*
  * wrapper functions for use with badlib
@@ -25,7 +24,7 @@ static int strncmp_wrapper(void *s1, void *s2) {
   if (!s1 || !s2) {
     ret = s1 == s2;
   } else {
-    ret = !strncmp(s1, s2, MAX_STRING_LENGTH);
+    ret = !strncmp(s1, s2, MAX_IDENT_LEN);
   }
   return ret;
 }

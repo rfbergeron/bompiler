@@ -23,7 +23,7 @@
 
 #define IFLAG_INT (1 << 0)
 #define IFLAG_CHAR (1 << 1)
-#define IFLAG_SHORT (1 << 2)
+#define IFLAG_SHRT (1 << 2)
 #define IFLAG_LONG (1 << 3)
 #define IFLAG_SIGNED (1 << 4)
 #define IFLAG_UNSIGNED (1 << 5)
@@ -40,55 +40,11 @@ enum type_checker_action {
 };
 
 static SymbolValue *current_function = NULL;
-static const size_t MAX_STRING_LENGTH = 31;
 
-/* for traversing the syntax tree */
-int validate_intcon(ASTree *intcon);
-int validate_type_id(ASTree *tid, TypeSpec *spec);
-int validate_call(ASTree *call);
-int validate_block(ASTree *block);
+/* forward declarations for mutual recursion */
 int validate_expr(ASTree *statement);
 int validate_stmt(ASTree *statement);
-int validate_assignment(ASTree *assignment);
-int validate_binop(ASTree *operator);
-int validate_cast(ASTree *cast);
-int validate_unop(ASTree *operator);
-int validate_equality(ASTree *operator);
-int validate_return(ASTree *loop);
-int validate_ifelse(ASTree *loop);
-int validate_while(ASTree *loop);
 
-/* for making entries in the symbol table */
-int make_object_entry(ASTree *object);
-int make_function_entry(ASTree *function);
-int make_structure_entry(ASTree *structure);
-int make_union_entry(ASTree *onion);
-int make_label_entry(ASTree *label);
-int make_typedef_entry(ASTree *tipedef);
-
-/*
- * wrapper functions for use with badlib
- */
-static int strncmp_wrapper(void *s1, void *s2) {
-  int ret = 0;
-  if (!s1 || !s2) {
-    ret = s1 == s2;
-  } else {
-    ret = !strncmp(s1, s2, MAX_STRING_LENGTH);
-  }
-  return ret;
-}
-
-static void symbol_table_destroy(void *table) {
-  /* cleanup symbol values */
-  map_foreach_value(table, (void (*)(void *))symbol_value_destroy);
-  /* destroy table, which frees symbol values */
-  map_destroy(table);
-}
-
-/*
- * internal functions
- */
 ASTree *extract_param(ASTree *function, size_t index) {
   return astree_get(astree_second(function), index);
 }
@@ -122,7 +78,7 @@ void insert_cast(ASTree *tree, size_t index, const TypeSpec *type) {
 int assign_type_id(ASTree *ident) {
   DEBUGS('t', "Attempting to assign a type");
   const char *id_str = ident->lexinfo;
-  size_t id_str_len = strnlen(id_str, MAX_STRING_LENGTH);
+  size_t id_str_len = strnlen(id_str, MAX_IDENT_LEN);
   SymbolValue *symval = NULL;
   int in_current_scope = locate_symbol(id_str, id_str_len, &symval);
 
@@ -248,7 +204,7 @@ int types_compatible(const void *arg1, const void *arg2, unsigned int flags) {
  */
 int determine_promotion(ASTree *arg1, ASTree *arg2, const TypeSpec **out) {
   const struct typespec *type1 = arg1 ? arg1->type : NULL;
-  const struct typespec *type2 = arg2 ? arg2->type : &SPEC_SINT;
+  const struct typespec *type2 = arg2 ? arg2->type : &SPEC_INT;
 
   if (type1 == NULL) {
     fprintf(stderr, "First argument not provided to promotion routine\n");
@@ -260,7 +216,7 @@ int determine_promotion(ASTree *arg1, ASTree *arg2, const TypeSpec **out) {
     *out = type2;
   } else if (type1->width < X64_SIZEOF_INT && type2->width < X64_SIZEOF_INT) {
     /* promote to signed int if both operands could be represented as one */
-    *out = &SPEC_SINT;
+    *out = &SPEC_INT;
   } else if (type1->width > type2->width) {
     /* promote to wider type; disregard signedness of type2 */
     *out = type1;
@@ -285,116 +241,6 @@ int determine_promotion(ASTree *arg1, ASTree *arg2, const TypeSpec **out) {
   return 0;
 }
 
-int validate_stmt(ASTree *statement) {
-  int status;
-  DEBUGS('t', "Validating next statement");
-  switch (statement->symbol) {
-    case TOK_RETURN:
-      status = validate_return(statement);
-      break;
-    case TOK_TYPE_ID:
-      status = make_object_entry(statement);
-      break;
-    case TOK_IF:
-      status = validate_ifelse(statement);
-      break;
-    case TOK_WHILE:
-      status = validate_while(statement);
-      break;
-    case TOK_BLOCK:
-      status = validate_block(statement);
-      break;
-    default:
-      /* parser will catch anything that we don't want, so at this point the
-       * only thing left that this could be is an expression
-       */
-      status = validate_expr(statement);
-      break;
-  }
-  return status;
-}
-
-int validate_expr(ASTree *expression) {
-  int status;
-  const char *ident;
-  ASTree *left;
-  ASTree *right;
-
-  DEBUGS('t', "Validating next expression");
-  switch (expression->symbol) {
-    case '=':
-      status = validate_assignment(expression);
-      break;
-    case TOK_EQ:
-    case TOK_NE:
-      status = validate_equality(expression);
-      break;
-    case TOK_OR:
-    case TOK_AND:
-    case TOK_LE:
-    case TOK_GE:
-    case '>':
-    case '<':
-    case '+':
-    case '-':
-    case '*':
-    case '/':
-    case '%':
-    case '|':
-    case '^':
-    case '&':
-    case TOK_SHL:
-    case TOK_SHR:
-      status = validate_binop(expression);
-      break;
-    case '!':
-    case TOK_POS: /* promotion operator */
-    case TOK_NEG:
-    case '~':
-    case TOK_INC:
-    case TOK_DEC:
-      status = validate_unop(expression);
-      break;
-    case TOK_CALL:
-      expression->attributes |= ATTR_EXPR_VREG;
-      status = validate_call(expression);
-      break;
-    case TOK_INDEX:
-      /* TODO(Robert): indexing */
-      status = -1;
-      break;
-    case TOK_ARROW:
-      /* TODO(Robert): pointers and struct member access */
-      /* evaluate left but not right since right
-       * is always an ident
-       */
-      break;
-    case TOK_INTCON:
-      status = validate_intcon(expression);
-      break;
-    case TOK_CHARCON:
-      /* types are set on construction and we don't need to do
-       * anything else
-       */
-      break;
-    case TOK_STRINGCON:
-      /* do nothing? this will get taking of during assembly generation */
-      break;
-    case TOK_IDENT:
-      DEBUGS('t', "bonk");
-      status = assign_type_id(expression);
-      break;
-    case TOK_CAST:
-      status = validate_cast(expression);
-      break;
-    default:
-      fprintf(stderr, "ERROR: UNEXPECTED TOKEN IN EXPRESSION: %s\n",
-              expression->lexinfo);
-      status = -1;
-  }
-  return status;
-}
-
 int validate_intcon(ASTree *intcon) {
   DEBUGS('t', "Validating integer constant %s", intcon->lexinfo);
   int status = 0;
@@ -412,20 +258,20 @@ int validate_intcon(ASTree *intcon) {
     } else if (unsigned_value < UINT8_MAX) {
       intcon->type = &SPEC_UCHAR;
     } else if (unsigned_value < UINT16_MAX) {
-      intcon->type = &SPEC_USHORT;
+      intcon->type = &SPEC_USHRT;
     } else if (unsigned_value < UINT32_MAX) {
       intcon->type = &SPEC_UINT;
     } else {
       intcon->type = &SPEC_ULONG;
     }
   } else if (signed_value > INT8_MIN && signed_value < INT8_MAX) {
-    intcon->type = &SPEC_SCHAR;
+    intcon->type = &SPEC_CHAR;
   } else if (signed_value > INT16_MIN && signed_value < INT16_MAX) {
-    intcon->type = &SPEC_SSHORT;
+    intcon->type = &SPEC_SHRT;
   } else if (signed_value > INT32_MIN && signed_value < INT32_MAX) {
-    intcon->type = &SPEC_SINT;
+    intcon->type = &SPEC_INT;
   } else {
-    intcon->type = &SPEC_SLONG;
+    intcon->type = &SPEC_LONG;
   }
 
   return status;
@@ -448,54 +294,54 @@ int validate_int_spec(ASTree *spec_list, TypeSpec *out) {
           fprintf(stderr, "ERROR: bad occurrence of int type secifier %s\n",
                   parser_get_tname(type->symbol));
           status = -1;
-        } else if (!(flags & (IFLAG_LONG | IFLAG_SHORT | IFLAG_UNSIGNED))) {
-          *out = SPEC_SINT;
+        } else if (!(flags & (IFLAG_LONG | IFLAG_SHRT | IFLAG_UNSIGNED))) {
+          *out = SPEC_INT;
         }
         flags |= IFLAG_INT;
         break;
       case TOK_CHAR:
-        if (flags & (IFLAG_CHAR | IFLAG_INT | IFLAG_SHORT | IFLAG_LONG)) {
+        if (flags & (IFLAG_CHAR | IFLAG_INT | IFLAG_SHRT | IFLAG_LONG)) {
           fprintf(stderr, "ERROR: bad occurrence of int type secifier %s\n",
                   parser_get_tname(type->symbol));
           status = -1;
         } else if (flags & IFLAG_UNSIGNED) {
           *out = SPEC_UCHAR;
         } else {
-          *out = SPEC_SCHAR;
+          *out = SPEC_CHAR;
         }
         flags |= IFLAG_CHAR;
         break;
       case TOK_LONG:
-        if (flags & (IFLAG_LONG | IFLAG_SHORT | IFLAG_CHAR)) {
+        if (flags & (IFLAG_LONG | IFLAG_SHRT | IFLAG_CHAR)) {
           fprintf(stderr, "ERROR: bad occurrence of int type secifier %s\n",
                   parser_get_tname(type->symbol));
           status = -1;
         } else if (flags & IFLAG_UNSIGNED) {
           *out = SPEC_ULONG;
         } else {
-          *out = SPEC_SLONG;
+          *out = SPEC_LONG;
         }
         flags |= IFLAG_LONG;
         break;
       case TOK_SHORT:
-        if (flags & (IFLAG_SHORT | IFLAG_LONG | IFLAG_CHAR)) {
+        if (flags & (IFLAG_SHRT | IFLAG_LONG | IFLAG_CHAR)) {
           fprintf(stderr, "ERROR: bad occurrence of int type secifier %s\n",
                   parser_get_tname(type->symbol));
           status = -1;
         } else if (flags & IFLAG_UNSIGNED) {
-          *out = SPEC_USHORT;
+          *out = SPEC_USHRT;
         } else {
-          *out = SPEC_SSHORT;
+          *out = SPEC_SHRT;
         }
-        flags |= IFLAG_SHORT;
+        flags |= IFLAG_SHRT;
         break;
       case TOK_SIGNED:
         if (flags & (IFLAG_SIGNED | IFLAG_UNSIGNED)) {
           fprintf(stderr, "ERROR: bad occurrence of int type secifier %s\n",
                   parser_get_tname(type->symbol));
           status = -1;
-        } else if (!(flags & (IFLAG_LONG | IFLAG_SHORT | IFLAG_CHAR))) {
-          *out = SPEC_SINT;
+        } else if (!(flags & (IFLAG_LONG | IFLAG_SHRT | IFLAG_CHAR))) {
+          *out = SPEC_INT;
         }
         flags |= IFLAG_SIGNED;
         break;
@@ -506,8 +352,8 @@ int validate_int_spec(ASTree *spec_list, TypeSpec *out) {
           status = -1;
         } else if (flags & IFLAG_LONG) {
           *out = SPEC_ULONG;
-        } else if (flags & IFLAG_SHORT) {
-          *out = SPEC_USHORT;
+        } else if (flags & IFLAG_SHRT) {
+          *out = SPEC_USHRT;
         } else if (flags & IFLAG_CHAR) {
           *out = SPEC_UCHAR;
         } else {
@@ -792,7 +638,7 @@ int validate_binop(ASTree *operator) {
               "ERROR: '%s' arguments were not comparable\n", operator->lexinfo);
       status = -1;
     } else {
-      operator->type = & SPEC_SINT;
+      operator->type = & SPEC_INT;
     }
   } else if (is_bitwise_op(operator) && !(type_is_int_or_ptr(left->type) &&
                                           type_is_int_or_ptr(right->type))) {
@@ -822,7 +668,7 @@ int validate_unop(ASTree *operator) {
               "ERROR: '%s' argument must be comparable\n", operator->lexinfo);
       status = -1;
     } else {
-      operator->type = & SPEC_SINT;
+      operator->type = & SPEC_INT;
     }
   } else {
     if (is_bitwise_op(operator) && !type_is_int_or_ptr(operand->type)) {
@@ -853,7 +699,7 @@ int validate_equality(ASTree *operator) {
   status = validate_expr(right);
   if (status != 0) return status;
 
-  operator->type = & SPEC_SINT;
+  operator->type = & SPEC_INT;
   /* comparison of types is limited to the following:
    * 1. between arithmetic types
    * 2. between pointers, which can be qualified, unqualified, incomplete,
@@ -970,9 +816,52 @@ int validate_while(ASTree *whole) {
   return status;
 }
 
+int make_object_entry(ASTree *object) {
+  ASTree *type = astree_first(object);
+  ASTree *identifier = astree_second(object);
+  DEBUGS('t', "Making object entry for value %s", identifier->lexinfo);
+  identifier->attributes |= ATTR_EXPR_LVAL;
+  SymbolValue *symbol = symbol_value_init(&(astree_second(object)->loc));
+  int status = validate_type_id(object, &symbol->type);
+  if (status != 0) return status;
+  identifier->type = &symbol->type;
+  if (astree_count(object) == 3) {
+    ASTree *init_value = astree_third(object);
+    status = validate_expr(init_value);
+    if (status) return status;
+    const TypeSpec *promoted_type = &SPEC_EMPTY;
+    status = determine_promotion(identifier, init_value, &promoted_type);
+    if (status) return status;
+    int compatibility =
+        types_compatible(identifier, init_value, ARG1_AST | ARG2_AST);
+    if (compatibility == TCHK_INCOMPATIBLE ||
+        compatibility == TCHK_EXPLICIT_CAST) {
+      fprintf(stderr, "ERROR: Incompatible type for object variable\n");
+      status = -1;
+    } else if (compatibility == TCHK_IMPLICIT_CAST) {
+      insert_cast(object, 2, promoted_type);
+    }
+  }
+
+  if (status) return status;
+  size_t identifier_len = strnlen(identifier->lexinfo, MAX_IDENT_LEN);
+  status = insert_symbol(identifier->lexinfo, identifier_len, symbol);
+  if (status) {
+    fprintf(stderr, "your data structure library sucks.\n");
+    abort();
+  }
+  return status;
+}
+
+int make_typedef_entry(ASTree *tipedef) {
+  ASTree *type = astree_first(tipedef);
+  ASTree *alias = astree_second(tipedef);
+  return 0;
+}
+
 int make_structure_entry(ASTree *structure) {
   const char *structure_type = extract_type(structure);
-  const size_t structure_type_len = strnlen(structure_type, MAX_STRING_LENGTH);
+  const size_t structure_type_len = strnlen(structure_type, MAX_IDENT_LEN);
   DEBUGS('t', "Defining structure type: %s", structure_type);
   SymbolValue *structure_value = NULL;
   locate_symbol((char *)structure_type, structure_type_len, &structure_value);
@@ -1005,7 +894,7 @@ int make_structure_entry(ASTree *structure) {
        */
       ASTree *member = astree_get(structure, i);
       const char *member_id_str = extract_ident(member);
-      size_t member_id_str_len = strnlen(member_id_str, MAX_STRING_LENGTH);
+      size_t member_id_str_len = strnlen(member_id_str, MAX_IDENT_LEN);
       DEBUGS('t', "Found structure member: %s", member_id_str);
       SymbolValue *member_entry = NULL;
       int member_exists =
@@ -1066,7 +955,7 @@ int make_function_entry(ASTree *function) {
      */
     status = make_object_entry(param);
     if (status != 0) return status;
-    size_t param_id_str_len = strnlen(param_id_str, MAX_STRING_LENGTH);
+    size_t param_id_str_len = strnlen(param_id_str, MAX_IDENT_LEN);
     SymbolValue *param_entry = NULL;
     locate_symbol(param_id_str, param_id_str_len, &param_entry);
     if (param_entry == NULL) {
@@ -1084,7 +973,7 @@ int make_function_entry(ASTree *function) {
   leave_scope(&(params->symbol_table));
 
   const char *function_id = extract_ident(type_id);
-  size_t function_id_len = strnlen(function_id, MAX_STRING_LENGTH);
+  size_t function_id_len = strnlen(function_id, MAX_IDENT_LEN);
   SymbolValue *existing_entry = NULL;
   locate_symbol(function_id, function_id_len, &existing_entry);
   if (existing_entry) {
@@ -1146,47 +1035,114 @@ int make_function_entry(ASTree *function) {
   return 0;
 }
 
-int make_object_entry(ASTree *object) {
-  ASTree *type = astree_first(object);
-  ASTree *identifier = astree_second(object);
-  DEBUGS('t', "Making object entry for value %s", identifier->lexinfo);
-  identifier->attributes |= ATTR_EXPR_LVAL;
-  SymbolValue *symbol = symbol_value_init(&(astree_second(object)->loc));
-  int status = validate_type_id(object, &symbol->type);
-  if (status != 0) return status;
-  identifier->type = &symbol->type;
-  if (astree_count(object) == 3) {
-    ASTree *init_value = astree_third(object);
-    status = validate_expr(init_value);
-    if (status) return status;
-    const TypeSpec *promoted_type = &SPEC_EMPTY;
-    status = determine_promotion(identifier, init_value, &promoted_type);
-    if (status) return status;
-    int compatibility =
-        types_compatible(identifier, init_value, ARG1_AST | ARG2_AST);
-    if (compatibility == TCHK_INCOMPATIBLE ||
-        compatibility == TCHK_EXPLICIT_CAST) {
-      fprintf(stderr, "ERROR: Incompatible type for object variable\n");
-      status = -1;
-    } else if (compatibility == TCHK_IMPLICIT_CAST) {
-      insert_cast(object, 2, promoted_type);
-    }
-  }
-
-  if (status) return status;
-  size_t identifier_len = strnlen(identifier->lexinfo, MAX_STRING_LENGTH);
-  status = insert_symbol(identifier->lexinfo, identifier_len, symbol);
-  if (status) {
-    fprintf(stderr, "your data structure library sucks.\n");
-    abort();
+int validate_stmt(ASTree *statement) {
+  int status;
+  DEBUGS('t', "Validating next statement");
+  switch (statement->symbol) {
+    case TOK_RETURN:
+      status = validate_return(statement);
+      break;
+    case TOK_TYPE_ID:
+      status = make_object_entry(statement);
+      break;
+    case TOK_IF:
+      status = validate_ifelse(statement);
+      break;
+    case TOK_WHILE:
+      status = validate_while(statement);
+      break;
+    case TOK_BLOCK:
+      status = validate_block(statement);
+      break;
+    default:
+      /* parser will catch anything that we don't want, so at this point the
+       * only thing left that this could be is an expression
+       */
+      status = validate_expr(statement);
+      break;
   }
   return status;
 }
 
-int make_typedef_entry(ASTree *tipedef) {
-  ASTree *type = astree_first(tipedef);
-  ASTree *alias = astree_second(tipedef);
-  return 0;
+int validate_expr(ASTree *expression) {
+  int status;
+  const char *ident;
+  ASTree *left;
+  ASTree *right;
+
+  DEBUGS('t', "Validating next expression");
+  switch (expression->symbol) {
+    case '=':
+      status = validate_assignment(expression);
+      break;
+    case TOK_EQ:
+    case TOK_NE:
+      status = validate_equality(expression);
+      break;
+    case TOK_OR:
+    case TOK_AND:
+    case TOK_LE:
+    case TOK_GE:
+    case '>':
+    case '<':
+    case '+':
+    case '-':
+    case '*':
+    case '/':
+    case '%':
+    case '|':
+    case '^':
+    case '&':
+    case TOK_SHL:
+    case TOK_SHR:
+      status = validate_binop(expression);
+      break;
+    case '!':
+    case TOK_POS: /* promotion operator */
+    case TOK_NEG:
+    case '~':
+    case TOK_INC:
+    case TOK_DEC:
+      status = validate_unop(expression);
+      break;
+    case TOK_CALL:
+      expression->attributes |= ATTR_EXPR_VREG;
+      status = validate_call(expression);
+      break;
+    case TOK_INDEX:
+      /* TODO(Robert): indexing */
+      status = -1;
+      break;
+    case TOK_ARROW:
+      /* TODO(Robert): pointers and struct member access */
+      /* evaluate left but not right since right
+       * is always an ident
+       */
+      break;
+    case TOK_INTCON:
+      status = validate_intcon(expression);
+      break;
+    case TOK_CHARCON:
+      /* types are set on construction and we don't need to do
+       * anything else
+       */
+      break;
+    case TOK_STRINGCON:
+      /* do nothing? this will get taking of during assembly generation */
+      break;
+    case TOK_IDENT:
+      DEBUGS('t', "bonk");
+      status = assign_type_id(expression);
+      break;
+    case TOK_CAST:
+      status = validate_cast(expression);
+      break;
+    default:
+      fprintf(stderr, "ERROR: UNEXPECTED TOKEN IN EXPRESSION: %s\n",
+              expression->lexinfo);
+      status = -1;
+  }
+  return status;
 }
 
 /*

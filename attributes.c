@@ -23,9 +23,6 @@ struct conversion_entry {
   enum conversion_type conversion;
 };
 
-static const size_t NUM_ATTRIBUTES = 6;
-static const size_t NUM_TYPES = 4;
-
 enum string_int_index {
   INDEX_FROM_INT(UNSIGNED, LONG),
   INDEX_FROM_INT(SIGNED, LONG),
@@ -37,19 +34,23 @@ enum string_int_index {
   INDEX_FROM_INT(SIGNED, CHAR),
 };
 
+static const size_t NUM_ATTRIBUTES = 6;
+static const size_t NUM_TYPES = 4;
+const size_t MAX_IDENT_LEN = 31;
+
 const char STRING_INT_MAP[][32] = {
     "unsigned long int",  "signed long int",  "unsigned int",  "signed int",
     "unsigned short int", "signed short int", "unsigned char", "signed char",
 };
 
 const char *STRING_ULONG = STRING_INT_MAP[INDEX_FROM_INT(UNSIGNED, LONG)];
-const char *STRING_SLONG = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, LONG)];
+const char *STRING_LONG = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, LONG)];
 const char *STRING_UINT = STRING_INT_MAP[INDEX_FROM_INT(UNSIGNED, INT)];
-const char *STRING_SINT = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, INT)];
-const char *STRING_USHORT = STRING_INT_MAP[INDEX_FROM_INT(UNSIGNED, SHORT)];
-const char *STRING_SSHORT = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, SHORT)];
+const char *STRING_INT = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, INT)];
+const char *STRING_USHRT = STRING_INT_MAP[INDEX_FROM_INT(UNSIGNED, SHORT)];
+const char *STRING_SHRT = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, SHORT)];
 const char *STRING_UCHAR = STRING_INT_MAP[INDEX_FROM_INT(UNSIGNED, CHAR)];
-const char *STRING_SCHAR = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, CHAR)];
+const char *STRING_CHAR = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, CHAR)];
 
 const TypeSpec SPEC_PTR = {X64_SIZEOF_LONG, X64_ALIGNOF_LONG, NULL,
                            BLIB_MAP_EMPTY,  TYPE_FLAG_NONE,   TYPE_POINTER,
@@ -61,13 +62,13 @@ const TypeSpec SPEC_FUNCTION = {
 const TypeSpec SPEC_STRUCT = {
     0, 0, NULL, BLIB_MAP_EMPTY, TYPE_FLAG_NONE, TYPE_STRUCT, "_struct"};
 const TypeSpec SPEC_ULONG = SPECIFY_INT(UNSIGNED, LONG);
-const TypeSpec SPEC_SLONG = SPECIFY_INT(SIGNED, LONG);
+const TypeSpec SPEC_LONG = SPECIFY_INT(SIGNED, LONG);
 const TypeSpec SPEC_UINT = SPECIFY_INT(UNSIGNED, INT);
-const TypeSpec SPEC_SINT = SPECIFY_INT(SIGNED, INT);
-const TypeSpec SPEC_USHORT = SPECIFY_INT(UNSIGNED, SHORT);
-const TypeSpec SPEC_SSHORT = SPECIFY_INT(SIGNED, SHORT);
+const TypeSpec SPEC_INT = SPECIFY_INT(SIGNED, INT);
+const TypeSpec SPEC_USHRT = SPECIFY_INT(UNSIGNED, SHORT);
+const TypeSpec SPEC_SHRT = SPECIFY_INT(SIGNED, SHORT);
 const TypeSpec SPEC_UCHAR = SPECIFY_INT(UNSIGNED, CHAR);
-const TypeSpec SPEC_SCHAR = SPECIFY_INT(SIGNED, CHAR);
+const TypeSpec SPEC_CHAR = SPECIFY_INT(SIGNED, CHAR);
 
 const Location LOC_EMPTY = {0, 0, 0, 0};
 
