@@ -203,6 +203,7 @@ int main(int argc, char **argv) {
   fclose(strfile);
   fclose(tokfile);
   fclose(astfile);
+  fclose(symfile);
 
   astree_destroy(parser_root);
   DEBUGS('m', "string set cleanup");
