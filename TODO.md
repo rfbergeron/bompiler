@@ -1,53 +1,50 @@
-# What order am I doing things in?
-- Get type checking in order
-  - fix the actual types system
-    - the only types needed for base functionality are different integer widths
-      and void (for return types)
-  - restructure the switch statements in `validate_expr` and `validate_stmt`,
-    moving code into separate functions
-  - implement nested scoping
-    - stack for symbol tables
-    - stack for function tables to allow nesting of functions
-    - stack for sequence numbers to count and order declarations in each block
-- Basic generation of assembly:
-  - allocating stack space for functions, scopes, etc.
-    - it would be more natural to allocate more stack space each time a new
-      scope is entered, instead of just doing all of it at the beginning of the
-      function, since I would have to write an entire function just to
-      recursively count the number of bytes needed
-    - on Linux, the stack needs to be 16-byte aligned before function calls, so
-      I will just always ensure that new scopes do this
-    - i believe the simplest way to allocate stack space efficiently would be to
-      put the values on the stack in order of decreasing alignment requirements
-  - Integer expressions with operands of varying width
-    - the width of the instruction will be the width of the widest of its
-      operands
-  - Function calls
-    - integer arguments and void or integer return types
-    - on windows, only 4 registers are available for non-floating arguments, so
-      for now I will limit the compiler to that many registers, even though 6
-      are available on Unix-like systems
-  - Do not bother with register allocation yet; for now output placeholder
-    values for registers so that other aspects of the compiler can be checked
-  - emit conversions for differing integer widths
-    - to make code generation easier, all types will be loaded as their native
-      width initially
-    - use bitmasks and sign extension to preform conversions after the fact
-- Pointers and pointer math
-  - automatic casting to and from void pointers
-  - array element access
-  - nested pointers and nested types in general
-  - keep in mind that the only implicit casting allowed occurs during promotion
-    of arithmetic types and when going to and from `void*`. Explicit casts
-    are only valid between any other types of pointers and arithmetic types.
-    Casting to and from a union and its members is valid, but I will omit it
-    for now
-- Structures
-  - pointers to structures
-  - struct member access with the dot and arrow operators
-- Arrays
-  - allocating stack space
-  - member access, keeping in mind the stride of the array
-  - decay to and compatiblility with pointers
-    - arrays can be used for functions with pointer arguments
-  - array arguments? (allows the length to be checked against)
+# When to use pointers
+Currently, some fields of syntax tree nodes are pointers, even though they could
+instead be nested structures. This includes the child lists and symbol tables.
+These do not have to be pointers, since only the one node should be responsible
+for these things.
+
+The typespec, on the other hand, should probably be a pointer, at least in the
+case of syntax tree nodes. It could be a nested structure within symbol values.
+
+In terms of optimization, making large structures like maps and linked lists
+a direct field of the syntax tree may not be great for space, since many nodes
+will not have children or a scope associated with them, so the space would be
+wasted. If it was a pointer, significantly less space would be needed for a
+feature that is not used.
+
+On the other hand, the fewer pointers, the better.
+
+# Symbol entry creation order
+Before, type information was constructed in an ASTree node. This is no longer
+possible, since nodes should be holding type information from a constant or
+symbol entry.
+
+So, either symbol entries must be created before type information is processed
+so that it can be assigned to the correct location, or a typespec structure
+must be allocated on the stack to serve as a temporary location for type info
+before it is copied to its final location.
+
+The former would be ideal and would lead to fewer errors, but would also require
+large portions of the type checker to be rewritten. The rewrite will probably
+make the code clearer, though.
+
+# Badlib improvements
+While giving each data structure an internal status field is convenient, it
+means that the arguments to data structures cannot truly be `const`; the status
+field may be modified in the event of a failure. I could just cast away const
+but that's not ideal.
+
+A potentially better idea may be having a status function to which the caller
+provides the data structure to. This function queries a map based on the memory
+address of the data structure and returns the error value associated with it,
+which defaults to a success status. Since the interface is a function that takes
+as an argument the structure in question, a simpler version that just returns
+the value of a simple variable in the source file could be implemented without
+changing the api later.
+
+This scheme is more complicated because it would require the library to
+implement thread-safe access to this map if it would ever be used in a multi-
+threaded environment. However, pointers are shared by threads and it wouldn't
+make sense to have thread-specific statuses, so if I made the map data structure
+thread-safe, that alone would probably be sufficient.

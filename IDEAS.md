@@ -9,24 +9,28 @@ purpose of achieving self-hosting, or both. These include:
 - ~~Variably modified types: I don't think I'll be using these, and they seem
   like a pain in the ass to implement~~ I just realized that I've been looking
   at a draft of C99, not C89, so I might not have even needed to worry about
-  this in the first place
+  this in the first place.
 - Variadic functions: I'm not sure how much of the heavy lifting is done by the
-  standard library here, but we'll see
+  standard library here, but we'll see.
 - typedefs: might not be that much of a headache to implement, but we'll see
 - floating point: learning x86 is going to be enough trouble without dealing
-  with AVX/SSE extensions
-- passing structs by value: so far as I can tell the standard does not specify
+  with AVX/SSE extensions.
+- passing structs by value: So far as I can tell the standard does not specify
   how this should be done, only that it must be done. GCC packs them into the
   registers if they fit. I don't want to worry about this and my compiler will
-  not be doing it so I won't need this to achieve self-hosting
+  not be doing it so I won't need this to achieve self-hosting.
+- returning structs by value: Not required by the standard, but would be a neat
+  extension. The Microsoft x64 ABI defines how to do this, and it seems fairly
+  straightforward.
 
 ## Identifier Labels
 Based on the language definition, it looks like labels are attached to the
-statement immediately following them. Just something to note for later.
+statement immediately following them. They are not a valid statement all on
+their own. Just something to note for later.
 
 ## Increment and decrement
-These operators must have an lval argument. They must also have unique tokens
-so that they may be distinguished outside of the parser.
+These operators must have an lval argument. Postfix and prefix versions must
+have unique tokens so that they may be distinguished outside of the parser.
 
 ## Storage of string constants
 Currently, the type checker/symbol table is repsonsible for tracking string
@@ -34,10 +38,6 @@ constants. It would make more sense for the string set to track them in some
 way; it would also make more sense for the constants to be registered when the
 abstract syntax tree is built, since the value and type of constants are known
 when the tree node is generated.
-
-## Statements and expressions
-Validation of statements and expressions should be cleanly separated, instead
-of grouped up in a single massive switch statement.
 
 ## Scoping
 Instead of the current scheme, where we only differentiate between local and
@@ -49,29 +49,58 @@ The function for making global and local entries should be condensed into a
 single function that just makes the entry in the scope that is on the top of the
 stack if it is not already present.
 
-Looking at the standard, it looks as though declarations of any kind can occur
-at any scope (ie function and struct declarations can occur inside of another
-block), so it would probably make sense to have only a single stack on which
-all declarations, be they of functions, structs, or variables, are pushed. This
-is opposed to the current scheme where global scope, local scope, and type scope
-are all considered to be separate things.
-
-As an aside, should labels be aware of their scope? I'm not sure if the type
-checker needs to be aware of scope when it comes to labels.
+Labels have their own namespace. Structures and unions share a namespace
+separate from other types of declarations, and functions and objects share a
+namespace.
 
 ## Storing types
-Have types stored by value is inconvenient because it makes assigning types to
-identifiers unnecessarily complicated, since the whole structure needs to be
-copied rather than just assigning a pointer. However, if each `struct typespec`
-was a pointer, then functions which assign types to intermediate values in
-expressions would either need to:
-- figure out if the intermediate node can reuse the value from one of its
-  children
-- allocate a new `struct TypeSpec` for each intermediate value
-- use a predefined value
+Currently, types are stored by value. Types of syntax tree nodes are set by:
+- copying the type from a symbol entry, in the case of an identifier
+- copying the type from a constant declared elsewhere, in the case of literals
+  and constants
+- copied from one of the operands, in the case of operator expressions
+- constructed, in the case of the promotion operator.
+
+This is convenient because it means that modifications to types that occur
+during the evaluation of the expression can be done easily by copying the base
+or child type to another tree node and modifying it as needed.
+
+However, it does make working with nested types more difficult. Nested types
+cannot simply be stored by value, because the storage can (or should) be
+arbitrarily deep (a pointer to a pointer to a pointer...), so nested type
+specifiers must be stored using pointers.
+
+This means that when cleanup occurs, nested type specifiers must be freed. This
+would require its own function `typespec_destroy` or similiar.
+
+However, this would become a problem when copying typespecs naively, with the
+equals operator. There would need to be a function dedicated to copying, or this
+functionality could be included in a `typespec_init` function.
+
+Even with a dedicated copy function, recursively copying certain components of
+type information, like linked lists and maps, would be complicated, because
+currently badlib does not implement copying functions, and implementing
+copying functions would be difficult since badlib data structures have no
+knowledge of what their elements are, so they cannot be easily copied.
+
+Copying is not necessary. Anytime a time needs to be assigned to a node, you can
+get it from one of three places:
+- we are promoting a value to a `signed int` from a narrower type, in which case
+  we point to a constant structure
+- we are working with a constant or literal, whose type can be taken from the
+  symbol table or destination in the case of structures and unions, or whose
+  type has limited possibilities, in the case of integer and character constants.
+- we are doing an explicit cast, in which case the type can be constructed from
+  the type specified, and assigned a dummy symbol
+- we are handling an identifier (either referencing the value or assigning it
+  a new one, which may require an implicit cast) in which case we refer to the
+  identifier's symbol entry
+
+No copying necessary, and dummy symbols only need to be created for explicit
+casts.
 
 ## Comparing types
-The `types_comatible` function should return more than just an enum describing
+The `types_compatible` function should return more than just an enum describing
 the compatibility of its arguments. It should return a struct that includes the
 enum already returned, in addition to a valid type that is compatible with both
 of the arguments. The returned type is needed to be able to do implicit casting
@@ -152,6 +181,29 @@ immediately next to each other. The parser should be able to reduce an expressio
 in parentheses to a pexpr, at which point it begins constructing the next
 nonterminal. If the next nonterminal is another pexpr, or a 
 
+## Tree node attributes
+Aside from types, tree nodes (I think just those related to expressions, but
+possibly others as well) should have an attributes field. This field should
+contain information about the expression that does not belong with the type of
+the expression.
+- compile time constants
+- lvalues (applies to all identifiers)
+- boolean (applies to integers guaranteed to be zero or one)
+- virtual address (applies to integers of the appropriate width)
+- requires a virtual register (intermediate value)
+
+The oc language defined a vaddr (virtual address) attribute, though I am not
+sure this would be useful here. Pointers are already codified as types.
+It would be possible to reduce pointers and arrays to integers of the
+appropriate width with a vaddr attribute set on the nodes they appear in, but
+that may be complicated. It would however reduce the gap between type
+information and the actualy assembly generated, since, much like with booleans,
+most instruction sets do not differentiate between integers and memory addresses
+and treat them equally.
+
+On the x64 platform, arrays and pointers would have the the base type
+`TYPE_UNSIGNED`, with a width of 8 bytes and the virtual address attribute set.
+
 ## Parsing function types
 Structure of a function definition in the syntax tree, as a reminder:
 - FUNCTION
@@ -229,6 +281,3 @@ either representation can have the same code emitted.
 To make accessing variables uniform, parameters should be immediately written
 to the stack at the beginning of the function. This sequence of operations will
 look similar to the way a local variable declaration appears in assembly.
-
-## Declarations in assembly
-Declarations 

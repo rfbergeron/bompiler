@@ -182,27 +182,24 @@ constant      : TOK_INTCON                                                      
 ASTree *parser_make_root() {
   DEBUGS('p', "Initializing AST, root token code: %d", TOK_ROOT);
   DEBUGS('p', "Translation of token code: %s", parser_get_tname(TOK_ROOT));
-  ASTree *root = malloc(sizeof(*root));
-  astree_init(root, TOK_ROOT, (Location){lexer_get_filenr(), 0, 0}, "_root");
+  Location root_loc = {lexer_get_filenr(), 0, 0};
+  ASTree *root = astree_init(TOK_ROOT, root_loc, "_root");
   return root;
 }
 
 ASTree *parser_make_function(ASTree *type_id, ASTree *paren, ASTree *params) {
-  ASTree *function = malloc(sizeof(*function));
-  astree_init(function, TOK_FUNCTION, type_id->loc, "_function");
+  ASTree *function = astree_init(TOK_FUNCTION, type_id->loc, "_function");
   return astree_adopt(function, type_id,
                       astree_adopt_sym(paren, TOK_PARAM, params, NULL), NULL);
 }
 
 ASTree *parser_make_type_id(ASTree *type, ASTree *id) {
-  ASTree *type_id = malloc(sizeof(*type_id));
-  astree_init(type_id, TOK_TYPE_ID, type->loc, "_type_id");
+  ASTree *type_id = astree_init(TOK_TYPE_ID, type->loc, "_type_id");
   return astree_adopt(type_id, type, id, NULL);
 }
 
 ASTree *parser_make_struct(ASTree *parent, ASTree *structure_id,
                            ASTree *structure_body) {
-  parent->type.identifier = structure_id->lexinfo;
   return astree_adopt(parent, structure_id, structure_body, NULL);
 }
 
@@ -212,14 +209,12 @@ ASTree *parser_make_struct(ASTree *parent, ASTree *structure_id,
  * TOK_IDENT is all that occurs between the parentheses.
  */
 ASTree *parser_make_cast(ASTree *type, ASTree *expr) {
-  ASTree *cast = malloc(sizeof(*cast));
-  astree_init(cast, TOK_CAST, type->loc, "_cast");
+  ASTree *cast = astree_init(TOK_CAST, type->loc, "_cast");
   return astree_adopt(cast, type, expr, NULL);
 }
 
 ASTree *parser_make_int_spec(ASTree *list) {
-  ASTree *int_spec = malloc(sizeof(*int_spec));
-  astree_init(int_spec, TOK_INT_SPEC, list->loc, "_int_spec");
+  ASTree *int_spec = astree_init(TOK_INT_SPEC, list->loc, "_int_spec");
   return astree_adopt(int_spec, list, NULL, NULL);
 }
 
