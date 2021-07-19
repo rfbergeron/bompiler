@@ -45,16 +45,108 @@ static SymbolValue *current_function = NULL;
 int validate_expr(ASTree *statement);
 int validate_stmt(ASTree *statement);
 
-ASTree *extract_param(ASTree *function, size_t index) {
-  return astree_get(astree_second(function), index);
+const char *extract_ident(ASTree *tree) {
+  switch (tree->symbol) {
+    case TOK_TYPE_ID:
+      return astree_second(tree)->lexinfo;
+      break;
+    case TOK_STRUCT:
+      return astree_first(tree)->lexinfo;
+      break;
+    case TOK_FUNCTION:
+      return astree_second(astree_first(tree))->lexinfo;
+      break;
+    case TOK_IDENT:
+      return tree->lexinfo;
+      break;
+    default:
+      fprintf(stderr, "ERROR: unable to get identifier for tree node %s\n",
+              parser_get_tname(tree->symbol));
+      return NULL;
+      break;
+  }
 }
 
-const char *extract_ident(ASTree *type_id) {
-  return astree_second(type_id)->lexinfo;
+const TypeSpec *extract_type(ASTree *tree) {
+  switch (tree->symbol) {
+    case TOK_TYPE_ID:
+      return astree_second(tree)->type;
+      break;
+    case TOK_STRUCT:
+      return astree_first(tree)->type;
+      break;
+    case TOK_FUNCTION:
+      return astree_second(astree_first(tree))->type;
+      break;
+    case TOK_CALL:
+    case TOK_IDENT:
+      return tree->type;
+      break;
+    default:
+      fprintf(stderr, "Unable to extract type from symbol %s\n",
+              parser_get_tname(tree->symbol));
+      return NULL;
+      break;
+  }
 }
 
-const char *extract_type(ASTree *type_id) {
-  return astree_first(type_id)->lexinfo;
+const Location *extract_loc(ASTree *tree) {
+  switch (tree->symbol) {
+    case TOK_TYPE_ID:
+      return &astree_second(tree)->loc;
+      break;
+    case TOK_STRUCT:
+      return &astree_first(tree)->loc;
+      break;
+    case TOK_FUNCTION:
+      return &astree_second(astree_first(tree))->loc;
+      break;
+    case TOK_CALL:
+    case TOK_IDENT:
+      return &tree->loc;
+      break;
+    default:
+      fprintf(stderr, "Unable to extract location from symbol %s\n",
+              parser_get_tname(tree->symbol));
+      return NULL;
+      break;
+  }
+}
+
+int assign_type(ASTree *tree) {
+  DEBUGS('t', "Attempting to assign a type");
+  const char *id_str = extract_ident(tree);
+  size_t id_str_len = strnlen(id_str, MAX_IDENT_LEN);
+  SymbolValue *symval = NULL;
+  int in_current_scope = locate_symbol(id_str, id_str_len, &symval);
+
+  if (symval) {
+    DEBUGS('t', "Assigning %s a symbol", id_str);
+    switch (tree->symbol) {
+      case TOK_FUNCTION:
+        astree_second(astree_first(tree))->type = &(symval->type);
+        break;
+      case TOK_TYPE_ID:
+        astree_second(tree)->type = &(symval->type);
+        break;
+      case TOK_STRUCT:
+        astree_first(tree)->type = &(symval->type);
+        break;
+      case TOK_CALL:
+        tree->type = symval->type.nested;
+        astree_first(tree)->type = &(symval->type);
+        break;
+      case TOK_IDENT:
+      default:
+        tree->type = &(symval->type);
+        break;
+    }
+    return 0;
+  } else {
+    fprintf(stderr, "ERROR: could not resolve symbol: %s %s\n", (tree->lexinfo),
+            parser_get_tname(tree->symbol));
+    return -1;
+  }
 }
 
 /*
@@ -73,24 +165,6 @@ void insert_cast(ASTree *tree, size_t index, const TypeSpec *type) {
   ASTree *cast = astree_init(TOK_CAST, to_cast->loc, "_cast");
   cast->type = type;
   llist_insert(&tree->children, astree_adopt(cast, to_cast, NULL, NULL), index);
-}
-
-int assign_type_id(ASTree *ident) {
-  DEBUGS('t', "Attempting to assign a type");
-  const char *id_str = ident->lexinfo;
-  size_t id_str_len = strnlen(id_str, MAX_IDENT_LEN);
-  SymbolValue *symval = NULL;
-  int in_current_scope = locate_symbol(id_str, id_str_len, &symval);
-
-  if (symval) {
-    DEBUGS('t', "Assigning %s a symbol", id_str);
-    ident->type = &symval->type;
-  } else {
-    fprintf(stderr, "ERROR: could not resolve symbol: %s %s\n",
-            (ident->lexinfo), parser_get_tname(ident->symbol));
-    return -1;
-  }
-  return 0;
 }
 
 int type_is_arithmetic(const TypeSpec *type) {
@@ -409,21 +483,6 @@ int validate_type(ASTree *type, TypeSpec *out) {
       break;
   }
   return status;
-}
-
-int validate_type_id(ASTree *tid, TypeSpec *spec) {
-  ASTree *type = astree_first(tid);
-  ASTree *ident = astree_second(tid);
-  int status = validate_type(type, spec);
-  if (status) return status;
-  SymbolValue *type_sym = NULL;
-  locate_symbol(ident->lexinfo, strlen(ident->lexinfo), &type_sym);
-  if (type_sym) {
-    /* error: symbol already defined */
-    fprintf(stderr, "ERROR: redefinition of symbol %s\n", ident->lexinfo);
-    return -1;
-  }
-  return 0;
 }
 
 int validate_block(ASTree *block) {
@@ -822,9 +881,17 @@ int make_object_entry(ASTree *object) {
   DEBUGS('t', "Making object entry for value %s", identifier->lexinfo);
   identifier->attributes |= ATTR_EXPR_LVAL;
   SymbolValue *symbol = symbol_value_init(&(astree_second(object)->loc));
-  int status = validate_type_id(object, &symbol->type);
-  if (status != 0) return status;
-  identifier->type = &symbol->type;
+  int status = validate_type(type, &symbol->type);
+  if (status) return status;
+  size_t identifier_len = strnlen(identifier->lexinfo, MAX_IDENT_LEN);
+  status = insert_symbol(identifier->lexinfo, identifier_len, symbol);
+  if (status) {
+    fprintf(stderr, "your data structure library sucks.\n");
+    abort();
+  }
+  status = assign_type(object);
+  if (status) return status;
+
   if (astree_count(object) == 3) {
     ASTree *init_value = astree_third(object);
     status = validate_expr(init_value);
@@ -837,30 +904,48 @@ int make_object_entry(ASTree *object) {
     if (compatibility == TCHK_INCOMPATIBLE ||
         compatibility == TCHK_EXPLICIT_CAST) {
       fprintf(stderr, "ERROR: Incompatible type for object variable\n");
-      status = -1;
+      return -1;
     } else if (compatibility == TCHK_IMPLICIT_CAST) {
       insert_cast(object, 2, promoted_type);
     }
   }
 
-  if (status) return status;
-  size_t identifier_len = strnlen(identifier->lexinfo, MAX_IDENT_LEN);
-  status = insert_symbol(identifier->lexinfo, identifier_len, symbol);
-  if (status) {
-    fprintf(stderr, "your data structure library sucks.\n");
-    abort();
-  }
-  return status;
+  return 0;
 }
 
-int make_typedef_entry(ASTree *tipedef) {
-  ASTree *type = astree_first(tipedef);
-  ASTree *alias = astree_second(tipedef);
+int define_members(ASTree *structure, SymbolValue *structure_entry) {
+  Map *members = &(structure_entry->type.data.members);
+  create_scope(members);
+  /* start from 2nd child; 1st was type name */
+  size_t i;
+  for (i = 1; i < astree_count(structure); ++i) {
+    /* TODO(Robert): Originally, the symbol's member table was not set until
+     * after they were all parsed. Make sure that it is okay to do it right
+     * away
+     */
+    ASTree *member = astree_get(structure, i);
+    const char *member_id_str = extract_ident(member);
+    size_t member_id_str_len = strnlen(member_id_str, MAX_IDENT_LEN);
+    DEBUGS('t', "Found structure member: %s", member_id_str);
+    SymbolValue *member_entry = NULL;
+    int member_exists =
+        locate_symbol(member_id_str, member_id_str_len, &member_entry);
+    if (member_exists) {
+      fprintf(stderr, "ERROR: Duplicate declaration of member: %s\n",
+              member_id_str);
+      return -1;
+    } else {
+      int status = make_object_entry(member);
+      if (status != 0) return status;
+      DEBUGS('t', "Field inserted at %s", astree_second(member)->lexinfo);
+    }
+  }
+  finalize_scope(members);
   return 0;
 }
 
 int make_structure_entry(ASTree *structure) {
-  const char *structure_type = extract_type(structure);
+  const char *structure_type = extract_ident(structure);
   const size_t structure_type_len = strnlen(structure_type, MAX_IDENT_LEN);
   DEBUGS('t', "Defining structure type: %s", structure_type);
   SymbolValue *structure_value = NULL;
@@ -871,78 +956,29 @@ int make_structure_entry(ASTree *structure) {
             structure_type);
     return -1;
   } else {
-    structure_value = symbol_value_init(&(astree_first(structure)->loc));
+    structure_value = symbol_value_init(extract_loc(structure));
     /* TODO(Robert): assign struct type information (structure name, base type,
      * etc.
      */
-    insert_symbol(structure_type, structure_type_len, structure_value);
-    astree_first(structure)->type = &structure_value->type;
+    int status =
+        insert_symbol(structure_type, structure_type_len, structure_value);
+    if (status) return status;
     /* TODO(Robert): in the interest of code reuse I used the existing functions
      * for entering and leaving scopes and making entries within a scope that
      * are normally used for objects and functions, even though struct members
      * don't work quite the same way. check to make sure everything is doing
      * okay later on
      */
-    Map *members = &(structure_value->type.data.members);
-    create_scope(members);
-    /* start from 2nd child; 1st was type name */
-    size_t i;
-    for (i = 1; i < astree_count(structure); ++i) {
-      /* TODO(Robert): Originally, the symbol's member table was not set until
-       * after they were all parsed. Make sure that it is okay to do it right
-       * away
-       */
-      ASTree *member = astree_get(structure, i);
-      const char *member_id_str = extract_ident(member);
-      size_t member_id_str_len = strnlen(member_id_str, MAX_IDENT_LEN);
-      DEBUGS('t', "Found structure member: %s", member_id_str);
-      SymbolValue *member_entry = NULL;
-      int member_exists =
-          locate_symbol(member_id_str, member_id_str_len, &member_entry);
-      if (member_exists) {
-        fprintf(stderr, "ERROR: Duplicate declaration of member: %s\n",
-                member_id_str);
-        return -1;
-      } else {
-        int status = make_object_entry(member);
-        if (status != 0) return status;
-        DEBUGS('t', "Field inserted at %s", astree_second(member)->lexinfo);
-      }
-    }
-    finalize_scope(members);
+    status = define_members(structure, structure_value);
+    if (status) return status;
+    return assign_type(structure);
   }
-  return 0;
 }
 
-/* TODO(Robert): some of this should be put into separate functions
- * (parameters?) */
-int make_function_entry(ASTree *function) {
-  ASTree *type_id = astree_first(function);
-  SymbolValue *function_entry =
-      symbol_value_init(&(astree_second(type_id)->loc));
-  function_entry->type = SPEC_FUNCTION;
-  function_entry->type.nested = malloc(sizeof(TypeSpec));
-  /* validate return type */
-  int status = validate_type_id(type_id, function_entry->type.nested);
-  if (status != 0) return status;
-  if (function_entry->type.nested->base == TYPE_ARRAY) {
-    fprintf(stderr, "ERROR: Function %s has an array return type.\n",
-            extract_ident(type_id));
-    /* TODO(rbergero): keep going if we can */
-    return -1;
-  }
-
+int define_params(ASTree *params, SymbolValue *function_entry) {
   LinkedList *param_entries = &(function_entry->type.data.params);
   /* type is not resposible for freeing symbol information */
   llist_init(param_entries, NULL, NULL);
-  ASTree *params = astree_second(function);
-  /* Currently, a new scope is created for function prototypes, which only holds
-   * the parameters. This is fine; the standard even specifies a scope
-   * specifically for function declarations.
-   *
-   * The symbol table for the function's scope and the symbol table for the
-   * parameters will be shared in the function definition.
-   */
   create_scope(&(params->symbol_table));
   size_t i;
   for (i = 0; i < astree_count(params); ++i) {
@@ -953,86 +989,95 @@ int make_function_entry(ASTree *function) {
      * TODO(Robert): implement find function(s) in badlib and search for
      * duplicate parameters
      */
-    status = make_object_entry(param);
-    if (status != 0) return status;
+    int status = make_object_entry(param);
+    if (status) return status;
     size_t param_id_str_len = strnlen(param_id_str, MAX_IDENT_LEN);
     SymbolValue *param_entry = NULL;
-    locate_symbol(param_id_str, param_id_str_len, &param_entry);
-    if (param_entry == NULL) {
+    int in_current_scope =
+        locate_symbol(param_id_str, param_id_str_len, &param_entry);
+    if (!in_current_scope) {
       fprintf(stderr,
               "ERROR: parameter symbol was not inserted into function table\n");
       return -1;
     }
     llist_push_back(param_entries, param_entry);
   }
-
-  /* temporarily leave function prototype scope so that we can check the
-   * global table, and also insert this function's symbol into the global
-   * table if we need to
-   */
+  /* temporarily leave function prototype scope to work on global table */
   leave_scope(&(params->symbol_table));
+  return 0;
+}
 
-  const char *function_id = extract_ident(type_id);
-  size_t function_id_len = strnlen(function_id, MAX_IDENT_LEN);
+int define_body(ASTree *function, SymbolValue *entry) {
+  DEBUGS('t', "Defining function: %s", extract_ident(function));
+  ASTree *params = astree_second(function);
+  ASTree *body = astree_third(function);
+  /* move symbol table from parameters to function body */
+  body->symbol_table = params->symbol_table;
+  memset(&params->symbol_table, 0, sizeof(params->symbol_table));
+  /* enter block scope again */
+  enter_scope(&body->symbol_table);
+  current_function = entry;
+  int status = validate_stmt(body);
+  if (status) return status;
+  current_function = NULL;
+  entry->is_defined = 1;
+  /* finalize scope */
+  finalize_scope(&body->symbol_table);
+  return 0;
+}
+
+int make_function_entry(ASTree *function) {
+  ASTree *type_id = astree_first(function);
+  SymbolValue *function_entry =
+      symbol_value_init(&(astree_second(type_id)->loc));
+  function_entry->type = SPEC_FUNCTION;
+  function_entry->type.nested = malloc(sizeof(TypeSpec));
+  /* validate return type */
+  int status =
+      validate_type(astree_first(type_id), function_entry->type.nested);
+  if (status) return status;
+  if (function_entry->type.nested->base == TYPE_ARRAY) {
+    fprintf(stderr, "ERROR: Function %s has an array return type.\n",
+            extract_ident(type_id));
+    /* TODO(rbergero): keep going if we can */
+    return -1;
+  }
+
+  ASTree *params = astree_second(function);
+  status = define_params(params, function_entry);
+  if (status) return status;
+
+  const char *function_ident = extract_ident(function);
+  size_t function_ident_len = strnlen(function_ident, MAX_IDENT_LEN);
   SymbolValue *existing_entry = NULL;
-  locate_symbol(function_id, function_id_len, &existing_entry);
+  locate_symbol(function_ident, function_ident_len, &existing_entry);
   if (existing_entry) {
     if (types_compatible(existing_entry, function_entry, ARG1_SMV | ARG2_SMV) ==
         TCHK_INCOMPATIBLE) {
-      fprintf(stderr, "ERROR: redeclaration of function: %s\n", function_id);
+      fprintf(stderr, "ERROR: redeclaration of function: %s\n", function_ident);
       return -1;
     } else if (existing_entry->is_defined) {
-      fprintf(stderr, "ERROR: redefinition of function: %s\n", function_id);
+      fprintf(stderr, "ERROR: redefinition of function: %s\n", function_ident);
       return -1;
     } else if (astree_count(function) == 3) {
-      DEBUGS('t', "Defining function: %s", function_id);
-      ASTree *fn_body = astree_third(function);
-      /* move symbol table from parameters to function body */
-      fn_body->symbol_table = params->symbol_table;
-      memset(&params->symbol_table, 0, sizeof(params->symbol_table));
-      /* enter block scope again */
-      enter_scope(&fn_body->symbol_table);
-      current_function = existing_entry;
-      status = validate_stmt(fn_body);
+      status = define_body(function, existing_entry);
       if (status) return status;
-      current_function = NULL;
-      existing_entry->is_defined = 1;
-      /* finalize scope */
-      finalize_scope(&fn_body->symbol_table);
     }
-    /* free the type information we created, as it is redundant, and use old
-     * type info. since the parameter list does not free its elements, they
-     * remain active in the symbol table and can safely be used
-     */
+    /* use existing type info */
     symbol_value_destroy(function_entry);
-    astree_second(type_id)->type = &(existing_entry->type);
+    return assign_type(function);
   } else {
-    insert_symbol(function_id, function_id_len, function_entry);
-    astree_second(type_id)->type = &(function_entry->type);
+    status = insert_symbol(function_ident, function_ident_len, function_entry);
+    if (status) return status;
     if (astree_count(function) == 3) {
-      /* define function */
-      DEBUGS('t', "No prototype; defining function %s", function_id);
-      ASTree *fn_body = astree_third(function);
-      /* move symbol table from parameters to function body */
-      fn_body->symbol_table = params->symbol_table;
-      memset(&params->symbol_table, 0, sizeof(params->symbol_table));
-      /* enter block scope again and validate function body */
-      enter_scope(&fn_body->symbol_table);
-      current_function = function_entry;
-      status = validate_stmt(fn_body);
+      status = define_body(function, function_entry);
       if (status) return status;
-      current_function = NULL;
-      function_entry->is_defined = 1;
-      /* finalize scope */
-      finalize_scope(&fn_body->symbol_table);
     } else {
-      /* go back into scope so that it can be finalized */
       enter_scope(&params->symbol_table);
       finalize_scope(&params->symbol_table);
     }
+    return assign_type(function);
   }
-
-  return 0;
 }
 
 int validate_stmt(ASTree *statement) {
@@ -1132,7 +1177,7 @@ int validate_expr(ASTree *expression) {
       break;
     case TOK_IDENT:
       DEBUGS('t', "bonk");
-      status = assign_type_id(expression);
+      status = assign_type(expression);
       break;
     case TOK_CAST:
       status = validate_cast(expression);
