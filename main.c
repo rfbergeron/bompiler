@@ -211,7 +211,10 @@ int main(int argc, char **argv) {
   fclose(strfile);
   fclose(tokfile);
   fclose(astfile);
+  fclose(symfile);
   fclose(oilfile);
+
+  astree_destroy(parser_root);
   DEBUGS('m', "string set cleanup");
   string_set_free_globals();
   DEBUGS('m', "lexing/parsing helper cleanup");

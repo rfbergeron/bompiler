@@ -18,7 +18,7 @@ size_t lexer_last_yyleng;
 Location lexer_loc;
 int lexer_interactive;
 ASTree *parser_root;
-struct llist *lexer_filenames;
+struct llist lexer_filenames;
 struct {
   size_t *data;
   size_t count;
@@ -36,11 +36,12 @@ void push_linenr(size_t linenr) {
   }
   lexer_include_linenrs.data[lexer_include_linenrs.count++] = linenr;
 }
+
 /* external functions */
 size_t lexer_get_filenr() { return lexer_loc.filenr; }
 
 const char *lexer_filename(int filenr) {
-  return llist_get(lexer_filenames, (size_t)filenr);
+  return llist_get(&lexer_filenames, (size_t)filenr);
 }
 
 size_t lexer_include_linenr(int filenr) {
@@ -48,8 +49,8 @@ size_t lexer_include_linenr(int filenr) {
 }
 
 void lexer_new_filename(const char *filename) {
-  lexer_loc.filenr = llist_size(lexer_filenames);
-  llist_push_front(lexer_filenames, (char *)filename);
+  lexer_loc.filenr = llist_size(&lexer_filenames);
+  llist_push_front(&lexer_filenames, (char *)filename);
   push_linenr(lexer_loc.linenr + 1);
 }
 
@@ -99,8 +100,7 @@ void lexer_include() {
 
 int lexer_token(int symbol) {
   DEBUGS('l', "Found token with code: %p, length: %p", symbol, yyleng);
-  yylval = malloc(sizeof(ASTree));
-  astree_init(yylval, symbol, lexer_loc, yytext);
+  yylval = astree_init(symbol, lexer_loc, yytext);
   fprintf(tokfile, "%2lu  %3lu.%3lu %3d %-13s %s\n", yylval->loc.filenr,
           yylval->loc.linenr, yylval->loc.offset, yylval->symbol,
           parser_get_tname(yylval->symbol), yylval->lexinfo);
@@ -120,24 +120,22 @@ int lexer_bad_token(int symbol) {
 void lexer_fatal_error(const char *msg) { errx(1, "%s", msg); }
 
 void lexer_error(const char *message) {
-  assert(llist_size(lexer_filenames) != 0);
+  assert(llist_size(&lexer_filenames) != 0);
   fprintf(stderr, "%s:%lu.%lu: %s", lexer_filename(lexer_loc.filenr),
           lexer_loc.linenr, lexer_loc.offset, message);
 }
 
 void lexer_dump_filenames(FILE *out) {
   size_t index;
-  for (index = 0; index < llist_size(lexer_filenames); ++index) {
+  for (index = 0; index < llist_size(&lexer_filenames); ++index) {
     fprintf(out, "filenames[%2lu] = \"%s\"\n", index,
-            (const char *)llist_get(lexer_filenames, index));
+            (const char *)llist_get(&lexer_filenames, index));
   }
 }
 
 void lexer_init_globals() {
   lexer_interactive = 0;
   lexer_loc = (Location){0, 1, 0};
-  lexer_filenames = malloc(sizeof(*lexer_filenames));
-  llist_init(lexer_filenames, NULL, NULL);
   lexer_include_linenrs.count = 0;
   lexer_include_linenrs.size = 10;
   lexer_include_linenrs.data =
@@ -145,7 +143,7 @@ void lexer_init_globals() {
 }
 
 void lexer_free_globals() {
-  llist_destroy(lexer_filenames);
+  llist_destroy(&lexer_filenames);
   free(lexer_include_linenrs.data);
 }
 

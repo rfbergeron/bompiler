@@ -1,5 +1,7 @@
 #ifndef __ATTRIBUTES_H__
 #define __ATTRIBUTES_H__
+#include "badlib/badllist.h"
+#include "badlib/badmap.h"
 #include "stdio.h"
 
 #define X64_SIZEOF_LONG (size_t)8
@@ -20,11 +22,12 @@
  * - the result of the array indexing operator
  */
 enum attribute {
-  ATTR_EXPR_VREG = 1 << 0, /* does this node require a virtual register */
-  ATTR_EXPR_LVAL = 1 << 1, /* does this node refer to an assignable location */
-  ATTR_EXPR_CONST =
-      1 << 2,              /* does this node refer to a compile-time constant */
-  ATTR_EXPR_BOOL = 1 << 3, /* is this node guaranteed to be 0 or 1 */
+  ATTR_NONE = 0,            /* no attributes set */
+  ATTR_EXPR_VREG = 1 << 0,  /* requires a virtual register */
+  ATTR_EXPR_LVAL = 1 << 1,  /* refers to an assignable location */
+  ATTR_EXPR_CONST = 1 << 2, /* refers to a compile-time constant */
+  ATTR_EXPR_BOOL = 1 << 3,  /* int guaranteed to be 0 or 1 */
+  ATTR_EXPR_VADDR = 1 << 4, /* int is memory address */
 };
 
 enum base_type {
@@ -82,9 +85,9 @@ typedef struct typespec {
   size_t alignment;
   struct typespec *nested; /* for functions, pointers and arrays */
   union {
-    struct llist *params; /* for functions */
-    struct map *members;  /* for structs and unions */
-    size_t length;        /* for arrays */
+    struct map members;  /* for structs and unions */
+    struct llist params; /* for functions */
+    size_t length;       /* for arrays */
   } data;
   unsigned int flags;
   enum base_type base;
@@ -98,15 +101,28 @@ typedef struct location {
   size_t blocknr;
 } Location;
 
-int attributes_to_string(const unsigned int attributes, char *buf,
-                         size_t bufsize);
-int type_to_string(const TypeSpec *type, char *buf, size_t bufsize);
-
+/* TODO(Robert): maybe define this in some other common file? */
+extern const size_t MAX_IDENT_LEN;
 extern const TypeSpec SPEC_PTR;
 extern const TypeSpec SPEC_EMPTY;
 extern const TypeSpec SPEC_FUNCTION;
+extern const TypeSpec SPEC_STRUCT;
+extern const TypeSpec SPEC_ULONG;
+extern const TypeSpec SPEC_LONG;
+extern const TypeSpec SPEC_UINT;
 extern const TypeSpec SPEC_INT;
+extern const TypeSpec SPEC_USHRT;
+extern const TypeSpec SPEC_SHRT;
+extern const TypeSpec SPEC_UCHAR;
+extern const TypeSpec SPEC_CHAR;
 
 extern const Location LOC_EMPTY;
+
+int attributes_to_string(const unsigned int attributes, char *buf,
+                         size_t bufsize);
+void location_to_string(const Location *loc, char *buffer, size_t size);
+int type_to_string(const TypeSpec *type, char *buf, size_t bufsize);
+int typespec_copy(TypeSpec *dst, const TypeSpec *src);
+int typespec_destroy(TypeSpec *type);
 
 #endif

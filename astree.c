@@ -14,34 +14,40 @@
 #include "strset.h"
 #define LINESIZE 1024
 
-ASTree *astree_first(ASTree *parent) { return llist_get(parent->children, 0); }
+ASTree *astree_first(ASTree *parent) { return llist_get(&parent->children, 0); }
 
-ASTree *astree_second(ASTree *parent) { return llist_get(parent->children, 1); }
+ASTree *astree_second(ASTree *parent) {
+  return llist_get(&parent->children, 1);
+}
 
-ASTree *astree_third(ASTree *parent) { return llist_get(parent->children, 2); }
+ASTree *astree_third(ASTree *parent) { return llist_get(&parent->children, 2); }
 
-int astree_init(ASTree *tree, int symbol_, const Location location,
-                const char *info) {
+ASTree *astree_get(ASTree *parent, const size_t index) {
+  return llist_get(&parent->children, index);
+}
+
+ASTree *astree_init(int symbol, const Location location, const char *info) {
   DEBUGS('t', "Initializing new astree node with code: %s, lexinfo: '%s'",
-         parser_get_tname(symbol_), info);
+         parser_get_tname(symbol), info);
 
-  tree->symbol = symbol_;
+  ASTree *tree = malloc(sizeof(ASTree));
+  tree->symbol = symbol;
   tree->lexinfo = string_set_intern(info);
   tree->loc = location;
-  tree->type = SPEC_EMPTY;
-  tree->attributes = 0;
+  tree->type = &SPEC_EMPTY;
+  tree->attributes = ATTR_NONE;
   /* casting function pointers is undefined behavior but it seems like most
    * compiler implementations make it work, and here we're just changing the
    * type of a pointer argument */
-  tree->children = malloc(sizeof(*(tree->children)));
-  llist_init(tree->children, (void (*)(void *))(astree_destroy), NULL);
+  llist_init(&tree->children, (void (*)(void *))(astree_destroy), NULL);
   tree->next_sibling = NULL;
   tree->firstborn = tree;
+  tree->symbol_table = (Map)BLIB_MAP_EMPTY;
 
   /* remember, attributes for nodes which adopt a different symbol
    * must have the appropriate attributes set in adopt_symbol
    */
-  switch (symbol_) {
+  switch (symbol) {
     case '+':
     case '-':
     case '/':
@@ -77,18 +83,24 @@ int astree_init(ASTree *tree, int symbol_, const Location location,
       break;
   }
 
-  return 0;
+  return tree;
 }
 
-int astree_destroy(ASTree *astree) {
-  if (astree == NULL) return 1;
-  DEBUGS('t', "Freeing an astree with sym %d, %s.", astree->symbol,
-         parser_get_tname(astree->symbol));
-  llist_destroy(astree->children);
+int astree_destroy(ASTree *tree) {
+  if (tree == NULL) return 1;
+  DEBUGS('t', "Freeing an astree with sym %d, %s.", tree->symbol,
+         parser_get_tname(tree->symbol));
   if (yydebug) {
     /* print tree contents to stderr */
   }
 
+  /* llist should handle destruction of children */
+  llist_destroy(&tree->children);
+
+  /* free symbol entries associated with scope */
+  map_destroy(&tree->symbol_table);
+
+  free(tree);
   return 0;
 }
 
@@ -100,7 +112,7 @@ ASTree *astree_adopt(ASTree *parent, ASTree *child1, ASTree *child2,
     ASTree *current_sibling = child1->firstborn;
 
     do {
-      llist_push_back(parent->children, current_sibling);
+      llist_push_back(&parent->children, current_sibling);
       current_sibling = current_sibling->next_sibling;
     } while (current_sibling != NULL);
   }
@@ -110,7 +122,7 @@ ASTree *astree_adopt(ASTree *parent, ASTree *child1, ASTree *child2,
     ASTree *current_sibling = child2->firstborn;
 
     do {
-      llist_push_back(parent->children, current_sibling);
+      llist_push_back(&parent->children, current_sibling);
       current_sibling = current_sibling->next_sibling;
     } while (current_sibling != NULL);
   }
@@ -120,7 +132,7 @@ ASTree *astree_adopt(ASTree *parent, ASTree *child1, ASTree *child2,
     ASTree *current_sibling = child3->firstborn;
 
     do {
-      llist_push_back(parent->children, current_sibling);
+      llist_push_back(&parent->children, current_sibling);
       current_sibling = current_sibling->next_sibling;
     } while (current_sibling != NULL);
   }
@@ -163,6 +175,8 @@ ASTree *astree_descend(ASTree *parent, ASTree *descendant) {
   return parent;
 }
 
+size_t astree_count(ASTree *parent) { return llist_size(&parent->children); }
+
 void astree_dump_tree(ASTree *tree, FILE *out, int depth) {
   /* Dump formatted tree: current pointer, current token, followed
    * by pointers to children, on one line. Then call recursively on
@@ -182,12 +196,6 @@ void astree_dump(ASTree *tree, FILE *out) {
   fprintf(out, "%p->%s", tree, nodestr);
 }
 
-void location_to_string(Location location, char *buffer, size_t size) {
-  int bufsize = snprintf(buffer, size, "%lu, %lu, %lu, %lu", location.filenr,
-                         location.linenr, location.offset, location.blocknr) +
-                1;
-}
-
 void astree_to_string(ASTree *tree, char *buffer, size_t size) {
   /* print token name, lexinfo in quotes, the location, block number,
    * attributes, and the typeid if this is a struct
@@ -196,11 +204,11 @@ void astree_to_string(ASTree *tree, char *buffer, size_t size) {
 
   const char *tname = parser_get_tname(tree->symbol);
   char locstr[LINESIZE];
-  location_to_string(tree->loc, locstr, LINESIZE);
+  location_to_string(&tree->loc, locstr, LINESIZE);
   char attrstr[LINESIZE];
   attributes_to_string(tree->attributes, attrstr, LINESIZE);
   char typestr[LINESIZE];
-  type_to_string(&(tree->type), typestr, LINESIZE);
+  type_to_string(tree->type, typestr, LINESIZE);
 
   if (strlen(tname) > 4) tname += 4;
   snprintf(buffer, size, "%s \"%s\" {%s} {%s} {%s}", tname, tree->lexinfo,
@@ -211,7 +219,7 @@ void astree_print_tree(ASTree *tree, FILE *out, int depth) {
   /* print out the whole tree */
   DEBUGS('t', "Tree info: token: %s, lexinfo: %s, children: %u",
          parser_get_tname(tree->symbol), tree->lexinfo,
-         llist_size(tree->children));
+         llist_size(&tree->children));
 
   size_t numspaces = depth * 3;
   char indent[LINESIZE];
@@ -222,12 +230,12 @@ void astree_print_tree(ASTree *tree, FILE *out, int depth) {
   fprintf(out, "%s%s\n", indent, nodestr);
 
   size_t i;
-  for (i = 0; i < llist_size(tree->children); ++i) {
-    DEBUGS('t', "    %p", llist_get(tree->children, i));
+  for (i = 0; i < llist_size(&tree->children); ++i) {
+    DEBUGS('t', "    %p", llist_get(&tree->children, i));
   }
 
-  for (i = 0; i < llist_size(tree->children); ++i) {
-    ASTree *child = (ASTree *)llist_get(tree->children, i);
+  for (i = 0; i < llist_size(&tree->children); ++i) {
+    ASTree *child = (ASTree *)llist_get(&tree->children, i);
 
     if (child != NULL) {
       astree_print_tree(child, out, depth + 1);
