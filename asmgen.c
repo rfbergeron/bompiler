@@ -170,10 +170,10 @@ int assign_space(const ASTree *tree) {
     return -1;
   }
   size_t required_padding =
-      tree->type.alignment - (stack_window % tree->type.alignment);
+      tree->type->alignment - (stack_window % tree->type->alignment);
   stack_window += required_padding;
   symval->stack_offset = stack_window;
-  stack_window += tree->type.width;
+  stack_window += tree->type->width;
   sprintf(symval->obj_loc, "rsp%+i", symval->stack_offset);
   return 0;
 }
@@ -272,7 +272,7 @@ int translate_ident(ASTree *ident, InstructionData *data, unsigned int flags) {
   if (flags & WANT_OBJ_VADDR) {
     int status = resolve_object(ident, data, SOURCE_OPERAND & WANT_OBJ_VADDR);
     if (status) return status;
-    status = assign_vreg(&(ident->type), data, vreg_count++,
+    status = assign_vreg(ident->type, data, vreg_count++,
                          DEST_OPERAND & WANT_OBJ_VADDR);
     if (status) return status;
 
@@ -280,7 +280,7 @@ int translate_ident(ASTree *ident, InstructionData *data, unsigned int flags) {
   } else {
     int status = resolve_object(ident, data, SOURCE_OPERAND);
     if (status) return status;
-    status = assign_vreg(&(ident->type), data, vreg_count++, DEST_OPERAND);
+    status = assign_vreg(ident->type, data, vreg_count++, DEST_OPERAND);
     if (status) return status;
 
     data->instruction = instructions[INSTR_MOV];
@@ -305,7 +305,7 @@ int translate_conversion(ASTree *operator, InstructionData * data,
 
   InstructionData *src_data = calloc(1, sizeof(*src_data));
   ASTree *converted_expr = NULL;
-  if (operator->children->size == 1)
+  if (astree_count(operator) == 1)
     converted_expr = astree_first(operator);
   else
     converted_expr = astree_second(operator);
@@ -313,25 +313,25 @@ int translate_conversion(ASTree *operator, InstructionData * data,
   if (status) return status;
   llist_push_back(text_section, src_data);
   strcpy(data->src_operand, src_data->dest_operand);
-  status = assign_vreg(&(operator->type), data, vreg_count++, DEST_OPERAND);
+  status = assign_vreg(operator->type, data, vreg_count++, DEST_OPERAND);
   if (status) return status;
 
-  TypeSpec target_type = operator->type;
-  TypeSpec source_type = converted_expr->type;
+  const TypeSpec *target_type = operator->type;
+  const TypeSpec *source_type = converted_expr->type;
 
-  if (source_type.width > target_type.width) {
+  if (source_type->width > target_type->width) {
     data->instruction = instructions[INSTR_MOV];
   }
-  if (source_type.width == target_type.width) {
+  if (source_type->width == target_type->width) {
     data->instruction = instructions[INSTR_NOP];
   }
-  if (source_type.base == TYPE_SIGNED) {
-    if (target_type.base == TYPE_SIGNED) {
+  if (source_type->base == TYPE_SIGNED) {
+    if (target_type->base == TYPE_SIGNED) {
       data->instruction = instructions[INSTR_MOVSX];
-    } else if (target_type.base == TYPE_UNSIGNED) {
+    } else if (target_type->base == TYPE_UNSIGNED) {
       data->instruction = instructions[INSTR_MOVZX];
     }
-  } else if (source_type.base == TYPE_UNSIGNED) {
+  } else if (source_type->base == TYPE_UNSIGNED) {
     data->instruction = instructions[INSTR_MOVZX];
   } else {
     fprintf(stderr, "ERROR: unable to determine conversion\n");
@@ -349,7 +349,7 @@ int translate_intcon(ASTree *constant, InstructionData *data,
      * into a register first
      */
     int status =
-        assign_vreg(&(constant->type), data, vreg_count++, DEST_OPERAND);
+        assign_vreg(constant->type, data, vreg_count++, DEST_OPERAND);
     if (status) return status;
     strcpy(data->src_operand, constant->lexinfo);
     data->instruction = instructions[INSTR_MOV];
@@ -488,7 +488,7 @@ int translate_binop(ASTree *operator, InstructionData * data,
 
 int translate_cast(ASTree *cast, InstructionData *data) {
   ASTree *casted_expr = NULL;
-  if (cast->children->size == 1)
+  if (astree_count(cast) == 1)
     casted_expr = astree_first(cast);
   else
     casted_expr = astree_second(cast);
@@ -522,7 +522,7 @@ int translate_param(ASTree *param, InstructionData *data) {
   DEBUGS('g', "Translating parameter");
   ASTree *param_ident = astree_second(param);
   int status =
-      assign_vreg(&(param_ident->type), data, vreg_count++, SOURCE_OPERAND);
+      assign_vreg(param_ident->type, data, vreg_count++, SOURCE_OPERAND);
   if (status) return status;
   status = assign_space(param_ident);
   if (status) return status;
@@ -541,7 +541,7 @@ int translate_local_decl(ASTree *type_id, InstructionData *data) {
   int status = assign_space(ident);
   if (status) return status;
 
-  if (type_id->children->size == 3) {
+  if (astree_count(type_id) == 3) {
     int status = resolve_object(ident, data, DEST_OPERAND & MOV_TO_MEM);
     if (status) return status;
     InstructionData *value_data = calloc(1, sizeof(*value_data));
@@ -567,14 +567,14 @@ int translate_global_decl(ASTree *type_id, InstructionData *data) {
   /* TODO(Robert): figure out how to initialize data for a struct or any
    * type wider than a quadword
    */
-  if (type_id->children->size == 3) {
+  if (astree_count(type_id) == 3) {
     /* put in data section */
     /* TODO(Robert): have the compiler evaluate compile-time constants
      */
     ASTree *init_value = astree_third(type_id);
     strcpy(data->dest_operand, "COMPILE-TIME CONSTANT");
 
-    switch (ident->type.width) {
+    switch (ident->type->width) {
       case X64_SIZEOF_LONG:
         data->instruction = instructions[INSTR_DQ];
         break;
@@ -591,7 +591,7 @@ int translate_global_decl(ASTree *type_id, InstructionData *data) {
         fprintf(stderr,
                 "ERROR: unable to determine instruction for initialized"
                 " data of width %zu\n",
-                ident->type.width);
+                ident->type->width);
         return -1;
         break;
     }
@@ -599,7 +599,7 @@ int translate_global_decl(ASTree *type_id, InstructionData *data) {
     /* put in bss/uninitialized data section */
     data->dest_operand[0] = '1';
     data->dest_operand[1] = 0;
-    switch (ident->type.width) {
+    switch (ident->type->width) {
       case X64_SIZEOF_LONG:
         data->instruction = instructions[INSTR_RESQ];
         break;
@@ -616,7 +616,7 @@ int translate_global_decl(ASTree *type_id, InstructionData *data) {
         fprintf(stderr,
                 "ERROR: unable to determine instruction for uninitialized"
                 " data of width %zu\n",
-                ident->type.width);
+                ident->type->width);
         return -1;
         break;
     }
@@ -747,7 +747,8 @@ static int translate_stmt(ASTree *stmt) {
   InstructionData *data;
   int status = 0;
 
-  if (stmt->symbol_table) enter_scope(stmt->symbol_table);
+  /* TODO(Robert): add badlib function to verify that a data structure is valid */
+  if (stmt->symbol_table.buckets) enter_scope(&stmt->symbol_table);
   switch (stmt->symbol) {
     case TOK_BLOCK:
       status = translate_block(stmt);
@@ -786,13 +787,13 @@ static int translate_stmt(ASTree *stmt) {
       break;
   }
 
-  if (stmt->symbol_table) leave_scope();
+  if (stmt->symbol_table.buckets) leave_scope(&stmt->symbol_table);
   return status;
 }
 
 static int translate_block(ASTree *block) {
   DEBUGS('g', "Translating compound statement");
-  LinkedList *stmts = block->children;
+  LinkedList *stmts = &block->children;
   size_t i;
   for (i = 0; i < stmts->size; ++i) {
     ASTree *stmt = llist_get(stmts, i);
@@ -890,18 +891,19 @@ int translate_function(ASTree *function, InstructionData *data) {
 
   size_t i;
   ASTree *params = astree_second(function);
+  ASTree *body = astree_third(function);
   /* cleanup vregs from last function */
   vreg_count = 0;
   /* enter function parameter/body scope briefly to handle parameters */
-  enter_scope(params->symbol_table);
-  for (i = 0; i < params->children->size; ++i) {
-    ASTree *param = llist_get(params->children, i);
+  enter_scope(&body->symbol_table);
+  for (i = 0; i < astree_count(params); ++i) {
+    ASTree *param = astree_get(params, i);
     InstructionData *param_data = calloc(1, sizeof(*param_data));
     int status = translate_param(param, param_data);
     if (status) return status;
     llist_push_back(text_section, param_data);
   }
-  leave_scope();
+  leave_scope(&body->symbol_table);
 
   /* reset vregs since they are now all available */
   vreg_count = 0;
@@ -913,9 +915,9 @@ int translate_function(ASTree *function, InstructionData *data) {
 
 int translate_file(ASTree *root) {
   size_t i;
-  enter_scope(root->symbol_table);
-  for (i = 0; i < llist_size(root->children); ++i) {
-    ASTree *topdecl = llist_get(root->children, i);
+  enter_scope(&root->symbol_table);
+  for (i = 0; i < astree_count(root); ++i) {
+    ASTree *topdecl = astree_get(root, i);
     InstructionData *topdecl_data = calloc(1, sizeof(*topdecl_data));
     int status = 0;
     switch (topdecl->symbol) {
@@ -925,7 +927,7 @@ int translate_file(ASTree *root) {
         break;
       case TOK_FUNCTION:
         /* do nothing if this is just a prototype */
-        if (topdecl->children->size > 2) {
+        if (astree_count(topdecl) > 2) {
           /* data will hold the function label, which should appear before
            * the function body
            */
@@ -946,7 +948,7 @@ int translate_file(ASTree *root) {
     if (status) return status;
   }
 
-  leave_scope();
+  leave_scope(&root->symbol_table);
   return 0;
 }
 
