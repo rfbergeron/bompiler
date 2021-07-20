@@ -107,6 +107,10 @@ typedef enum instruction_flags {
   WANT_OBJ_VADDR = 1 << 2, /* result should be object address, not value */
   MOV_TO_MEM = 1 << 3,     /* parent instruction is MOV */
   RETURN_REG = 1 << 4,     /* result is to be place in a return register */
+  QUOTIENT_REG = 1 << 4,   /* assign quotient register */
+  REMAINDER_REG = 1 << 5,  /* assign remainder register */
+  LO_REG = 1 << 4,         /* assign low-order product register */
+  HI_REG = 1 << 5,         /* assign high-order product register */
 } InstructionFlags;
 
 const char instructions[][MAX_INSTRUCTION_LENGTH] = {
@@ -241,26 +245,9 @@ int translate_return(ASTree *ret, InstructionData *data) {
   mov_data->instruction = instructions[INSTR_MOV];
   strcpy(mov_data->src_operand, value_data->dest_operand);
 
-  /* choose between rax, eax, ax, and al */
-  /* TODO(Robert): have assign_vreg handle this */
-  switch (current_function->type.nested->width) {
-    case X64_SIZEOF_LONG:
-      sprintf(mov_data->dest_operand, "rax");
-      break;
-    case X64_SIZEOF_INT:
-      sprintf(mov_data->dest_operand, "eax");
-      break;
-    case X64_SIZEOF_SHORT:
-      sprintf(mov_data->dest_operand, "ax");
-      break;
-    case X64_SIZEOF_CHAR:
-      sprintf(mov_data->dest_operand, "al");
-      break;
-    default:
-      fprintf(stderr, "ERROR: unable to assign vreg of width %zu\n",
-              current_function->type.nested->width);
-      return -1;
-  }
+  /* TODO(Robert): designate a vreg as return register */
+  status = assign_vreg(current_function->type.nested, mov_data, vreg_count++,
+                       DEST_OPERAND);
 
   llist_push_back(text_section, mov_data);
 
@@ -321,11 +308,9 @@ int translate_conversion(ASTree *operator, InstructionData * data,
 
   if (source_type->width > target_type->width) {
     data->instruction = instructions[INSTR_MOV];
-  }
-  if (source_type->width == target_type->width) {
+  } else if (source_type->width == target_type->width) {
     data->instruction = instructions[INSTR_NOP];
-  }
-  if (source_type->base == TYPE_SIGNED) {
+  } else if (source_type->base == TYPE_SIGNED) {
     if (target_type->base == TYPE_SIGNED) {
       data->instruction = instructions[INSTR_MOVSX];
     } else if (target_type->base == TYPE_UNSIGNED) {
@@ -348,8 +333,7 @@ int translate_intcon(ASTree *constant, InstructionData *data,
     /* result will be destination register of parent operand; mov constant
      * into a register first
      */
-    int status =
-        assign_vreg(constant->type, data, vreg_count++, DEST_OPERAND);
+    int status = assign_vreg(constant->type, data, vreg_count++, DEST_OPERAND);
     if (status) return status;
     strcpy(data->src_operand, constant->lexinfo);
     data->instruction = instructions[INSTR_MOV];
@@ -397,8 +381,7 @@ int cvt_to_bool(ASTree *tree, InstructionData *data, unsigned int logical_not) {
     data->instruction = instructions[INSTR_SETZ];
   else
     data->instruction = instructions[INSTR_SETNZ];
-  status = assign_vreg(&SPEC_INT, data, vreg_count++, DEST_OPERAND);
-  return status;
+  return assign_vreg(&SPEC_INT, data, vreg_count++, DEST_OPERAND);
 }
 
 int translate_logical(ASTree *operator, InstructionData * data,
@@ -486,6 +469,27 @@ int translate_binop(ASTree *operator, InstructionData * data,
   return 0;
 }
 
+int translate_mul_div_mod(ASTree *operator, InstructionData * data,
+                          InstructionEnum num, unsigned int flags) {
+  /* TODO(Robert): designate vregs for quotient/lo bits and remainder/hi bits */
+  if (operator->symbol == '%') {
+    /* return remainder instead of quotient */
+    InstructionData *remainder_data = calloc(1, sizeof(*remainder_data));
+    int status = translate_binop(operator, remainder_data, num, flags);
+    if (status) return status;
+    llist_push_back(text_section, remainder_data);
+    data->instruction = instructions[INSTR_NOP];
+    return assign_vreg(operator->type, data, vreg_count++, DEST_OPERAND);
+  } else {
+    int status = translate_binop(operator, data, num, flags);
+    if (status) return status;
+    /* use up another vreg for the remainder/high-order bits */
+    ++vreg_count;
+    return 0;
+  }
+}
+
+/* TODO(Robert): this may be unnecessary */
 int translate_cast(ASTree *cast, InstructionData *data) {
   ASTree *casted_expr = NULL;
   if (astree_count(cast) == 1)
@@ -640,16 +644,22 @@ static int translate_expr(ASTree *tree, InstructionData *out,
       status = translate_binop(tree, out, INSTR_SUB, flags);
       break;
     case '*':
-      /* TODO(Robert): determine whether to use mul or imul */
-      status = translate_binop(tree, out, INSTR_MUL, flags);
+      if (astree_first(tree)->type->base == TYPE_SIGNED)
+        status = translate_mul_div_mod(tree, out, INSTR_IMUL, flags);
+      else
+        status = translate_mul_div_mod(tree, out, INSTR_MUL, flags);
       break;
     case '/':
-      /* TODO(Robert): determine whether to use div or idiv */
-      status = translate_binop(tree, out, INSTR_DIV, flags);
+      if (astree_first(tree)->type->base == TYPE_SIGNED)
+        status = translate_mul_div_mod(tree, out, INSTR_IDIV, flags);
+      else
+        status = translate_mul_div_mod(tree, out, INSTR_DIV, flags);
       break;
     case '%':
-      /* TODO(Robert): determine whether to use div or idiv */
-      /* TODO(Robert): translate pseudo-op */
+      if (astree_first(tree)->type->base == TYPE_SIGNED)
+        status = translate_mul_div_mod(tree, out, INSTR_IDIV, flags);
+      else
+        status = translate_mul_div_mod(tree, out, INSTR_DIV, flags);
       break;
     case TOK_INC:
       /* TODO(Robert): postfix increment */
@@ -710,7 +720,7 @@ static int translate_expr(ASTree *tree, InstructionData *out,
     /* logical operators */
     case '!':
       /* instruction does not matter and is ignored */
-      translate_logical(tree, out, INSTR_SETZ, flags);
+      translate_logical(tree, out, INSTR_NOP, flags);
       break;
     case TOK_AND:
       translate_logical(tree, out, INSTR_AND, flags);
@@ -747,7 +757,8 @@ static int translate_stmt(ASTree *stmt) {
   InstructionData *data;
   int status = 0;
 
-  /* TODO(Robert): add badlib function to verify that a data structure is valid */
+  /* TODO(Robert): add badlib function to verify that a data structure is valid
+   */
   if (stmt->symbol_table.buckets) enter_scope(&stmt->symbol_table);
   switch (stmt->symbol) {
     case TOK_BLOCK:
@@ -969,6 +980,7 @@ int write_instruction(InstructionData *data, FILE *out) {
     /* instruction, possible with a label */
     int instruction_type =
         (!!data->dest_operand[0]) | (!!data->src_operand[0] << 1);
+    if (data->instruction == instructions[INSTR_NOP]) instruction_type = 0;
     switch (instruction_type) {
       case 0:
         /* nullary */
