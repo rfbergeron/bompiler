@@ -281,3 +281,19 @@ either representation can have the same code emitted.
 To make accessing variables uniform, parameters should be immediately written
 to the stack at the beginning of the function. This sequence of operations will
 look similar to the way a local variable declaration appears in assembly.
+
+## postfix and prefix increment and decrement
+Increment and decrement require an lval as their argument, which means that the
+InstructionData associated with its argument should be a MOV and its source
+should be the memory location of the object.
+
+This memory location can be copied and used as the argument for the increment or
+decrement.
+
+On x64, the same two instructions can be used for the prefix and postfix
+versions of these operators:
+- inc/dec in memory
+- mov from memory to a register
+
+Prefix operations perform the operations in the order above, while postfix operations
+reverse the order.

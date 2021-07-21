@@ -432,6 +432,34 @@ int translate_comparison(ASTree *operator, InstructionData * data,
   return status;
 }
 
+int translate_inc_dec(ASTree *operator, InstructionData * data,
+                      InstructionEnum num, unsigned int flags) {
+  DEBUGS('g', "Translating increment/decrement: %s", instructions[num]);
+  InstructionData *mov_data = NULL;
+  InstructionData *inc_dec_data = NULL;
+  InstructionData *to_push_data = NULL;
+
+  /* change which instruction gets pushed first depending on pofx vs prfx */
+  if (operator->symbol == TOK_INC || operator->symbol == TOK_DEC) {
+    inc_dec_data = calloc(1, sizeof(*mov_data));
+    mov_data = data;
+    to_push_data = inc_dec_data;
+  } else {
+    mov_data = calloc(1, sizeof(*mov_data));
+    inc_dec_data = data;
+    to_push_data = mov_data;
+  }
+
+  int status = translate_expr(astree_first(operator), mov_data, SOURCE_OPERAND);
+  if (status) return status;
+
+  inc_dec_data->instruction = instructions[num];
+  strcpy(inc_dec_data->dest_operand, mov_data->src_operand);
+
+  llist_push_back(text_section, to_push_data);
+  return 0;
+}
+
 int translate_unop(ASTree *operator, InstructionData * data,
                    InstructionEnum num, unsigned int flags) {
   DEBUGS('g', "Translating unary operation: %s", instructions[num]);
@@ -650,11 +678,6 @@ static int translate_expr(ASTree *tree, InstructionData *out,
         status = translate_mul_div_mod(tree, out, INSTR_MUL, flags);
       break;
     case '/':
-      if (astree_first(tree)->type->base == TYPE_SIGNED)
-        status = translate_mul_div_mod(tree, out, INSTR_IDIV, flags);
-      else
-        status = translate_mul_div_mod(tree, out, INSTR_DIV, flags);
-      break;
     case '%':
       if (astree_first(tree)->type->base == TYPE_SIGNED)
         status = translate_mul_div_mod(tree, out, INSTR_IDIV, flags);
@@ -662,18 +685,18 @@ static int translate_expr(ASTree *tree, InstructionData *out,
         status = translate_mul_div_mod(tree, out, INSTR_DIV, flags);
       break;
     case TOK_INC:
-      /* TODO(Robert): postfix increment */
-      status = translate_unop(tree, out, INSTR_INC, flags);
+    case TOK_POST_INC:
+      status = translate_inc_dec(tree, out, INSTR_INC, flags);
       break;
     case TOK_DEC:
-      /* TODO(Robert): postfix decrement */
-      status = translate_unop(tree, out, INSTR_DEC, flags);
+    case TOK_POST_DEC:
+      status = translate_inc_dec(tree, out, INSTR_DEC, flags);
       break;
     case TOK_NEG:
       status = translate_unop(tree, out, INSTR_NEG, flags);
       break;
     case TOK_POS:
-      /* TODO(Robert): promotion operator */
+      status = translate_conversion(tree, out, flags);
       break;
     /* bitwise operators */
     case '&':
@@ -693,10 +716,10 @@ static int translate_expr(ASTree *tree, InstructionData *out,
       status = translate_binop(tree, out, INSTR_SHL, flags);
       break;
     case TOK_SHR:
-      /* TODO(Robert): the implementation may choose behavior in this case,
-       * but I should try to use arithmetic shift on signed values
-       */
-      status = translate_unop(tree, out, INSTR_SHR, flags);
+      if (astree_first(tree)->type->base == TYPE_SIGNED)
+        status = translate_binop(tree, out, INSTR_SAR, flags);
+      else
+        status = translate_binop(tree, out, INSTR_SHR, flags);
       break;
     /* comparison operators */
     case '>':
