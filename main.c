@@ -186,21 +186,36 @@ int main(int argc, char **argv) {
   symbol_table_init_globals();
   asmgen_init_globals();
 
-  DEBUGS('m', "Parsing");
-  int parse_status = yyparse();
-
-  if (parse_status != 0) {
-    warnx("Parsing failed with status %d.", parse_status);
-  } else {
-    DEBUGS('m', "Parse successful; dumping strings.");
-
-    if (do_type_check) type_checker_make_table(parser_root);
-    string_set_dump(strfile);
-    astree_print_tree(parser_root, astfile, 0);
-    /* type_checker_dump_symbols (symfile); */
-    translate_file(parser_root);
-    write_asm(oilfile);
+  status = yyparse();
+  if (status) {
+    warnx("Parsing failed with status %d.", status);
+    goto cleanup;
   }
+
+  string_set_dump(strfile);
+
+  status = type_checker_make_table(parser_root);
+  if (status) {
+    warnx("Type checking failed.");
+    goto cleanup;
+  }
+
+  astree_print_tree(parser_root, astfile, 0);
+  /* type_checker_dump_symbols (symfile); */
+
+  status = translate_file(parser_root);
+  if (status) {
+    warnx("Assembly translation failed.");
+    goto cleanup;
+  }
+
+  status = write_asm(oilfile);
+  if (status) {
+    warnx("Failed to emit assembly instructions.");
+    goto cleanup;
+  }
+
+cleanup:
 
   DEBUGS('m', "Execution finished; wrapping up.");
 

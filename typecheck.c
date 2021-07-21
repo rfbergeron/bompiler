@@ -711,11 +711,8 @@ int validate_binop(ASTree *operator) {
   return status;
 }
 
-/* TODO(Robert): postfix increment/decrement and promotion operators should get
- * their own token codes to make assembly generation easier.
- */
 int validate_unop(ASTree *operator) {
-  DEBUGS('t', "Validating binary operator %c", operator->symbol);
+  DEBUGS('t', "Validating unary operator %c", operator->symbol);
   int status = 0;
   ASTree *operand = astree_first(operator);
   status = validate_expr(operand);
@@ -903,7 +900,8 @@ int make_object_entry(ASTree *object) {
         types_compatible(identifier, init_value, ARG1_AST | ARG2_AST);
     if (compatibility == TCHK_INCOMPATIBLE ||
         compatibility == TCHK_EXPLICIT_CAST) {
-      fprintf(stderr, "ERROR: Incompatible type for object variable\n");
+      fprintf(stderr, "ERROR: Incompatible type for object %s\n",
+              identifier->lexinfo);
       return -1;
     } else if (compatibility == TCHK_IMPLICIT_CAST) {
       insert_cast(object, 2, promoted_type);
@@ -1148,6 +1146,8 @@ int validate_expr(ASTree *expression) {
     case '~':
     case TOK_INC:
     case TOK_DEC:
+    case TOK_POST_INC:
+    case TOK_POST_DEC:
       status = validate_unop(expression);
       break;
     case TOK_CALL:

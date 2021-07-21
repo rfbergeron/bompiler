@@ -34,7 +34,7 @@
 %token TOK_VOID TOK_INT TOK_SHORT TOK_LONG TOK_CHAR TOK_UNSIGNED TOK_SIGNED
 %token TOK_CONST TOK_VOLATILE TOK_RESTRICT
 %token TOK_IF TOK_ELSE TOK_WHILE TOK_RETURN TOK_STRUCT TOK_UNION
-%token TOK_ARROW TOK_EQ TOK_NE TOK_LE TOK_GE TOK_SHL TOK_SHR TOK_INC TOK_DEC TOK_AND TOK_OR
+%token TOK_ARROW TOK_EQ TOK_NE TOK_LE TOK_GE TOK_SHL TOK_SHR TOK_AND TOK_OR TOK_INC TOK_DEC TOK_POST_INC TOK_POST_DEC
 %token TOK_SUBEQ TOK_ADDEQ TOK_MULEQ TOK_DIVEQ TOK_REMEQ TOK_ANDEQ TOK_OREQ TOK_XOREQ TOK_SHREQ TOK_SHLEQ
 %token TOK_IDENT TOK_INTCON TOK_CHARCON TOK_STRINGCON
 
@@ -54,7 +54,7 @@
 //%right PREC_PREFIX TOK_POS TOK_NEG '!' '~' TOK_CAST PREC_DEREF PREC_ADDROF
 %right TOK_CAST PREC_PREFIX
 /*%left PREC_POSTFIX TOK_CALL TOK_ARROW '.' TOK_INDEX */
-%right PREC_POSTFIX
+%right PREC_POSTFIX TOK_POST_DEC TOK_POST_INC
 
 /* precedence of TOK_ELSE doesn't matter because it doesn't co-occur with operators, but it does need to be right-associative */
 %right TOK_ELSE
@@ -144,8 +144,8 @@ unary_expr    : postfix_expr                                                    
               | paren_toks unary_expr %prec TOK_CAST                              { $$ = parser_make_cast($1, $2); }
               ;
 postfix_expr  : primary_expr                                                      { $$ = $1; }
-              | primary_expr TOK_INC %prec PREC_POSTFIX                           { $$ = astree_adopt($2, $1, NULL, NULL); }
-              | primary_expr TOK_DEC %prec PREC_POSTFIX                           { $$ = astree_adopt($2, $1, NULL, NULL); }
+              | primary_expr TOK_INC %prec TOK_POST_INC                           { $$ = astree_adopt_sym($2, TOK_POST_INC, $1, NULL); }
+              | primary_expr TOK_DEC %prec TOK_POST_DEC                           { $$ = astree_adopt_sym($2, TOK_POST_DEC, $1, NULL); }
               | primary_expr '(' arg_list ')'                                     { $$ = astree_adopt_sym($2, TOK_CALL, $1, $3); parser_cleanup (1, $4); }
               ;
 arg_list      : %empty                                                            { $$ = NULL; }
