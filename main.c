@@ -41,13 +41,14 @@ FILE *astfile;
 FILE *symfile;
 FILE *oilfile;
 
-int do_type_check = 1;
+int skip_type_check = 0;
+int skip_asm = 0;
 int stdin_tmp_fileno;
 
 void scan_options(int argc, char **argv) {
   opterr = 0;
   for (;;) {
-    int option = getopt(argc, argv, "@:D:lyc");
+    int option = getopt(argc, argv, "@:D:lyca");
 
     if (option == EOF) break;
     switch (option) {
@@ -68,7 +69,10 @@ void scan_options(int argc, char **argv) {
         yydebug = 1;
         break;
       case 'c':
-        do_type_check = 0;
+        skip_type_check = 1;
+        break;
+      case 'a':
+        skip_asm = 1;
         break;
       default:
         fprintf(stderr, "-%c: invalid option\n", (char)optopt);
@@ -194,15 +198,18 @@ int main(int argc, char **argv) {
 
   string_set_dump(strfile);
 
+  if (skip_type_check) goto print_untyped;
   status = type_checker_make_table(parser_root);
   if (status) {
     warnx("Type checking failed.");
     goto cleanup;
   }
 
-  astree_print_tree(parser_root, astfile, 0);
   /* type_checker_dump_symbols (symfile); */
+print_untyped:
+  astree_print_tree(parser_root, astfile, 0);
 
+  if (skip_asm || skip_type_check) goto cleanup;
   status = translate_file(parser_root);
   if (status) {
     warnx("Assembly translation failed.");

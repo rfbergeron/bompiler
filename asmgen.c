@@ -567,6 +567,70 @@ int translate_assignment(ASTree *assignment, InstructionData *data,
   return 0;
 }
 
+int translate_save() {
+  size_t i;
+  for (i = 0; i < VOLATILE_COUNT; ++i) {
+    DEBUGS('g', "Saving register %lu to stack", i);
+    InstructionData *data = calloc(1, sizeof(InstructionData));
+    data->instruction = instructions[INSTR_PUSH];
+    int status = assign_vreg(&SPEC_ULONG, data, i, SOURCE_OPERAND);
+    llist_push_back(text_section, data);
+  }
+  return 0;
+}
+
+int translate_restore() {
+  size_t i;
+  for (i = 1; i <= VOLATILE_COUNT; ++i) {
+    DEBUGS('g', "Restoring register %lu from stack", (VOLATILE_COUNT - i));
+    InstructionData *data = calloc(1, sizeof(InstructionData));
+    data->instruction = instructions[INSTR_POP];
+    int status =
+        assign_vreg(&SPEC_ULONG, data, (VOLATILE_COUNT - i), SOURCE_OPERAND);
+    llist_push_back(text_section, data);
+  }
+  return 0;
+}
+
+int translate_call(ASTree *call, InstructionData *data, unsigned int flags) {
+  DEBUGS('g', "Translating function call");
+  size_t i;
+  for (i = 1; i < astree_count(call); ++i) {
+    DEBUGS('g', "Translating parameter %i", i);
+    /* compute parameter */
+    ASTree *param = astree_get(call, i);
+    InstructionData *param_data = calloc(1, sizeof(*param_data));
+    int status = translate_expr(param, param_data, SOURCE_OPERAND);
+    if (status) return status;
+    llist_push_back(text_section, param_data);
+
+    /* mov parameter to argument register */
+    InstructionData *mov_data = calloc(1, sizeof(*mov_data));
+    mov_data->instruction = instructions[INSTR_MOV];
+    status = assign_vreg(param->type, mov_data, i, DEST_OPERAND);
+    if (status) return status;
+    strcpy(mov_data->src_operand, param_data->dest_operand);
+    llist_push_back(text_section, mov_data);
+  }
+
+  int status = translate_save();
+  if (status) return status;
+
+  InstructionData *call_data = calloc(1, sizeof(*call_data));
+  call_data->instruction = instructions[INSTR_CALL];
+  strcpy(call_data->dest_operand, astree_first(call)->lexinfo);
+  llist_push_back(text_section, call_data);
+
+  status = translate_restore();
+  if (status) return status;
+
+  /* only give the parent recursive call the result register, which will
+   * always be virtual register zero
+   */
+  data->instruction = instructions[INSTR_NOP];
+  return assign_vreg(call->type, data, 0, DEST_OPERAND);
+}
+
 int translate_param(ASTree *param, InstructionData *data) {
   DEBUGS('g', "Translating parameter");
   ASTree *param_ident = astree_second(param);
@@ -783,6 +847,9 @@ static int translate_expr(ASTree *tree, InstructionData *out,
       break;
     case TOK_CAST:
       status = translate_conversion(tree, out, flags);
+      break;
+    case TOK_CALL:
+      status = translate_call(tree, out, flags);
       break;
     default:
       fprintf(stderr, "ERROR: Unimplemented token: %s, lexinfo: %s\n",
