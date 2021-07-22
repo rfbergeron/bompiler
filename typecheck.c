@@ -325,16 +325,10 @@ int validate_intcon(ASTree *intcon) {
    */
   if (signed_value == LONG_MIN) {
     /* error: constant too small */
-  } else if (signed_value > 0) {
+  } else if (signed_value == LONG_MAX) {
     unsigned long unsigned_value = strtoul(intcon->lexinfo, NULL, 10);
     if (unsigned_value == UINT64_MAX) {
       /* error: constant too large */
-    } else if (unsigned_value < UINT8_MAX) {
-      intcon->type = &SPEC_UCHAR;
-    } else if (unsigned_value < UINT16_MAX) {
-      intcon->type = &SPEC_USHRT;
-    } else if (unsigned_value < UINT32_MAX) {
-      intcon->type = &SPEC_UINT;
     } else {
       intcon->type = &SPEC_ULONG;
     }

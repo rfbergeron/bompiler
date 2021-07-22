@@ -297,3 +297,32 @@ versions of these operators:
 
 Prefix operations perform the operations in the order above, while postfix operations
 reverse the order.
+
+## Assigning special roles to vregs
+In assembly languages, registers broadly fall into three categories:
+- saved general purpose registers
+- temporary general purpose registers
+- other registers
+
+These registers may have other, more specific roles that they can or must be
+used for, including:
+- return address/link
+- frame/base pointer
+- stack pointer
+- subroutine arguments
+- subroutine return values
+- syscall number
+
+For now, the generator only needs to be told the number of volatile (N+M) and
+nonvolatile (P) registers. It will assume that the 0th volatile register is used
+for subroutine return values, N volatile registers are used for subroutine
+arguments, and one nonvolatile register is used to store the stack pointer.
+
+So, with the above constraints, the register layout will look like this:
+- vr0 is for subroutine return values
+- vr1-vrN are for subroutine arguments
+- vr(N+1)-vrM are volatile general purpose registers
+- vr(M+1)-vrP are nonvolatile general purpose registers; vr(M+1) holds the stack pointer
+
+Later, there will be a way to inform the generator about other special registers
+listed above.
