@@ -239,6 +239,21 @@ extension. This leaves us with few casts which need consideration:
 - Casting between function pointer types. I may also allow casting functions to
   and from void pointers, even though that is not required by the standard.
 
+## Conditionals and loops
+`if` statements need only one label to function: a label following the body of
+the if statement, so that it may be skipped.
+
+`if-else` statements with an unconditional else clause also only require a
+single label. However, if the else statement is conditional, an additional
+label is required at the end of each else body.
+
+`while` and `for` loops require three labels: one at the start of the condition
+expression, one at the beginning of the loop body, and one at the end of the
+loop body.
+
+This is tweaked slightly for do-while statements, where the end of the loop
+body and the start of the conditional are the same.
+
 ## The arrow operator
 Accessing members of pointers to structs with the arrow operator is equivalent
 to dereferencing them and then accessing them with the dot operator, so maybe
@@ -281,6 +296,13 @@ either representation can have the same code emitted.
 To make accessing variables uniform, parameters should be immediately written
 to the stack at the beginning of the function. This sequence of operations will
 look similar to the way a local variable declaration appears in assembly.
+
+## Handling function return values
+Function return values always end up in the same virtual register, `vr0`. This
+register must also be restored by the caller before it can continue, even
+though its contents are needed when the function returns a value. So, after each
+function call and before the volatile registers are restored, the return value
+should automatically be moved to a new vreg.
 
 ## postfix and prefix increment and decrement
 Increment and decrement require an lval as their argument, which means that the
