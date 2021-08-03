@@ -503,29 +503,29 @@ int validate_call(ASTree *call) {
   locate_symbol(identifier, strlen(identifier), &function);
 
   if (function) {
-    struct llist *params = &(function->type.data.params);
+    struct llist *param_list = &(function->type.data.params);
     /* subtract one since function identifier is also a child */
-    if (astree_count(call) - 1 != llist_size(params)) {
+    if (astree_count(call) - 1 != llist_size(param_list)) {
       fprintf(stderr, "ERROR: incorrect number of arguments %s\n", identifier);
       return -1;
     }
     DEBUGS('t', "Validating arguments for call to %s, num call->children: %d",
            identifier, astree_count(call) - 1);
     size_t i;
-    for (i = 0; i < llist_size(params); ++i) {
+    for (i = 0; i < llist_size(param_list); ++i) {
       DEBUGS('t', "Validating argument %d", i);
       /* add 1 to index to skip function identifier */
-      ASTree *param = astree_get(call, i + 1);
-      int status = validate_expr(param);
+      ASTree *call_param = astree_get(call, i + 1);
+      int status = validate_expr(call_param);
 
       if (status != 0) return status;
       DEBUGS('t', "Comparing types");
-      int compatibility =
-          types_compatible(param, llist_get(params, i), ARG1_AST | ARG2_SMV);
+      int compatibility = types_compatible(llist_get(param_list, i), call_param,
+                                           ARG1_SMV | ARG2_AST);
       if (compatibility == TCHK_INCOMPATIBLE ||
           compatibility == TCHK_EXPLICIT_CAST) {
         fprintf(stderr, "ERROR: incompatible type for argument: %s\n",
-                param->lexinfo);
+                call_param->lexinfo);
         return -1;
       }
     }
