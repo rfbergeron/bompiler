@@ -762,7 +762,7 @@ int validate_equality(ASTree *operator) {
     status = determine_promotion(left, right, &promoted_type);
     if (status) return status;
     int compatibility =
-        types_compatible(left, &promoted_type, ARG1_AST | ARG2_TYPE);
+        types_compatible(promoted_type, left, ARG1_TYPE | ARG2_AST);
     if (compatibility == CONV_IMPLICIT_CAST) {
       insert_cast(operator, 0, promoted_type);
     } else if (compatibility == CONV_INCOMPATIBLE ||
@@ -775,7 +775,7 @@ int validate_equality(ASTree *operator) {
     }
 
     compatibility =
-        types_compatible(right, &promoted_type, ARG1_AST | ARG2_TYPE);
+        types_compatible(promoted_type, right, ARG1_TYPE | ARG2_AST);
     if (compatibility == CONV_IMPLICIT_CAST) {
       insert_cast(operator, 1, promoted_type);
     } else if (compatibility == CONV_INCOMPATIBLE ||

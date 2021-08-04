@@ -38,6 +38,20 @@
   GENERATOR(SETBE)                     \
   GENERATOR(SETZ)                      \
   GENERATOR(SETNZ)                     \
+  /* jump */                           \
+  GENERATOR(JMP)                       \
+  GENERATOR(JE)                        \
+  GENERATOR(JNE)                       \
+  GENERATOR(JG)                        \
+  GENERATOR(JGE)                       \
+  GENERATOR(JL)                        \
+  GENERATOR(JLE)                       \
+  GENERATOR(JA)                        \
+  GENERATOR(JAE)                       \
+  GENERATOR(JB)                        \
+  GENERATOR(JBE)                       \
+  GENERATOR(JZ)                        \
+  GENERATOR(JNZ)                       \
   /* logical and bitwise */            \
   GENERATOR(NOT)                       \
   GENERATOR(OR)                        \
@@ -128,10 +142,10 @@ static const char VREG_FMT[] = "vr%zu%c";
 static const char BINOP_FMT[] = "%8s%8s%8s,%s\n";
 static const char UNOP_FMT[] = "%8s%8s%8s\n";
 static const char NULLOP_FMT[] = "%8s%8s\n";
-static const char LABEL_FMT[] = "%s\n";
-static const char COND_FMT[] = ".C%u:\n";
-static const char END_FMT[] = ".E%u:\n";
-static const char LOOP_FMT[] = ".L%u:\n";
+static const char LABEL_FMT[] = "%s:\n";
+static const char COND_FMT[] = ".C%zu";
+static const char END_FMT[] = ".E%zu";
+static const char LOOP_FMT[] = ".L%zu";
 static const char SECTION_FMT[] = ".section %s\n";
 static const char EMPTY_FMT[] = "";
 
@@ -788,6 +802,75 @@ static int translate_expr(ASTree *tree, InstructionData *out,
   return status;
 }
 
+static int translate_ifelse(ASTree *ifelse) {
+  size_t current_branch = branch_count++;
+  /* translate conditional expression */
+  InstructionData *cond_data = calloc(1, sizeof(*cond_data));
+  int status = translate_expr(astree_first(ifelse), cond_data, DEST_OPERAND);
+  if (status) return status;
+  llist_push_back(text_section, cond_data);
+  /* check if condition is zero and jump if it is */
+  InstructionData *test_data = calloc(1, sizeof(*test_data));
+  test_data->instruction = instructions[INSTR_TEST];
+  strcpy(test_data->dest_operand, cond_data->dest_operand);
+  strcpy(test_data->src_operand, cond_data->dest_operand);
+  llist_push_back(text_section, test_data);
+
+  InstructionData *test_jmp_data = calloc(1, sizeof(*test_jmp_data));
+  test_jmp_data->instruction = instructions[INSTR_JZ];
+  sprintf(test_jmp_data->dest_operand, END_FMT, current_branch);
+  llist_push_back(text_section, test_jmp_data);
+  /* translate if body */
+  status = translate_stmt(astree_second(ifelse));
+  if (status) return status;
+  /* emit label at end of statement */
+  InstructionData *end_label = calloc(1, sizeof(*end_label));
+  sprintf(end_label->label, END_FMT, current_branch);
+  llist_push_back(text_section, end_label);
+  /* translate else body if present */
+  if (astree_count(ifelse) == 3) {
+    translate_stmt(astree_third(ifelse));
+  }
+  return 0;
+}
+
+static int translate_while(ASTree *whilestmt) {
+  size_t current_branch = branch_count++;
+  /* emit label at beginning of condition */
+  InstructionData *cond_label = calloc(1, sizeof(*cond_label));
+  sprintf(cond_label->label, COND_FMT, current_branch);
+  llist_push_back(text_section, cond_label);
+  /* translate conditional expression */
+  InstructionData *cond_data = calloc(1, sizeof(*cond_data));
+  int status = translate_expr(astree_first(whilestmt), cond_data, DEST_OPERAND);
+  if (status) return status;
+  llist_push_back(text_section, cond_data);
+  /* check if condition is zero and jump if it is */
+  InstructionData *test_data = calloc(1, sizeof(*test_data));
+  test_data->instruction = instructions[INSTR_TEST];
+  strcpy(test_data->dest_operand, cond_data->dest_operand);
+  strcpy(test_data->src_operand, cond_data->dest_operand);
+  llist_push_back(text_section, test_data);
+
+  InstructionData *test_jmp_data = calloc(1, sizeof(*test_jmp_data));
+  test_jmp_data->instruction = instructions[INSTR_JZ];
+  sprintf(test_jmp_data->dest_operand, END_FMT, current_branch);
+  llist_push_back(text_section, test_jmp_data);
+  /* translate while body */
+  status = translate_stmt(astree_second(whilestmt));
+  if (status) return status;
+  /* emit jump to condition */
+  InstructionData *cond_jmp_data = calloc(1, sizeof(*cond_jmp_data));
+  cond_jmp_data->instruction = instructions[INSTR_JMP];
+  sprintf(cond_jmp_data->dest_operand, COND_FMT, current_branch);
+  llist_push_back(text_section, cond_jmp_data);
+  /* emit label at end of statement */
+  InstructionData *end_label = calloc(1, sizeof(*end_label));
+  sprintf(end_label->label, END_FMT, current_branch);
+  llist_push_back(text_section, end_label);
+  return 0;
+}
+
 static int translate_block(ASTree *block) {
   DEBUGS('g', "Translating compound statement");
   LinkedList *stmts = &block->children;
@@ -847,8 +930,7 @@ static int translate_stmt(ASTree *stmt) {
       llist_push_back(text_section, data);
       break;
     case TOK_WHILE:
-      fprintf(stderr, "ERROR: while constructs not implemented\n");
-      status = -1;
+      status = translate_while(stmt);
       break;
     /*
     case TOK_DO:
@@ -857,8 +939,7 @@ static int translate_stmt(ASTree *stmt) {
         break;
     */
     case TOK_IF:
-      fprintf(stderr, "ERROR: if-else constructs not implemented\n");
-      status = -1;
+      status = translate_ifelse(stmt);
       break;
     case TOK_TYPE_ID:
       data = calloc(1, sizeof(*data));
@@ -950,7 +1031,7 @@ int translate_function(ASTree *function, InstructionData *data) {
   DEBUGS('g', "Translating function definition");
   ASTree *name_node = astree_second(astree_first(function));
   current_function = function;
-  sprintf(data->label, "%s:", name_node->lexinfo);
+  strcpy(data->label, name_node->lexinfo);
   int status = save_registers(NONVOLATILE_START, NONVOLATILE_COUNT);
   if (status) return status;
 
