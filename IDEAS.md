@@ -320,6 +320,37 @@ versions of these operators:
 Prefix operations perform the operations in the order above, while postfix operations
 reverse the order.
 
+## Short-circuiting of logical operators
+The logical operators `&&` and `||` must short-circuit. If the left-hand side of `&&`
+is false, the right hand side is never evaluated; likewise, if the left hand side of
+`||` is true, the right hand side is never evaluated.
+
+This means that the `AND` and `OR` instructions are not useful in implementing these
+operations.
+
+Instead, these operators must be implemented using `TEST` and `Jcc` instructions.
+The code evaluating the left operand will be emitted first, followed by a `TEST`
+instruction and a `JZ` or `JNZ` instruction for `&&` and `||` operators, respectively.
+Then, the code evaluating the right operand will be emitted, followed by the label
+which serves as the target for the mentioned jump above.
+
+Additionally, all subexpressions of a boolean-valued expression will jump to the same
+label at the end of the expression. There must be a way to communicate the register
+of the final result and the name of this label.
+
+There must also be a result register for the sequence of boolean operations, in case
+the value is assigned.
+
+Structurally, I would like the assembly to work like a sled into a fall-through condition
+which can be skipped if we reach a point of no return, which would be any false value
+for `&&` and any true value for `||`.
+
+This scheme would require that we set a default value which is returned unless all
+subexpressions are executed, in which case a different value is returned. For `&&`, we
+would default to false, setting the value only to true if all expressions are executed.
+For `||`, we would default to true, setting the value to false only if all expressions
+are executed.
+
 ## Assigning special roles to vregs
 In assembly languages, registers broadly fall into three categories:
 - saved general purpose registers

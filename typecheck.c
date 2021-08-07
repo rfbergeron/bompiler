@@ -620,8 +620,6 @@ int is_logical_op(ASTree *operator) {
     case TOK_NE:
     case TOK_LE:
     case TOK_GE:
-    case TOK_AND:
-    case TOK_OR:
     case '<':
     case '>':
     case '!':
@@ -643,6 +641,25 @@ int is_bitwise_op(ASTree *operator) {
     default:
       return 0;
   }
+}
+
+int validate_logical_op (ASTree *operator) {
+  DEBUGS('t', "Validating logical operator %c", operator->symbol);
+  ASTree *left = astree_first(operator);
+  ASTree *right = astree_second(operator);
+
+  int status = validate_expr(left);
+  if (status != 0) return status;
+  status = validate_expr(right);
+  if (status != 0) return status;
+
+  if (!type_is_int_or_ptr(left->type) || !type_is_int_or_ptr(right->type)) {
+    fprintf(stderr, "ERROR: cannot compare non-arithmetic types\n");
+    return -1;
+  }
+
+  operator->type = &SPEC_INT;
+  return 0;
 }
 
 int validate_binop(ASTree *operator) {
@@ -1118,6 +1135,8 @@ int validate_expr(ASTree *expression) {
       break;
     case TOK_OR:
     case TOK_AND:
+      status = validate_logical_op(expression);
+      break;
     case TOK_LE:
     case TOK_GE:
     case '>':
