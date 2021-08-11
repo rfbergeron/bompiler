@@ -10,6 +10,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+/* #include "asmgen.h" */
 #include "astree.h"
 #include "debug.h"
 #include "lyutils.h"
@@ -40,13 +41,14 @@ FILE *astfile;
 FILE *symfile;
 FILE *oilfile;
 
-int do_type_check = 1;
+int skip_type_check = 0;
+int skip_asm = 0;
 int stdin_tmp_fileno;
 
 void scan_options(int argc, char **argv) {
   opterr = 0;
   for (;;) {
-    int option = getopt(argc, argv, "@:D:lyc");
+    int option = getopt(argc, argv, "@:D:lyca");
 
     if (option == EOF) break;
     switch (option) {
@@ -67,7 +69,10 @@ void scan_options(int argc, char **argv) {
         yydebug = 1;
         break;
       case 'c':
-        do_type_check = 0;
+        skip_type_check = 1;
+        break;
+      case 'a':
+        skip_asm = 1;
         break;
       default:
         fprintf(stderr, "-%c: invalid option\n", (char)optopt);
@@ -174,25 +179,52 @@ int main(int argc, char **argv) {
   if (symfile == NULL) {
     err(1, "%s", symname);
   }
+  oilfile = fopen(oilname, "w");
+  if (oilfile == NULL) {
+    err(1, "%s", oilname);
+  }
 
   /* remember to initialize certain things, like the string table */
   string_set_init_globals();
   lexer_init_globals();
   symbol_table_init_globals();
+  /* asmgen_init_globals(); */
 
-  DEBUGS('m', "Parsing");
-  int parse_status = yyparse();
-
-  if (parse_status != 0) {
-    warnx("Parsing failed with status %d.", parse_status);
-  } else {
-    DEBUGS('m', "Parse successful; dumping strings.");
-
-    if (do_type_check) type_checker_make_table(parser_root);
-    string_set_dump(strfile);
-    astree_print_tree(parser_root, astfile, 0);
-    /* type_checker_dump_symbols (symfile); */
+  status = yyparse();
+  if (status) {
+    warnx("Parsing failed with status %d.", status);
+    goto cleanup;
   }
+
+  string_set_dump(strfile);
+
+  if (skip_type_check) goto print_untyped;
+  status = type_checker_make_table(parser_root);
+  if (status) {
+    warnx("Type checking failed.");
+    goto cleanup;
+  }
+
+  /* type_checker_dump_symbols (symfile); */
+print_untyped:
+  astree_print_tree(parser_root, astfile, 0);
+
+  /*
+  if (skip_asm || skip_type_check) goto cleanup;
+  status = translate_file(parser_root);
+  if (status) {
+    warnx("Assembly translation failed.");
+    goto cleanup;
+  }
+
+  status = write_asm(oilfile);
+  if (status) {
+    warnx("Failed to emit assembly instructions.");
+    goto cleanup;
+  }
+  */
+
+cleanup:
 
   DEBUGS('m', "Execution finished; wrapping up.");
 
@@ -204,6 +236,7 @@ int main(int argc, char **argv) {
   fclose(tokfile);
   fclose(astfile);
   fclose(symfile);
+  fclose(oilfile);
 
   astree_destroy(parser_root);
   DEBUGS('m', "string set cleanup");
@@ -212,6 +245,7 @@ int main(int argc, char **argv) {
   lexer_free_globals();
   DEBUGS('m', "symbol table cleanup");
   symbol_table_free_globals();
-  DEBUGS('m', "assembly generator cleanup");
+  /* DEBUGS('m', "assembly generator cleanup"); */
+  /* asmgen_free_globals(); */
   return EXIT_SUCCESS;
 }

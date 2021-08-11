@@ -325,16 +325,10 @@ int validate_intcon(ASTree *intcon) {
    */
   if (signed_value == LONG_MIN) {
     /* error: constant too small */
-  } else if (signed_value > 0) {
+  } else if (signed_value == LONG_MAX) {
     unsigned long unsigned_value = strtoul(intcon->lexinfo, NULL, 10);
     if (unsigned_value == UINT64_MAX) {
       /* error: constant too large */
-    } else if (unsigned_value < UINT8_MAX) {
-      intcon->type = &SPEC_UCHAR;
-    } else if (unsigned_value < UINT16_MAX) {
-      intcon->type = &SPEC_USHRT;
-    } else if (unsigned_value < UINT32_MAX) {
-      intcon->type = &SPEC_UINT;
     } else {
       intcon->type = &SPEC_ULONG;
     }
@@ -509,29 +503,29 @@ int validate_call(ASTree *call) {
   locate_symbol(identifier, strlen(identifier), &function);
 
   if (function) {
-    struct llist *params = &(function->type.data.params);
+    struct llist *param_list = &(function->type.data.params);
     /* subtract one since function identifier is also a child */
-    if (astree_count(call) - 1 != llist_size(params)) {
+    if (astree_count(call) - 1 != llist_size(param_list)) {
       fprintf(stderr, "ERROR: incorrect number of arguments %s\n", identifier);
       return -1;
     }
     DEBUGS('t', "Validating arguments for call to %s, num call->children: %d",
            identifier, astree_count(call) - 1);
     size_t i;
-    for (i = 0; i < llist_size(params); ++i) {
+    for (i = 0; i < llist_size(param_list); ++i) {
       DEBUGS('t', "Validating argument %d", i);
       /* add 1 to index to skip function identifier */
-      ASTree *param = astree_get(call, i + 1);
-      int status = validate_expr(param);
+      ASTree *call_param = astree_get(call, i + 1);
+      int status = validate_expr(call_param);
 
       if (status != 0) return status;
       DEBUGS('t', "Comparing types");
-      int compatibility =
-          types_compatible(param, llist_get(params, i), ARG1_AST | ARG2_SMV);
+      int compatibility = types_compatible(llist_get(param_list, i), call_param,
+                                           ARG1_SMV | ARG2_AST);
       if (compatibility == TCHK_INCOMPATIBLE ||
           compatibility == TCHK_EXPLICIT_CAST) {
         fprintf(stderr, "ERROR: incompatible type for argument: %s\n",
-                param->lexinfo);
+                call_param->lexinfo);
         return -1;
       }
     }
@@ -626,8 +620,6 @@ int is_logical_op(ASTree *operator) {
     case TOK_NE:
     case TOK_LE:
     case TOK_GE:
-    case TOK_AND:
-    case TOK_OR:
     case '<':
     case '>':
     case '!':
@@ -649,6 +641,25 @@ int is_bitwise_op(ASTree *operator) {
     default:
       return 0;
   }
+}
+
+int validate_logical_op (ASTree *operator) {
+  DEBUGS('t', "Validating logical operator %c", operator->symbol);
+  ASTree *left = astree_first(operator);
+  ASTree *right = astree_second(operator);
+
+  int status = validate_expr(left);
+  if (status != 0) return status;
+  status = validate_expr(right);
+  if (status != 0) return status;
+
+  if (!type_is_int_or_ptr(left->type) || !type_is_int_or_ptr(right->type)) {
+    fprintf(stderr, "ERROR: cannot compare non-arithmetic types\n");
+    return -1;
+  }
+
+  operator->type = &SPEC_INT;
+  return 0;
 }
 
 int validate_binop(ASTree *operator) {
@@ -711,11 +722,8 @@ int validate_binop(ASTree *operator) {
   return status;
 }
 
-/* TODO(Robert): postfix increment/decrement and promotion operators should get
- * their own token codes to make assembly generation easier.
- */
 int validate_unop(ASTree *operator) {
-  DEBUGS('t', "Validating binary operator %c", operator->symbol);
+  DEBUGS('t', "Validating unary operator %c", operator->symbol);
   int status = 0;
   ASTree *operand = astree_first(operator);
   status = validate_expr(operand);
@@ -771,7 +779,7 @@ int validate_equality(ASTree *operator) {
     status = determine_promotion(left, right, &promoted_type);
     if (status) return status;
     int compatibility =
-        types_compatible(left, &promoted_type, ARG1_AST | ARG2_TYPE);
+        types_compatible(promoted_type, left, ARG1_TYPE | ARG2_AST);
     if (compatibility == CONV_IMPLICIT_CAST) {
       insert_cast(operator, 0, promoted_type);
     } else if (compatibility == CONV_INCOMPATIBLE ||
@@ -784,7 +792,7 @@ int validate_equality(ASTree *operator) {
     }
 
     compatibility =
-        types_compatible(right, &promoted_type, ARG1_AST | ARG2_TYPE);
+        types_compatible(promoted_type, right, ARG1_TYPE | ARG2_AST);
     if (compatibility == CONV_IMPLICIT_CAST) {
       insert_cast(operator, 1, promoted_type);
     } else if (compatibility == CONV_INCOMPATIBLE ||
@@ -903,7 +911,8 @@ int make_object_entry(ASTree *object) {
         types_compatible(identifier, init_value, ARG1_AST | ARG2_AST);
     if (compatibility == TCHK_INCOMPATIBLE ||
         compatibility == TCHK_EXPLICIT_CAST) {
-      fprintf(stderr, "ERROR: Incompatible type for object variable\n");
+      fprintf(stderr, "ERROR: Incompatible type for object %s\n",
+              identifier->lexinfo);
       return -1;
     } else if (compatibility == TCHK_IMPLICIT_CAST) {
       insert_cast(object, 2, promoted_type);
@@ -1126,6 +1135,8 @@ int validate_expr(ASTree *expression) {
       break;
     case TOK_OR:
     case TOK_AND:
+      status = validate_logical_op(expression);
+      break;
     case TOK_LE:
     case TOK_GE:
     case '>':
@@ -1148,6 +1159,8 @@ int validate_expr(ASTree *expression) {
     case '~':
     case TOK_INC:
     case TOK_DEC:
+    case TOK_POST_INC:
+    case TOK_POST_DEC:
       status = validate_unop(expression);
       break;
     case TOK_CALL:
