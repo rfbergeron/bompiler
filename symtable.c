@@ -37,6 +37,7 @@ SymbolValue *symbol_value_init(const Location *loc) {
   ret->type = SPEC_EMPTY;
   ret->loc = *loc;
   ret->sequence = nrstack_postfix_inc(&sequence_nrs);
+  typespec_init(&ret->type);
   return ret;
 }
 

@@ -8,14 +8,11 @@
 #include "symtable.h"
 
 #define INDEX_FROM_INT(sign, width) INDEX_##sign##_##width
-#define SPECIFY_INT(sign, width) \
-  {X64_SIZEOF_##width,           \
-   X64_ALIGNOF_##width,          \
-   NULL,                         \
-   BLIB_MAP_EMPTY,               \
-   TYPE_FLAG_NONE,               \
-   TYPE_##sign,                  \
-   STRING_INT_MAP[INDEX_FROM_INT(sign, width)]};
+#define SPECIFY_INT(sign, width)                                 \
+  {                                                              \
+      X64_SIZEOF_##width, X64_ALIGNOF_##width, BLIB_LLIST_EMPTY, \
+      TYPE_FLAG_NONE,     TYPE_##sign,                           \
+  };
 
 struct conversion_entry {
   enum base_type from;
@@ -52,15 +49,7 @@ const char *STRING_SHRT = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, SHORT)];
 const char *STRING_UCHAR = STRING_INT_MAP[INDEX_FROM_INT(UNSIGNED, CHAR)];
 const char *STRING_CHAR = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, CHAR)];
 
-const TypeSpec SPEC_PTR = {X64_SIZEOF_LONG, X64_ALIGNOF_LONG, NULL,
-                           BLIB_MAP_EMPTY,  TYPE_FLAG_NONE,   TYPE_POINTER,
-                           "_ptr_empty"};
-const TypeSpec SPEC_EMPTY = {
-    0, 0, NULL, BLIB_MAP_EMPTY, TYPE_FLAG_NONE, TYPE_NONE, "_empty"};
-const TypeSpec SPEC_FUNCTION = {
-    0, 0, NULL, BLIB_MAP_EMPTY, TYPE_FLAG_NONE, TYPE_FUNCTION, "_function"};
-const TypeSpec SPEC_STRUCT = {
-    0, 0, NULL, BLIB_MAP_EMPTY, TYPE_FLAG_NONE, TYPE_STRUCT, "_struct"};
+const TypeSpec SPEC_VOID = {0, 0, BLIB_LLIST_EMPTY, TYPE_FLAG_NONE, TYPE_VOID};
 const TypeSpec SPEC_ULONG = SPECIFY_INT(UNSIGNED, LONG);
 const TypeSpec SPEC_LONG = SPECIFY_INT(SIGNED, LONG);
 const TypeSpec SPEC_UINT = SPECIFY_INT(UNSIGNED, INT);
@@ -125,33 +114,15 @@ void location_to_string(const Location *loc, char *buffer, size_t size) {
 
 int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {
   int ret = 0;
-  int i = 0;
   /* TODO(Robert): use the mappings defined above to print instead of this
    * silly shit
    */
   switch (type->base) {
-    case TYPE_VOID:
-      ret = sprintf(buf, "void");
-      break;
-    case TYPE_FUNCTION:
-      ret += type_to_string(type->nested, buf, bufsize);
-      ret += sprintf((buf + ret), " ()(");
-      if (type->data.params.size > 0) {
-        for (i = 0; i < type->data.params.size; ++i) {
-          SymbolValue *param_symval = llist_get((void *)&type->data.params, i);
-          ret +=
-              type_to_string(&(param_symval->type), (buf + ret), bufsize - ret);
-          if (i + 1 < llist_size((void *)&type->data.params)) {
-            ret += sprintf((buf + ret), ", ");
-          }
-        }
-        ret += sprintf((buf + ret), ")");
-      } else {
-        ret += sprintf((buf + ret), "void)");
-      }
-      break;
     case TYPE_NONE:
       buf[0] = 0;
+      break;
+    case TYPE_VOID:
+      ret = sprintf(buf, "void");
       break;
     case TYPE_SIGNED:
       switch (type->width) {
@@ -196,48 +167,92 @@ int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {
     default:
       break;
   }
+
+  /* TODO(Robert): casting away const bad; redo badlib so that query functions
+   * have const arguments
+   */
+  size_t i;
+  for (i = 0; i < llist_size((LinkedList *)&type->auxspecs); ++i) {
+    AuxSpec *auxspec = llist_get((LinkedList *)&type->auxspecs, i);
+    switch (auxspec->aux) {
+      case AUX_ARRAY:
+        if (auxspec->data.ptr_or_arr.length > 0) {
+          ret += sprintf((buf + ret), "[%zu]", auxspec->data.ptr_or_arr.length);
+        } else {
+          ret += sprintf((buf + ret), "[]");
+        }
+        break;
+      case AUX_POINTER:
+        ret += sprintf((buf + ret), "*");
+        break;
+      case AUX_FUNCTION:
+        ret += sprintf((buf + ret), " ()(");
+        LinkedList *params = &auxspec->data.params;
+        size_t j;
+        for (j = 0; j < llist_size(params); ++j) {
+          SymbolValue *param_symval = llist_get(params, j);
+          ret +=
+              type_to_string(&(param_symval->type), (buf + ret), bufsize - ret);
+          if (i + 1 < llist_size(params)) {
+            ret += sprintf((buf + ret), ", ");
+          }
+        }
+        ret += sprintf((buf + ret), ")");
+        break;
+      default:
+        break;
+    }
+  }
   return ret;
 }
 
-int typespec_copy(TypeSpec *dst, const TypeSpec *src) {
-  /* copy contents of source type
-   * allocate new space to copy nested type into
-   * recursively call typespec_copy on nested type
-   */
-  *dst = *src;
-  if (src->nested != NULL) {
-    dst->nested = malloc(sizeof(TypeSpec));
-    return typespec_copy(dst->nested, src->nested);
-  } else {
-    dst->nested = NULL;
-    return 0;
-  }
+/* TODO(Robert): make sure this doesn't need to be more thorough */
+int auxspec_copy(AuxSpec *dest, const AuxSpec *src) {
+  *dest = *src;
+  return 0;
 }
 
-int typespec_destroy(TypeSpec *type) {
+int auxspec_destroy(AuxSpec *auxspec) {
+  size_t i;
+  switch (auxspec->aux) {
+    case AUX_NONE:
+      break;
+    case AUX_POINTER:
+      break;
+    case AUX_ARRAY:
+      break;
+    case AUX_STRUCT:
+    case AUX_UNION:
+      map_destroy(&auxspec->data.members);
+      break;
+    case AUX_FUNCTION:
+      llist_destroy(&auxspec->data.params);
+      break;
+    case AUX_TYPEDEF:
+      break;
+  }
+  free(auxspec);
+  return 0;
+}
+
+int typespec_init(TypeSpec *spec) {
+  llist_init(&spec->auxspecs, (void (*)(void *)) & auxspec_destroy, NULL);
+  return 0;
+}
+
+int typespec_destroy(TypeSpec *spec) {
   /* the badlib functions won't segfault when attempting to destroy a data
    * structure a second time because they do a paranoid free (free and set to
    * NULL) on the fields of the structure, so we can repeat the process as
    * many times as we like
    */
-  if (type == NULL) return -1;
-  switch (type->base) {
-    case TYPE_FUNCTION:
-      llist_destroy(&(type->data.params));
-      goto free_nested_typesec;
-    case TYPE_STRUCT:
-    case TYPE_UNION:
-      map_destroy(&(type->data.members));
-      goto free_nested_typesec;
-    case TYPE_POINTER:
-    case TYPE_ARRAY:
-    free_nested_typesec:
-      typespec_destroy(type->nested);
-      free(type->nested);
-      break;
-    default:
-      /* do nothing */
-      break;
-  }
+  if (spec == NULL) return -1;
+  llist_destroy(&spec->auxspecs);
+  return 0;
+}
+
+/* TODO(Robert): make sure this doesn't need to be more thorough */
+int typespec_copy(TypeSpec *dest, const TypeSpec *src) {
+  *dest = *src;
   return 0;
 }

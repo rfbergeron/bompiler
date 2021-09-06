@@ -11,8 +11,9 @@
 #include "simplestack.h"
 #include "stdint.h"
 #include "string.h"
-#include "strset.h"
 #include "symtable.h"
+/* TODO(Robert): Linux-specific; replace with strtoul or similar */
+#include "inttypes.h"
 
 #define ARG1_AST (1 << 0)
 #define ARG1_SMV (1 << 1)
@@ -27,15 +28,13 @@
 #define IFLAG_LONG (1 << 3)
 #define IFLAG_SIGNED (1 << 4)
 #define IFLAG_UNSIGNED (1 << 5)
+#define IFLAG_VOID (1 << 6)
 
 enum type_checker_action {
   TCHK_COMPATIBLE,
   TCHK_IMPLICIT_CAST,
   TCHK_EXPLICIT_CAST,
   TCHK_INCOMPATIBLE,
-  TCHK_PROMOTE_LEFT,
-  TCHK_PROMOTE_RIGHT,
-  TCHK_PROMOTE_BOTH,
   TCHK_E_NO_FLAGS
 };
 
@@ -44,103 +43,81 @@ static SymbolValue *current_function = NULL;
 /* forward declarations for mutual recursion */
 int validate_expr(ASTree *statement);
 int validate_stmt(ASTree *statement);
+int validate_declaration(ASTree *statement); /* required to process params */
+int types_compatible(
+    const void *arg1, const void *arg2,
+    unsigned int flags); /* required to check param and member types */
 
-const char *extract_ident(ASTree *tree) {
+ASTree *extract_ident(ASTree *tree) {
   switch (tree->symbol) {
+    /*
     case TOK_TYPE_ID:
-      return astree_second(tree)->lexinfo;
       break;
+    */
     case TOK_STRUCT:
-      return astree_first(tree)->lexinfo;
-      break;
-    case TOK_FUNCTION:
-      return astree_second(astree_first(tree))->lexinfo;
-      break;
+    case TOK_UNION:
+    case TOK_CALL:
+      return astree_first(tree);
     case TOK_IDENT:
-      return tree->lexinfo;
-      break;
+      return tree;
+    case TOK_DECLARATOR:
+      if (astree_first(tree)->symbol == TOK_DECLARATOR) {
+        return extract_ident(astree_first(tree));
+      } else {
+        size_t i;
+        for (i = 0; i < astree_count(tree); ++i) {
+          ASTree *direct_decl = astree_get(tree, i);
+          if (direct_decl->symbol == TOK_IDENT) {
+            return direct_decl;
+          }
+        }
+      }
+      /* do not break; fall through and return error when no ident */
     default:
       fprintf(stderr, "ERROR: unable to get identifier for tree node %s\n",
               parser_get_tname(tree->symbol));
       return NULL;
-      break;
   }
 }
 
 const TypeSpec *extract_type(ASTree *tree) {
   switch (tree->symbol) {
-    case TOK_TYPE_ID:
-      return astree_second(tree)->type;
-      break;
     case TOK_STRUCT:
-      return astree_first(tree)->type;
-      break;
+    case TOK_UNION:
     case TOK_FUNCTION:
-      return astree_second(astree_first(tree))->type;
-      break;
+    case TOK_DECLARATOR:
     case TOK_CALL:
+      return extract_ident(tree)->type;
     case TOK_IDENT:
-      return tree->type;
-      break;
     default:
-      fprintf(stderr, "Unable to extract type from symbol %s\n",
-              parser_get_tname(tree->symbol));
-      return NULL;
-      break;
+      return tree->type;
   }
 }
 
 const Location *extract_loc(ASTree *tree) {
   switch (tree->symbol) {
-    case TOK_TYPE_ID:
-      return &astree_second(tree)->loc;
-      break;
     case TOK_STRUCT:
-      return &astree_first(tree)->loc;
-      break;
+    case TOK_UNION:
     case TOK_FUNCTION:
-      return &astree_second(astree_first(tree))->loc;
-      break;
+    case TOK_DECLARATOR:
     case TOK_CALL:
+      return &extract_ident(tree)->loc;
     case TOK_IDENT:
-      return &tree->loc;
-      break;
     default:
-      fprintf(stderr, "Unable to extract location from symbol %s\n",
-              parser_get_tname(tree->symbol));
-      return NULL;
-      break;
+      return &tree->loc;
   }
 }
 
 int assign_type(ASTree *tree) {
   DEBUGS('t', "Attempting to assign a type");
-  const char *id_str = extract_ident(tree);
+  ASTree *identifier = extract_ident(tree);
+  const char *id_str = identifier->lexinfo;
   size_t id_str_len = strnlen(id_str, MAX_IDENT_LEN);
   SymbolValue *symval = NULL;
   int in_current_scope = locate_symbol(id_str, id_str_len, &symval);
-
   if (symval) {
     DEBUGS('t', "Assigning %s a symbol", id_str);
-    switch (tree->symbol) {
-      case TOK_FUNCTION:
-        astree_second(astree_first(tree))->type = &(symval->type);
-        break;
-      case TOK_TYPE_ID:
-        astree_second(tree)->type = &(symval->type);
-        break;
-      case TOK_STRUCT:
-        astree_first(tree)->type = &(symval->type);
-        break;
-      case TOK_CALL:
-        tree->type = symval->type.nested;
-        astree_first(tree)->type = &(symval->type);
-        break;
-      case TOK_IDENT:
-      default:
-        tree->type = &(symval->type);
-        break;
-    }
+    identifier->type = &(symval->type);
     return 0;
   } else {
     fprintf(stderr, "ERROR: could not resolve symbol: %s %s\n", (tree->lexinfo),
@@ -168,42 +145,150 @@ void insert_cast(ASTree *tree, size_t index, const TypeSpec *type) {
 }
 
 int type_is_arithmetic(const TypeSpec *type) {
-  return (type->base == TYPE_SIGNED || type->base == TYPE_UNSIGNED ||
-          type->base == TYPE_FLOAT || type->base == TYPE_DOUBLE);
+  return (type->base == TYPE_SIGNED || type->base == TYPE_UNSIGNED);
 }
 
 int type_is_integer(const TypeSpec *type) {
   return (type->base == TYPE_SIGNED || type->base == TYPE_UNSIGNED);
 }
 
+int type_is_aux(const TypeSpec *type, const AuxType aux) {
+  AuxSpec *auxspec = llist_front((LinkedList *)&type->auxspecs);
+  return auxspec != NULL && auxspec->aux == aux;
+}
+
+int type_is_pointer(const TypeSpec *type) {
+  return type_is_aux(type, AUX_POINTER);
+}
+
+int type_is_array(const TypeSpec *type) { return type_is_aux(type, AUX_ARRAY); }
+
+int type_is_function(const TypeSpec *type) {
+  return type_is_aux(type, AUX_FUNCTION);
+}
+
 int type_is_int_or_ptr(const TypeSpec *type) {
-  return (type->base == TYPE_SIGNED || type->base == TYPE_UNSIGNED ||
-          type->base == TYPE_POINTER);
+  return (type_is_integer(type) || type_is_pointer(type));
+}
+
+int type_is_scalar(const TypeSpec *type) {
+  return type_is_pointer(type) || type_is_arithmetic(type);
 }
 
 int type_is_comparable(const TypeSpec *type) {
-  switch (type->base) {
-    case TYPE_SIGNED:
-    case TYPE_UNSIGNED:
-    case TYPE_POINTER:
-    case TYPE_FLOAT:
-    case TYPE_DOUBLE:
-      return 1;
-    default:
-      return 0;
+  if (type->base == TYPE_SIGNED || type->base == TYPE_UNSIGNED ||
+      type_is_pointer(type)) {
+    return 1;
+  } else {
+    return 0;
   }
 }
 
-/* Remember that this function is not directly called during arithmetic,
- * bitwise, or boolean operations; it is only called for assignments, function
- * calls, casts, and as a helper function when preforming promotions.
+int compare_params(LinkedList *dests, LinkedList *srcs) {
+  size_t list_count = llist_size(dests) > llist_size(srcs) ? llist_size(dests)
+                                                           : llist_size(srcs);
+  size_t i;
+  for (i = 0; i < list_count; ++i) {
+    SymbolValue *dest = llist_get(dests, i);
+    SymbolValue *src = llist_get(srcs, i);
+    if (dest == NULL || src == NULL) {
+      return TCHK_EXPLICIT_CAST;
+    } else {
+      int symbol_compat = types_compatible(dest, src, ARG1_SMV | ARG2_SMV);
+      if (symbol_compat == TCHK_COMPATIBLE) continue;
+      return TCHK_EXPLICIT_CAST;
+    }
+  }
+  return TCHK_COMPATIBLE;
+}
+
+int compare_members(Map *dests, Map *srcs) {
+  LinkedList keys = BLIB_LLIST_EMPTY;
+  llist_init(&keys, NULL, NULL);
+  /* get all keys; there will be duplicates but that is fine */
+  map_keys(dests, &keys);
+  map_keys(srcs, &keys);
+
+  size_t i;
+  for (i = 0; i < llist_size(&keys); ++i) {
+    char *key = llist_get(&keys, i);
+    SymbolValue *dest = map_get(dests, key, strlen(key));
+    SymbolValue *src = map_get(srcs, key, strlen(key));
+
+    if (dest == NULL || src == NULL) {
+      return TCHK_EXPLICIT_CAST;
+    } else {
+      int ret = types_compatible(dest, src, ARG1_SMV | ARG2_SMV);
+      if (ret != TCHK_COMPATIBLE) return ret;
+    }
+  }
+  return TCHK_COMPATIBLE;
+}
+
+int compare_auxspecs(LinkedList *dests, LinkedList *srcs) {
+  size_t aux_count = llist_size(dests) > llist_size(srcs) ? llist_size(dests)
+                                                          : llist_size(srcs);
+  size_t i;
+  for (i = 0; i < aux_count; ++i) {
+    AuxSpec *dest = llist_get(srcs, i);
+    AuxSpec *src = llist_get(srcs, i);
+
+    if (dest == NULL || src == NULL) {
+      return TCHK_EXPLICIT_CAST;
+    } else if ((dest->aux == AUX_POINTER || dest->aux == AUX_ARRAY) &&
+               (src->aux == AUX_POINTER || src->aux == AUX_ARRAY) &&
+               !((dest->data.ptr_or_arr.qualifiers ^
+                  src->data.ptr_or_arr.qualifiers) &
+                 (TYPE_FLAG_CONST | TYPE_FLAG_VOLATILE))) {
+      continue;
+    } else if ((dest->aux == AUX_FUNCTION && src->aux == AUX_FUNCTION)) {
+      int ret = compare_params(&dest->data.params, &src->data.params);
+      if (ret != TCHK_COMPATIBLE) return ret;
+    } else if ((dest->aux == AUX_STRUCT && src->aux == AUX_STRUCT) ||
+               (dest->aux == AUX_UNION && src->aux == AUX_UNION)) {
+      int ret = compare_members(&dest->data.members, &src->data.members);
+      if (ret != TCHK_COMPATIBLE) return ret;
+    } else {
+      return TCHK_EXPLICIT_CAST;
+    }
+  }
+
+  return TCHK_COMPATIBLE;
+}
+
+int compare_declspecs(const TypeSpec *dest, const TypeSpec *src) {
+  /* TODO(Robert): check qualifiers */
+  int ret = TCHK_COMPATIBLE;
+  if (type_is_integer(dest) && type_is_integer(src)) {
+    if (dest->width > src->width) {
+      ret = TCHK_IMPLICIT_CAST;
+    } else if (dest->width == src->width) {
+      if (dest->base == TYPE_SIGNED && src->base == TYPE_UNSIGNED) {
+        ret = TCHK_EXPLICIT_CAST;
+      } else if (dest->base == TYPE_UNSIGNED && src->base == TYPE_SIGNED) {
+        ret = TCHK_IMPLICIT_CAST;
+      } else {
+        ret = TCHK_COMPATIBLE;
+      }
+    } else {
+      return TCHK_EXPLICIT_CAST;
+    }
+  } else if ((dest->base == TYPE_STRUCT && src->base == TYPE_STRUCT) ||
+             (src->base == TYPE_UNION && src->base == TYPE_UNION)) {
+    ret = TCHK_COMPATIBLE;
+  } else {
+    ret = TCHK_EXPLICIT_CAST;
+  }
+
+  return ret;
+}
+
+/* This function determines compatibility in situations where there is a
+ * distinct 'destination' and 'source' type. It answers the question "does X
+ * need to be converted to Y, and if so, does that need to be done explicity".
  *
- * Arithmetic operations use the "determine_promotion" function, while
- * boolean and bitwise operations check that their operands are integers or
- * pointers
- *
- * whenever it matters, arg1 is taken to be the type being cast to, while arg2
- * is the type being cast from
+ * It is used to determine conversions after promotions, casts, assignments, and
+ * function calls/definitions/declarations.
  */
 int types_compatible(const void *arg1, const void *arg2, unsigned int flags) {
   const TypeSpec *type1 = NULL;
@@ -212,7 +297,7 @@ int types_compatible(const void *arg1, const void *arg2, unsigned int flags) {
 
   /* extract type from first argument */
   if (flags & ARG1_AST) {
-    type1 = ((ASTree *)arg1)->type;
+    type1 = extract_type((ASTree *)arg1);
   } else if (flags & ARG1_SMV) {
     type1 = &(((SymbolValue *)arg1)->type);
   } else if (flags & ARG1_TYPE) {
@@ -224,7 +309,7 @@ int types_compatible(const void *arg1, const void *arg2, unsigned int flags) {
 
   /* extract type from second argument */
   if (flags & ARG2_AST) {
-    type2 = ((ASTree *)arg2)->type;
+    type2 = extract_type((ASTree *)arg2);
   } else if (flags & ARG2_SMV) {
     type2 = &(((SymbolValue *)arg2)->type);
   } else if (flags & ARG2_TYPE) {
@@ -234,29 +319,27 @@ int types_compatible(const void *arg1, const void *arg2, unsigned int flags) {
     return TCHK_E_NO_FLAGS;
   }
 
-  /* TODO(Robert): check for arrays, pointers, structs, unions, and valid
-   * conversions between types
-   */
-  int ret = TCHK_COMPATIBLE;
-  if (type_is_int_or_ptr(type1) && type_is_int_or_ptr(type2)) {
-    if ((type1->base == TYPE_SIGNED) && (type2->base == TYPE_UNSIGNED)) {
-      ret = TCHK_EXPLICIT_CAST;
-    } else if ((type1->base == TYPE_UNSIGNED) && (type2->base == TYPE_SIGNED)) {
-      ret = TCHK_IMPLICIT_CAST;
-    }
-    if (type1->width > type2->width) {
-      ret = TCHK_IMPLICIT_CAST;
-    } else if (type1->width < type2->width) {
-      ret = TCHK_EXPLICIT_CAST;
-    }
-  } else if (type1->base == TYPE_FUNCTION && type2->base == TYPE_FUNCTION) {
-    /* compare return types, then parameter types, returning the weakest
-     * compatibilty
-     */
-  } else {
-    ret = TCHK_INCOMPATIBLE;
+  LinkedList *auxspecs1 = (LinkedList *)&type1->auxspecs;
+  LinkedList *auxspecs2 = (LinkedList *)&type2->auxspecs;
+  /* special cases */
+  if (type_is_pointer(type1) && type_is_pointer(type2) &&
+      (type1->base == TYPE_VOID || type2->base == TYPE_VOID)) {
+    /* pointer to/from void pointer */
+    return TCHK_COMPATIBLE;
+  } else if (type_is_pointer(type1) && type_is_integer(type2) &&
+             llist_size(auxspecs2) == 0) {
+    /* int to pointer */
+    return TCHK_IMPLICIT_CAST;
+  } else if (type_is_pointer(type2) && type_is_integer(type1) &&
+             llist_size(auxspecs1) == 0) {
+    /* pointer to int */
+    return TCHK_IMPLICIT_CAST;
   }
-  return ret;
+
+  int ret = compare_auxspecs(auxspecs1, auxspecs2);
+  if (ret != TCHK_COMPATIBLE) return ret;
+
+  return compare_declspecs(type1, type2);
 }
 
 /* this function only determines the promoted type of its arguments, and even
@@ -277,16 +360,15 @@ int types_compatible(const void *arg1, const void *arg2, unsigned int flags) {
  * (signed) char
  */
 int determine_promotion(ASTree *arg1, ASTree *arg2, const TypeSpec **out) {
-  const struct typespec *type1 = arg1 ? arg1->type : NULL;
-  const struct typespec *type2 = arg2 ? arg2->type : &SPEC_INT;
+  const struct typespec *type1 = arg1 ? extract_type(arg1) : NULL;
+  const struct typespec *type2 = arg2 ? extract_type(arg2) : &SPEC_INT;
 
   if (type1 == NULL) {
     fprintf(stderr, "First argument not provided to promotion routine\n");
     return -1;
-  } else if (type1->base == TYPE_POINTER) {
-    /* promote to pointer if either operand is one, prefer type of left op */
+  } else if (type_is_pointer(type1)) {
     *out = type1;
-  } else if (type2->base == TYPE_POINTER) {
+  } else if (type_is_pointer(type2)) {
     *out = type2;
   } else if (type1->width < X64_SIZEOF_INT && type2->width < X64_SIZEOF_INT) {
     /* promote to signed int if both operands could be represented as one */
@@ -345,7 +427,7 @@ int validate_intcon(ASTree *intcon) {
   return status;
 }
 
-int validate_int_spec(ASTree *spec_list, TypeSpec *out) {
+int validate_spec(ASTree *spec_list, TypeSpec *out) {
   int status = 0;
   unsigned int flags = 0;
 
@@ -357,8 +439,18 @@ int validate_int_spec(ASTree *spec_list, TypeSpec *out) {
   for (i = 0; i < astree_count(spec_list); ++i) {
     ASTree *type = astree_get(spec_list, i);
     switch (type->symbol) {
+      case TOK_VOID:
+        if (flags) {
+          fprintf(stderr, "ERROR: bad occurrence of void type secifier %s\n",
+                  parser_get_tname(type->symbol));
+          status = -1;
+        } else {
+          *out = SPEC_VOID;
+        }
+        flags |= IFLAG_VOID;
+        break;
       case TOK_INT:
-        if (flags & (IFLAG_INT | IFLAG_CHAR)) {
+        if (flags & (IFLAG_INT | IFLAG_CHAR | IFLAG_VOID)) {
           fprintf(stderr, "ERROR: bad occurrence of int type secifier %s\n",
                   parser_get_tname(type->symbol));
           status = -1;
@@ -368,7 +460,8 @@ int validate_int_spec(ASTree *spec_list, TypeSpec *out) {
         flags |= IFLAG_INT;
         break;
       case TOK_CHAR:
-        if (flags & (IFLAG_CHAR | IFLAG_INT | IFLAG_SHRT | IFLAG_LONG)) {
+        if (flags &
+            (IFLAG_CHAR | IFLAG_INT | IFLAG_SHRT | IFLAG_LONG | IFLAG_VOID)) {
           fprintf(stderr, "ERROR: bad occurrence of int type secifier %s\n",
                   parser_get_tname(type->symbol));
           status = -1;
@@ -380,7 +473,7 @@ int validate_int_spec(ASTree *spec_list, TypeSpec *out) {
         flags |= IFLAG_CHAR;
         break;
       case TOK_LONG:
-        if (flags & (IFLAG_LONG | IFLAG_SHRT | IFLAG_CHAR)) {
+        if (flags & (IFLAG_LONG | IFLAG_SHRT | IFLAG_CHAR | IFLAG_VOID)) {
           fprintf(stderr, "ERROR: bad occurrence of int type secifier %s\n",
                   parser_get_tname(type->symbol));
           status = -1;
@@ -392,7 +485,7 @@ int validate_int_spec(ASTree *spec_list, TypeSpec *out) {
         flags |= IFLAG_LONG;
         break;
       case TOK_SHORT:
-        if (flags & (IFLAG_SHRT | IFLAG_LONG | IFLAG_CHAR)) {
+        if (flags & (IFLAG_SHRT | IFLAG_LONG | IFLAG_CHAR | IFLAG_VOID)) {
           fprintf(stderr, "ERROR: bad occurrence of int type secifier %s\n",
                   parser_get_tname(type->symbol));
           status = -1;
@@ -404,7 +497,7 @@ int validate_int_spec(ASTree *spec_list, TypeSpec *out) {
         flags |= IFLAG_SHRT;
         break;
       case TOK_SIGNED:
-        if (flags & (IFLAG_SIGNED | IFLAG_UNSIGNED)) {
+        if (flags & (IFLAG_SIGNED | IFLAG_UNSIGNED | IFLAG_VOID)) {
           fprintf(stderr, "ERROR: bad occurrence of int type secifier %s\n",
                   parser_get_tname(type->symbol));
           status = -1;
@@ -414,7 +507,7 @@ int validate_int_spec(ASTree *spec_list, TypeSpec *out) {
         flags |= IFLAG_SIGNED;
         break;
       case TOK_UNSIGNED:
-        if (flags & (IFLAG_UNSIGNED | IFLAG_SIGNED)) {
+        if (flags & (IFLAG_UNSIGNED | IFLAG_SIGNED | IFLAG_VOID)) {
           fprintf(stderr, "ERROR: bad occurrence of int type secifier %s\n",
                   parser_get_tname(type->symbol));
           status = -1;
@@ -453,9 +546,9 @@ int validate_type(ASTree *type, TypeSpec *out) {
     case TOK_STRUCT:
     case TOK_UNION:
     */
-    case TOK_INT_SPEC:
+    case TOK_SPEC:
       /* go to integer validation function */
-      status = validate_int_spec(type, out);
+      status = validate_spec(type, out);
       break;
     case TOK_IDENT:
       fprintf(stderr,
@@ -463,13 +556,10 @@ int validate_type(ASTree *type, TypeSpec *out) {
               "location\n");
       status = -1;
       break;
-    case TOK_VOID:
-      out->base = TYPE_VOID;
-      break;
-      /*
-      case TOK_CONST:
-      break;
-      */
+    /*
+    case TOK_CONST:
+    break;
+    */
     default:
       fprintf(stderr, "ERROR: unimplemented type: %s",
               parser_get_tname(type->symbol));
@@ -479,31 +569,21 @@ int validate_type(ASTree *type, TypeSpec *out) {
   return status;
 }
 
-int validate_block(ASTree *block) {
-  size_t i;
-  int status = 0;
-  /* always safe; a scope should never be created twice in the same place */
-  create_scope(&(block->symbol_table));
-  for (i = 0; i < astree_count(block); ++i) {
-    ASTree *statement = astree_get(block, i);
-    status = validate_stmt(statement);
-    if (status) break;
-  }
-  /* always safe; a scope should never be finalized unless it is at the top
-   * of the stack
-   */
-  finalize_scope(&block->symbol_table);
-  return status;
-}
-
 int validate_call(ASTree *call) {
-  const char *identifier = astree_first(call)->lexinfo;
+  const char *identifier = extract_ident(call)->lexinfo;
   /* params are at the same level as the id */
   SymbolValue *function = NULL;
   locate_symbol(identifier, strlen(identifier), &function);
 
   if (function) {
-    struct llist *param_list = &(function->type.data.params);
+    TypeSpec *function_spec = &function->type;
+    /* TODO(Robert): handle function pointers (automatic dereference)
+     */
+    AuxSpec *param_spec = llist_front(&function_spec->auxspecs);
+    if (param_spec->aux != AUX_FUNCTION) {
+      /* error; type is not a function */
+    }
+    LinkedList *param_list = &param_spec->data.params;
     /* subtract one since function identifier is also a child */
     if (astree_count(call) - 1 != llist_size(param_list)) {
       fprintf(stderr, "ERROR: incorrect number of arguments %s\n", identifier);
@@ -530,8 +610,7 @@ int validate_call(ASTree *call) {
       }
     }
 
-    call->type = function->type.nested;
-    astree_first(call)->type = &(function->type);
+    call->type = &function->type;
     return 0;
   } else {
     fprintf(stderr, "ERROR: Invalid call to function %s\n", identifier);
@@ -561,25 +640,13 @@ int validate_assignment(ASTree *assignment) {
     status = -2;
   } else if (compatibility == TCHK_IMPLICIT_CAST) {
     insert_cast(assignment, 1, dest->type);
-  } else if (!(astree_first(assignment)->attributes & ATTR_EXPR_LVAL)) {
-    fprintf(stderr, "ERROR: Destination is not an LVAL\n");
-    status = -1;
-  }
+  } /* else if (!(astree_first(assignment)->attributes & ATTR_EXPR_LVAL)) {
+     fprintf(stderr, "ERROR: Destination is not an LVAL\n");
+     status = -1;
+   } */
   /* type is the type of the left operand */
   assignment->type = astree_first(assignment)->type;
   return status;
-}
-
-const char *make_dummy_string(const Location *loc) {
-  char dummy[1024];
-  dummy[0] = '_';
-  location_to_string(loc, dummy + 1, 255);
-  strcat(dummy, "_dummy_entry");
-
-  /* TODO(Robert): pulling in strset just to do this seems a little silly;
-   * figure out a better way
-   */
-  return string_set_intern(dummy);
 }
 
 int validate_cast(ASTree *cast) {
@@ -593,11 +660,7 @@ int validate_cast(ASTree *cast) {
     SymbolValue *dummy_entry = symbol_value_init(&cast_spec->loc);
     status = validate_type(cast_spec, &dummy_entry->type);
     if (status) return status;
-    /* NOTE: this is one of two places in the code where a new value is
-     * inserted into the string set
-     */
-    const char *dummy_ident = make_dummy_string(&cast_spec->loc);
-    insert_symbol(dummy_ident, strlen(dummy_ident), dummy_entry);
+    /* assign dummy entry (freed based on token) */
     cast->type = &dummy_entry->type;
     to_cast = astree_second(cast);
   } else {
@@ -643,7 +706,7 @@ int is_bitwise_op(ASTree *operator) {
   }
 }
 
-int validate_logical_op (ASTree *operator) {
+int validate_logical_op(ASTree *operator) {
   DEBUGS('t', "Validating logical operator %c", operator->symbol);
   ASTree *left = astree_first(operator);
   ASTree *right = astree_second(operator);
@@ -658,7 +721,7 @@ int validate_logical_op (ASTree *operator) {
     return -1;
   }
 
-  operator->type = &SPEC_INT;
+  operator->type = & SPEC_INT;
   return 0;
 }
 
@@ -803,317 +866,12 @@ int validate_equality(ASTree *operator) {
       fprintf(stderr, "Promotion failed on right operand; aborting.");
       abort();
     }
-  } else if ((left->type->base == TYPE_POINTER) &&
-             (right->type->base == TYPE_POINTER)) {
-    /* good; nothing else to do */
+  } else if (type_is_pointer(left->type) && type_is_pointer(right->type)) {
+    /* do nothing if both are pointers */
   } else {
     fprintf(stderr,
             "ERROR: Incompatible types for operator: %i\n", operator->symbol);
     status = -1;
-  }
-  return status;
-}
-
-int validate_return(ASTree *ret) {
-  int status = 0;
-  if (astree_count(ret) > 0) {
-    if (current_function->type.nested->base == TYPE_VOID) {
-      fprintf(stderr,
-              "ERROR: Return statement with value in void "
-              "function\n");
-      status = -1;
-    } else {
-      status = validate_expr(astree_first(ret));
-      if (status) return status;
-      TypeSpec *return_type = current_function->type.nested;
-      int compatibility = types_compatible(return_type, astree_first(ret),
-                                           ARG1_TYPE | ARG2_AST);
-      if (compatibility == TCHK_INCOMPATIBLE ||
-          compatibility == TCHK_EXPLICIT_CAST) {
-        fprintf(stderr, "ERROR: Incompatible return type\n");
-        status = -1;
-      } else {
-        ret->attributes |= ATTR_EXPR_VREG;
-        ret->attributes |= astree_first(ret)->attributes;
-      }
-    }
-  } else if (current_function->type.nested->base != TYPE_VOID) {
-    fprintf(stderr, "ERROR: Function does not return promised value\n");
-    status = -1;
-  }
-  return status;
-}
-
-int validate_ifelse(ASTree *ifelse) {
-  int status = validate_expr(astree_first(ifelse));
-  if (status) return status;
-  if (!type_is_integer(astree_first(ifelse)->type)) {
-    /* error: conditional expression must be of type int */
-    status = -1;
-    return status;
-  }
-  /* Note: no matter whether or not there is an actual block here or just a
-   * single statement, a new scope still needs to be created for it. For
-   * example, if the single statement was a declaration, that object would not
-   * be visible anywhere
-   */
-  create_scope(&(astree_second(ifelse)->symbol_table));
-  status = validate_stmt(astree_second(ifelse));
-  finalize_scope(&(astree_second(ifelse)->symbol_table));
-  if (status) return status;
-  if (astree_count(ifelse) == 3) {
-    create_scope(&(astree_third(ifelse)->symbol_table));
-    status = validate_stmt(astree_third(ifelse));
-    finalize_scope(&(astree_third(ifelse)->symbol_table));
-  }
-  return status;
-}
-
-int validate_while(ASTree *whole) {
-  int status = validate_expr(astree_first(whole));
-  if (status != 0) return status;
-  if (!type_is_integer(astree_first(whole)->type)) {
-    /* error: conditional expression must be of type int */
-    status = -1;
-    return status;
-  }
-  create_scope(&(astree_second(whole)->symbol_table));
-  status = validate_stmt(astree_second(whole));
-  finalize_scope(&(astree_second(whole)->symbol_table));
-  return status;
-}
-
-int make_object_entry(ASTree *object) {
-  ASTree *type = astree_first(object);
-  ASTree *identifier = astree_second(object);
-  DEBUGS('t', "Making object entry for value %s", identifier->lexinfo);
-  identifier->attributes |= ATTR_EXPR_LVAL;
-  SymbolValue *symbol = symbol_value_init(&(astree_second(object)->loc));
-  int status = validate_type(type, &symbol->type);
-  if (status) return status;
-  size_t identifier_len = strnlen(identifier->lexinfo, MAX_IDENT_LEN);
-  status = insert_symbol(identifier->lexinfo, identifier_len, symbol);
-  if (status) {
-    fprintf(stderr, "your data structure library sucks.\n");
-    abort();
-  }
-  status = assign_type(object);
-  if (status) return status;
-
-  if (astree_count(object) == 3) {
-    ASTree *init_value = astree_third(object);
-    status = validate_expr(init_value);
-    if (status) return status;
-    const TypeSpec *promoted_type = &SPEC_EMPTY;
-    status = determine_promotion(identifier, init_value, &promoted_type);
-    if (status) return status;
-    int compatibility =
-        types_compatible(identifier, init_value, ARG1_AST | ARG2_AST);
-    if (compatibility == TCHK_INCOMPATIBLE ||
-        compatibility == TCHK_EXPLICIT_CAST) {
-      fprintf(stderr, "ERROR: Incompatible type for object %s\n",
-              identifier->lexinfo);
-      return -1;
-    } else if (compatibility == TCHK_IMPLICIT_CAST) {
-      insert_cast(object, 2, promoted_type);
-    }
-  }
-
-  return 0;
-}
-
-int define_members(ASTree *structure, SymbolValue *structure_entry) {
-  Map *members = &(structure_entry->type.data.members);
-  create_scope(members);
-  /* start from 2nd child; 1st was type name */
-  size_t i;
-  for (i = 1; i < astree_count(structure); ++i) {
-    /* TODO(Robert): Originally, the symbol's member table was not set until
-     * after they were all parsed. Make sure that it is okay to do it right
-     * away
-     */
-    ASTree *member = astree_get(structure, i);
-    const char *member_id_str = extract_ident(member);
-    size_t member_id_str_len = strnlen(member_id_str, MAX_IDENT_LEN);
-    DEBUGS('t', "Found structure member: %s", member_id_str);
-    SymbolValue *member_entry = NULL;
-    int member_exists =
-        locate_symbol(member_id_str, member_id_str_len, &member_entry);
-    if (member_exists) {
-      fprintf(stderr, "ERROR: Duplicate declaration of member: %s\n",
-              member_id_str);
-      return -1;
-    } else {
-      int status = make_object_entry(member);
-      if (status != 0) return status;
-      DEBUGS('t', "Field inserted at %s", astree_second(member)->lexinfo);
-    }
-  }
-  finalize_scope(members);
-  return 0;
-}
-
-int make_structure_entry(ASTree *structure) {
-  const char *structure_type = extract_ident(structure);
-  const size_t structure_type_len = strnlen(structure_type, MAX_IDENT_LEN);
-  DEBUGS('t', "Defining structure type: %s", structure_type);
-  SymbolValue *structure_value = NULL;
-  locate_symbol((char *)structure_type, structure_type_len, &structure_value);
-  if (structure_value) {
-    /* TODO(Robert): allow duplicates if definition matches */
-    fprintf(stderr, "ERROR: Duplicate definition of structure %s\n",
-            structure_type);
-    return -1;
-  } else {
-    structure_value = symbol_value_init(extract_loc(structure));
-    /* TODO(Robert): assign struct type information (structure name, base type,
-     * etc.
-     */
-    int status =
-        insert_symbol(structure_type, structure_type_len, structure_value);
-    if (status) return status;
-    /* TODO(Robert): in the interest of code reuse I used the existing functions
-     * for entering and leaving scopes and making entries within a scope that
-     * are normally used for objects and functions, even though struct members
-     * don't work quite the same way. check to make sure everything is doing
-     * okay later on
-     */
-    status = define_members(structure, structure_value);
-    if (status) return status;
-    return assign_type(structure);
-  }
-}
-
-int define_params(ASTree *params, SymbolValue *function_entry) {
-  LinkedList *param_entries = &(function_entry->type.data.params);
-  /* type is not resposible for freeing symbol information */
-  llist_init(param_entries, NULL, NULL);
-  create_scope(&(params->symbol_table));
-  size_t i;
-  for (i = 0; i < astree_count(params); ++i) {
-    ASTree *param = astree_get(params, i);
-    const char *param_id_str = extract_ident(param);
-    DEBUGS('t', "Defining function parameter %s", param_id_str);
-    /*
-     * TODO(Robert): implement find function(s) in badlib and search for
-     * duplicate parameters
-     */
-    int status = make_object_entry(param);
-    if (status) return status;
-    size_t param_id_str_len = strnlen(param_id_str, MAX_IDENT_LEN);
-    SymbolValue *param_entry = NULL;
-    int in_current_scope =
-        locate_symbol(param_id_str, param_id_str_len, &param_entry);
-    if (!in_current_scope) {
-      fprintf(stderr,
-              "ERROR: parameter symbol was not inserted into function table\n");
-      return -1;
-    }
-    llist_push_back(param_entries, param_entry);
-  }
-  /* temporarily leave function prototype scope to work on global table */
-  leave_scope(&(params->symbol_table));
-  return 0;
-}
-
-int define_body(ASTree *function, SymbolValue *entry) {
-  DEBUGS('t', "Defining function: %s", extract_ident(function));
-  ASTree *params = astree_second(function);
-  ASTree *body = astree_third(function);
-  /* move symbol table from parameters to function body */
-  body->symbol_table = params->symbol_table;
-  memset(&params->symbol_table, 0, sizeof(params->symbol_table));
-  /* enter block scope again */
-  enter_scope(&body->symbol_table);
-  current_function = entry;
-  int status = validate_stmt(body);
-  if (status) return status;
-  current_function = NULL;
-  entry->is_defined = 1;
-  /* finalize scope */
-  finalize_scope(&body->symbol_table);
-  return 0;
-}
-
-int make_function_entry(ASTree *function) {
-  ASTree *type_id = astree_first(function);
-  SymbolValue *function_entry =
-      symbol_value_init(&(astree_second(type_id)->loc));
-  function_entry->type = SPEC_FUNCTION;
-  function_entry->type.nested = malloc(sizeof(TypeSpec));
-  /* validate return type */
-  int status =
-      validate_type(astree_first(type_id), function_entry->type.nested);
-  if (status) return status;
-  if (function_entry->type.nested->base == TYPE_ARRAY) {
-    fprintf(stderr, "ERROR: Function %s has an array return type.\n",
-            extract_ident(type_id));
-    /* TODO(rbergero): keep going if we can */
-    return -1;
-  }
-
-  ASTree *params = astree_second(function);
-  status = define_params(params, function_entry);
-  if (status) return status;
-
-  const char *function_ident = extract_ident(function);
-  size_t function_ident_len = strnlen(function_ident, MAX_IDENT_LEN);
-  SymbolValue *existing_entry = NULL;
-  locate_symbol(function_ident, function_ident_len, &existing_entry);
-  if (existing_entry) {
-    if (types_compatible(existing_entry, function_entry, ARG1_SMV | ARG2_SMV) ==
-        TCHK_INCOMPATIBLE) {
-      fprintf(stderr, "ERROR: redeclaration of function: %s\n", function_ident);
-      return -1;
-    } else if (existing_entry->is_defined) {
-      fprintf(stderr, "ERROR: redefinition of function: %s\n", function_ident);
-      return -1;
-    } else if (astree_count(function) == 3) {
-      status = define_body(function, existing_entry);
-      if (status) return status;
-    }
-    /* use existing type info */
-    symbol_value_destroy(function_entry);
-    return assign_type(function);
-  } else {
-    status = insert_symbol(function_ident, function_ident_len, function_entry);
-    if (status) return status;
-    if (astree_count(function) == 3) {
-      status = define_body(function, function_entry);
-      if (status) return status;
-    } else {
-      enter_scope(&params->symbol_table);
-      finalize_scope(&params->symbol_table);
-    }
-    return assign_type(function);
-  }
-}
-
-int validate_stmt(ASTree *statement) {
-  int status;
-  DEBUGS('t', "Validating next statement");
-  switch (statement->symbol) {
-    case TOK_RETURN:
-      status = validate_return(statement);
-      break;
-    case TOK_TYPE_ID:
-      status = make_object_entry(statement);
-      break;
-    case TOK_IF:
-      status = validate_ifelse(statement);
-      break;
-    case TOK_WHILE:
-      status = validate_while(statement);
-      break;
-    case TOK_BLOCK:
-      status = validate_block(statement);
-      break;
-    default:
-      /* parser will catch anything that we don't want, so at this point the
-       * only thing left that this could be is an expression
-       */
-      status = validate_expr(statement);
-      break;
   }
   return status;
 }
@@ -1164,12 +922,18 @@ int validate_expr(ASTree *expression) {
       status = validate_unop(expression);
       break;
     case TOK_CALL:
-      expression->attributes |= ATTR_EXPR_VREG;
+      /* expression->attributes |= ATTR_EXPR_VREG; */
       status = validate_call(expression);
       break;
-    case TOK_INDEX:
+    case TOK_SUBSCRIPT:
       /* TODO(Robert): indexing */
       status = -1;
+      break;
+    case TOK_INDIRECTION:
+      /* TODO(Robert): indirection */
+      break;
+    case TOK_ADDROF:
+      /* TODO(Robert): address-of */
       break;
     case TOK_ARROW:
       /* TODO(Robert): pointers and struct member access */
@@ -1204,6 +968,420 @@ int validate_expr(ASTree *expression) {
 }
 
 /*
+ * order in which type information should be read:
+ * 1. anything in between parentheses that is not parameter info
+ * 2. array and/or function direct declarators, from left to right
+ * 3. pointers, from left to right
+ * 4. declaration specifiers
+ */
+int define_params(ASTree *params, ASTree *ident, SymbolValue *function_entry) {
+  AuxSpec *function_aux = calloc(1, sizeof(*function_aux));
+  function_aux->aux = AUX_FUNCTION;
+  LinkedList *param_entries = &(function_aux->data.params);
+  /* type is not resposible for freeing symbol information */
+  llist_init(param_entries, NULL, NULL);
+  create_scope(&(ident->symbol_table));
+  size_t i;
+  for (i = 0; i < astree_count(params); ++i) {
+    ASTree *param = astree_get(params, i);
+    const char *param_id_str = extract_ident(param)->lexinfo;
+    DEBUGS('t', "Defining function parameter %s", param_id_str);
+    /*
+     * TODO(Robert): implement find function(s) in badlib and search for
+     * duplicate parameters
+     */
+    int status = validate_declaration(param);
+    if (status) return status;
+    size_t param_id_str_len = strnlen(param_id_str, MAX_IDENT_LEN);
+    SymbolValue *param_entry = NULL;
+    int in_current_scope =
+        locate_symbol(param_id_str, param_id_str_len, &param_entry);
+    if (!in_current_scope) {
+      fprintf(stderr,
+              "ERROR: parameter symbol was not inserted into function table\n");
+      return -1;
+    }
+    llist_push_back(param_entries, param_entry);
+  }
+  /* temporarily leave function prototype scope to work on global table */
+  leave_scope(&(ident->symbol_table));
+  return 0;
+}
+
+int define_array(ASTree *array, SymbolValue *symbol) {
+  AuxSpec *aux_array = calloc(1, sizeof(*aux_array));
+  aux_array->aux = AUX_ARRAY;
+  if (astree_count(array) > 0) {
+    aux_array->data.ptr_or_arr.length =
+        strtoumax(astree_first(array)->lexinfo, NULL, 0);
+    if (aux_array->data.ptr_or_arr.length == ULONG_MAX) {
+      fprintf(stderr, "ERROR: array size too large\n");
+      return -1;
+    }
+  }
+  llist_push_back(&symbol->type.auxspecs, aux_array);
+  return 0;
+}
+
+int define_pointer(ASTree *pointer, SymbolValue *symbol) {
+  AuxSpec *aux_pointer = calloc(1, sizeof(*aux_pointer));
+  aux_pointer->aux = AUX_POINTER;
+  llist_push_back(&symbol->type.auxspecs, aux_pointer);
+  return 0;
+}
+
+int validate_dirdecl(ASTree *dirdecl, ASTree *ident, SymbolValue *symbol) {
+  AuxSpec *prev = llist_back(&symbol->type.auxspecs);
+  if (prev && prev->aux == AUX_FUNCTION) {
+    fprintf(stderr,
+            "ERROR: function declarator must be last in list of direct "
+            "declarators\n");
+    return -1;
+  } else if (prev && prev->aux == AUX_ARRAY &&
+             dirdecl->symbol == TOK_FUNCTION) {
+    fprintf(stderr, "ERROR: function and array specifiers may not co-occur\n");
+    return -1;
+  }
+
+  switch (dirdecl->symbol) {
+    case TOK_DECLARATOR: {
+      size_t i;
+      for (i = 0; i < astree_count(dirdecl); ++i) {
+        int status = validate_dirdecl(astree_get(dirdecl, i), ident, symbol);
+        if (status) return status;
+      }
+    }
+      return 0;
+      break;
+    case TOK_ARRAY:
+      return define_array(dirdecl, symbol);
+      break;
+    case TOK_POINTER:
+      return define_pointer(dirdecl, symbol);
+      break;
+    case TOK_FUNCTION:
+      return define_params(dirdecl, ident, symbol);
+      break;
+    default:
+      fprintf(stderr, "ERROR: invalid direct declarator for symbol\n");
+      return -1;
+      break;
+  }
+}
+
+int declare_symbol(ASTree *declaration, size_t i, TypeSpec *declspecs) {
+  ASTree *declarator = astree_get(declaration, i);
+  ASTree *identifier = extract_ident(declarator);
+  DEBUGS('t', "Making object entry for value %s", identifier->lexinfo);
+  SymbolValue *symbol = symbol_value_init(&declarator->loc);
+  symbol->type = *declspecs;
+  size_t j;
+  for (j = 0; j < astree_count(declarator); ++j) {
+    int status =
+        validate_dirdecl(astree_get(declarator, j), identifier, symbol);
+    if (status) return status;
+  }
+  size_t identifier_len = strnlen(identifier->lexinfo, MAX_IDENT_LEN);
+  int status = insert_symbol(identifier->lexinfo, identifier_len, symbol);
+  if (status) {
+    fprintf(stderr, "your data structure library sucks.\n");
+    abort();
+  }
+
+  return assign_type(identifier);
+}
+
+int define_symbol(ASTree *declaration, size_t i, TypeSpec *declspecs) {
+  ASTree *declarator = astree_get(declaration, i);
+  ASTree *expr = astree_get(declaration, i + 1);
+  int status = declare_symbol(declaration, i, declspecs);
+  if (status) return status;
+  status = validate_expr(expr);
+  if (status) return status;
+
+  const TypeSpec *promoted_type = &SPEC_EMPTY;
+  status = determine_promotion(declarator, expr, &promoted_type);
+  if (status) return status;
+
+  int compatibility = types_compatible(declarator, expr, ARG1_AST | ARG2_AST);
+  if (compatibility == TCHK_INCOMPATIBLE ||
+      compatibility == TCHK_EXPLICIT_CAST) {
+    fprintf(stderr, "ERROR: Incompatible type for object %s\n",
+            extract_ident(declarator)->lexinfo);
+    return -1;
+  } else if (compatibility == TCHK_IMPLICIT_CAST) {
+    insert_cast(declaration, i, promoted_type);
+  }
+  return 0;
+}
+
+int define_body(ASTree *function, SymbolValue *entry) {
+  int status = 0;
+  ASTree *identifier = extract_ident(function);
+  enter_scope(&identifier->symbol_table);
+
+  if (astree_count(function) == 3) {
+    DEBUGS('t', "Defining function: %s", identifier->lexinfo);
+    ASTree *body = astree_third(function);
+    current_function = entry;
+    /* set return status */
+    status = validate_stmt(body);
+    current_function = NULL;
+    entry->is_defined = 1;
+  }
+
+  /* finalize scope */
+  finalize_scope(&identifier->symbol_table);
+  return status;
+}
+
+int define_function(ASTree *function, TypeSpec *declspecs) {
+  ASTree *declaration = function;
+  ASTree *declarator = astree_second(function);
+  ASTree *identifier = extract_ident(declarator);
+
+  SymbolValue *symbol = symbol_value_init(extract_loc(declarator));
+  symbol->type = *declspecs;
+  size_t i;
+  for (i = 0; i < astree_count(declarator); ++i) {
+    int status =
+        validate_dirdecl(astree_get(declarator, i), identifier, symbol);
+    if (status) return status;
+  }
+
+  const char *function_ident = extract_ident(function)->lexinfo;
+  size_t function_ident_len = strnlen(function_ident, MAX_IDENT_LEN);
+  SymbolValue *existing_entry = NULL;
+  locate_symbol(function_ident, function_ident_len, &existing_entry);
+  if (existing_entry) {
+    if (types_compatible(existing_entry, symbol, ARG1_SMV | ARG2_SMV) ==
+        TCHK_INCOMPATIBLE) {
+      fprintf(stderr, "ERROR: redeclaration of function: %s\n", function_ident);
+      return -1;
+    } else if (existing_entry->is_defined) {
+      fprintf(stderr, "ERROR: redefinition of function: %s\n", function_ident);
+      return -1;
+    } else if (astree_count(function) == 3) {
+      int status = define_body(function, existing_entry);
+      if (status) return status;
+    }
+    /* use existing type info */
+    symbol_value_destroy(symbol);
+    return assign_type(function);
+  } else {
+    int status = insert_symbol(function_ident, function_ident_len, symbol);
+    if (status) return status;
+    status = define_body(function, symbol);
+    if (status) return status;
+    return assign_type(function);
+  }
+}
+
+int define_members(ASTree *structure, SymbolValue *structure_entry) {
+  AuxSpec *struct_aux = calloc(1, sizeof(*struct_aux));
+  Map *members = &struct_aux->data.members;
+  /* TODO(Robert): in the interest of code reuse I used the existing functions
+   * for entering and leaving scopes and making entries within a scope that
+   * are normally used for objects and functions, even though struct members
+   * don't work quite the same way. check to make sure everything is doing
+   * okay later on
+   */
+  create_scope(members);
+  /* start from 2nd child; 1st was type name */
+  size_t i;
+  for (i = 1; i < astree_count(structure); ++i) {
+    ASTree *member = astree_get(structure, i);
+    const char *member_id_str = extract_ident(member)->lexinfo;
+    size_t member_id_str_len = strnlen(member_id_str, MAX_IDENT_LEN);
+    DEBUGS('t', "Found structure member: %s", member_id_str);
+    SymbolValue *member_entry = NULL;
+    int member_exists =
+        locate_symbol(member_id_str, member_id_str_len, &member_entry);
+    if (member_exists) {
+      fprintf(stderr, "ERROR: Duplicate declaration of member: %s\n",
+              member_id_str);
+      return -1;
+    } else {
+      int status = validate_declaration(member);
+      if (status != 0) return status;
+      DEBUGS('t', "Field inserted at %s", astree_second(member)->lexinfo);
+    }
+  }
+  finalize_scope(members);
+  llist_push_front(&structure_entry->type.auxspecs, struct_aux);
+  return 0;
+}
+
+int define_structure(ASTree *structure) {
+  const char *structure_type = extract_ident(structure)->lexinfo;
+  const size_t structure_type_len = strnlen(structure_type, MAX_IDENT_LEN);
+  DEBUGS('t', "Defining structure type: %s", structure_type);
+  SymbolValue *exists = NULL;
+  locate_symbol((char *)structure_type, structure_type_len, &exists);
+  SymbolValue *structure_value = symbol_value_init(extract_loc(structure));
+
+  if (exists) {
+    int status = define_members(structure, structure_value);
+    if (status) return status;
+    if (types_compatible(exists, structure_value, ARG1_SMV | ARG2_SMV) !=
+        TCHK_COMPATIBLE) {
+      fprintf(stderr, "ERROR: redefinition of structure %s\n", structure_type);
+      return -1;
+    }
+    /* discard duplicate */
+    return symbol_value_destroy(structure_value);
+  } else {
+    int status =
+        insert_symbol(structure_type, structure_type_len, structure_value);
+    if (status) return status;
+    return define_members(structure, structure_value);
+  }
+}
+
+int validate_declaration(ASTree *declaration) {
+  ASTree *spec_list = astree_first(declaration);
+  TypeSpec declspecs = SPEC_EMPTY;
+  int status = validate_type(spec_list, &declspecs);
+  if (status) return status;
+
+  size_t i;
+  for (i = 1; i < astree_count(declaration); ++i) {
+    /* call a function that constructs the rest of the type */
+    ASTree *next = astree_get(declaration, i + 1);
+    if (next && next->symbol == TOK_BLOCK) {
+      /* function definition */
+      return define_function(declaration, &declspecs);
+    } else if (next && next->symbol != TOK_DECLARATOR) {
+      /* variable declaration and initialization */
+      return define_symbol(declaration, i, &declspecs);
+    } else {
+      /* variable/function declaration */
+      return declare_symbol(declaration, i, &declspecs);
+    }
+  }
+  return 0;
+}
+
+int validate_return(ASTree *ret) {
+  /* TODO(Robert): use existing type checking functions to compare statement
+   * type with the declared function's return type
+   */
+
+  int status = 0;
+  if (astree_count(ret) > 0) {
+    if (current_function->type.base == TYPE_VOID) {
+      fprintf(stderr,
+              "ERROR: Return statement with value in void "
+              "function\n");
+      status = -1;
+    } else {
+      status = validate_expr(astree_first(ret));
+      if (status) return status;
+      TypeSpec *return_type = &(current_function->type);
+      int compatibility = types_compatible(return_type, astree_first(ret),
+                                           ARG1_TYPE | ARG2_AST);
+      if (compatibility == TCHK_INCOMPATIBLE ||
+          compatibility == TCHK_EXPLICIT_CAST) {
+        fprintf(stderr, "ERROR: Incompatible return type\n");
+        status = -1;
+      } else {
+        /* ret->attributes |= ATTR_EXPR_VREG;
+        ret->attributes |= astree_first(ret)->attributes; */
+      }
+    }
+  } else if (current_function->type.base != TYPE_VOID) {
+    fprintf(stderr, "ERROR: Function does not return promised value\n");
+    status = -1;
+  }
+  return status;
+}
+
+int validate_ifelse(ASTree *ifelse) {
+  int status = validate_expr(astree_first(ifelse));
+  if (status) return status;
+  if (!type_is_integer(astree_first(ifelse)->type)) {
+    /* error: conditional expression must be of type int */
+    status = -1;
+    return status;
+  }
+  /* Note: no matter whether or not there is an actual block here or just a
+   * single statement, a new scope still needs to be created for it. For
+   * example, if the single statement was a declaration, that object would not
+   * be visible anywhere
+   */
+  create_scope(&(astree_second(ifelse)->symbol_table));
+  status = validate_stmt(astree_second(ifelse));
+  finalize_scope(&(astree_second(ifelse)->symbol_table));
+  if (status) return status;
+  if (astree_count(ifelse) == 3) {
+    create_scope(&(astree_third(ifelse)->symbol_table));
+    status = validate_stmt(astree_third(ifelse));
+    finalize_scope(&(astree_third(ifelse)->symbol_table));
+  }
+  return status;
+}
+
+int validate_while(ASTree *whole) {
+  int status = validate_expr(astree_first(whole));
+  if (status != 0) return status;
+  if (!type_is_integer(astree_first(whole)->type)) {
+    /* error: conditional expression must be of type int */
+    status = -1;
+    return status;
+  }
+  create_scope(&(astree_second(whole)->symbol_table));
+  status = validate_stmt(astree_second(whole));
+  finalize_scope(&(astree_second(whole)->symbol_table));
+  return status;
+}
+
+int validate_block(ASTree *block) {
+  size_t i;
+  int status = 0;
+  /* always safe; a scope should never be created twice in the same place */
+  create_scope(&(block->symbol_table));
+  for (i = 0; i < astree_count(block); ++i) {
+    ASTree *statement = astree_get(block, i);
+    status = validate_stmt(statement);
+    if (status) break;
+  }
+  /* always safe; a scope should never be finalized unless it is at the top
+   * of the stack
+   */
+  finalize_scope(&block->symbol_table);
+  return status;
+}
+
+int validate_stmt(ASTree *statement) {
+  int status;
+  DEBUGS('t', "Validating next statement");
+  switch (statement->symbol) {
+    case TOK_RETURN:
+      status = validate_return(statement);
+      break;
+    case TOK_IF:
+      status = validate_ifelse(statement);
+      break;
+    case TOK_WHILE:
+      status = validate_while(statement);
+      break;
+    case TOK_BLOCK:
+      status = validate_block(statement);
+      break;
+    case TOK_DECLARATION:
+      status = validate_declaration(statement);
+      break;
+    default:
+      /* parser will catch anything that we don't want, so at this point the
+       * only thing left that this could be is an expression
+       */
+      status = validate_expr(statement);
+      break;
+  }
+  return status;
+}
+
+/*
  * external functions
  */
 
@@ -1215,14 +1393,12 @@ int type_checker_make_table(ASTree *root) {
     ASTree *child = astree_get(root, i);
     int status;
     switch (child->symbol) {
-      case TOK_FUNCTION:
-        status = make_function_entry(child);
-        if (status != 0) return status;
-        break;
-      case TOK_TYPE_ID:
-        status = make_object_entry(child);
-        if (status != 0) return status;
-        break;
+      /* only way to distinguish between a function definition and other
+       * declarations is the symbol of the third child
+       */
+      case TOK_DECLARATION:
+        status = validate_declaration(child);
+        if (status) return status;
       default:
         fprintf(stderr, "ERROR: Unexpected symbol at top level: %s\n",
                 parser_get_tname(child->symbol));
