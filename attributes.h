@@ -15,11 +15,16 @@
 
 /* attributes correspond to array indices in the order they are listed here */
 /* the following operations resolve to an lvalue:
- * - identifiers
+ * - most identifiers
  * - the result of the arrow operator
  * - the result of the dot operator
- * - the result of the dereference operator
- * - the result of the array indexing operator
+ * - the result of the indirection operator
+ * - the result of the subscript operator
+ *
+ * the following resolve to an rvalue:
+ * - plain array and function identifiers
+ * - the result of the address-of operator
+ * - the result of any expression not explicitly listed as an lval
  */
 enum attribute {
   ATTR_NONE = 0,            /* no attributes set */
@@ -30,23 +35,24 @@ enum attribute {
   ATTR_EXPR_VADDR = 1 << 4, /* int is memory address */
 };
 
-enum base_type {
+typedef enum base_type {
   TYPE_NONE,
-  /* arithmetic types */
   TYPE_SIGNED,
   TYPE_UNSIGNED,
-  TYPE_FLOAT,
-  TYPE_DOUBLE,
-  /* compound types */
-  TYPE_POINTER,
-  TYPE_ARRAY,
+  TYPE_VOID,
   TYPE_STRUCT,
   TYPE_UNION,
-  TYPE_FUNCTION,
-  /* other types */
-  TYPE_TYPEDEF,
-  TYPE_VOID
-};
+} BaseType;
+
+typedef enum aux_type {
+  AUX_NONE,
+  AUX_POINTER,
+  AUX_ARRAY,
+  AUX_STRUCT,
+  AUX_UNION,
+  AUX_FUNCTION,
+  AUX_TYPEDEF,
+} AuxType;
 
 enum conversion_type {
   CONV_COMPATIBLE,
@@ -73,25 +79,36 @@ enum type_flag {
   TYPE_FLAG_INLINE = 1 << 6
 };
 
+enum imm_type {
+  IMM_TYPE_POINTER,
+  IMM_TYPE_FUNCTION,
+  IMM_TYPE_ARITHMETIC,
+  IMM_TYPE_SCALAR,
+};
+
+typedef struct auxspec {
+  union {
+    const char *type_id;
+    struct {
+      unsigned int qualifiers;
+      size_t length;
+    } ptr_or_arr;
+    LinkedList params;
+    Map members;
+  } data;
+  AuxType aux;
+} AuxSpec;
+
+/*
+ * auxinfo will contain information about structs/unions, pointers, functions,
+ * typedefs, and arrays.
+ */
 typedef struct typespec {
   size_t width;
-  /*
-   * 1. only structures and unions need their alignment specified
-   * 2. only structures and unions need a map
-   * 3. only arrays need length
-   * 4. only functions need  parameters
-   * 5. only functions, pointers, and arrays need nested types
-   */
   size_t alignment;
-  struct typespec *nested; /* for functions, pointers and arrays */
-  union {
-    struct map members;  /* for structs and unions */
-    struct llist params; /* for functions */
-    size_t length;       /* for arrays */
-  } data;
+  LinkedList auxspecs;
   unsigned int flags;
-  enum base_type base;
-  const char *identifier;
+  BaseType base;
 } TypeSpec;
 
 typedef struct location {
@@ -107,6 +124,7 @@ extern const TypeSpec SPEC_PTR;
 extern const TypeSpec SPEC_EMPTY;
 extern const TypeSpec SPEC_FUNCTION;
 extern const TypeSpec SPEC_STRUCT;
+extern const TypeSpec SPEC_VOID;
 extern const TypeSpec SPEC_ULONG;
 extern const TypeSpec SPEC_LONG;
 extern const TypeSpec SPEC_UINT;
@@ -122,7 +140,9 @@ int attributes_to_string(const unsigned int attributes, char *buf,
                          size_t bufsize);
 void location_to_string(const Location *loc, char *buffer, size_t size);
 int type_to_string(const TypeSpec *type, char *buf, size_t bufsize);
+
+int typespec_init(TypeSpec *spec);
+int typespec_destroy(TypeSpec *spec);
 int typespec_copy(TypeSpec *dst, const TypeSpec *src);
-int typespec_destroy(TypeSpec *type);
 
 #endif

@@ -23,10 +23,15 @@ purpose of achieving self-hosting, or both. These include:
   extension. The Microsoft x64 ABI defines how to do this, and it seems fairly
   straightforward.
 
-## Identifier Labels
+## Labels
 Based on the language definition, it looks like labels are attached to the
 statement immediately following them. They are not a valid statement all on
 their own. Just something to note for later.
+
+## Namespaces
+Labels have their own namespace. Structures and unions share a namespace
+separate from other types of declarations, and functions and objects share a
+namespace.
 
 ## Increment and decrement
 These operators must have an lval argument. Postfix and prefix versions must
@@ -38,118 +43,6 @@ constants. It would make more sense for the string set to track them in some
 way; it would also make more sense for the constants to be registered when the
 abstract syntax tree is built, since the value and type of constants are known
 when the tree node is generated.
-
-## Scoping
-Instead of the current scheme, where we only differentiate between local and
-global scope, we should implement a 'scope stack' that is pushed onto with
-each nested block. There should be a function that searches for a given typeid
-in the stack from the top down.
-
-The function for making global and local entries should be condensed into a
-single function that just makes the entry in the scope that is on the top of the
-stack if it is not already present.
-
-Labels have their own namespace. Structures and unions share a namespace
-separate from other types of declarations, and functions and objects share a
-namespace.
-
-## Storing types
-Currently, types are stored by value. Types of syntax tree nodes are set by:
-- copying the type from a symbol entry, in the case of an identifier
-- copying the type from a constant declared elsewhere, in the case of literals
-  and constants
-- copied from one of the operands, in the case of operator expressions
-- constructed, in the case of the promotion operator.
-
-This is convenient because it means that modifications to types that occur
-during the evaluation of the expression can be done easily by copying the base
-or child type to another tree node and modifying it as needed.
-
-However, it does make working with nested types more difficult. Nested types
-cannot simply be stored by value, because the storage can (or should) be
-arbitrarily deep (a pointer to a pointer to a pointer...), so nested type
-specifiers must be stored using pointers.
-
-This means that when cleanup occurs, nested type specifiers must be freed. This
-would require its own function `typespec_destroy` or similiar.
-
-However, this would become a problem when copying typespecs naively, with the
-equals operator. There would need to be a function dedicated to copying, or this
-functionality could be included in a `typespec_init` function.
-
-Even with a dedicated copy function, recursively copying certain components of
-type information, like linked lists and maps, would be complicated, because
-currently badlib does not implement copying functions, and implementing
-copying functions would be difficult since badlib data structures have no
-knowledge of what their elements are, so they cannot be easily copied.
-
-Copying is not necessary. Anytime a time needs to be assigned to a node, you can
-get it from one of three places:
-- we are promoting a value to a `signed int` from a narrower type, in which case
-  we point to a constant structure
-- we are working with a constant or literal, whose type can be taken from the
-  symbol table or destination in the case of structures and unions, or whose
-  type has limited possibilities, in the case of integer and character constants.
-- we are doing an explicit cast, in which case the type can be constructed from
-  the type specified, and assigned a dummy symbol
-- we are handling an identifier (either referencing the value or assigning it
-  a new one, which may require an implicit cast) in which case we refer to the
-  identifier's symbol entry
-
-No copying necessary, and dummy symbols only need to be created for explicit
-casts.
-
-## Comparing types
-The `types_compatible` function should return more than just an enum describing
-the compatibility of its arguments. It should return a struct that includes the
-enum already returned, in addition to a valid type that is compatible with both
-of the arguments. The returned type is needed to be able to do implicit casting
-and promotion.
-
-Arithmetic promotions may need to be separated from other conversions.
-
-Return types depending on whether or not the arguments are being used in an
-intermediate computation (and will therefore be promoted) or actually need to be
-assigned to a destination, in which case the 
-
-The function(s) responsible for handling casting will be reused when handling
-promotion, and as such promotion will internally be considered as a specific
-case of implicit casting.
-
-## Parsing integer/character types
-Integer and character types are surprisingly complicated to parse.
-There are a couple of rules governing their specifiers:
-- each specifier can only occur once (long long does not exist in ANSI)
-- char and int are mutually exclusive
-- long and short are mutually exclusive
-- signed and unsigned are mutually exclusive
-- long and short may not occur in a specifier that includes char
-
-The standard lists valid combinations. It appears that the standard intends
-that the order of specifiers matters, which would make legal combinations
-less permissive, but much like requiring variable declarations at the beginning
-of the block, this is more difficult to implement than allowing them to occur in
-any order.
-
-Actually, it doesn't really make sense to have type flags for signedness, since
-they only get used for integers, unlike all of the other type flags, which are
-storage class modifiers and type qualifiers.
-
-So going back to SIGNED and UNSIGNED instead of INT might make sense. It would
-require a little more thought when processing integer types though. The above
-rules need to be mapped to a base type and a width.
-
-An integer will be passed around to the integer type checking functions, which
-is used to track which tokens have occurred so far in the specifier. Each of
-"short", "long", "int", "char", "signed", and "unsigned" will have their own
-bit in this integer.
-
-The function will descend into the list of specifiers, marking which ones have
-occurred as it goes. If any of the flags are set twice, the function errors. If
-any flags that may not co-occur are set, the function errors.
-
-Afterwards, there will be a switch statement with a case corresponding to valid
-combinations of flags. The default case will result in an error.
 
 ## How to evaluate types
 With only one token of lookahead, the parser cannot distinguish between an
@@ -204,28 +97,100 @@ and treat them equally.
 On the x64 platform, arrays and pointers would have the the base type
 `TYPE_UNSIGNED`, with a width of 8 bytes and the virtual address attribute set.
 
-## Parsing function types
-Structure of a function definition in the syntax tree, as a reminder:
-- FUNCTION
-  - TYPE_ID
-    - TYPE
-    - IDENT
-  - PARAM
-    - TYPE_ID ...
-  - BLOCK (optional)
+## Declarators and abstract declarators
+A declarator is a syntactic unit which includes an identifier and type
+information (type specifiers and qualifiers, pointers, array dimensions,
+function parameters).
 
-First, validate_type_id will be called on the TYPE_ID node. The type of this
-node will be assigned to the nested field of FUNCTION's type. The data field
-of the function's type structure will be allocated and initialized as a linked
-list for storing its parameters. A SymbolValue structure associated with this
-function will be initialized, but not inserted into the global table yet. 
+An abstract declaractor is the same, except that it does not include the
+identifier; it is free-floating type information.
 
-Second, validate_type_id will be called on each TYPE_ID child of PARAM. Once
-validated, a SymbolValue structure will be initialized for each parameter and
-appended to the list in FUNCTION's type structure.
+IMPORTANT NOTE: the declarator form `direct-declarator ( identifier-list )` is
+only used when writing old style functions, which this compiler will not be
+doing, so it should be ignored (for now).
 
-Once all parameters have been validated, only then will the type checker attempt
-to insert FUNCTION's symbol into the table.
+## Storing type information
+Type information will have two structs created for its storage: `TypeSpec` and
+`AuxSpec`. `TypeSpec` will directly store information that is derived from
+declaration specifiers. It will also contain a list of `AuxSpec` structs, which
+will store other type information.
+
+Both of these structures will have a copy, init, and destroy function associated
+with them, to make (re)using the information stored in them easier.
+
+## Propagating and resolving type information
+Currently, the "primary" storage location for type information is in the symbol
+table. This information is accessed from other locations, namely nodes of the
+syntax tree, via reference. Syntax tree nodes are only indirectly responsible
+for managing this memory by allocating and freeing these tables as necessary.
+
+Because it is sometimes convenient to construct new `TypeSpec` objects, rather
+than referring to existing symbol table entries (for example, when using the
+indirection, address-of, and subscript operators) it may be sensible to
+break the rule of having the symbol table be solely responsible for all type
+information in one-off instances like this.
+
+Specific syntax tree nodes require a new type object to be constructed:
+- the subscript operator `[]`
+- the indirection operator `*`
+- the address-of operator `&`
+- isolated function identifiers, which become a pointer to a function of that
+  identifier's type (unless the address-of operator is used explicitly)
+- implicit and explicit casts
+
+Isolated function identifiers could be handled more uniformly by inserting an
+address-of operator into the syntax tree and creating the new type object there
+instead of creating a special case for lone function identifiers.
+
+## Parsing complex (function, pointer, array) types
+This implementation will support arbitrarily complex types, which means
+arbitrarily nested pointers and n-dimensional arrays, which may co-occur.
+
+First, the `TOK_SPEC` associated with a declaration will be validated, and
+the type information recorded in a structure. This information will be
+copied once for each declarator.
+
+Second, the type information associated with each declarator will be processed
+and used to fully specify the type of the identifier, which will then be
+validated.
+
+When comprehending a type, information between parentheses takes highest priority.
+Array and function information is read from left to right. Pointers are read
+from left to right, and finally the information included in the declaration
+specifiers is read out.
+
+## Tree structure of declarations
+Each declaration has a top level node constructed by the parser with the token
+`TOK_DECLARATION`. This node carries no type information and is used to group
+the components of a declaration together.
+
+The first child of a `TOK_DECLARATION` node is always a `TOK_SPEC` node
+constructed by the parser, which groups together declaration specifiers.
+
+All other children are either declarator nodes or expression nodes containing
+the initial value of an object.
+
+Declarator nodes are constructed by the parser and have the token
+`TOK_DECLARATOR`. These are used to organize the components of a declarator in
+a sensible way. Iterating over their child nodes from smallest to largest index
+gives an accurate reading of the type they describe. The final child of such a
+node should be a `TOK_IDENT`.
+
+Each declarator node may be followed by an expression node if the declared
+object is initialized at the same time.
+
+```
+TOK_DECLARATOR = ( TOK_DECLARATOR | TOK_IDENT ) ( TOK_INDEX | TOK_FUNCTION )* TOK_POINTER*
+```
+
+## Increasing speed of type and expression comparison
+To make identifying common subexpressions and types easier, it may be worthwhile
+to implement some kind of recursive hashing mechanism like those seen in
+distributed databases, so that common subexpressions can be identified with
+simple checks.
+
+It would obviously not be useful in quite the same way, since recursively
+examining hashes of subexpressions may prove fruitless.
 
 ## Casting
 In C, there aren't as many legal casts as I had previously assumed. You may not
@@ -239,11 +204,12 @@ extension. This leaves us with few casts which need consideration:
 - Casting between function pointer types. I may also allow casting functions to
   and from void pointers, even though that is not required by the standard.
 
-## The arrow operator
+## The arrow and square bracket operator
 Accessing members of pointers to structs with the arrow operator is equivalent
 to dereferencing them and then accessing them with the dot operator, so maybe
 the parser should just add the necessary tree nodes to make those two operations
-look equivalent in the abstract syntax tree.
+look equivalent in the abstract syntax tree. A similar thing could be done with
+the square bracket (array indexing) operator.
 
 ## Passing information during type checking
 The return values of the type checker's internal functions should be a flagset
@@ -281,3 +247,247 @@ either representation can have the same code emitted.
 To make accessing variables uniform, parameters should be immediately written
 to the stack at the beginning of the function. This sequence of operations will
 look similar to the way a local variable declaration appears in assembly.
+
+## Pointer arithmetic
+Integer values may be added or subtracted from a pointer; when this happens, the
+pointer is assumed to be the member of an array, and the integer value is
+multiplied by the width of the object the pointer refers to before the operation
+is carried out. The result is a pointer to another object in the array, or is
+otherwise undefined.
+
+Two pointer values may be subtracted from one another. According to the
+standard, they must be of the same type and located in the same array; this
+implementation will forgo that for now for the sake of simplicity. The result
+of this operation is an integer whose exact type is implementation-defined
+(recommended to be ptrdiff_t by the standard) that represents the displacement
+between the two objects. The displacement can be calculated by performing the
+subtraction, then dividing the result by the width of the objects pointed
+to by the operands.
+
+The standard does not mention anything about adding pointers. The type checker
+should refuse attempts to add pointers of any type, or to add or subtract any
+two pointers of differing types.
+
+This shouldn't be too difficult to implement with the current structure of the
+type checker; most of the above is ruled out by disallowing implicit casts
+to and from pointer types besides `void`, which the standard already requires.
+
+It may additionally be required that adding/subtracting a void pointer from any
+other pointer not be allowed (no implicit conversions and the fact that the
+object underlying the pointer has no specified width), but I am not certain of
+this.
+
+## Scope
+The standard defines three scopes: The first is file scope, which is occupied by
+all objects not declared within a block, and which is visible anywhere within
+the file. The second is block scope, in which all declarations are visible for
+the duration of that block, including in nested blocks, so long as the object is
+not masked by another declaration.
+
+The third type is called "function prototype scope". Really all this scope means
+is that the parameter names in a function type don't matter beyond that
+prototype. When type checking function calls and definitions, the names of the
+parameters do not matter; only the types.
+
+As a consequence of this, the names of the parameters of a function prototype
+should be overwritten by the parameters used in the definition.
+
+Each new scope will need:
+- its own depth
+- a counter for the number 
+
+Each scope will have its own unique map used to track symbols. These maps will
+be pushed onto a stack in order of increasing depth, and new symbols will always
+be placed into the map on the top of the stack. The map at the bottom of the
+stack will always be global/file scope.
+
+Each scope will also have sequence numbers, which are used in ordering variables
+by declaration location. This number will be pushed and popped in the same way
+as the symbol tables are.
+
+To handle labels, which have function scope, the name of the function being
+worked with will be stored as a global variable. When function labels need to be
+verified or inserted into the symbol table, the function's symbol table will be
+retrieved from the global table for use.
+
+The function which resolves symbols (besides labels) will search each symbol
+table, starting at the top, for the corresponding symbol.
+
+## Promotion and casting
+Promotion rules for arithmetic values are as follows:
+- unsigned types are promoted to signed types
+- integers are promoted to wider types
+- any integer less wide than `signed int` is promoted to `signed int` when used;
+  the increase in width can be optimized away by compilers but not the change in
+  signedness.
+
+Casting/compatibility rules are as follows:
+- arrays and pointers are compatible, so long as the underlying types are compatible
+- pointers to functions and functions are compatible, so long as the underlying types are
+  compatible and the pointer is on the left hand/destination side
+- all explicit casts are allowed, without exception; be mindful of width
+
+## Operations that will be identical during assembly generation
+Some operations map pretty well to assembly instructions:
+- derefrencing pointers maps identically to `lea`
+- taking the address of something is pretty self-explanatory in assembly
+- float/double to int and back maps to a couple of simd instructions
+- anything that is an address (pointer, array) can be considered an int
+
+## Assembler nuances
+I'll stick to the following rules when generating assembly to simplify the
+process:
+- At the beginning of the function, enough space will be allocated to store:
+  - all variables declared within the function
+  - all parameters
+  - all stable registers
+- all parameters will be pushed onto the stack at the beginning of the function
+- Before each function call, all volatile registers will be pushed to the stack
+- functions may not have more than 6 normal arguments and 8 floating point
+  arguments (avoid having to implement stack-based arguments)
+- I will come up with a simple register allocation scheme later; at first,
+  registers will simply be numbered in increasing order like the virtual
+  registers were in the original intermediate language
+- every variable assignment is automatically put on the stack once it has been
+  computed
+- I will not use the x86 feature of using a value directly from memory in
+  operations. This is inefficient, but I feel it will simplify code generation.
+  Values will enter registers via the `mov` instruction.
+
+# Assembler generation
+The most basic assembly to be generated is the assembly having to do with
+integer/arithmetic expressions. This involves loading objects from memory,
+performing operations on them, then storing new values back to memory in the
+appropriate location.
+
+I will try to list all of the components needed to do this:
+1. Each (stack-allocated) object will need to have a particular address on the
+   stack assigned to it. I'm not sure if it will ever be correct to have
+   memory addresses for a single object. Probably not.
+2. Values should probably not be loaded into multiple registers at the same
+   time; instead, they should be reused where possible. However, there may be
+   instruction sequences that explicitly move/copy the contents of a register
+   to another register. This should be allowed.
+3. Intermediate values in computations may need to be temporarily stored on the
+   stack. They will have a fake object name generated to track them.
+4. Some data structure must be used to track where a value is currently located
+   in memory/registers, and updated when this value is destroyed by operators or
+   when the value changes and other instances are invalid.
+5. Some data structure must be used to track whether a register currently
+   contains a (valid) value.
+6. It may make sense to have the system that tracks whether or not values are
+   currently loaded into registers also be used to determine whether or not an
+   operand should be addressed from memory, instead of being loaded first.
+
+The initial implementation will not do any register allocation, or even refer
+to registers by their proper names. Instead, it will refer registers as r0, r1,
+r2, etc. in ascending order. These fake registers will not be reused. They are
+not immutable; because of the way x64 works, they will be clobbered by
+arithmetic operations. However, there will be at most one MOV/LOAD instruction
+where that register is the destination. This includes subregisters; if a value
+is moved into r0d, then at no point will values be moved into r0, r0w, or r0b.
+
+The generator will need to distinguish between `.data`, `.text`, and `.bss`
+sections, and decide which symbols belong in which location. It will also need
+to decide whether or not a symbol should be exported with the `global`
+directive, and whether or not a symbol needs to/should be imported with the
+`extern` directive. There is also `static` to consider, but I don't know if
+it is actually necessary.
+
+The generator will need to have access to the root of the abstract syntax tree.
+I do not think it will need to access the symbol tables, since all type info
+should be encoded in the tree already.
+
+All file-scope declarations will go in either the `.data` or `.bss` sections,
+depending on whether or not they have been initialized, and will be exported
+with the `global` directive unless they are declared `static` in the source
+file.
+
+All function declarations will be exported with the `global` directive, unless
+they were declared with the `static` keyword in the source file.
+
+The order in which these must be done is:
+1. other directives (`global`, `extern`, `default rel`, etc.)
+2. text segment
+3. data segment
+4. bss segment
+
+Since I am allowing declarations to occur anywhere, I should use a stack upon
+which function and global variable declarations are pushed so that they can be
+emitted later, and so that I can determine whether symbols need to be declared
+`extern`.
+
+Notes:
+- Division and multiplication are special; the destination operand is implied
+  and hardcoded to AX. AX is divided by the single operand. The lower half of
+  the result or the dividend will be stored in AX. The upper half of the result
+  or the remainder is stored in DX.
+- Unlike C, `extern` can't be used to reference any (non-static) function; the
+  function must have been exported with the `global` directive in the module
+  that defined it.
+
+# Assembly generation procudures
+Assembly generation for each instruction or type of instruction will have a
+dedicated method, each with responsibilities mirroring the ones in the type
+checker. There will be one "primary" function, `write_instruction`, that is
+mutually recursive with all other `write_X` functions. These functions will
+only recursively call into `write_instruction`.
+
+All of these functions will have three parameters:
+- the `ASTree` node to generate instruction(s) for
+- the `InstructionData` object, which will hold the output of the function
+- an `unsigned int`, with some flags holding information about what's going on
+  higher up in the recursion
+
+# Assembly Expression Generation
+By default, the left(destination) operand of every instruction is a register,
+while the right operand may be addressed from memory. This is not a restriction
+of x64, but it makes generation a little simpler.
+
+The function definition for most assembly evaluation functions will look like
+this:
+- the tree node to operate on
+- a set of flags indicating whether the result will be the source or destination
+  of the parent assembly instruction, among other things
+- the `InstructionData` structure, which the function will output its results to
+
+Structure of a generator function:
+- Recursively call into generator for first subtree(left/unary operand), if any
+- Recursively call into generator for second subtree(right operand), if any
+- Determine operation performed and the corresponding assembly instruction to be
+  emitted
+
+General procedure by token type:
+- For binary and unary ops, subexpressions are evaluated. The locations returned
+  are used as the operands in the instruction data.
+- For postfix increment and decrement specifically, the single subexpression is
+  evaluated, and the value stored at the resulting address is loaded into
+  another register; this register will be the one returned by the function. An
+  add command is emitted, with the left operand being the memory address of the
+  lval and the right being either an immediate 1 or -1.
+- For identifiers, the address of the identifier is loaded into a register,
+  which will be returned.
+- For constants/immediate integers and characters:
+  - if a left operand, the value will be loaded into a register with the `mov`
+    instruction
+  - if a right operand, the raw value will be returned
+
+## Label
+Since some labels will be pre-existing `const char *`, while others will be
+short, simple and generated like `.S0, .L1, .C2, .E3` etc., the `label` field
+of the struct will be a union of `size_t` and `const char *`. There will be
+an additional field indicating the type of the label (string constant, function,
+global variable, conditional, loop body, loop end, etc.) which the label printer
+function will use to determine how the label should be printed.
+
+# Register Allocation
+Before register allocation is done, all lines that will be written to the output
+file will first be stored in a linearly traversible and maybe random access data
+structure. Instructions will use virtual registers as operands.
+
+The x64 use of the left operand as destination will be respected when these
+lines are generated; the function that puts instruction data into the list will
+return the name of the register the result was placed into.
+
+The contents of source lines to be written out will be tracked in a struct with
+fields for label, instruction, left/right operands, and comment.

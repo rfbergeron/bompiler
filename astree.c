@@ -12,6 +12,7 @@
 #include "debug.h"
 #include "lyutils.h"
 #include "strset.h"
+#include "yyparse.h"
 #define LINESIZE 1024
 
 ASTree *astree_first(ASTree *parent) { return llist_get(&parent->children, 0); }
@@ -68,7 +69,7 @@ ASTree *astree_init(int symbol, const Location location, const char *info) {
       /* tree->attributes[ATTR_VREG] = 1; */
       break;
     case TOK_ARROW:
-    case TOK_INDEX:
+    case TOK_SUBSCRIPT:
       /* tree->attributes[ATTR_LVAL] = 1; */
       /* tree->attributes[ATTR_VADDR] = 1; */
       break;
@@ -99,6 +100,16 @@ int astree_destroy(ASTree *tree) {
 
   /* free symbol entries associated with scope */
   map_destroy(&tree->symbol_table);
+
+  /* free one-off TypeSpec objects */
+  switch (tree->symbol) {
+    case TOK_CAST:
+    case TOK_SUBSCRIPT:
+    case TOK_INDIRECTION:
+    case TOK_ADDROF:
+      typespec_destroy((TypeSpec *)tree->type);
+      break;
+  }
 
   free(tree);
   return 0;
@@ -145,7 +156,7 @@ ASTree *astree_adopt_sym(ASTree *parent, int symbol_, ASTree *child1,
   if (symbol_ == '<' || symbol_ == '>') {
     /* attributes.set((size_t)attr::INT); */
     /* attributes.set((size_t)attr::VREG); */
-  } else if (symbol_ == TOK_INDEX) {
+  } else if (symbol_ == TOK_SUBSCRIPT) {
     /* attributes.set((size_t)attr::VADDR); */
     /* attributes.set((size_t)attr::LVAL); */
   } else if (symbol_ == TOK_CALL) {
@@ -162,8 +173,11 @@ ASTree *astree_twin(ASTree *sibling1, ASTree *sibling2) {
   /* if it is the head of the list, this node points to itself */
   sibling2->firstborn = sibling1->firstborn;
   /* want to append to the end of the "list" */
-  sibling1->next_sibling = sibling2;
-  return sibling2;
+  ASTree *current = sibling1;
+  while (current->next_sibling) current = current->next_sibling;
+  current->next_sibling = sibling2;
+  /* return the head of the list */
+  return sibling1;
 }
 
 ASTree *astree_descend(ASTree *parent, ASTree *descendant) {
