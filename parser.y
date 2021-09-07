@@ -93,7 +93,7 @@ init_decl     : declarator '=' expr                                             
 declarator    : pointer direct_decl                                               { $$ = parser_make_declarator($1, $2); }
               | direct_decl                                                       { $$ = parser_make_declarator(NULL, $1); }
               ;
-pointer       : pointer '*'                                                       { $$ = astree_twin($1, astree_adopt_sym($2, TOK_POINTER, NULL, NULL); }
+pointer       : pointer '*'                                                       { $$ = astree_twin($1, astree_adopt_sym($2, TOK_POINTER, NULL, NULL)); }
               | '*'                                                               { $$ = astree_adopt_sym($1, TOK_POINTER, NULL, NULL);; }
               ;
 direct_decl   : TOK_IDENT                                                         { $$ = $1; }
@@ -160,9 +160,10 @@ unary_expr    : postfix_expr                                                    
               | paren_toks unary_expr %prec TOK_CAST                              { $$ = parser_make_cast($1, $2); }
               ;
 postfix_expr  : primary_expr                                                      { $$ = $1; }
-              | primary_expr TOK_INC %prec TOK_POST_INC                           { $$ = astree_adopt_sym($2, TOK_POST_INC, $1, NULL); }
-              | primary_expr TOK_DEC %prec TOK_POST_DEC                           { $$ = astree_adopt_sym($2, TOK_POST_DEC, $1, NULL); }
-              | primary_expr '(' arg_list ')'                                     { $$ = astree_adopt_sym($2, TOK_CALL, $1, $3); parser_cleanup (1, $4); }
+              | postfix_expr TOK_INC %prec TOK_POST_INC                           { $$ = astree_adopt_sym($2, TOK_POST_INC, $1, NULL); }
+              | postfix_expr TOK_DEC %prec TOK_POST_DEC                           { $$ = astree_adopt_sym($2, TOK_POST_DEC, $1, NULL); }
+              | postfix_expr '(' arg_list ')'                                     { $$ = astree_adopt_sym($2, TOK_CALL, $1, $3); parser_cleanup (1, $4); }
+              | postfix_expr '[' expr ']'                                         { $$ = astree_adopt_sym($2, TOK_SUBSCRIPT, $1, $3); astree_destroy($4); }
               ;
 arg_list      : %empty                                                            { $$ = NULL; }
               | arg_list ',' expr                                                 { $$ = astree_twin($1, $3); astree_destroy($2); }
@@ -231,10 +232,6 @@ ASTree *parser_make_array(ASTree *direct_decl, ASTree *bracket,
                           ASTree *length) {
   return astree_twin(direct_decl,
                      astree_adopt_sym(bracket, TOK_ARRAY, length, NULL));
-}
-
-ASTree *parser_make_pointer(ASTree *type_id) {
-  return astree_adopt_sym(star, TOK_POINTER, NULL, NULL);
 }
 
 ASTree *parser_make_type_id(ASTree *type, ASTree *id) {

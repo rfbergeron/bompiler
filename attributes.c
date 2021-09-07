@@ -49,6 +49,7 @@ const char *STRING_SHRT = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, SHORT)];
 const char *STRING_UCHAR = STRING_INT_MAP[INDEX_FROM_INT(UNSIGNED, CHAR)];
 const char *STRING_CHAR = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, CHAR)];
 
+const TypeSpec SPEC_EMPTY = {0, 0, BLIB_LLIST_EMPTY, TYPE_FLAG_NONE, TYPE_NONE};
 const TypeSpec SPEC_VOID = {0, 0, BLIB_LLIST_EMPTY, TYPE_FLAG_NONE, TYPE_VOID};
 const TypeSpec SPEC_ULONG = SPECIFY_INT(UNSIGNED, LONG);
 const TypeSpec SPEC_LONG = SPECIFY_INT(SIGNED, LONG);
@@ -206,12 +207,6 @@ int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {
   return ret;
 }
 
-/* TODO(Robert): make sure this doesn't need to be more thorough */
-int auxspec_copy(AuxSpec *dest, const AuxSpec *src) {
-  *dest = *src;
-  return 0;
-}
-
 int auxspec_destroy(AuxSpec *auxspec) {
   size_t i;
   switch (auxspec->aux) {
@@ -235,6 +230,12 @@ int auxspec_destroy(AuxSpec *auxspec) {
   return 0;
 }
 
+/* TODO(Robert): make sure this doesn't need to be more thorough */
+int auxspec_copy(AuxSpec *dest, const AuxSpec *src) {
+  *dest = *src;
+  return 0;
+}
+
 int typespec_init(TypeSpec *spec) {
   llist_init(&spec->auxspecs, (void (*)(void *)) & auxspec_destroy, NULL);
   return 0;
@@ -251,8 +252,9 @@ int typespec_destroy(TypeSpec *spec) {
   return 0;
 }
 
-/* TODO(Robert): make sure this doesn't need to be more thorough */
 int typespec_copy(TypeSpec *dest, const TypeSpec *src) {
   *dest = *src;
+  memset(&dest->auxspecs, 0, sizeof(dest->auxspecs));
+  llist_copy(&dest->auxspecs, (LinkedList *)&src->auxspecs);
   return 0;
 }

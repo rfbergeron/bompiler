@@ -141,6 +141,9 @@ int attributes_to_string(const unsigned int attributes, char *buf,
 void location_to_string(const Location *loc, char *buffer, size_t size);
 int type_to_string(const TypeSpec *type, char *buf, size_t bufsize);
 
+int auxspec_destroy(AuxSpec *auxspec);
+int auxspec_copy(AuxSpec *dest, const AuxSpec *src);
+
 int typespec_init(TypeSpec *spec);
 int typespec_destroy(TypeSpec *spec);
 int typespec_copy(TypeSpec *dst, const TypeSpec *src);

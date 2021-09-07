@@ -103,10 +103,12 @@ int astree_destroy(ASTree *tree) {
 
   /* free one-off TypeSpec objects */
   switch (tree->symbol) {
+    case TOK_ADDROF:
+      /* free pointer auxspec that was added */
+      auxspec_destroy(llist_pop_front((LinkedList *)&tree->type->auxspecs));
     case TOK_CAST:
     case TOK_SUBSCRIPT:
     case TOK_INDIRECTION:
-    case TOK_ADDROF:
       typespec_destroy((TypeSpec *)tree->type);
       break;
   }
