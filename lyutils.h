@@ -51,10 +51,12 @@ ASTree *parser_make_root();
 ASTree *parser_make_type_id(ASTree *type, ASTree *id);
 ASTree *parser_make_function(ASTree *type_id, ASTree *paren, ASTree *params);
 ASTree *parser_make_declaration(ASTree *spec, ASTree *decls);
+ASTree *parser_make_declarator(ASTree *pointer, ASTree *direct_decl);
 ASTree *parser_make_struct(ASTree *parent, ASTree *structure_id,
                            ASTree *structure_body);
 ASTree *parser_make_cast(ASTree *type, ASTree *expr);
 ASTree *parser_make_spec(ASTree *list);
+ASTree *parser_make_array(ASTree *direct_decl, ASTree *bracket, ASTree *length);
 void parser_cleanup(size_t count, ...);
 
 #define YYSTYPE_IS_DECLARED

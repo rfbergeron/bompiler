@@ -140,7 +140,9 @@ void insert_cast(ASTree *tree, size_t index, const TypeSpec *type) {
    */
   ASTree *to_cast = llist_extract(&tree->children, index);
   ASTree *cast = astree_init(TOK_CAST, to_cast->loc, "_cast");
-  cast->type = type;
+  TypeSpec *cast_spec = malloc(sizeof(*cast_spec));
+  typespec_copy(cast_spec, type);
+  cast->type = cast_spec;
   llist_insert(&tree->children, astree_adopt(cast, to_cast, NULL, NULL), index);
 }
 
@@ -650,24 +652,13 @@ int validate_assignment(ASTree *assignment) {
 }
 
 int validate_cast(ASTree *cast) {
-  ASTree *to_cast = NULL;
-  int status = 0;
+  ASTree *cast_spec = astree_first(cast);
+  cast->type = calloc(1, sizeof(*cast->type));
+  typespec_init((TypeSpec *)cast->type);
+  int status = validate_type(cast_spec, (TypeSpec *)cast->type);
+  if (status) return status;
 
-  if (astree_count(cast) > 1) {
-    /* explicit cast; process type specifiers */
-    ASTree *cast_spec = astree_first(cast);
-    /* create dummy symbol entry for cast specifier */
-    SymbolValue *dummy_entry = symbol_value_init(&cast_spec->loc);
-    status = validate_type(cast_spec, &dummy_entry->type);
-    if (status) return status;
-    /* assign dummy entry (freed based on token) */
-    cast->type = &dummy_entry->type;
-    to_cast = astree_second(cast);
-  } else {
-    /* implicit cast/promotion; no type specifiers */
-    to_cast = astree_first(cast);
-  }
-
+  ASTree *to_cast = astree_second(cast);
   status = validate_expr(to_cast);
   if (status) return status;
   int compatibility = types_compatible(cast, to_cast, ARG1_AST | ARG2_AST);
@@ -783,6 +774,52 @@ int validate_binop(ASTree *operator) {
   }
 
   return status;
+}
+
+int validate_indirection(ASTree *indirection) {
+  int status = validate_expr(astree_first(indirection));
+  if (status) return status;
+  if (!type_is_pointer(indirection->type) &&
+      !type_is_array(indirection->type)) {
+    /* error; indirection can only be used on pointers and arrays */
+  } else {
+    TypeSpec *indirection_spec = malloc(sizeof(*indirection_spec));
+    int status =
+        typespec_copy(indirection_spec, astree_first(indirection)->type);
+    if (status) return status;
+    llist_pop_front(&indirection_spec->auxspecs);
+    indirection->type = indirection_spec;
+  }
+  return 0;
+}
+
+int validate_addrof(ASTree *addrof) {
+  int status = validate_expr(astree_first(addrof));
+  if (status) return status;
+  /* TODO(Robert): check that operand is an lval */
+  TypeSpec *addrof_spec = malloc(sizeof(*addrof_spec));
+  status = typespec_copy(addrof_spec, astree_first(addrof)->type);
+  if (status) return status;
+  AuxSpec *ptr_aux = calloc(1, sizeof(*ptr_aux));
+  ptr_aux->aux = AUX_POINTER;
+  llist_push_front(&addrof_spec->auxspecs, ptr_aux);
+  addrof->type = addrof_spec;
+  return 0;
+}
+
+int validate_subscript(ASTree *subscript) {
+  int status = validate_expr(astree_first(subscript));
+  if (status) return status;
+  if (!type_is_pointer(subscript->type) && !type_is_array(subscript->type)) {
+    /* error; subscript can only be used on pointers and arrays */
+  } else {
+    TypeSpec *subscript_spec = malloc(sizeof(*subscript_spec));
+    int status = typespec_copy(subscript_spec, astree_first(subscript)->type);
+    if (status) return status;
+    llist_pop_front(&subscript_spec->auxspecs);
+    subscript->type = subscript_spec;
+  }
+  return 0;
 }
 
 int validate_unop(ASTree *operator) {
@@ -926,14 +963,16 @@ int validate_expr(ASTree *expression) {
       status = validate_call(expression);
       break;
     case TOK_SUBSCRIPT:
-      /* TODO(Robert): indexing */
-      status = -1;
+      status = validate_subscript(expression);
+      ;
       break;
     case TOK_INDIRECTION:
-      /* TODO(Robert): indirection */
+      status = validate_indirection(expression);
+      ;
       break;
     case TOK_ADDROF:
-      /* TODO(Robert): address-of */
+      status = validate_addrof(expression);
+      ;
       break;
     case TOK_ARROW:
       /* TODO(Robert): pointers and struct member access */
@@ -1262,37 +1301,51 @@ int validate_declaration(ASTree *declaration) {
   return 0;
 }
 
-int validate_return(ASTree *ret) {
-  /* TODO(Robert): use existing type checking functions to compare statement
-   * type with the declared function's return type
-   */
-
-  int status = 0;
-  if (astree_count(ret) > 0) {
-    if (current_function->type.base == TYPE_VOID) {
-      fprintf(stderr,
-              "ERROR: Return statement with value in void "
-              "function\n");
-      status = -1;
-    } else {
-      status = validate_expr(astree_first(ret));
-      if (status) return status;
-      TypeSpec *return_type = &(current_function->type);
-      int compatibility = types_compatible(return_type, astree_first(ret),
-                                           ARG1_TYPE | ARG2_AST);
-      if (compatibility == TCHK_INCOMPATIBLE ||
-          compatibility == TCHK_EXPLICIT_CAST) {
-        fprintf(stderr, "ERROR: Incompatible return type\n");
-        status = -1;
-      } else {
-        /* ret->attributes |= ATTR_EXPR_VREG;
-        ret->attributes |= astree_first(ret)->attributes; */
-      }
-    }
-  } else if (current_function->type.base != TYPE_VOID) {
-    fprintf(stderr, "ERROR: Function does not return promised value\n");
-    status = -1;
+int construct_ret_type(TypeSpec *dest, const TypeSpec *src) {
+  if (!type_is_function(src)) {
+    fprintf(stderr, "ERROR: cannot construct return type from object type\n");
+    return -1;
+  } else if (dest == NULL) {
+    fprintf(stderr,
+            "ERROR: destination is NULL, cannot construct return type\n");
+    return -1;
   }
+
+  typespec_copy(dest, src);
+  llist_pop_front(&dest->auxspecs);
+  return 0;
+}
+
+int validate_return(ASTree *ret) {
+  TypeSpec ret_spec = SPEC_EMPTY;
+  int status = construct_ret_type(&ret_spec, &current_function->type);
+  if (status) return status;
+  if (astree_count(ret) > 0) {
+    status = validate_expr(astree_first(ret));
+    if (status) return status;
+  }
+
+  const TypeSpec *expr_spec =
+      astree_count(ret) > 0 ? astree_first(ret)->type : &SPEC_VOID;
+  int compatibility =
+      types_compatible(&ret_spec, expr_spec, ARG1_TYPE | ARG2_TYPE);
+  if (compatibility == TCHK_INCOMPATIBLE ||
+      compatibility == TCHK_EXPLICIT_CAST) {
+    fprintf(stderr, "ERROR: Incompatible return type\n");
+    status = -1;
+  } else if (compatibility == TCHK_IMPLICIT_CAST) {
+    insert_cast(ret, 1, &ret_spec);
+    status = 0;
+    /* ret->attributes |= ATTR_EXPR_VREG;
+    ret->attributes |= astree_first(ret)->attributes; */
+  } else {
+    status = 0;
+    /* ret->attributes |= ATTR_EXPR_VREG;
+    ret->attributes |= astree_first(ret)->attributes; */
+  }
+
+  /* free temporary spec */
+  typespec_destroy(&ret_spec);
   return status;
 }
 
