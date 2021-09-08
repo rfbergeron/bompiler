@@ -25,6 +25,7 @@ ASTree *astree_adopt(ASTree *parent, ASTree *child1, ASTree *child2,
 ASTree *astree_adopt_sym(ASTree *parent, int symbol, ASTree *child1,
                          ASTree *child2);
 ASTree *astree_descend(ASTree *parent, ASTree *descendant);
+ASTree *astree_inject(ASTree *old_node, ASTree *new_node);
 ASTree *astree_twin(ASTree *sibling1, ASTree *sibling2);
 ASTree *astree_first(ASTree *parent);
 ASTree *astree_second(ASTree *parent);

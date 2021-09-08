@@ -118,6 +118,16 @@ will store other type information.
 Both of these structures will have a copy, init, and destroy function associated
 with them, to make (re)using the information stored in them easier.
 
+## Special handling of function identifiers
+Function identifiers and pointers receive special treatment based on their
+location in an expression. When used on their own in/as an expression, they
+are automatically converted to a pointer to a function of their type. When
+function pointers are used during a call, the type of the expression is
+to a function of the appropriate type, minus the pointer specifier.
+
+Within the implementation, it may be more convenient to treat lone identifiers
+as the special case when used as the identifier of a function call.
+
 ## Propagating and resolving type information
 Currently, the "primary" storage location for type information is in the symbol
 table. This information is accessed from other locations, namely nodes of the

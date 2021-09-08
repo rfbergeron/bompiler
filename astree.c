@@ -191,6 +191,17 @@ ASTree *astree_descend(ASTree *parent, ASTree *descendant) {
   return parent;
 }
 
+ASTree *astree_inject(ASTree *old_node, ASTree *new_node) {
+  ASTree temp = *old_node;
+  *old_node = *new_node;
+  *new_node = temp;
+  new_node->firstborn = old_node->firstborn;
+  new_node->next_sibling = old_node->next_sibling;
+  old_node->firstborn = temp.firstborn;
+  old_node->next_sibling = temp.next_sibling;
+  return astree_adopt(old_node, new_node, NULL, NULL);
+}
+
 size_t astree_count(ASTree *parent) { return llist_size(&parent->children); }
 
 void astree_dump_tree(ASTree *tree, FILE *out, int depth) {
