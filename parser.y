@@ -73,8 +73,8 @@ topdecl       : declaration ';'                                                 
 declaration   : typespec_list init_decls                                          { $$ = parser_make_declaration($1, $2); }
               | typespec_list                                                     { $$ = NULL; astree_destroy($1); }
               ;
-typespec_list : typespec_list typespec                                            { $$ = astree_twin($1, $2); }
-              | typespec                                                          { $$ = $1; }
+typespec_list : typespec_list typespec                                            { $$ = astree_adopt($1, $2, NULL, NULL); }
+              | typespec                                                          { $$ = parser_make_spec($1); }
               ;
 typespec      : TOK_LONG                                                          { $$ = $1; }
               | TOK_SIGNED                                                        { $$ = $1; }

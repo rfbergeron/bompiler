@@ -120,31 +120,31 @@ int astree_destroy(ASTree *tree) {
 ASTree *astree_adopt(ASTree *parent, ASTree *child1, ASTree *child2,
                      ASTree *child3) {
   if (child1 != NULL) {
-    DEBUGS('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
-           parser_get_tname(child1->symbol));
     ASTree *current_sibling = child1->firstborn;
 
     do {
+      DEBUGS('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
+             parser_get_tname(current_sibling->symbol));
       llist_push_back(&parent->children, current_sibling);
       current_sibling = current_sibling->next_sibling;
     } while (current_sibling != NULL);
   }
   if (child2 != NULL) {
-    DEBUGS('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
-           parser_get_tname(child2->symbol));
     ASTree *current_sibling = child2->firstborn;
 
     do {
+      DEBUGS('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
+             parser_get_tname(current_sibling->symbol));
       llist_push_back(&parent->children, current_sibling);
       current_sibling = current_sibling->next_sibling;
     } while (current_sibling != NULL);
   }
   if (child3 != NULL) {
-    DEBUGS('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
-           parser_get_tname(child3->symbol));
     ASTree *current_sibling = child3->firstborn;
 
     do {
+      DEBUGS('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
+             parser_get_tname(current_sibling->symbol));
       llist_push_back(&parent->children, current_sibling);
       current_sibling = current_sibling->next_sibling;
     } while (current_sibling != NULL);
