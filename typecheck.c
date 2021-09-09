@@ -598,7 +598,7 @@ int validate_type(ASTree *type, TypeSpec *out) {
     break;
     */
     default:
-      fprintf(stderr, "ERROR: unimplemented type: %s",
+      fprintf(stderr, "ERROR: unimplemented type: %s\n",
               parser_get_tname(type->symbol));
       status = -1;
       break;
