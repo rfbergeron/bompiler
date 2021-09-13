@@ -16,7 +16,8 @@
 %token-table
 %verbose
 
-%destructor { fprintf(stderr, "Cleanup\n"); } <>
+%destructor { astree_destroy($$); } <>
+%destructor { ; } program
 %printer { assert (yyoutput == stderr); astree_dump($$, stderr); } <>
 
 /* TODO(Robert): postfix increment/decrement should get
@@ -61,26 +62,28 @@
 %right TOK_ELSE
 
 %%
-program       : %empty                                                            { parser_root = parser_make_root(); $$ = parser_root; }
+program       : topdecl                                                           { $$ = parser_root = astree_adopt(parser_make_root(), $1, NULL, NULL); }
               | program topdecl                                                   { $$ = astree_adopt($1, $2, NULL, NULL); }
               | program error '}'                                                 { $$ = $1; astree_destroy($3); }
               | program error ';'                                                 { $$ = $1; astree_destroy($3); }
               ;
 topdecl       : declaration ';'                                                   { $$ = $1; astree_destroy($2); }
+              | struct_spec ';'                                                   { $$ = $1; astree_destroy($2); }
+              | union_spec ';'                                                    { $$ = $1; astree_destroy($2); }
               | typespec_list declarator block                                    { $$ = astree_adopt(parser_make_declaration($1, $2), $3, NULL, NULL); }
               | ';'                                                               { $$ = NULL; astree_destroy($1); }
               ;
-struct_spec   : TOK_STRUCT TOK_IDENT '{' struct_decl_list '}'                     { $$ = astree_adopt($1, $2, $4, NULL); astree_destroy($3); astree_destroy($5);}
+struct_spec   : TOK_STRUCT TOK_IDENT '{' struct_decl_list '}'                     { $$ = astree_adopt($1, $2, $4, NULL); astree_destroy($3); astree_destroy($5); }
               | TOK_STRUCT TOK_IDENT                                              { $$ = astree_adopt($1, $2, NULL, NULL); }
               ;
-union_spec    : TOK_UNION TOK_IDENT '{' struct_decl_list '}'                      { $$ = astree_adopt($1, $2, $4, NULL); astree_destroy($3); astree_destroy($5);}
+union_spec    : TOK_UNION TOK_IDENT '{' struct_decl_list '}'                      { $$ = astree_adopt($1, $2, $4, NULL); astree_destroy($3); astree_destroy($5); }
               | TOK_UNION TOK_IDENT                                               { $$ = astree_adopt($1, $2, NULL, NULL); }
               ;
 struct_decl_list
               : struct_decl_list struct_decl ';'                                  { $$ = astree_twin($1, $2); astree_destroy($3); }
               | struct_decl ';'                                                   { $$ = $1; astree_destroy($2); }
               ;
-struct_decl   : struct_decl ',' declarator                                        { $$ = astree_adopt($1, $3); astree_destroy($2); }
+struct_decl   : struct_decl ',' declarator                                        { $$ = astree_adopt($1, $3, NULL, NULL); astree_destroy($2); }
               | typespec_list declarator                                          { $$ = parser_make_declaration($1, $2); }
               ;
 declaration   : typespec_list init_decls                                          { $$ = parser_make_declaration($1, $2); }
@@ -274,11 +277,6 @@ ASTree *parser_make_type_id(ASTree *type, ASTree *id) {
   return astree_adopt(type_id, type, id, NULL);
 }
 
-/* due to grammar ambiguities regarding identifiers, the parser cannot (with
- * shift/reduce conflicts) distinguish between an expression surrounded by
- * parentheses and a cast operation with only one token of lookahead when a
- * TOK_IDENT is all that occurs between the parentheses.
- */
 ASTree *parser_make_cast(ASTree *spec_list, ASTree *abstract_declaration,
                          ASTree *expr) {
   ASTree *cast = astree_init(TOK_CAST, spec_list->loc, "_cast");

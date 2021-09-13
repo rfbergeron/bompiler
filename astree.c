@@ -15,6 +15,8 @@
 #include "yyparse.h"
 #define LINESIZE 1024
 
+extern int skip_type_check;
+
 ASTree *astree_first(ASTree *parent) { return llist_get(&parent->children, 0); }
 
 ASTree *astree_second(ASTree *parent) {
@@ -102,17 +104,19 @@ int astree_destroy(ASTree *tree) {
   map_destroy(&tree->symbol_table);
 
   /* free one-off TypeSpec objects */
-  switch (tree->symbol) {
-    case TOK_ADDROF:
-      /* free pointer auxspec that was added */
-      auxspec_destroy(llist_pop_front((LinkedList *)&tree->type->auxspecs));
-    case TOK_CAST:
-    case TOK_SUBSCRIPT:
-    case TOK_INDIRECTION:
-    case TOK_CALL:
-      typespec_destroy((TypeSpec *)tree->type);
-      free((TypeSpec *)tree->type);
-      break;
+  if (!skip_type_check) {
+    switch (tree->symbol) {
+      case TOK_ADDROF:
+        /* free pointer auxspec that was added */
+        auxspec_destroy(llist_pop_front((LinkedList *)&tree->type->auxspecs));
+      case TOK_CAST:
+      case TOK_SUBSCRIPT:
+      case TOK_INDIRECTION:
+      case TOK_CALL:
+        typespec_destroy((TypeSpec *)tree->type);
+        free((TypeSpec *)tree->type);
+        break;
+    }
   }
 
   free(tree);
