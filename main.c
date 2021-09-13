@@ -207,6 +207,7 @@ int main(int argc, char **argv) {
 
   /* type_checker_dump_symbols (symfile); */
 print_untyped:
+cleanup:
   astree_print_tree(parser_root, astfile, 0);
 
   /*
@@ -223,8 +224,6 @@ print_untyped:
     goto cleanup;
   }
   */
-
-cleanup:
 
   DEBUGS('m', "Execution finished; wrapping up.");
 

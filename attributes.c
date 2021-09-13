@@ -14,11 +14,13 @@
       TYPE_FLAG_NONE,     TYPE_##sign,                           \
   };
 
+/*
 struct conversion_entry {
   enum base_type from;
   enum base_type to;
   enum conversion_type conversion;
 };
+*/
 
 enum string_int_index {
   INDEX_FROM_INT(UNSIGNED, LONG),
@@ -115,29 +117,66 @@ void location_to_string(const Location *loc, char *buffer, size_t size) {
 
 int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {
   int ret = 0;
+  /* TODO(Robert): casting away const bad; redo badlib so that query functions
+   * have const arguments
+   */
+  size_t i;
+  for (i = 0; i < llist_size((LinkedList *)&type->auxspecs); ++i) {
+    AuxSpec *auxspec = llist_get((LinkedList *)&type->auxspecs, i);
+    switch (auxspec->aux) {
+      case AUX_ARRAY:
+        if (auxspec->data.ptr_or_arr.length > 0) {
+          ret += sprintf((buf + ret), " array of size %zu of",
+                         auxspec->data.ptr_or_arr.length);
+        } else {
+          ret += sprintf((buf + ret), " array of");
+        }
+        break;
+      case AUX_POINTER:
+        ret += sprintf((buf + ret), " pointer to");
+        break;
+      case AUX_FUNCTION:
+        ret += sprintf((buf + ret), " function with parameters (");
+        LinkedList *params = &auxspec->data.params;
+        size_t j;
+        for (j = 0; j < llist_size(params); ++j) {
+          SymbolValue *param_symval = llist_get(params, j);
+          ret +=
+              type_to_string(&(param_symval->type), (buf + ret), bufsize - ret);
+          if (j + 1 < llist_size(params)) {
+            ret += sprintf((buf + ret), ", ");
+          }
+        }
+        ret += sprintf((buf + ret), ") returning");
+        break;
+      default:
+        break;
+    }
+  }
   /* TODO(Robert): use the mappings defined above to print instead of this
    * silly shit
    */
   switch (type->base) {
     case TYPE_NONE:
-      buf[0] = 0;
+      /* ret += sprintf(buf + ret, " none"); */
+      buf[ret] = 0;
       break;
     case TYPE_VOID:
-      ret = sprintf(buf, "void");
+      ret += sprintf(buf + ret, " void");
       break;
     case TYPE_SIGNED:
       switch (type->width) {
         case 8:
-          ret = sprintf(buf, "signed long");
+          ret += sprintf(buf + ret, " signed long");
           break;
         case 4:
-          ret = sprintf(buf, "signed int");
+          ret += sprintf(buf + ret, " signed int");
           break;
         case 2:
-          ret = sprintf(buf, "signed short");
+          ret += sprintf(buf + ret, " signed short");
           break;
         case 1:
-          ret = sprintf(buf, "signed char");
+          ret += sprintf(buf + ret, " signed char");
           break;
         default:
           fprintf(stderr, "ERROR: Unknown width of signed type: %lu\n",
@@ -148,16 +187,16 @@ int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {
     case TYPE_UNSIGNED:
       switch (type->width) {
         case 8:
-          ret = sprintf(buf, "unsigned long");
+          ret += sprintf(buf + ret, " unsigned long");
           break;
         case 4:
-          ret = sprintf(buf, "unsigned int");
+          ret += sprintf(buf + ret, " unsigned int");
           break;
         case 2:
-          ret = sprintf(buf, "unsigned short");
+          ret += sprintf(buf + ret, " unsigned short");
           break;
         case 1:
-          ret = sprintf(buf, "unsigned char");
+          ret += sprintf(buf + ret, " unsigned char");
           break;
         default:
           fprintf(stderr, "ERROR: Unknown width of unsigned type: %lu\n",
@@ -169,41 +208,6 @@ int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {
       break;
   }
 
-  /* TODO(Robert): casting away const bad; redo badlib so that query functions
-   * have const arguments
-   */
-  size_t i;
-  for (i = 0; i < llist_size((LinkedList *)&type->auxspecs); ++i) {
-    AuxSpec *auxspec = llist_get((LinkedList *)&type->auxspecs, i);
-    switch (auxspec->aux) {
-      case AUX_ARRAY:
-        if (auxspec->data.ptr_or_arr.length > 0) {
-          ret += sprintf((buf + ret), "[%zu]", auxspec->data.ptr_or_arr.length);
-        } else {
-          ret += sprintf((buf + ret), "[]");
-        }
-        break;
-      case AUX_POINTER:
-        ret += sprintf((buf + ret), "*");
-        break;
-      case AUX_FUNCTION:
-        ret += sprintf((buf + ret), " ()(");
-        LinkedList *params = &auxspec->data.params;
-        size_t j;
-        for (j = 0; j < llist_size(params); ++j) {
-          SymbolValue *param_symval = llist_get(params, j);
-          ret +=
-              type_to_string(&(param_symval->type), (buf + ret), bufsize - ret);
-          if (i + 1 < llist_size(params)) {
-            ret += sprintf((buf + ret), ", ");
-          }
-        }
-        ret += sprintf((buf + ret), ")");
-        break;
-      default:
-        break;
-    }
-  }
   return ret;
 }
 
