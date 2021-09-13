@@ -111,6 +111,7 @@ const Location *extract_loc(ASTree *tree) {
 int assign_type(ASTree *tree) {
   DEBUGS('t', "Attempting to assign a type");
   ASTree *identifier = extract_ident(tree);
+  if (identifier == NULL) return -1;
   const char *id_str = identifier->lexinfo;
   size_t id_str_len = strnlen(id_str, MAX_IDENT_LEN);
   SymbolValue *symval = NULL;
@@ -124,6 +125,13 @@ int assign_type(ASTree *tree) {
             parser_get_tname(tree->symbol));
     return -1;
   }
+}
+
+void merge_declspecs(TypeSpec *dest, const TypeSpec *declspecs) {
+  dest->base = declspecs->base;
+  dest->width = declspecs->width;
+  dest->alignment = declspecs->alignment;
+  return;
 }
 
 /*
@@ -330,7 +338,7 @@ int compare_declspecs(const TypeSpec *dest, const TypeSpec *src) {
 int types_compatible(const void *arg1, const void *arg2, unsigned int flags) {
   const TypeSpec *type1 = NULL;
   const TypeSpec *type2 = NULL;
-  int action = CONV_COMPATIBLE;
+  int action = TCHK_COMPATIBLE;
 
   /* extract type from first argument */
   if (flags & ARG1_AST) {
@@ -616,29 +624,35 @@ int validate_ident(ASTree *ident) {
 }
 
 int validate_call(ASTree *call) {
-  if (astree_first(call)->symbol == TOK_IDENT) {
+  ASTree *function = astree_first(call);
+  if (function->symbol == TOK_IDENT) {
     /* circumvent normal procedure of turning identifier for function to a
      * pointer to a function
      */
-    int status = assign_type(astree_first(call));
+    int status = assign_type(function);
     if (status) return status;
   } else {
-    ASTree *function = astree_first(call);
     int status = validate_expr(function);
     if (status) return status;
   }
 
-  if (type_is_pointer(astree_first(call)->type)) {
+  if (type_is_pointer(function->type)) {
     /* automatic dereference of function pointer */
-    int status = insert_indirection(astree_first(call));
+    int status = insert_indirection(function);
     if (status) return status;
   }
 
-  TypeSpec *function_spec = (TypeSpec *)astree_first(call)->type;
+  TypeSpec *function_spec = (TypeSpec *)function->type;
   if (!type_is_function(function_spec)) {
+    char buf[4096];
+    int chars_written = type_to_string(function_spec, buf, 4096);
+    if (chars_written > 4096) {
+      abort();
+    }
+
     fprintf(stderr,
-            "ERROR: cannot call identifier whose type is not function: %s\n",
-            extract_ident(astree_first(call))->lexinfo);
+            "ERROR: cannot call non-function %s, whose type is \"%s\"\n",
+            extract_ident(function)->lexinfo, buf);
     return -1;
   }
 
@@ -688,8 +702,7 @@ int validate_assignment(ASTree *assignment) {
   status = validate_expr(src);
   if (status != 0) return status;
 
-  int compatibility = types_compatible(
-      astree_first(assignment), astree_second(assignment), ARG1_AST | ARG2_AST);
+  int compatibility = types_compatible(dest, src, ARG1_AST | ARG2_AST);
   if (compatibility == TCHK_INCOMPATIBLE ||
       compatibility == TCHK_EXPLICIT_CAST) {
     fprintf(stderr, "ERROR: Incompatible types for tokens: %s,%s %s,%s\n",
@@ -699,7 +712,7 @@ int validate_assignment(ASTree *assignment) {
             astree_second(assignment)->lexinfo);
     status = -2;
   } else if (compatibility == TCHK_IMPLICIT_CAST) {
-    insert_cast(assignment, dest->type);
+    insert_cast(src, dest->type);
   } /* else if (!(astree_first(assignment)->attributes & ATTR_EXPR_LVAL)) {
      fprintf(stderr, "ERROR: Destination is not an LVAL\n");
      status = -1;
@@ -709,17 +722,142 @@ int validate_assignment(ASTree *assignment) {
   return status;
 }
 
+int define_params(ASTree *params, ASTree *ident, TypeSpec *spec) {
+  AuxSpec *aux_function = calloc(1, sizeof(*aux_function));
+  aux_function->aux = AUX_FUNCTION;
+  LinkedList *param_entries = &(aux_function->data.params);
+  /* type is not resposible for freeing symbol information */
+  llist_init(param_entries, NULL, NULL);
+  create_scope(&(ident->symbol_table));
+  size_t i;
+  for (i = 0; i < astree_count(params); ++i) {
+    ASTree *param = astree_get(params, i);
+    ASTree *spec = astree_get(param, 0);
+    ASTree *declarator = astree_get(param, 1);
+    const char *param_id_str = extract_ident(declarator)->lexinfo;
+    DEBUGS('t', "Defining function parameter %s", param_id_str);
+    int status = validate_declaration(param);
+    if (status) return status;
+    size_t param_id_str_len = strnlen(param_id_str, MAX_IDENT_LEN);
+    SymbolValue *param_entry = NULL;
+    int in_current_scope =
+        locate_symbol(param_id_str, param_id_str_len, &param_entry);
+    if (!in_current_scope) {
+      fprintf(stderr,
+              "ERROR: parameter symbol was not inserted into function table\n");
+      return -1;
+    }
+    llist_push_back(param_entries, param_entry);
+  }
+  llist_push_back(&spec->auxspecs, aux_function);
+  /* temporarily leave function prototype scope to work on global table */
+  leave_scope(&(ident->symbol_table));
+  return 0;
+}
+
+int define_array(ASTree *array, TypeSpec *spec) {
+  AuxSpec *aux_array = calloc(1, sizeof(*aux_array));
+  aux_array->aux = AUX_ARRAY;
+  if (astree_count(array) > 0) {
+    aux_array->data.ptr_or_arr.length =
+        strtoumax(astree_first(array)->lexinfo, NULL, 0);
+    if (aux_array->data.ptr_or_arr.length == ULONG_MAX) {
+      fprintf(stderr, "ERROR: array size too large\n");
+      return -1;
+    }
+  }
+  llist_push_back(&spec->auxspecs, aux_array);
+  return 0;
+}
+
+int define_pointer(ASTree *pointer, TypeSpec *spec) {
+  AuxSpec *aux_pointer = calloc(1, sizeof(*aux_pointer));
+  aux_pointer->aux = AUX_POINTER;
+  llist_push_back(&spec->auxspecs, aux_pointer);
+  return 0;
+}
+
+int validate_dirdecl(ASTree *dirdecl, ASTree *ident, TypeSpec *spec) {
+  /* TODO(Robert): do not allow multiple function dirdecls to occur, and do not
+   * allow functions to return array types
+   */
+  /*
+  AuxSpec *prev = llist_back(&symbol->type.auxspecs);
+  if (prev && prev->aux == AUX_FUNCTION) {
+    fprintf(stderr,
+            "ERROR: function declarator must be last in list of direct "
+            "declarators\n");
+    return -1;
+  } else if (prev && prev->aux == AUX_ARRAY &&
+             dirdecl->symbol == TOK_FUNCTION) {
+    fprintf(stderr, "ERROR: function and array specifiers may not co-occur\n");
+    return -1;
+  }
+  */
+
+  switch (dirdecl->symbol) {
+    case TOK_DECLARATOR: {
+      size_t i;
+      for (i = 0; i < astree_count(dirdecl); ++i) {
+        int status = validate_dirdecl(astree_get(dirdecl, i), ident, spec);
+        if (status) return status;
+      }
+    }
+      return 0;
+      break;
+    case TOK_IDENT:
+      /* do nothing */
+      return 0;
+      break;
+    case TOK_ARRAY:
+      return define_array(dirdecl, spec);
+      break;
+    case TOK_POINTER:
+      return define_pointer(dirdecl, spec);
+      break;
+    case TOK_FUNCTION:
+      return define_params(dirdecl, ident, spec);
+      break;
+    default:
+      fprintf(stderr, "ERROR: invalid direct declarator: %s\n",
+              parser_get_tname(dirdecl->symbol));
+      return -1;
+      break;
+  }
+}
+
 int validate_cast(ASTree *cast) {
-  ASTree *cast_spec = astree_first(cast);
-  cast->type = calloc(1, sizeof(*cast->type));
-  typespec_init((TypeSpec *)cast->type);
-  int status = validate_type(cast_spec, (TypeSpec *)cast->type);
+  ASTree *spec_list = astree_first(cast);
+  /* validate_type overrides every field in the spec so we can't just pass it
+   * an already-initialized spec
+   */
+  TypeSpec declspecs = SPEC_EMPTY;
+  int status = validate_type(spec_list, &declspecs);
+  if (status) return status;
+  TypeSpec *spec = calloc(1, sizeof(*cast->type));
+  merge_declspecs(spec, &declspecs);
+  cast->type = spec;
+  typespec_init(spec);
   if (status) return status;
 
-  ASTree *to_cast = astree_second(cast);
-  status = validate_expr(to_cast);
+  ASTree *abstract_decl = NULL;
+  ASTree *expr = NULL;
+
+  if (astree_second(cast)->symbol == TOK_DECLARATOR) {
+    abstract_decl = astree_second(cast);
+    expr = astree_third(cast);
+    size_t i;
+    for (i = 0; i < astree_count(abstract_decl); ++i) {
+      int status = validate_dirdecl(astree_get(abstract_decl, i), cast, spec);
+      if (status) return status;
+    }
+  } else {
+    expr = astree_second(cast);
+  }
+
+  status = validate_expr(expr);
   if (status) return status;
-  int compatibility = types_compatible(cast, to_cast, ARG1_AST | ARG2_AST);
+  int compatibility = types_compatible(cast, expr, ARG1_AST | ARG2_AST);
   if (compatibility == TCHK_INCOMPATIBLE)
     return -1;
   else
@@ -791,10 +929,10 @@ int validate_binop(ASTree *operator) {
 
   int compatibility =
       types_compatible(promoted_type, left, ARG1_TYPE | ARG2_AST);
-  if (compatibility == CONV_IMPLICIT_CAST) {
-    insert_cast(operator, promoted_type);
-  } else if (compatibility == CONV_INCOMPATIBLE ||
-             compatibility == CONV_EXPLICIT_CAST) {
+  if (compatibility == TCHK_IMPLICIT_CAST) {
+    insert_cast(left, promoted_type);
+  } else if (compatibility == TCHK_INCOMPATIBLE ||
+             compatibility == TCHK_EXPLICIT_CAST) {
     /* should not happen but I am bad at programming so it would be worth
      * checking for
      */
@@ -803,10 +941,10 @@ int validate_binop(ASTree *operator) {
   }
 
   compatibility = types_compatible(promoted_type, right, ARG1_TYPE | ARG2_AST);
-  if (compatibility == CONV_IMPLICIT_CAST) {
-    insert_cast(operator, promoted_type);
-  } else if (compatibility == CONV_INCOMPATIBLE ||
-             compatibility == CONV_EXPLICIT_CAST) {
+  if (compatibility == TCHK_IMPLICIT_CAST) {
+    insert_cast(right, promoted_type);
+  } else if (compatibility == TCHK_INCOMPATIBLE ||
+             compatibility == TCHK_EXPLICIT_CAST) {
     /* should not happen but I am bad at programming so it would be worth
      * checking for
      */
@@ -938,10 +1076,10 @@ int validate_equality(ASTree *operator) {
     if (status) return status;
     int compatibility =
         types_compatible(promoted_type, left, ARG1_TYPE | ARG2_AST);
-    if (compatibility == CONV_IMPLICIT_CAST) {
-      insert_cast(operator, promoted_type);
-    } else if (compatibility == CONV_INCOMPATIBLE ||
-               compatibility == CONV_EXPLICIT_CAST) {
+    if (compatibility == TCHK_IMPLICIT_CAST) {
+      insert_cast(left, promoted_type);
+    } else if (compatibility == TCHK_INCOMPATIBLE ||
+               compatibility == TCHK_EXPLICIT_CAST) {
       /* should not happen but I am bad at programming so it would be worth
        * checking for
        */
@@ -951,10 +1089,10 @@ int validate_equality(ASTree *operator) {
 
     compatibility =
         types_compatible(promoted_type, right, ARG1_TYPE | ARG2_AST);
-    if (compatibility == CONV_IMPLICIT_CAST) {
-      insert_cast(operator, promoted_type);
-    } else if (compatibility == CONV_INCOMPATIBLE ||
-               compatibility == CONV_EXPLICIT_CAST) {
+    if (compatibility == TCHK_IMPLICIT_CAST) {
+      insert_cast(right, promoted_type);
+    } else if (compatibility == TCHK_INCOMPATIBLE ||
+               compatibility == TCHK_EXPLICIT_CAST) {
       /* should not happen but I am bad at programming so it would be worth
        * checking for
        */
@@ -1065,108 +1203,17 @@ int validate_expr(ASTree *expression) {
   return status;
 }
 
-int define_params(ASTree *params, ASTree *ident, SymbolValue *function_entry) {
-  AuxSpec *function_aux = calloc(1, sizeof(*function_aux));
-  function_aux->aux = AUX_FUNCTION;
-  LinkedList *param_entries = &(function_aux->data.params);
-  /* type is not resposible for freeing symbol information */
-  llist_init(param_entries, NULL, NULL);
-  create_scope(&(ident->symbol_table));
-  size_t i;
-  for (i = 0; i < astree_count(params); ++i) {
-    ASTree *param = astree_get(params, i);
-    const char *param_id_str = extract_ident(param)->lexinfo;
-    DEBUGS('t', "Defining function parameter %s", param_id_str);
-    int status = validate_declaration(param);
-    if (status) return status;
-    size_t param_id_str_len = strnlen(param_id_str, MAX_IDENT_LEN);
-    SymbolValue *param_entry = NULL;
-    int in_current_scope =
-        locate_symbol(param_id_str, param_id_str_len, &param_entry);
-    if (!in_current_scope) {
-      fprintf(stderr,
-              "ERROR: parameter symbol was not inserted into function table\n");
-      return -1;
-    }
-    llist_push_back(param_entries, param_entry);
-  }
-  /* temporarily leave function prototype scope to work on global table */
-  leave_scope(&(ident->symbol_table));
-  return 0;
-}
-
-int define_array(ASTree *array, SymbolValue *symbol) {
-  AuxSpec *aux_array = calloc(1, sizeof(*aux_array));
-  aux_array->aux = AUX_ARRAY;
-  if (astree_count(array) > 0) {
-    aux_array->data.ptr_or_arr.length =
-        strtoumax(astree_first(array)->lexinfo, NULL, 0);
-    if (aux_array->data.ptr_or_arr.length == ULONG_MAX) {
-      fprintf(stderr, "ERROR: array size too large\n");
-      return -1;
-    }
-  }
-  llist_push_back(&symbol->type.auxspecs, aux_array);
-  return 0;
-}
-
-int define_pointer(ASTree *pointer, SymbolValue *symbol) {
-  AuxSpec *aux_pointer = calloc(1, sizeof(*aux_pointer));
-  aux_pointer->aux = AUX_POINTER;
-  llist_push_back(&symbol->type.auxspecs, aux_pointer);
-  return 0;
-}
-
-int validate_dirdecl(ASTree *dirdecl, ASTree *ident, SymbolValue *symbol) {
-  AuxSpec *prev = llist_back(&symbol->type.auxspecs);
-  if (prev && prev->aux == AUX_FUNCTION) {
-    fprintf(stderr,
-            "ERROR: function declarator must be last in list of direct "
-            "declarators\n");
-    return -1;
-  } else if (prev && prev->aux == AUX_ARRAY &&
-             dirdecl->symbol == TOK_FUNCTION) {
-    fprintf(stderr, "ERROR: function and array specifiers may not co-occur\n");
-    return -1;
-  }
-
-  switch (dirdecl->symbol) {
-    case TOK_DECLARATOR: {
-      size_t i;
-      for (i = 0; i < astree_count(dirdecl); ++i) {
-        int status = validate_dirdecl(astree_get(dirdecl, i), ident, symbol);
-        if (status) return status;
-      }
-    }
-      return 0;
-      break;
-    case TOK_ARRAY:
-      return define_array(dirdecl, symbol);
-      break;
-    case TOK_POINTER:
-      return define_pointer(dirdecl, symbol);
-      break;
-    case TOK_FUNCTION:
-      return define_params(dirdecl, ident, symbol);
-      break;
-    default:
-      fprintf(stderr, "ERROR: invalid direct declarator for symbol\n");
-      return -1;
-      break;
-  }
-}
-
 int declare_symbol(ASTree *declaration, size_t i, TypeSpec *declspecs) {
   ASTree *declarator = astree_get(declaration, i);
   ASTree *identifier = extract_ident(declarator);
   DEBUGS('t', "Making object entry for value %s", identifier->lexinfo);
   SymbolValue *symbol = symbol_value_init(&declarator->loc);
-  symbol->type = *declspecs;
+  merge_declspecs(&symbol->type, declspecs);
 
   size_t j;
   for (j = 0; j < astree_count(declarator); ++j) {
     int status =
-        validate_dirdecl(astree_get(declarator, j), identifier, symbol);
+        validate_dirdecl(astree_get(declarator, j), identifier, &symbol->type);
     if (status) return status;
   }
 
@@ -1220,14 +1267,15 @@ int define_symbol(ASTree *declaration, size_t i, TypeSpec *declspecs) {
             extract_ident(declarator)->lexinfo);
     return -1;
   } else if (compatibility == TCHK_IMPLICIT_CAST) {
-    insert_cast(declaration, promoted_type);
+    insert_cast(expr, promoted_type);
   }
   return 0;
 }
 
 int define_body(ASTree *function, SymbolValue *entry) {
   int status = 0;
-  ASTree *identifier = extract_ident(function);
+  ASTree *declarator = astree_second(function);
+  ASTree *identifier = extract_ident(declarator);
   enter_scope(&identifier->symbol_table);
 
   if (astree_count(function) == 3) {
@@ -1251,15 +1299,15 @@ int define_function(ASTree *function, TypeSpec *declspecs) {
   ASTree *identifier = extract_ident(declarator);
 
   SymbolValue *symbol = symbol_value_init(extract_loc(declarator));
-  symbol->type = *declspecs;
+  merge_declspecs(&symbol->type, declspecs);
   size_t i;
   for (i = 0; i < astree_count(declarator); ++i) {
     int status =
-        validate_dirdecl(astree_get(declarator, i), identifier, symbol);
+        validate_dirdecl(astree_get(declarator, i), identifier, &symbol->type);
     if (status) return status;
   }
 
-  const char *function_ident = extract_ident(function)->lexinfo;
+  const char *function_ident = extract_ident(declarator)->lexinfo;
   size_t function_ident_len = strnlen(function_ident, MAX_IDENT_LEN);
   SymbolValue *existing_entry = NULL;
   locate_symbol(function_ident, function_ident_len, &existing_entry);
@@ -1277,13 +1325,13 @@ int define_function(ASTree *function, TypeSpec *declspecs) {
     }
     /* use existing type info */
     symbol_value_destroy(symbol);
-    return assign_type(function);
+    return assign_type(identifier);
   } else {
     int status = insert_symbol(function_ident, function_ident_len, symbol);
     if (status) return status;
     status = define_body(function, symbol);
     if (status) return status;
-    return assign_type(function);
+    return assign_type(identifier);
   }
 }
 
@@ -1301,7 +1349,8 @@ int define_members(ASTree *structure, SymbolValue *structure_entry) {
   size_t i;
   for (i = 1; i < astree_count(structure); ++i) {
     ASTree *member = astree_get(structure, i);
-    const char *member_id_str = extract_ident(member)->lexinfo;
+    ASTree *declarator = astree_second(member);
+    const char *member_id_str = extract_ident(declarator)->lexinfo;
     size_t member_id_str_len = strnlen(member_id_str, MAX_IDENT_LEN);
     DEBUGS('t', "Found structure member: %s", member_id_str);
     SymbolValue *member_entry = NULL;
@@ -1390,7 +1439,7 @@ int validate_return(ASTree *ret) {
     fprintf(stderr, "ERROR: Incompatible return type\n");
     status = -1;
   } else if (compatibility == TCHK_IMPLICIT_CAST) {
-    insert_cast(ret, &ret_spec);
+    insert_cast(astree_first(ret), &ret_spec);
     status = 0;
     /* ret->attributes |= ATTR_EXPR_VREG;
     ret->attributes |= astree_first(ret)->attributes; */
@@ -1508,6 +1557,7 @@ int type_checker_make_table(ASTree *root) {
       case TOK_DECLARATION:
         status = validate_declaration(child);
         if (status) return status;
+        break;
       default:
         fprintf(stderr, "ERROR: Unexpected symbol at top level: %s\n",
                 parser_get_tname(child->symbol));

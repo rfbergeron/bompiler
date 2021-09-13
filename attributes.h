@@ -54,6 +54,7 @@ typedef enum aux_type {
   AUX_TYPEDEF,
 } AuxType;
 
+/*
 enum conversion_type {
   CONV_COMPATIBLE,
   CONV_IMPLICIT_CAST,
@@ -64,6 +65,7 @@ enum conversion_type {
   CONV_PROMOTE_BOTH,
   CONV_PROMOTE_WIDER
 };
+*/
 
 enum type_flag {
   TYPE_FLAG_NONE = 0,
