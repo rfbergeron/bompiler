@@ -70,11 +70,21 @@ topdecl       : declaration ';'                                                 
               | typespec_list declarator block                                    { $$ = astree_adopt(parser_make_declaration($1, $2), $3, NULL, NULL); }
               | ';'                                                               { $$ = NULL; astree_destroy($1); }
               ;
+struct_spec   : TOK_STRUCT TOK_IDENT '{' struct_decl_list '}'                     { $$ = astree_adopt($1, $2, $4, NULL); astree_destroy($3); astree_destroy($5);}
+              | TOK_STRUCT TOK_IDENT                                              { $$ = astree_adopt($1, $2, NULL, NULL); }
+              ;
+union_spec    : TOK_UNION TOK_IDENT '{' struct_decl_list '}'                      { $$ = astree_adopt($1, $2, $4, NULL); astree_destroy($3); astree_destroy($5);}
+              | TOK_UNION TOK_IDENT                                               { $$ = astree_adopt($1, $2, NULL, NULL); }
+              ;
+struct_decl_list
+              : struct_decl_list struct_decl ';'                                  { $$ = astree_twin($1, $2); astree_destroy($3); }
+              | struct_decl ';'                                                   { $$ = $1; astree_destroy($2); }
+              ;
+struct_decl   : struct_decl ',' declarator                                        { $$ = astree_adopt($1, $3); astree_destroy($2); }
+              | typespec_list declarator                                          { $$ = parser_make_declaration($1, $2); }
+              ;
 declaration   : typespec_list init_decls                                          { $$ = parser_make_declaration($1, $2); }
               | typespec_list                                                     { $$ = NULL; astree_destroy($1); }
-              ;
-abs_declion   : typespec_list abstract_decl                                       { $$ = astree_twin($1, $2); }
-              | typespec_list                                                     { $$ = $1; }
               ;
 typespec_list : typespec_list typespec                                            { $$ = astree_adopt($1, $2, NULL, NULL); }
               | typespec                                                          { $$ = parser_make_spec($1); }
@@ -86,12 +96,21 @@ typespec      : TOK_LONG                                                        
               | TOK_INT                                                           { $$ = $1; }
               | TOK_CHAR                                                          { $$ = $1; }
               | TOK_VOID                                                          { $$ = $1; }
+              | TOK_STRUCT TOK_IDENT                                              { $$ = astree_adopt($1, $2, NULL, NULL); }
+              | TOK_UNION TOK_IDENT                                               { $$ = astree_adopt($1, $2, NULL, NULL); }
               ;
 init_decls    : init_decls ',' init_decl                                          { $$ = astree_twin($1, $3); astree_destroy($2); }
               | init_decl                                                         { $$ = $1; }
               ;
-init_decl     : declarator '=' expr                                               { $$ = astree_twin($1, $3); astree_destroy($2); }
+init_decl     : declarator '=' initializer                                        { $$ = astree_twin($1, $3); astree_destroy($2); }
               | declarator                                                        { $$ = $1; }
+              ;
+initializer   : expr                                                              { $$ = $1; }
+              | '{' init_list '}'                                                 { $$ = $2; astree_destroy($1); astree_destroy($3); }
+              | '{' init_list ',' '}'                                             { $$ = $2; astree_destroy($1); astree_destroy($3); astree_destroy($4); }
+              ;
+init_list     : init_list ',' initializer                                         { $$ = astree_twin($1, $3); astree_destroy($2); }
+              | initializer                                                       { $$ = $1; }
               ;
 declarator    : pointer direct_decl                                               { $$ = parser_make_declarator($1, $2); }
               | direct_decl                                                       { $$ = parser_make_declarator(NULL, $1); }
@@ -164,6 +183,10 @@ expr          : expr '+' expr                                                   
               | expr TOK_SHR expr                                                 { $$ = astree_adopt($2, $1, $3, NULL); }
               | expr TOK_SHL expr                                                 { $$ = astree_adopt($2, $1, $3, NULL); }
               | expr '=' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
+              | cast_expr                                                         { $$ = $1; }
+              ;
+cast_expr     : '(' typespec_list ')' unary_expr %prec TOK_CAST                   { $$ = parser_make_cast($2, NULL, $4); parser_cleanup(2, $1, $3); }
+              | '(' typespec_list abstract_decl ')' unary_expr %prec TOK_CAST     { $$ = parser_make_cast($2, $3, $5); parser_cleanup(2, $1, $4); }
               | unary_expr                                                        { $$ = $1; }
               ;
 unary_expr    : postfix_expr                                                      { $$ = $1; }
@@ -173,7 +196,6 @@ unary_expr    : postfix_expr                                                    
               | '~' unary_expr                                                    { $$ = astree_adopt($1, $2, NULL, NULL); }
               | '+' unary_expr %prec TOK_CAST                                     { $$ = astree_adopt_sym($1, TOK_POS, $2, NULL); }
               | '-' unary_expr %prec TOK_CAST                                     { $$ = astree_adopt_sym($1, TOK_NEG, $2, NULL); }
-              | cast unary_expr %prec TOK_CAST                                    { $$ = astree_adopt($1, $2, NULL, NULL); }
               ;
 postfix_expr  : primary_expr                                                      { $$ = $1; }
               | postfix_expr TOK_INC %prec TOK_POST_INC                           { $$ = astree_adopt_sym($2, TOK_POST_INC, $1, NULL); }
@@ -188,8 +210,6 @@ arg_list      : %empty                                                          
 primary_expr  : TOK_IDENT                                                         { $$ = $1; }
               | constant                                                          { $$ = $1; }
               | '(' expr ')' %prec TOK_CAST                                       { $$ = $2; parser_cleanup(2, $1, $3); }
-              ;
-cast          : '(' abs_declion ')' %prec TOK_CAST                                { $$ = parser_make_cast($2); parser_cleanup(2, $1, $3); }
               ;
 constant      : TOK_INTCON                                                        { $$ = $1; }
               | TOK_CHARCON                                                       { $$ = $1; }
@@ -254,19 +274,15 @@ ASTree *parser_make_type_id(ASTree *type, ASTree *id) {
   return astree_adopt(type_id, type, id, NULL);
 }
 
-ASTree *parser_make_struct(ASTree *parent, ASTree *structure_id,
-                           ASTree *structure_body) {
-  return astree_adopt(parent, structure_id, structure_body, NULL);
-}
-
 /* due to grammar ambiguities regarding identifiers, the parser cannot (with
  * shift/reduce conflicts) distinguish between an expression surrounded by
  * parentheses and a cast operation with only one token of lookahead when a
  * TOK_IDENT is all that occurs between the parentheses.
  */
-ASTree *parser_make_cast(ASTree *abstract_declaration) {
-  ASTree *cast = astree_init(TOK_CAST, abstract_declaration->loc, "_cast");
-  return astree_adopt(cast, abstract_declaration, NULL, NULL);
+ASTree *parser_make_cast(ASTree *spec_list, ASTree *abstract_declaration,
+                         ASTree *expr) {
+  ASTree *cast = astree_init(TOK_CAST, spec_list->loc, "_cast");
+  return astree_adopt(cast, spec_list, abstract_declaration, expr);
 }
 
 void parser_cleanup(size_t count, ...) {
