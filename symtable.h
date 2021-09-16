@@ -13,7 +13,7 @@
 typedef struct symbol_value {
   size_t sequence;  /* used to order declarations in a given block */
   Location loc;     /* declaration location */
-  int is_defined;   /* whether this is a function definition or declaration */
+  int is_defined;   /* whether this function/struct/union has been specified/defined */
   TypeSpec type;    /* type of symbol */
   int stack_offset; /* location in the current stack frame */
   char obj_loc[64]; /* location, represented as a string */

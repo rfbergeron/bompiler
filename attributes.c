@@ -222,7 +222,7 @@ int auxspec_destroy(AuxSpec *auxspec) {
       break;
     case AUX_STRUCT:
     case AUX_UNION:
-      map_destroy(&auxspec->data.members);
+      llist_destroy(&auxspec->data.structure.members);
       break;
     case AUX_FUNCTION:
       llist_destroy(&auxspec->data.params);

@@ -88,6 +88,9 @@ enum imm_type {
   IMM_TYPE_SCALAR,
 };
 
+/* Structs and unions require a member map, as well as the order of the members.
+ * This would be best provided by an ordered_map data structure.
+ */
 typedef struct auxspec {
   union {
     const char *type_id;
@@ -95,8 +98,11 @@ typedef struct auxspec {
       unsigned int qualifiers;
       size_t length;
     } ptr_or_arr;
+    struct {
+      LinkedList members;
+      Map *symbol_table;
+    } structure;
     LinkedList params;
-    Map members;
   } data;
   AuxType aux;
 } AuxSpec;

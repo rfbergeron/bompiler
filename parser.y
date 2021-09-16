@@ -31,7 +31,7 @@
 %token TOK_TYPE_ID TOK_SPEC TOK_DECLARATION TOK_DECLARATOR TOK_ROOT TOK_CAST TOK_FUNCTION
 /* tokens assigned to exsting nodes */
 %token TOK_POS TOK_NEG TOK_POST_INC TOK_POST_DEC TOK_INDIRECTION TOK_ADDROF TOK_CALL TOK_SUBSCRIPT
-%token TOK_BLOCK TOK_PARAM TOK_POINTER TOK_ARRAY
+%token TOK_BLOCK TOK_PARAM TOK_POINTER TOK_ARRAY TOK_INIT_LIST
 /* tokens constructed by lexer */
 %token TOK_VOID TOK_INT TOK_SHORT TOK_LONG TOK_CHAR TOK_UNSIGNED TOK_SIGNED
 %token TOK_CONST TOK_VOLATILE TOK_RESTRICT
@@ -70,7 +70,7 @@ program       : topdecl                                                         
 topdecl       : declaration ';'                                                   { $$ = $1; astree_destroy($2); }
               | struct_spec ';'                                                   { $$ = $1; astree_destroy($2); }
               | union_spec ';'                                                    { $$ = $1; astree_destroy($2); }
-              | typespec_list declarator block                                    { $$ = astree_adopt(parser_make_declaration($1, $2), $3, NULL, NULL); }
+              | primary_type  declarator block                                    { $$ = astree_adopt(parser_make_declaration($1, $2), $3, NULL, NULL); }
               | ';'                                                               { $$ = NULL; astree_destroy($1); }
               ;
 struct_spec   : TOK_STRUCT TOK_IDENT '{' struct_decl_list '}'                     { $$ = astree_adopt($1, $2, $4, NULL); astree_destroy($3); astree_destroy($5); }
@@ -84,10 +84,15 @@ struct_decl_list
               | struct_decl ';'                                                   { $$ = $1; astree_destroy($2); }
               ;
 struct_decl   : struct_decl ',' declarator                                        { $$ = astree_adopt($1, $3, NULL, NULL); astree_destroy($2); }
-              | typespec_list declarator                                          { $$ = parser_make_declaration($1, $2); }
+              | primary_type  declarator                                          { $$ = parser_make_declaration($1, $2); }
               ;
-declaration   : typespec_list init_decls                                          { $$ = parser_make_declaration($1, $2); }
-              | typespec_list                                                     { $$ = NULL; astree_destroy($1); }
+declaration   : primary_type  init_decls                                          { $$ = parser_make_declaration($1, $2); }
+              | primary_type                                                      { $$ = NULL; astree_destroy($1); }
+              ;
+primary_type  : typespec_list                                                     { $$ = $1; }
+              | TOK_STRUCT TOK_IDENT                                              { $$ = astree_adopt($1, $2, NULL, NULL); }
+              | TOK_UNION TOK_IDENT                                               { $$ = astree_adopt($1, $2, NULL, NULL); }
+              | TOK_VOID                                                          { $$ = $1; }
               ;
 typespec_list : typespec_list typespec                                            { $$ = astree_adopt($1, $2, NULL, NULL); }
               | typespec                                                          { $$ = parser_make_spec($1); }
@@ -98,9 +103,6 @@ typespec      : TOK_LONG                                                        
               | TOK_SHORT                                                         { $$ = $1; }
               | TOK_INT                                                           { $$ = $1; }
               | TOK_CHAR                                                          { $$ = $1; }
-              | TOK_VOID                                                          { $$ = $1; }
-              | TOK_STRUCT TOK_IDENT                                              { $$ = astree_adopt($1, $2, NULL, NULL); }
-              | TOK_UNION TOK_IDENT                                               { $$ = astree_adopt($1, $2, NULL, NULL); }
               ;
 init_decls    : init_decls ',' init_decl                                          { $$ = astree_twin($1, $3); astree_destroy($2); }
               | init_decl                                                         { $$ = $1; }
@@ -109,8 +111,8 @@ init_decl     : declarator '=' initializer                                      
               | declarator                                                        { $$ = $1; }
               ;
 initializer   : expr                                                              { $$ = $1; }
-              | '{' init_list '}'                                                 { $$ = $2; astree_destroy($1); astree_destroy($3); }
-              | '{' init_list ',' '}'                                             { $$ = $2; astree_destroy($1); astree_destroy($3); astree_destroy($4); }
+              | '{' init_list '}'                                                 { $$ = astree_adopt_sym($1, TOK_INIT_LIST, $2, NULL); astree_destroy($3); }
+              | '{' init_list ',' '}'                                             { $$ = astree_adopt_sym($1, TOK_INIT_LIST, $2, NULL); astree_destroy($3); astree_destroy($4); }
               ;
 init_list     : init_list ',' initializer                                         { $$ = astree_twin($1, $3); astree_destroy($2); }
               | initializer                                                       { $$ = $1; }
@@ -142,8 +144,8 @@ dir_abs_decl  : '(' abstract_decl ')'                                           
 pointer       : pointer '*'                                                       { $$ = astree_twin($1, astree_adopt_sym($2, TOK_POINTER, NULL, NULL)); }
               | '*'                                                               { $$ = astree_adopt_sym($1, TOK_POINTER, NULL, NULL);; }
               ;
-param_list    : param_list ',' typespec_list declarator                           { $$ = astree_twin($1, parser_make_declaration($3, $4)); astree_destroy($2); }
-              | typespec_list declarator                                          { $$ = parser_make_declaration($1, $2); }
+param_list    : param_list ',' primary_type  declarator                           { $$ = astree_twin($1, parser_make_declaration($3, $4)); astree_destroy($2); }
+              | primary_type  declarator                                          { $$ = parser_make_declaration($1, $2); }
               ;
 block         : '{' stmt_list '}'                                                 { $$ = astree_adopt_sym($1, TOK_BLOCK, $2, NULL); astree_destroy($3); }
               | '{' '}'                                                           { $$ = astree_adopt_sym($1, TOK_BLOCK, NULL, NULL); astree_destroy($2); }
@@ -188,8 +190,8 @@ expr          : expr '+' expr                                                   
               | expr '=' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
               | cast_expr                                                         { $$ = $1; }
               ;
-cast_expr     : '(' typespec_list ')' unary_expr %prec TOK_CAST                   { $$ = parser_make_cast($2, NULL, $4); parser_cleanup(2, $1, $3); }
-              | '(' typespec_list abstract_decl ')' unary_expr %prec TOK_CAST     { $$ = parser_make_cast($2, $3, $5); parser_cleanup(2, $1, $4); }
+cast_expr     : '(' primary_type  ')' unary_expr %prec TOK_CAST                   { $$ = parser_make_cast($2, NULL, $4); parser_cleanup(2, $1, $3); }
+              | '(' primary_type  abstract_decl ')' unary_expr %prec TOK_CAST     { $$ = parser_make_cast($2, $3, $5); parser_cleanup(2, $1, $4); }
               | unary_expr                                                        { $$ = $1; }
               ;
 unary_expr    : postfix_expr                                                      { $$ = $1; }

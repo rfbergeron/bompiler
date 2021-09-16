@@ -29,6 +29,8 @@
 #define IFLAG_SIGNED (1 << 4)
 #define IFLAG_UNSIGNED (1 << 5)
 #define IFLAG_VOID (1 << 6)
+#define IFLAG_STRUCT (1 << 7)
+#define IFLAG_UNION (1 << 8)
 
 enum type_checker_action {
   TCHK_COMPATIBLE,
@@ -247,18 +249,12 @@ int compare_params(LinkedList *dests, LinkedList *srcs) {
   return TCHK_COMPATIBLE;
 }
 
-int compare_members(Map *dests, Map *srcs) {
-  LinkedList keys = BLIB_LLIST_EMPTY;
-  llist_init(&keys, NULL, NULL);
-  /* get all keys; there will be duplicates but that is fine */
-  map_keys(dests, &keys);
-  map_keys(srcs, &keys);
-
+int compare_members(LinkedList *dests, LinkedList *srcs) {
+  size_t max_len = dests->size > srcs->size ? dests->size : srcs->size;
   size_t i;
-  for (i = 0; i < llist_size(&keys); ++i) {
-    char *key = llist_get(&keys, i);
-    SymbolValue *dest = map_get(dests, key, strlen(key));
-    SymbolValue *src = map_get(srcs, key, strlen(key));
+  for (i = 0; i < max_len; ++i) {
+    SymbolValue *dest = llist_get(dests, i);
+    SymbolValue *src = llist_get(srcs, i);
 
     if (dest == NULL || src == NULL) {
       return TCHK_EXPLICIT_CAST;
@@ -291,7 +287,7 @@ int compare_auxspecs(LinkedList *dests, LinkedList *srcs) {
       if (ret != TCHK_COMPATIBLE) return ret;
     } else if ((dest->aux == AUX_STRUCT && src->aux == AUX_STRUCT) ||
                (dest->aux == AUX_UNION && src->aux == AUX_UNION)) {
-      int ret = compare_members(&dest->data.members, &src->data.members);
+      int ret = compare_members(&dest->data.structure.members, &src->data.structure.members);
       if (ret != TCHK_COMPATIBLE) return ret;
     } else {
       return TCHK_EXPLICIT_CAST;
@@ -415,6 +411,11 @@ int determine_promotion(ASTree *arg1, ASTree *arg2, const TypeSpec **out) {
     *out = type1;
   } else if (type_is_pointer(type2)) {
     *out = type2;
+  } else if (type1->base == TYPE_STRUCT || type1->base == TYPE_UNION) {
+    *out = type1;
+  } else if (type2->base == TYPE_STRUCT || type2->base == TYPE_UNION) {
+    fprintf(stderr, "ERROR: unable to promote struct or union type to other type\n");
+    return -1;
   } else if (type1->width < X64_SIZEOF_INT && type2->width < X64_SIZEOF_INT) {
     /* promote to signed int if both operands could be represented as one */
     *out = &SPEC_INT;
@@ -494,8 +495,28 @@ int validate_spec(ASTree *spec_list, TypeSpec *out) {
         }
         flags |= IFLAG_VOID;
         break;
+      case TOK_STRUCT:
+        if (flags) {
+          fprintf(stderr, "ERROR: bad occurrence of struct type secifier %s\n",
+                  parser_get_tname(type->symbol));
+          status = -1;
+        } else {
+          out->base = TYPE_STRUCT;
+        }
+        flags |= IFLAG_STRUCT;
+        break;
+      case TOK_UNION:
+        if (flags) {
+          fprintf(stderr, "ERROR: bad occurrence of union type secifier %s\n",
+                  parser_get_tname(type->symbol));
+          status = -1;
+        } else {
+          out->base = TYPE_UNION;
+        }
+        flags |= IFLAG_UNION;
+        break;
       case TOK_INT:
-        if (flags & (IFLAG_INT | IFLAG_CHAR | IFLAG_VOID)) {
+        if (flags & (IFLAG_INT | IFLAG_CHAR | IFLAG_VOID | IFLAG_UNION | IFLAG_STRUCT)) {
           fprintf(stderr, "ERROR: bad occurrence of int type secifier %s\n",
                   parser_get_tname(type->symbol));
           status = -1;
@@ -506,7 +527,7 @@ int validate_spec(ASTree *spec_list, TypeSpec *out) {
         break;
       case TOK_CHAR:
         if (flags &
-            (IFLAG_CHAR | IFLAG_INT | IFLAG_SHRT | IFLAG_LONG | IFLAG_VOID)) {
+            (IFLAG_CHAR | IFLAG_INT | IFLAG_SHRT | IFLAG_LONG | IFLAG_VOID | IFLAG_UNION | IFLAG_STRUCT)) {
           fprintf(stderr, "ERROR: bad occurrence of int type secifier %s\n",
                   parser_get_tname(type->symbol));
           status = -1;
@@ -588,9 +609,13 @@ int validate_type(ASTree *type, TypeSpec *out) {
   switch (type->symbol) {
     /*
     case TOK_FUNCTION:
-    case TOK_STRUCT:
-    case TOK_UNION:
     */
+    case TOK_STRUCT:
+      out->base = TYPE_STRUCT;
+      break;
+    case TOK_UNION:
+      out->base = TYPE_UNION;
+      break;
     case TOK_SPEC:
       /* go to integer validation function */
       status = validate_spec(type, out);
@@ -1248,27 +1273,99 @@ int declare_symbol(ASTree *declaration, size_t i, TypeSpec *declspecs) {
   return assign_type(identifier);
 }
 
+int validate_initializer(ASTree *initializer) {
+  if (initializer->symbol == TOK_INIT_LIST) {
+    size_t i;
+    for (i = 0; i < astree_count(initializer); ++i) {
+      ASTree *component = astree_get(initializer, i);
+      int status = validate_expr(component);
+      if (status) return status;
+    }
+  } else {
+    return validate_expr(initializer);
+  }
+  return 0;
+}
+
+int init_list_compatible(ASTree *declarator, ASTree *init_list) {
+  ASTree *identifier = extract_ident(declarator);
+  if (identifier->type->base == TYPE_STRUCT) {
+    AuxSpec *struct_aux = llist_front((LinkedList*)&identifier->type->auxspecs);
+    if (struct_aux->aux != AUX_STRUCT) {
+      fprintf(stderr, "ERROR: identifier of structure type has improperly ordered"
+                      " auxiliary specifiers\n");
+      return -1;
+    }
+    const LinkedList *members = &identifier->type->auxspecs;
+    if (members->size < astree_count(init_list)) {
+      fprintf(stderr, "ERROR: too many initializers provided for struct type\n");
+      return -1;
+    }
+    size_t i;
+    for (i = 0; i < astree_count(init_list); ++i) {
+      ASTree *initializer = astree_get(init_list, i);
+      SymbolValue *member_symbol = llist_get((LinkedList *)members, i);
+      int compatibility = types_compatible(&member_symbol->type, initializer->type,
+              ARG1_TYPE | ARG2_TYPE);
+      if (compatibility == TCHK_EXPLICIT_CAST || compatibility == TCHK_INCOMPATIBLE) {
+        fprintf(stderr, "ERROR: incompatible initializer for element %zu of array %s\n",
+                i, identifier->lexinfo);
+        return -1;
+      } else if (compatibility == TCHK_IMPLICIT_CAST) {
+        int status = insert_cast(initializer, &member_symbol->type);
+        if (status) return status;
+      }
+    }
+  } else if (type_is_array(identifier->type)) {
+    TypeSpec element_type = SPEC_EMPTY;
+    int status = strip_aux_type(&element_type, identifier->type);
+    if (status) return status;
+    size_t i;
+    for (i = 0; i < astree_count(init_list); ++i) {
+      ASTree *initializer = astree_get(init_list, i);
+      int compatibility = types_compatible(&element_type, initializer->type, ARG1_TYPE | ARG2_TYPE);
+      if (compatibility == TCHK_EXPLICIT_CAST || compatibility == TCHK_INCOMPATIBLE) {
+        fprintf(stderr, "ERROR: incompatible initializer for element %zu of array %s\n",
+                i, identifier->lexinfo);
+        return -1;
+      } else if (compatibility == TCHK_IMPLICIT_CAST) {
+        int status = insert_cast(initializer, &element_type);
+        if (status) return status;
+      }
+    }
+  } else {
+    fprintf(stderr, "ERROR: provided type cannot be initialized using initializer lists\n");
+    return -1;
+  }
+  return 0;
+}
+
 int define_symbol(ASTree *declaration, size_t i, TypeSpec *declspecs) {
   ASTree *declarator = astree_get(declaration, i);
-  ASTree *expr = astree_get(declaration, i + 1);
+  ASTree *initializer = astree_get(declaration, i + 1);
   int status = declare_symbol(declaration, i, declspecs);
   if (status) return status;
-  status = validate_expr(expr);
+  status = validate_initializer(initializer);
   if (status) return status;
 
   const TypeSpec *promoted_type = &SPEC_EMPTY;
-  status = determine_promotion(declarator, expr, &promoted_type);
-  if (status) return status;
-
-  int compatibility = types_compatible(declarator, expr, ARG1_AST | ARG2_AST);
-  if (compatibility == TCHK_INCOMPATIBLE ||
-      compatibility == TCHK_EXPLICIT_CAST) {
-    fprintf(stderr, "ERROR: Incompatible type for object %s\n",
-            extract_ident(declarator)->lexinfo);
-    return -1;
-  } else if (compatibility == TCHK_IMPLICIT_CAST) {
-    insert_cast(expr, promoted_type);
+  if (initializer->symbol == TOK_INIT_LIST) {
+    status = init_list_compatible(declarator, initializer);
+    if (status) return status;
+  } else {
+    status = determine_promotion(declarator, initializer, &promoted_type);
+    int compatibility = types_compatible(declarator, initializer, ARG1_AST | ARG2_AST);
+    if (compatibility == TCHK_INCOMPATIBLE ||
+        compatibility == TCHK_EXPLICIT_CAST) {
+      fprintf(stderr, "ERROR: Incompatible type for object %s\n",
+              extract_ident(declarator)->lexinfo);
+      return -1;
+    } else if (compatibility == TCHK_IMPLICIT_CAST) {
+      status = insert_cast(initializer, promoted_type);
+      if (status) return status;
+    }
   }
+
   return 0;
 }
 
@@ -1337,14 +1434,16 @@ int define_function(ASTree *function, TypeSpec *declspecs) {
 
 int define_members(ASTree *structure, SymbolValue *structure_entry) {
   AuxSpec *struct_aux = calloc(1, sizeof(*struct_aux));
-  Map *members = &struct_aux->data.members;
+  LinkedList *members = &struct_aux->data.structure.members;
+  llist_init(members, NULL, NULL);
   /* TODO(Robert): in the interest of code reuse I used the existing functions
    * for entering and leaving scopes and making entries within a scope that
    * are normally used for objects and functions, even though struct members
    * don't work quite the same way. check to make sure everything is doing
    * okay later on
    */
-  create_scope(members);
+  create_scope(&structure->symbol_table);
+  struct_aux->data.structure.symbol_table = &structure->symbol_table;
   /* start from 2nd child; 1st was type name */
   size_t i;
   for (i = 1; i < astree_count(structure); ++i) {
@@ -1363,11 +1462,23 @@ int define_members(ASTree *structure, SymbolValue *structure_entry) {
     } else {
       int status = validate_declaration(member);
       if (status != 0) return status;
+      locate_symbol(member_id_str, member_id_str_len, &member_entry);
+      if (structure_entry->type.alignment < member_entry->type.alignment) {
+        structure_entry->type.alignment = member_entry->type.alignment;
+      }
+      if (structure_entry->type.base == TYPE_STRUCT) {
+        size_t padding = member_entry->type.alignment -
+            (structure_entry->type.width % member_entry->type.alignment);
+        structure_entry->type.width += padding + member_entry->type.width;
+      } else if (structure_entry->type.width < member_entry->type.width) {
+        structure_entry->type.width = member_entry->type.width;
+      }
+      llist_push_back(members, member_entry);
       DEBUGS('t', "Field inserted at %s", astree_second(member)->lexinfo);
     }
   }
-  finalize_scope(members);
-  llist_push_front(&structure_entry->type.auxspecs, struct_aux);
+  finalize_scope(&structure->symbol_table);
+  llist_push_back(&structure_entry->type.auxspecs, struct_aux);
   return 0;
 }
 
@@ -1379,21 +1490,27 @@ int define_structure(ASTree *structure) {
   locate_symbol((char *)structure_type, structure_type_len, &exists);
   SymbolValue *structure_value = symbol_value_init(extract_loc(structure));
 
-  if (exists) {
-    int status = define_members(structure, structure_value);
-    if (status) return status;
-    if (types_compatible(exists, structure_value, ARG1_SMV | ARG2_SMV) !=
-        TCHK_COMPATIBLE) {
-      fprintf(stderr, "ERROR: redefinition of structure %s\n", structure_type);
-      return -1;
-    }
-    /* discard duplicate */
-    return symbol_value_destroy(structure_value);
+  if (astree_count(structure) < 2 && !exists) {
+    structure_value->is_defined = 0;
+    return insert_symbol(structure_type, structure_type_len, structure_value);
   } else {
-    int status =
-        insert_symbol(structure_type, structure_type_len, structure_value);
-    if (status) return status;
-    return define_members(structure, structure_value);
+    if (exists) {
+      int status = define_members(structure, structure_value);
+      if (status) return status;
+      if (types_compatible(exists, structure_value, ARG1_SMV | ARG2_SMV) !=
+          TCHK_COMPATIBLE) {
+        fprintf(stderr, "ERROR: redefinition of structure %s\n", structure_type);
+        return -1;
+      }
+      /* discard duplicate */
+      return symbol_value_destroy(structure_value);
+    } else {
+      int status =
+          insert_symbol(structure_type, structure_type_len, structure_value);
+      if (status) return status;
+      structure_value->is_defined = 1;
+      return define_members(structure, structure_value);
+    }
   }
 }
 
@@ -1556,6 +1673,11 @@ int type_checker_make_table(ASTree *root) {
        */
       case TOK_DECLARATION:
         status = validate_declaration(child);
+        if (status) return status;
+        break;
+      case TOK_STRUCT:
+      case TOK_UNION:
+        status = define_structure(child);
         if (status) return status;
         break;
       default:
