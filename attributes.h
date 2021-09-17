@@ -155,5 +155,15 @@ int auxspec_copy(AuxSpec *dest, const AuxSpec *src);
 int typespec_init(TypeSpec *spec);
 int typespec_destroy(TypeSpec *spec);
 int typespec_copy(TypeSpec *dst, const TypeSpec *src);
+int strip_aux_type(TypeSpec *dest, const TypeSpec *src);
 
+int typespec_is_arithmetic(const TypeSpec *type);
+int typespec_is_integer(const TypeSpec *type);
+int typespec_is_aux(const TypeSpec *type, const AuxType aux);
+int typespec_is_pointer(const TypeSpec *type);
+int typespec_is_array(const TypeSpec *type);
+int typespec_is_function(const TypeSpec *type);
+int typespec_is_int_or_ptr(const TypeSpec *type);
+int typespec_is_scalar(const TypeSpec *type);
+int typespec_is_comparable(const TypeSpec *type);
 #endif
