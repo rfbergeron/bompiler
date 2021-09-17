@@ -262,3 +262,56 @@ int typespec_copy(TypeSpec *dest, const TypeSpec *src) {
   llist_copy(&dest->auxspecs, (LinkedList *)&src->auxspecs);
   return 0;
 }
+
+int strip_aux_type(TypeSpec *dest, const TypeSpec *src) {
+  int status = typespec_copy(dest, src);
+  if (status) return status;
+  void *stripped = llist_pop_front(&dest->auxspecs);
+  if (stripped == NULL) {
+    fprintf(stderr, "ERROR: unable to strip auxiliary type information\n");
+    return -1;
+  }
+  return 0;
+}
+
+int typespec_is_arithmetic(const TypeSpec *type) {
+  return (type->base == TYPE_SIGNED || type->base == TYPE_UNSIGNED);
+}
+
+int typespec_is_integer(const TypeSpec *type) {
+  return (type->base == TYPE_SIGNED || type->base == TYPE_UNSIGNED);
+}
+
+int typespec_is_aux(const TypeSpec *type, const AuxType aux) {
+  AuxSpec *auxspec = llist_front((LinkedList *)&type->auxspecs);
+  return auxspec != NULL && auxspec->aux == aux;
+}
+
+int typespec_is_pointer(const TypeSpec *type) {
+  return typespec_is_aux(type, AUX_POINTER);
+}
+
+int typespec_is_array(const TypeSpec *type) {
+  return typespec_is_aux(type, AUX_ARRAY);
+}
+
+int typespec_is_function(const TypeSpec *type) {
+  return typespec_is_aux(type, AUX_FUNCTION);
+}
+
+int typespec_is_int_or_ptr(const TypeSpec *type) {
+  return (typespec_is_integer(type) || typespec_is_pointer(type));
+}
+
+int typespec_is_scalar(const TypeSpec *type) {
+  return typespec_is_pointer(type) || typespec_is_arithmetic(type);
+}
+
+int typespec_is_comparable(const TypeSpec *type) {
+  if (type->base == TYPE_SIGNED || type->base == TYPE_UNSIGNED ||
+      typespec_is_pointer(type)) {
+    return 1;
+  } else {
+    return 0;
+  }
+}

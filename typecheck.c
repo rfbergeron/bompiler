@@ -40,8 +40,6 @@ enum type_checker_action {
   TCHK_E_NO_FLAGS
 };
 
-static SymbolValue *current_function = NULL;
-
 /* forward declarations for mutual recursion */
 int validate_expr(ASTree *statement);
 int validate_stmt(ASTree *statement);
@@ -142,57 +140,6 @@ void merge_declspecs(TypeSpec *dest, const TypeSpec *declspecs) {
  * of expressions, at which point it is not possible to further nest scopes.
  */
 
-int type_is_arithmetic(const TypeSpec *type) {
-  return (type->base == TYPE_SIGNED || type->base == TYPE_UNSIGNED);
-}
-
-int type_is_integer(const TypeSpec *type) {
-  return (type->base == TYPE_SIGNED || type->base == TYPE_UNSIGNED);
-}
-
-int type_is_aux(const TypeSpec *type, const AuxType aux) {
-  AuxSpec *auxspec = llist_front((LinkedList *)&type->auxspecs);
-  return auxspec != NULL && auxspec->aux == aux;
-}
-
-int type_is_pointer(const TypeSpec *type) {
-  return type_is_aux(type, AUX_POINTER);
-}
-
-int type_is_array(const TypeSpec *type) { return type_is_aux(type, AUX_ARRAY); }
-
-int type_is_function(const TypeSpec *type) {
-  return type_is_aux(type, AUX_FUNCTION);
-}
-
-int type_is_int_or_ptr(const TypeSpec *type) {
-  return (type_is_integer(type) || type_is_pointer(type));
-}
-
-int type_is_scalar(const TypeSpec *type) {
-  return type_is_pointer(type) || type_is_arithmetic(type);
-}
-
-int type_is_comparable(const TypeSpec *type) {
-  if (type->base == TYPE_SIGNED || type->base == TYPE_UNSIGNED ||
-      type_is_pointer(type)) {
-    return 1;
-  } else {
-    return 0;
-  }
-}
-
-int strip_aux_type(TypeSpec *dest, const TypeSpec *src) {
-  int status = typespec_copy(dest, src);
-  if (status) return status;
-  void *stripped = llist_pop_front(&dest->auxspecs);
-  if (stripped == NULL) {
-    fprintf(stderr, "ERROR: unable to strip auxiliary type information\n");
-    return -1;
-  }
-  return 0;
-}
-
 int insert_cast(ASTree *tree, const TypeSpec *type) {
   /* since the linked list has a destructor defined for elements, we can't just
    * use llist_get and llist_delete here, since that will call astree_destroy
@@ -287,7 +234,8 @@ int compare_auxspecs(LinkedList *dests, LinkedList *srcs) {
       if (ret != TCHK_COMPATIBLE) return ret;
     } else if ((dest->aux == AUX_STRUCT && src->aux == AUX_STRUCT) ||
                (dest->aux == AUX_UNION && src->aux == AUX_UNION)) {
-      int ret = compare_members(&dest->data.structure.members, &src->data.structure.members);
+      int ret = compare_members(&dest->data.structure.members,
+                                &src->data.structure.members);
       if (ret != TCHK_COMPATIBLE) return ret;
     } else {
       return TCHK_EXPLICIT_CAST;
@@ -300,7 +248,7 @@ int compare_auxspecs(LinkedList *dests, LinkedList *srcs) {
 int compare_declspecs(const TypeSpec *dest, const TypeSpec *src) {
   /* TODO(Robert): check qualifiers */
   int ret = TCHK_COMPATIBLE;
-  if (type_is_integer(dest) && type_is_integer(src)) {
+  if (typespec_is_integer(dest) && typespec_is_integer(src)) {
     if (dest->width > src->width) {
       ret = TCHK_IMPLICIT_CAST;
     } else if (dest->width == src->width) {
@@ -363,15 +311,15 @@ int types_compatible(const void *arg1, const void *arg2, unsigned int flags) {
   LinkedList *auxspecs1 = (LinkedList *)&type1->auxspecs;
   LinkedList *auxspecs2 = (LinkedList *)&type2->auxspecs;
   /* special cases */
-  if (type_is_pointer(type1) && type_is_pointer(type2) &&
+  if (typespec_is_pointer(type1) && typespec_is_pointer(type2) &&
       (type1->base == TYPE_VOID || type2->base == TYPE_VOID)) {
     /* pointer to/from void pointer */
     return TCHK_COMPATIBLE;
-  } else if (type_is_pointer(type1) && type_is_integer(type2) &&
+  } else if (typespec_is_pointer(type1) && typespec_is_integer(type2) &&
              llist_size(auxspecs2) == 0) {
     /* int to pointer */
     return TCHK_IMPLICIT_CAST;
-  } else if (type_is_pointer(type2) && type_is_integer(type1) &&
+  } else if (typespec_is_pointer(type2) && typespec_is_integer(type1) &&
              llist_size(auxspecs1) == 0) {
     /* pointer to int */
     return TCHK_IMPLICIT_CAST;
@@ -407,14 +355,15 @@ int determine_promotion(ASTree *arg1, ASTree *arg2, const TypeSpec **out) {
   if (type1 == NULL) {
     fprintf(stderr, "First argument not provided to promotion routine\n");
     return -1;
-  } else if (type_is_pointer(type1)) {
+  } else if (typespec_is_pointer(type1)) {
     *out = type1;
-  } else if (type_is_pointer(type2)) {
+  } else if (typespec_is_pointer(type2)) {
     *out = type2;
   } else if (type1->base == TYPE_STRUCT || type1->base == TYPE_UNION) {
     *out = type1;
   } else if (type2->base == TYPE_STRUCT || type2->base == TYPE_UNION) {
-    fprintf(stderr, "ERROR: unable to promote struct or union type to other type\n");
+    fprintf(stderr,
+            "ERROR: unable to promote struct or union type to other type\n");
     return -1;
   } else if (type1->width < X64_SIZEOF_INT && type2->width < X64_SIZEOF_INT) {
     /* promote to signed int if both operands could be represented as one */
@@ -516,7 +465,8 @@ int validate_spec(ASTree *spec_list, TypeSpec *out) {
         flags |= IFLAG_UNION;
         break;
       case TOK_INT:
-        if (flags & (IFLAG_INT | IFLAG_CHAR | IFLAG_VOID | IFLAG_UNION | IFLAG_STRUCT)) {
+        if (flags & (IFLAG_INT | IFLAG_CHAR | IFLAG_VOID | IFLAG_UNION |
+                     IFLAG_STRUCT)) {
           fprintf(stderr, "ERROR: bad occurrence of int type secifier %s\n",
                   parser_get_tname(type->symbol));
           status = -1;
@@ -526,8 +476,8 @@ int validate_spec(ASTree *spec_list, TypeSpec *out) {
         flags |= IFLAG_INT;
         break;
       case TOK_CHAR:
-        if (flags &
-            (IFLAG_CHAR | IFLAG_INT | IFLAG_SHRT | IFLAG_LONG | IFLAG_VOID | IFLAG_UNION | IFLAG_STRUCT)) {
+        if (flags & (IFLAG_CHAR | IFLAG_INT | IFLAG_SHRT | IFLAG_LONG |
+                     IFLAG_VOID | IFLAG_UNION | IFLAG_STRUCT)) {
           fprintf(stderr, "ERROR: bad occurrence of int type secifier %s\n",
                   parser_get_tname(type->symbol));
           status = -1;
@@ -642,7 +592,7 @@ int validate_type(ASTree *type, TypeSpec *out) {
 int validate_ident(ASTree *ident) {
   int status = assign_type(ident);
   if (status) return status;
-  if (type_is_function(ident->type)) {
+  if (typespec_is_function(ident->type)) {
     insert_addrof(ident);
   }
   return 0;
@@ -661,14 +611,14 @@ int validate_call(ASTree *call) {
     if (status) return status;
   }
 
-  if (type_is_pointer(function->type)) {
+  if (typespec_is_pointer(function->type)) {
     /* automatic dereference of function pointer */
     int status = insert_indirection(function);
     if (status) return status;
   }
 
   TypeSpec *function_spec = (TypeSpec *)function->type;
-  if (!type_is_function(function_spec)) {
+  if (!typespec_is_function(function_spec)) {
     char buf[4096];
     int chars_written = type_to_string(function_spec, buf, 4096);
     if (chars_written > 4096) {
@@ -928,7 +878,8 @@ int validate_logical_op(ASTree *operator) {
   status = validate_expr(right);
   if (status != 0) return status;
 
-  if (!type_is_int_or_ptr(left->type) || !type_is_int_or_ptr(right->type)) {
+  if (!typespec_is_int_or_ptr(left->type) ||
+      !typespec_is_int_or_ptr(right->type)) {
     fprintf(stderr, "ERROR: cannot compare non-arithmetic types\n");
     return -1;
   }
@@ -978,15 +929,17 @@ int validate_binop(ASTree *operator) {
   }
 
   if (is_logical_op(operator)) {
-    if (!(type_is_comparable(left->type) && type_is_comparable(right->type))) {
+    if (!(typespec_is_comparable(left->type) &&
+          typespec_is_comparable(right->type))) {
       fprintf(stderr,
               "ERROR: '%s' arguments were not comparable\n", operator->lexinfo);
       status = -1;
     } else {
       operator->type = & SPEC_INT;
     }
-  } else if (is_bitwise_op(operator) && !(type_is_int_or_ptr(left->type) &&
-                                          type_is_int_or_ptr(right->type))) {
+  } else if (is_bitwise_op(operator) &&
+             !(typespec_is_int_or_ptr(left->type) &&
+               typespec_is_int_or_ptr(right->type))) {
     fprintf(stderr,
             "ERROR: '%s' arguments must be of type int\n", operator->lexinfo);
     status = -1;
@@ -1000,8 +953,8 @@ int validate_binop(ASTree *operator) {
 int validate_indirection(ASTree *indirection) {
   int status = validate_expr(astree_first(indirection));
   if (status) return status;
-  if (!type_is_pointer(indirection->type) &&
-      !type_is_array(indirection->type)) {
+  if (!typespec_is_pointer(indirection->type) &&
+      !typespec_is_array(indirection->type)) {
     /* error; indirection can only be used on pointers and arrays */
   } else {
     TypeSpec *indirection_spec = malloc(sizeof(*indirection_spec));
@@ -1031,7 +984,8 @@ int validate_addrof(ASTree *addrof) {
 int validate_subscript(ASTree *subscript) {
   int status = validate_expr(astree_first(subscript));
   if (status) return status;
-  if (!type_is_pointer(subscript->type) && !type_is_array(subscript->type)) {
+  if (!typespec_is_pointer(subscript->type) &&
+      !typespec_is_array(subscript->type)) {
     /* error; subscript can only be used on pointers and arrays */
   } else {
     TypeSpec *subscript_spec = malloc(sizeof(*subscript_spec));
@@ -1051,7 +1005,7 @@ int validate_unop(ASTree *operator) {
   if (status != 0) return status;
 
   if (is_logical_op(operator)) {
-    if (!type_is_comparable(operand->type)) {
+    if (!typespec_is_comparable(operand->type)) {
       fprintf(stderr,
               "ERROR: '%s' argument must be comparable\n", operator->lexinfo);
       status = -1;
@@ -1059,11 +1013,12 @@ int validate_unop(ASTree *operator) {
       operator->type = & SPEC_INT;
     }
   } else {
-    if (is_bitwise_op(operator) && !type_is_int_or_ptr(operand->type)) {
+    if (is_bitwise_op(operator) && !typespec_is_int_or_ptr(operand->type)) {
       fprintf(stderr, "ERROR: '%s' argument must be an int or pointer\n",
                       operator->lexinfo);
       status = -1;
-    } else if (operator->symbol == '+' && !type_is_arithmetic(operand->type)) {
+    } else if (operator->symbol ==
+               '+' && !typespec_is_arithmetic(operand->type)) {
       fprintf(stderr, "ERROR: '%s' argument must be of arithmetic type\n",
                       operator->lexinfo);
       status = -1;
@@ -1094,7 +1049,8 @@ int validate_equality(ASTree *operator) {
    *    and/or a pointer to void
    * 3. between pointers and NULL
    */
-  if (type_is_arithmetic(left->type) && type_is_arithmetic(right->type)) {
+  if (typespec_is_arithmetic(left->type) &&
+      typespec_is_arithmetic(right->type)) {
     /* determine promotions and insert casts where necessary */
     const TypeSpec *promoted_type = NULL;
     status = determine_promotion(left, right, &promoted_type);
@@ -1124,7 +1080,8 @@ int validate_equality(ASTree *operator) {
       fprintf(stderr, "Promotion failed on right operand; aborting.");
       abort();
     }
-  } else if (type_is_pointer(left->type) && type_is_pointer(right->type)) {
+  } else if (typespec_is_pointer(left->type) &&
+             typespec_is_pointer(right->type)) {
     /* do nothing if both are pointers */
   } else {
     fprintf(stderr,
@@ -1247,7 +1204,8 @@ int declare_symbol(ASTree *declaration, size_t i, TypeSpec *declspecs) {
   int in_current_scope =
       locate_symbol(identifier->lexinfo, identifier_len, &exists);
   if (exists && in_current_scope) {
-    if (type_is_function(&exists->type) && type_is_function(&symbol->type)) {
+    if (typespec_is_function(&exists->type) &&
+        typespec_is_function(&symbol->type)) {
       int compatibility =
           types_compatible(&exists->type, &symbol->type, ARG1_SMV | ARG2_SMV);
       if (compatibility != TCHK_COMPATIBLE) {
@@ -1290,25 +1248,30 @@ int validate_initializer(ASTree *initializer) {
 int init_list_compatible(ASTree *declarator, ASTree *init_list) {
   ASTree *identifier = extract_ident(declarator);
   if (identifier->type->base == TYPE_STRUCT) {
-    AuxSpec *struct_aux = llist_front((LinkedList*)&identifier->type->auxspecs);
+    AuxSpec *struct_aux =
+        llist_front((LinkedList *)&identifier->type->auxspecs);
     if (struct_aux->aux != AUX_STRUCT) {
-      fprintf(stderr, "ERROR: identifier of structure type has improperly ordered"
-                      " auxiliary specifiers\n");
+      fprintf(stderr,
+              "ERROR: identifier of structure type has improperly ordered"
+              " auxiliary specifiers\n");
       return -1;
     }
     const LinkedList *members = &identifier->type->auxspecs;
     if (members->size < astree_count(init_list)) {
-      fprintf(stderr, "ERROR: too many initializers provided for struct type\n");
+      fprintf(stderr,
+              "ERROR: too many initializers provided for struct type\n");
       return -1;
     }
     size_t i;
     for (i = 0; i < astree_count(init_list); ++i) {
       ASTree *initializer = astree_get(init_list, i);
       SymbolValue *member_symbol = llist_get((LinkedList *)members, i);
-      int compatibility = types_compatible(&member_symbol->type, initializer->type,
-              ARG1_TYPE | ARG2_TYPE);
-      if (compatibility == TCHK_EXPLICIT_CAST || compatibility == TCHK_INCOMPATIBLE) {
-        fprintf(stderr, "ERROR: incompatible initializer for element %zu of array %s\n",
+      int compatibility = types_compatible(
+          &member_symbol->type, initializer->type, ARG1_TYPE | ARG2_TYPE);
+      if (compatibility == TCHK_EXPLICIT_CAST ||
+          compatibility == TCHK_INCOMPATIBLE) {
+        fprintf(stderr,
+                "ERROR: incompatible initializer for element %zu of array %s\n",
                 i, identifier->lexinfo);
         return -1;
       } else if (compatibility == TCHK_IMPLICIT_CAST) {
@@ -1316,16 +1279,19 @@ int init_list_compatible(ASTree *declarator, ASTree *init_list) {
         if (status) return status;
       }
     }
-  } else if (type_is_array(identifier->type)) {
+  } else if (typespec_is_array(identifier->type)) {
     TypeSpec element_type = SPEC_EMPTY;
     int status = strip_aux_type(&element_type, identifier->type);
     if (status) return status;
     size_t i;
     for (i = 0; i < astree_count(init_list); ++i) {
       ASTree *initializer = astree_get(init_list, i);
-      int compatibility = types_compatible(&element_type, initializer->type, ARG1_TYPE | ARG2_TYPE);
-      if (compatibility == TCHK_EXPLICIT_CAST || compatibility == TCHK_INCOMPATIBLE) {
-        fprintf(stderr, "ERROR: incompatible initializer for element %zu of array %s\n",
+      int compatibility = types_compatible(&element_type, initializer->type,
+                                           ARG1_TYPE | ARG2_TYPE);
+      if (compatibility == TCHK_EXPLICIT_CAST ||
+          compatibility == TCHK_INCOMPATIBLE) {
+        fprintf(stderr,
+                "ERROR: incompatible initializer for element %zu of array %s\n",
                 i, identifier->lexinfo);
         return -1;
       } else if (compatibility == TCHK_IMPLICIT_CAST) {
@@ -1334,7 +1300,9 @@ int init_list_compatible(ASTree *declarator, ASTree *init_list) {
       }
     }
   } else {
-    fprintf(stderr, "ERROR: provided type cannot be initialized using initializer lists\n");
+    fprintf(
+        stderr,
+        "ERROR: provided type cannot be initialized using initializer lists\n");
     return -1;
   }
   return 0;
@@ -1354,7 +1322,8 @@ int define_symbol(ASTree *declaration, size_t i, TypeSpec *declspecs) {
     if (status) return status;
   } else {
     status = determine_promotion(declarator, initializer, &promoted_type);
-    int compatibility = types_compatible(declarator, initializer, ARG1_AST | ARG2_AST);
+    int compatibility =
+        types_compatible(declarator, initializer, ARG1_AST | ARG2_AST);
     if (compatibility == TCHK_INCOMPATIBLE ||
         compatibility == TCHK_EXPLICIT_CAST) {
       fprintf(stderr, "ERROR: Incompatible type for object %s\n",
@@ -1373,20 +1342,17 @@ int define_body(ASTree *function, SymbolValue *entry) {
   int status = 0;
   ASTree *declarator = astree_second(function);
   ASTree *identifier = extract_ident(declarator);
-  enter_scope(&identifier->symbol_table);
+  enter_body(&identifier->symbol_table, entry);
 
   if (astree_count(function) == 3) {
     DEBUGS('t', "Defining function: %s", identifier->lexinfo);
     ASTree *body = astree_third(function);
-    current_function = entry;
     /* set return status */
     status = validate_stmt(body);
-    current_function = NULL;
-    entry->is_defined = 1;
   }
 
   /* finalize scope */
-  finalize_scope(&identifier->symbol_table);
+  leave_body(&identifier->symbol_table, entry);
   return status;
 }
 
@@ -1467,7 +1433,8 @@ int define_members(ASTree *structure, SymbolValue *structure_entry) {
         structure_entry->type.alignment = member_entry->type.alignment;
       }
       if (structure_entry->type.base == TYPE_STRUCT) {
-        size_t padding = member_entry->type.alignment -
+        size_t padding =
+            member_entry->type.alignment -
             (structure_entry->type.width % member_entry->type.alignment);
         structure_entry->type.width += padding + member_entry->type.width;
       } else if (structure_entry->type.width < member_entry->type.width) {
@@ -1499,7 +1466,8 @@ int define_structure(ASTree *structure) {
       if (status) return status;
       if (types_compatible(exists, structure_value, ARG1_SMV | ARG2_SMV) !=
           TCHK_COMPATIBLE) {
-        fprintf(stderr, "ERROR: redefinition of structure %s\n", structure_type);
+        fprintf(stderr, "ERROR: redefinition of structure %s\n",
+                structure_type);
         return -1;
       }
       /* discard duplicate */
@@ -1540,7 +1508,7 @@ int validate_declaration(ASTree *declaration) {
 
 int validate_return(ASTree *ret) {
   TypeSpec ret_spec = SPEC_EMPTY;
-  int status = strip_aux_type(&ret_spec, &current_function->type);
+  int status = get_ret_type(&ret_spec);
   if (status) return status;
   if (astree_count(ret) > 0) {
     status = validate_expr(astree_first(ret));
@@ -1574,7 +1542,7 @@ int validate_return(ASTree *ret) {
 int validate_ifelse(ASTree *ifelse) {
   int status = validate_expr(astree_first(ifelse));
   if (status) return status;
-  if (!type_is_integer(astree_first(ifelse)->type)) {
+  if (!typespec_is_integer(astree_first(ifelse)->type)) {
     /* error: conditional expression must be of type int */
     status = -1;
     return status;
@@ -1599,7 +1567,7 @@ int validate_ifelse(ASTree *ifelse) {
 int validate_while(ASTree *whole) {
   int status = validate_expr(astree_first(whole));
   if (status != 0) return status;
-  if (!type_is_integer(astree_first(whole)->type)) {
+  if (!typespec_is_integer(astree_first(whole)->type)) {
     /* error: conditional expression must be of type int */
     status = -1;
     return status;
