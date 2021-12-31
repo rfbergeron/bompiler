@@ -127,13 +127,6 @@ int assign_type(ASTree *tree) {
   }
 }
 
-void merge_declspecs(TypeSpec *dest, const TypeSpec *declspecs) {
-  dest->base = declspecs->base;
-  dest->width = declspecs->width;
-  dest->alignment = declspecs->alignment;
-  return;
-}
-
 /*
  * TODO(Robert): recursively setting the block number no longer works because
  * of nested scoping; instead block numbers should be set during the validation
@@ -422,6 +415,9 @@ int validate_intcon(ASTree *intcon) {
   return status;
 }
 
+/* TODO(Robert): This function should only be handling integer specifiers;
+ * all others will be handled in validate_type. Naming should be improved.
+ */
 int validate_spec(ASTree *spec_list, TypeSpec *out) {
   int status = 0;
   unsigned int flags = 0;
@@ -554,14 +550,36 @@ int validate_spec(ASTree *spec_list, TypeSpec *out) {
   return status;
 }
 
+/* TODO(Robert): Improve naming to indicate that all type specifiers and storage
+ * class modifiers are to be checked using this function, and refactor code
+ * to avoid declaring variables prior to entering switch statement.
+ */
 int validate_type(ASTree *type, TypeSpec *out) {
   int status = 0;
+  ASTree *struct_type;
+  const char *struct_type_name;
+  size_t struct_type_name_len;
+  SymbolValue *exists = NULL;
   switch (type->symbol) {
     /*
     case TOK_FUNCTION:
     */
     case TOK_STRUCT:
-      out->base = TYPE_STRUCT;
+      struct_type = astree_first(type);
+      struct_type_name = struct_type->lexinfo;
+      struct_type_name_len = strlen(struct_type_name);
+      locate_symbol(struct_type_name, struct_type_name_len, &exists);
+      if (!exists) {
+        fprintf(stderr, "ERROR: structure type %s is not defined\n",
+                struct_type_name);
+        status = -1;
+      } else if (exists->type.base != TYPE_STRUCT) {
+        fprintf(stderr, "ERROR: type %s is not a structure\n",
+                struct_type_name);
+        status = -1;
+      } else {
+        status = typespec_copy(out, &exists->type);
+      }
       break;
     case TOK_UNION:
       out->base = TYPE_UNION;
@@ -571,6 +589,7 @@ int validate_type(ASTree *type, TypeSpec *out) {
       status = validate_spec(type, out);
       break;
     case TOK_IDENT:
+      /* TODO(Robert): handle typedefs */
       fprintf(stderr,
               "ERROR: type specifier in incorrect"
               "location\n");
@@ -810,7 +829,9 @@ int validate_cast(ASTree *cast) {
   int status = validate_type(spec_list, &declspecs);
   if (status) return status;
   TypeSpec *spec = calloc(1, sizeof(*cast->type));
-  merge_declspecs(spec, &declspecs);
+  spec->base = declspecs.base;
+  spec->width = declspecs.width;
+  spec->alignment = declspecs.alignment;
   cast->type = spec;
   typespec_init(spec);
   if (status) return status;
@@ -1185,12 +1206,13 @@ int validate_expr(ASTree *expression) {
   return status;
 }
 
-int declare_symbol(ASTree *declaration, size_t i, TypeSpec *declspecs) {
+int declare_symbol(ASTree *declaration, size_t i) {
   ASTree *declarator = astree_get(declaration, i);
   ASTree *identifier = extract_ident(declarator);
   DEBUGS('t', "Making object entry for value %s", identifier->lexinfo);
   SymbolValue *symbol = symbol_value_init(&declarator->loc);
-  merge_declspecs(&symbol->type, declspecs);
+  int status = validate_type(astree_first(declaration), &symbol->type);
+  if (status) return status;
 
   size_t j;
   for (j = 0; j < astree_count(declarator); ++j) {
@@ -1248,6 +1270,7 @@ int validate_initializer(ASTree *initializer) {
 int init_list_compatible(ASTree *declarator, ASTree *init_list) {
   ASTree *identifier = extract_ident(declarator);
   if (identifier->type->base == TYPE_STRUCT) {
+    DEBUGS('t', "Validating initializer list for struct %s", identifier->lexinfo);
     AuxSpec *struct_aux =
         llist_front((LinkedList *)&identifier->type->auxspecs);
     if (struct_aux->aux != AUX_STRUCT) {
@@ -1256,7 +1279,7 @@ int init_list_compatible(ASTree *declarator, ASTree *init_list) {
               " auxiliary specifiers\n");
       return -1;
     }
-    const LinkedList *members = &identifier->type->auxspecs;
+    const LinkedList *members = &struct_aux->data.structure.members;
     if (members->size < astree_count(init_list)) {
       fprintf(stderr,
               "ERROR: too many initializers provided for struct type\n");
@@ -1280,6 +1303,7 @@ int init_list_compatible(ASTree *declarator, ASTree *init_list) {
       }
     }
   } else if (typespec_is_array(identifier->type)) {
+    DEBUGS('t', "Validating initializer list for array %s", identifier->lexinfo);
     TypeSpec element_type = SPEC_EMPTY;
     int status = strip_aux_type(&element_type, identifier->type);
     if (status) return status;
@@ -1308,10 +1332,10 @@ int init_list_compatible(ASTree *declarator, ASTree *init_list) {
   return 0;
 }
 
-int define_symbol(ASTree *declaration, size_t i, TypeSpec *declspecs) {
+int define_symbol(ASTree *declaration, size_t i) {
   ASTree *declarator = astree_get(declaration, i);
   ASTree *initializer = astree_get(declaration, i + 1);
-  int status = declare_symbol(declaration, i, declspecs);
+  int status = declare_symbol(declaration, i);
   if (status) return status;
   status = validate_initializer(initializer);
   if (status) return status;
@@ -1356,13 +1380,15 @@ int define_body(ASTree *function, SymbolValue *entry) {
   return status;
 }
 
-int define_function(ASTree *function, TypeSpec *declspecs) {
+int define_function(ASTree *function) {
   ASTree *declaration = function;
   ASTree *declarator = astree_second(function);
   ASTree *identifier = extract_ident(declarator);
 
   SymbolValue *symbol = symbol_value_init(extract_loc(declarator));
-  merge_declspecs(&symbol->type, declspecs);
+  int status = validate_type(astree_first(function), &symbol->type);
+  if (status) return status;
+  typespec_init(&symbol->type);
   size_t i;
   for (i = 0; i < astree_count(declarator); ++i) {
     int status =
@@ -1400,6 +1426,7 @@ int define_function(ASTree *function, TypeSpec *declspecs) {
 
 int define_members(ASTree *structure, SymbolValue *structure_entry) {
   AuxSpec *struct_aux = calloc(1, sizeof(*struct_aux));
+  struct_aux->aux = AUX_STRUCT;
   LinkedList *members = &struct_aux->data.structure.members;
   llist_init(members, NULL, NULL);
   /* TODO(Robert): in the interest of code reuse I used the existing functions
@@ -1449,13 +1476,19 @@ int define_members(ASTree *structure, SymbolValue *structure_entry) {
   return 0;
 }
 
+/* TODO(Robert): change naming and code to indicate that this function is used
+ * to define both struct and union types
+ */
 int define_structure(ASTree *structure) {
   const char *structure_type = extract_ident(structure)->lexinfo;
   const size_t structure_type_len = strnlen(structure_type, MAX_IDENT_LEN);
   DEBUGS('t', "Defining structure type: %s", structure_type);
   SymbolValue *exists = NULL;
+  /* TODO(Robert): do not cast away const */
   locate_symbol((char *)structure_type, structure_type_len, &exists);
   SymbolValue *structure_value = symbol_value_init(extract_loc(structure));
+  structure_value->type.base = TYPE_STRUCT;
+  typespec_init(&structure_value->type);
 
   if (astree_count(structure) < 2 && !exists) {
     structure_value->is_defined = 0;
@@ -1483,24 +1516,19 @@ int define_structure(ASTree *structure) {
 }
 
 int validate_declaration(ASTree *declaration) {
-  ASTree *spec_list = astree_first(declaration);
-  TypeSpec declspecs = SPEC_EMPTY;
-  int status = validate_type(spec_list, &declspecs);
-  if (status) return status;
-
   size_t i;
   for (i = 1; i < astree_count(declaration); ++i) {
     /* call a function that constructs the rest of the type */
     ASTree *next = astree_get(declaration, i + 1);
     if (next && next->symbol == TOK_BLOCK) {
       /* function definition */
-      return define_function(declaration, &declspecs);
+      return define_function(declaration);
     } else if (next && next->symbol != TOK_DECLARATOR) {
       /* variable declaration and initialization */
-      return define_symbol(declaration, i, &declspecs);
+      return define_symbol(declaration, i);
     } else {
       /* variable/function declaration */
-      return declare_symbol(declaration, i, &declspecs);
+      return declare_symbol(declaration, i);
     }
   }
   return 0;
