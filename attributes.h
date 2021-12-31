@@ -101,7 +101,7 @@ typedef struct auxspec {
     struct {
       LinkedList members;
       Map *symbol_table;
-    } structure;
+    } composite;
     LinkedList params;
   } data;
   AuxType aux;
