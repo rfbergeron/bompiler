@@ -151,7 +151,7 @@ int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {
         break;
       case AUX_STRUCT:
         ret += sprintf((buf + ret), " struct with members {");
-        LinkedList *members = &auxspec->data.structure.members;
+        LinkedList *members = &auxspec->data.composite.members;
         for (j = 0; j < llist_size(members); ++j) {
           SymbolValue *member = llist_get(members, j);
           ret += type_to_string(&(member->type), (buf + ret), bufsize - ret);
@@ -233,7 +233,7 @@ int auxspec_destroy(AuxSpec *auxspec) {
       break;
     case AUX_STRUCT:
     case AUX_UNION:
-      llist_destroy(&auxspec->data.structure.members);
+      llist_destroy(&auxspec->data.composite.members);
       break;
     case AUX_FUNCTION:
       llist_destroy(&auxspec->data.params);

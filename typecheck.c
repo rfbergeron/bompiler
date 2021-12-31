@@ -227,8 +227,8 @@ int compare_auxspecs(LinkedList *dests, LinkedList *srcs) {
       if (ret != TCHK_COMPATIBLE) return ret;
     } else if ((dest->aux == AUX_STRUCT && src->aux == AUX_STRUCT) ||
                (dest->aux == AUX_UNION && src->aux == AUX_UNION)) {
-      int ret = compare_members(&dest->data.structure.members,
-                                &src->data.structure.members);
+      int ret = compare_members(&dest->data.composite.members,
+                                &src->data.composite.members);
       if (ret != TCHK_COMPATIBLE) return ret;
     } else {
       return TCHK_EXPLICIT_CAST;
@@ -415,10 +415,7 @@ int validate_intcon(ASTree *intcon) {
   return status;
 }
 
-/* TODO(Robert): This function should only be handling integer specifiers;
- * all others will be handled in validate_type. Naming should be improved.
- */
-int validate_spec(ASTree *spec_list, TypeSpec *out) {
+int validate_int_type(ASTree *spec_list, TypeSpec *out) {
   int status = 0;
   unsigned int flags = 0;
 
@@ -430,36 +427,6 @@ int validate_spec(ASTree *spec_list, TypeSpec *out) {
   for (i = 0; i < astree_count(spec_list); ++i) {
     ASTree *type = astree_get(spec_list, i);
     switch (type->symbol) {
-      case TOK_VOID:
-        if (flags) {
-          fprintf(stderr, "ERROR: bad occurrence of void type secifier %s\n",
-                  parser_get_tname(type->symbol));
-          status = -1;
-        } else {
-          *out = SPEC_VOID;
-        }
-        flags |= IFLAG_VOID;
-        break;
-      case TOK_STRUCT:
-        if (flags) {
-          fprintf(stderr, "ERROR: bad occurrence of struct type secifier %s\n",
-                  parser_get_tname(type->symbol));
-          status = -1;
-        } else {
-          out->base = TYPE_STRUCT;
-        }
-        flags |= IFLAG_STRUCT;
-        break;
-      case TOK_UNION:
-        if (flags) {
-          fprintf(stderr, "ERROR: bad occurrence of union type secifier %s\n",
-                  parser_get_tname(type->symbol));
-          status = -1;
-        } else {
-          out->base = TYPE_UNION;
-        }
-        flags |= IFLAG_UNION;
-        break;
       case TOK_INT:
         if (flags & (IFLAG_INT | IFLAG_CHAR | IFLAG_VOID | IFLAG_UNION |
                      IFLAG_STRUCT)) {
@@ -550,62 +517,52 @@ int validate_spec(ASTree *spec_list, TypeSpec *out) {
   return status;
 }
 
-/* TODO(Robert): Improve naming to indicate that all type specifiers and storage
- * class modifiers are to be checked using this function, and refactor code
- * to avoid declaring variables prior to entering switch statement.
- */
-int validate_type(ASTree *type, TypeSpec *out) {
-  int status = 0;
-  ASTree *struct_type;
-  const char *struct_type_name;
-  size_t struct_type_name_len;
+int validate_composite_type(ASTree *type, TypeSpec *out) {
+  ASTree *composite_type = astree_first(type);
+  const char *composite_type_name = composite_type->lexinfo;
+  size_t composite_type_name_len = strlen(composite_type_name);
   SymbolValue *exists = NULL;
+  locate_symbol(composite_type_name, composite_type_name_len, &exists);
+  if (!exists) {
+    fprintf(stderr, "ERROR: structure type %s is not defined\n",
+            composite_type_name);
+    return -1;
+  } else if (type->symbol == TOK_STRUCT && exists->type.base != TYPE_STRUCT) {
+    fprintf(stderr, "ERROR: type %s is not a struct\n",
+            composite_type_name);
+    return -1;
+  } else if (type->symbol == TOK_UNION && exists->type.base != TYPE_UNION) {
+    fprintf(stderr, "ERROR: type %s is not a union\n",
+            composite_type_name);
+    return -1;
+  } else {
+    return typespec_copy(out, &exists->type);
+  }
+}
+
+int validate_type(ASTree *type, TypeSpec *out) {
   switch (type->symbol) {
-    /*
-    case TOK_FUNCTION:
-    */
+    case TOK_VOID:
+      *out = SPEC_VOID;
+      return 0;
     case TOK_STRUCT:
-      struct_type = astree_first(type);
-      struct_type_name = struct_type->lexinfo;
-      struct_type_name_len = strlen(struct_type_name);
-      locate_symbol(struct_type_name, struct_type_name_len, &exists);
-      if (!exists) {
-        fprintf(stderr, "ERROR: structure type %s is not defined\n",
-                struct_type_name);
-        status = -1;
-      } else if (exists->type.base != TYPE_STRUCT) {
-        fprintf(stderr, "ERROR: type %s is not a structure\n",
-                struct_type_name);
-        status = -1;
-      } else {
-        status = typespec_copy(out, &exists->type);
-      }
-      break;
     case TOK_UNION:
-      out->base = TYPE_UNION;
-      break;
+      /* go to struct/union validation function */
+      return validate_composite_type(type, out);
     case TOK_SPEC:
       /* go to integer validation function */
-      status = validate_spec(type, out);
-      break;
+      return validate_int_type(type, out);
     case TOK_IDENT:
       /* TODO(Robert): handle typedefs */
       fprintf(stderr,
               "ERROR: type specifier in incorrect"
               "location\n");
-      status = -1;
-      break;
-    /*
-    case TOK_CONST:
-    break;
-    */
+      return -1;
     default:
       fprintf(stderr, "ERROR: unimplemented type: %s\n",
               parser_get_tname(type->symbol));
-      status = -1;
-      break;
+      return -1;
   }
-  return status;
 }
 
 int validate_ident(ASTree *ident) {
@@ -1279,7 +1236,7 @@ int init_list_compatible(ASTree *declarator, ASTree *init_list) {
               " auxiliary specifiers\n");
       return -1;
     }
-    const LinkedList *members = &struct_aux->data.structure.members;
+    const LinkedList *members = &struct_aux->data.composite.members;
     if (members->size < astree_count(init_list)) {
       fprintf(stderr,
               "ERROR: too many initializers provided for struct type\n");
@@ -1424,10 +1381,10 @@ int define_function(ASTree *function) {
   }
 }
 
-int define_members(ASTree *structure, SymbolValue *structure_entry) {
+int define_members(ASTree *composite_type, SymbolValue *composite_type_entry) {
   AuxSpec *struct_aux = calloc(1, sizeof(*struct_aux));
   struct_aux->aux = AUX_STRUCT;
-  LinkedList *members = &struct_aux->data.structure.members;
+  LinkedList *members = &struct_aux->data.composite.members;
   llist_init(members, NULL, NULL);
   /* TODO(Robert): in the interest of code reuse I used the existing functions
    * for entering and leaving scopes and making entries within a scope that
@@ -1435,16 +1392,16 @@ int define_members(ASTree *structure, SymbolValue *structure_entry) {
    * don't work quite the same way. check to make sure everything is doing
    * okay later on
    */
-  create_scope(&structure->symbol_table);
-  struct_aux->data.structure.symbol_table = &structure->symbol_table;
+  create_scope(&composite_type->symbol_table);
+  struct_aux->data.composite.symbol_table = &composite_type->symbol_table;
   /* start from 2nd child; 1st was type name */
   size_t i;
-  for (i = 1; i < astree_count(structure); ++i) {
-    ASTree *member = astree_get(structure, i);
+  for (i = 1; i < astree_count(composite_type); ++i) {
+    ASTree *member = astree_get(composite_type, i);
     ASTree *declarator = astree_second(member);
     const char *member_id_str = extract_ident(declarator)->lexinfo;
     size_t member_id_str_len = strnlen(member_id_str, MAX_IDENT_LEN);
-    DEBUGS('t', "Found structure member: %s", member_id_str);
+    DEBUGS('t', "Found composite type member: %s", member_id_str);
     SymbolValue *member_entry = NULL;
     int member_exists =
         locate_symbol(member_id_str, member_id_str_len, &member_entry);
@@ -1456,61 +1413,65 @@ int define_members(ASTree *structure, SymbolValue *structure_entry) {
       int status = validate_declaration(member);
       if (status != 0) return status;
       locate_symbol(member_id_str, member_id_str_len, &member_entry);
-      if (structure_entry->type.alignment < member_entry->type.alignment) {
-        structure_entry->type.alignment = member_entry->type.alignment;
+      if (composite_type_entry->type.alignment < member_entry->type.alignment) {
+        composite_type_entry->type.alignment = member_entry->type.alignment;
       }
-      if (structure_entry->type.base == TYPE_STRUCT) {
+      if (composite_type_entry->type.base == TYPE_STRUCT) {
         size_t padding =
             member_entry->type.alignment -
-            (structure_entry->type.width % member_entry->type.alignment);
-        structure_entry->type.width += padding + member_entry->type.width;
-      } else if (structure_entry->type.width < member_entry->type.width) {
-        structure_entry->type.width = member_entry->type.width;
+            (composite_type_entry->type.width % member_entry->type.alignment);
+        composite_type_entry->type.width += padding + member_entry->type.width;
+      } else if (composite_type_entry->type.width < member_entry->type.width) {
+        composite_type_entry->type.width = member_entry->type.width;
       }
       llist_push_back(members, member_entry);
       DEBUGS('t', "Field inserted at %s", astree_second(member)->lexinfo);
     }
   }
-  finalize_scope(&structure->symbol_table);
-  llist_push_back(&structure_entry->type.auxspecs, struct_aux);
+  finalize_scope(&composite_type->symbol_table);
+  llist_push_back(&composite_type_entry->type.auxspecs, struct_aux);
   return 0;
 }
 
 /* TODO(Robert): change naming and code to indicate that this function is used
  * to define both struct and union types
  */
-int define_structure(ASTree *structure) {
-  const char *structure_type = extract_ident(structure)->lexinfo;
-  const size_t structure_type_len = strnlen(structure_type, MAX_IDENT_LEN);
-  DEBUGS('t', "Defining structure type: %s", structure_type);
+int define_composite_type(ASTree *composite_type) {
+  const char *composite_type_name = extract_ident(composite_type)->lexinfo;
+  const size_t composite_type_name_len = strnlen(composite_type_name, MAX_IDENT_LEN);
+  DEBUGS('t', "Defining composite type: %s", composite_type_name);
   SymbolValue *exists = NULL;
   /* TODO(Robert): do not cast away const */
-  locate_symbol((char *)structure_type, structure_type_len, &exists);
-  SymbolValue *structure_value = symbol_value_init(extract_loc(structure));
-  structure_value->type.base = TYPE_STRUCT;
-  typespec_init(&structure_value->type);
+  locate_symbol((char *)composite_type_name, composite_type_name_len, &exists);
+  SymbolValue *composite_type_symbol = symbol_value_init(extract_loc(composite_type));
+  if (composite_type->symbol == TOK_STRUCT)
+    composite_type_symbol->type.base = TYPE_STRUCT;
+  else if (composite_type->symbol == TOK_UNION)
+    composite_type_symbol->type.base = TYPE_UNION;
 
-  if (astree_count(structure) < 2 && !exists) {
-    structure_value->is_defined = 0;
-    return insert_symbol(structure_type, structure_type_len, structure_value);
+  typespec_init(&composite_type_symbol->type);
+
+  if (astree_count(composite_type) < 2 && !exists) {
+    composite_type_symbol->is_defined = 0;
+    return insert_symbol(composite_type_name, composite_type_name_len, composite_type_symbol);
   } else {
     if (exists) {
-      int status = define_members(structure, structure_value);
+      int status = define_members(composite_type, composite_type_symbol);
       if (status) return status;
-      if (types_compatible(exists, structure_value, ARG1_SMV | ARG2_SMV) !=
+      if (types_compatible(exists, composite_type_symbol, ARG1_SMV | ARG2_SMV) !=
           TCHK_COMPATIBLE) {
-        fprintf(stderr, "ERROR: redefinition of structure %s\n",
-                structure_type);
+        fprintf(stderr, "ERROR: redefinition of composite_type %s\n",
+                composite_type_name);
         return -1;
       }
       /* discard duplicate */
-      return symbol_value_destroy(structure_value);
+      return symbol_value_destroy(composite_type_symbol);
     } else {
       int status =
-          insert_symbol(structure_type, structure_type_len, structure_value);
+          insert_symbol(composite_type_name, composite_type_name_len, composite_type_symbol);
       if (status) return status;
-      structure_value->is_defined = 1;
-      return define_members(structure, structure_value);
+      composite_type_symbol->is_defined = 1;
+      return define_members(composite_type, composite_type_symbol);
     }
   }
 }
@@ -1673,7 +1634,7 @@ int type_checker_make_table(ASTree *root) {
         break;
       case TOK_STRUCT:
       case TOK_UNION:
-        status = define_structure(child);
+        status = define_composite_type(child);
         if (status) return status;
         break;
       default:
