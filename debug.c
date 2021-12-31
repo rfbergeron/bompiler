@@ -10,7 +10,7 @@
 /* not ideal but I'm the only one that'll ever be using it so whatever */
 #define MAX_MESSAGE_LEN 1024
 #define FILENAME_WIDTH 11
-#define LINENR_DIGITS 3
+#define LINENR_DIGITS 4
 
 int flags[UCHAR_MAX + 1] = {0};
 

@@ -123,6 +123,7 @@ int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {
   size_t i;
   for (i = 0; i < llist_size((LinkedList *)&type->auxspecs); ++i) {
     AuxSpec *auxspec = llist_get((LinkedList *)&type->auxspecs, i);
+    size_t j;
     switch (auxspec->aux) {
       case AUX_ARRAY:
         if (auxspec->data.ptr_or_arr.length > 0) {
@@ -138,7 +139,6 @@ int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {
       case AUX_FUNCTION:
         ret += sprintf((buf + ret), " function with parameters (");
         LinkedList *params = &auxspec->data.params;
-        size_t j;
         for (j = 0; j < llist_size(params); ++j) {
           SymbolValue *param_symval = llist_get(params, j);
           ret +=
@@ -148,6 +148,17 @@ int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {
           }
         }
         ret += sprintf((buf + ret), ") returning");
+        break;
+      case AUX_STRUCT:
+        ret += sprintf((buf + ret), " struct with members {");
+        LinkedList *members = &auxspec->data.structure.members;
+        for (j = 0; j < llist_size(members); ++j) {
+          SymbolValue *member = llist_get(members, j);
+          ret += type_to_string(&(member->type), (buf + ret), bufsize - ret);
+          if (j + 1 < llist_size(members)) {
+            ret += sprintf((buf + ret), ", ");
+          }
+        }
         break;
       default:
         break;
