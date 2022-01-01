@@ -1382,9 +1382,18 @@ int define_function(ASTree *function) {
 }
 
 int define_members(ASTree *composite_type, SymbolValue *composite_type_entry) {
-  AuxSpec *struct_aux = calloc(1, sizeof(*struct_aux));
-  struct_aux->aux = AUX_STRUCT;
-  LinkedList *members = &struct_aux->data.composite.members;
+  AuxSpec *composite_aux = calloc(1, sizeof(*composite_aux));
+  if (composite_type->symbol == TOK_STRUCT) {
+    composite_aux->aux = AUX_STRUCT;
+  } else if (composite_type->symbol == TOK_UNION) {
+    composite_aux->aux = AUX_UNION;
+  } else {
+    /* should not happen, but I have been wrong before */
+    fprintf(stderr, "ERROR: invalid token for composite type: %s\n",
+            parser_get_tname(composite_type->symbol));
+    return -1;
+  }
+  LinkedList *members = &composite_aux->data.composite.members;
   llist_init(members, NULL, NULL);
   /* TODO(Robert): in the interest of code reuse I used the existing functions
    * for entering and leaving scopes and making entries within a scope that
@@ -1393,7 +1402,7 @@ int define_members(ASTree *composite_type, SymbolValue *composite_type_entry) {
    * okay later on
    */
   create_scope(&composite_type->symbol_table);
-  struct_aux->data.composite.symbol_table = &composite_type->symbol_table;
+  composite_aux->data.composite.symbol_table = &composite_type->symbol_table;
   /* start from 2nd child; 1st was type name */
   size_t i;
   for (i = 1; i < astree_count(composite_type); ++i) {
@@ -1429,13 +1438,10 @@ int define_members(ASTree *composite_type, SymbolValue *composite_type_entry) {
     }
   }
   finalize_scope(&composite_type->symbol_table);
-  llist_push_back(&composite_type_entry->type.auxspecs, struct_aux);
+  llist_push_back(&composite_type_entry->type.auxspecs, composite_aux);
   return 0;
 }
 
-/* TODO(Robert): change naming and code to indicate that this function is used
- * to define both struct and union types
- */
 int define_composite_type(ASTree *composite_type) {
   const char *composite_type_name = extract_ident(composite_type)->lexinfo;
   const size_t composite_type_name_len = strnlen(composite_type_name, MAX_IDENT_LEN);
@@ -1444,10 +1450,16 @@ int define_composite_type(ASTree *composite_type) {
   /* TODO(Robert): do not cast away const */
   locate_symbol((char *)composite_type_name, composite_type_name_len, &exists);
   SymbolValue *composite_type_symbol = symbol_value_init(extract_loc(composite_type));
-  if (composite_type->symbol == TOK_STRUCT)
+  if (composite_type->symbol == TOK_STRUCT) {
     composite_type_symbol->type.base = TYPE_STRUCT;
-  else if (composite_type->symbol == TOK_UNION)
+  } else if (composite_type->symbol == TOK_UNION) {
     composite_type_symbol->type.base = TYPE_UNION;
+  } else {
+    /* should not happen, but I have been wrong before */
+    fprintf(stderr, "ERROR: invalid token for composite type: %s\n",
+            parser_get_tname(composite_type->symbol));
+    return -1;
+  }
 
   typespec_init(&composite_type_symbol->type);
 

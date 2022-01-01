@@ -53,6 +53,7 @@ NOTSTRING       (\"[^"]*)
 "while"         { return lexer_token (TOK_WHILE); }
 "return"        { return lexer_token (TOK_RETURN); }
 "struct"        { return lexer_token (TOK_STRUCT); }
+"union"         { return lexer_token (TOK_UNION); }
 {IDENT}         { return lexer_token (TOK_IDENT); }
 {STRINGCON}     { return lexer_token (TOK_STRINGCON); }
 {INTCON}        { return lexer_token (TOK_INTCON); }
