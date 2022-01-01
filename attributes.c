@@ -150,7 +150,9 @@ int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {
         ret += sprintf((buf + ret), ") returning");
         break;
       case AUX_STRUCT:
-        ret += sprintf((buf + ret), " struct with members {");
+      case AUX_UNION:
+        ret += sprintf((buf + ret), " %s with members {",
+                auxspec->aux == AUX_STRUCT ? "struct" : "union");
         LinkedList *members = &auxspec->data.composite.members;
         for (j = 0; j < llist_size(members); ++j) {
           SymbolValue *member = llist_get(members, j);
