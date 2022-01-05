@@ -528,12 +528,10 @@ int validate_composite_type(ASTree *type, TypeSpec *out) {
             composite_type_name);
     return -1;
   } else if (type->symbol == TOK_STRUCT && exists->type.base != TYPE_STRUCT) {
-    fprintf(stderr, "ERROR: type %s is not a struct\n",
-            composite_type_name);
+    fprintf(stderr, "ERROR: type %s is not a struct\n", composite_type_name);
     return -1;
   } else if (type->symbol == TOK_UNION && exists->type.base != TYPE_UNION) {
-    fprintf(stderr, "ERROR: type %s is not a union\n",
-            composite_type_name);
+    fprintf(stderr, "ERROR: type %s is not a union\n", composite_type_name);
     return -1;
   } else {
     return typespec_copy(out, &exists->type);
@@ -698,12 +696,13 @@ int define_params(ASTree *params, ASTree *ident, TypeSpec *spec) {
               "ERROR: parameter symbol was not inserted into function table\n");
       return -1;
     }
-    llist_push_back(param_entries, param_entry);
+    status = llist_push_back(param_entries, param_entry);
+    if (status) return status;
   }
-  llist_push_back(&spec->auxspecs, aux_function);
+  int status = llist_push_back(&spec->auxspecs, aux_function);
+  if (status) return status;
   /* temporarily leave function prototype scope to work on global table */
-  leave_scope(&(ident->symbol_table));
-  return 0;
+  return leave_scope(&(ident->symbol_table));
 }
 
 int define_array(ASTree *array, TypeSpec *spec) {
@@ -717,15 +716,13 @@ int define_array(ASTree *array, TypeSpec *spec) {
       return -1;
     }
   }
-  llist_push_back(&spec->auxspecs, aux_array);
-  return 0;
+  return llist_push_back(&spec->auxspecs, aux_array);
 }
 
 int define_pointer(ASTree *pointer, TypeSpec *spec) {
   AuxSpec *aux_pointer = calloc(1, sizeof(*aux_pointer));
   aux_pointer->aux = AUX_POINTER;
-  llist_push_back(&spec->auxspecs, aux_pointer);
-  return 0;
+  return llist_push_back(&spec->auxspecs, aux_pointer);
 }
 
 int validate_dirdecl(ASTree *dirdecl, ASTree *ident, TypeSpec *spec) {
@@ -745,6 +742,15 @@ int validate_dirdecl(ASTree *dirdecl, ASTree *ident, TypeSpec *spec) {
     return -1;
   }
   */
+  /* TODO(Robert): possibly add external function to check validity of linked
+   * list and other badlib data structures
+   * TODO(Robert): initialize auxspec list in a more predictable and centralized
+   * way, and rename or repurpose typespec_init to make it more clear what it
+   * does
+   */
+  if (spec->auxspecs.anchor == NULL) {
+    typespec_init(spec);
+  }
 
   switch (dirdecl->symbol) {
     case TOK_DECLARATOR: {
@@ -1227,7 +1233,8 @@ int validate_initializer(ASTree *initializer) {
 int init_list_compatible(ASTree *declarator, ASTree *init_list) {
   ASTree *identifier = extract_ident(declarator);
   if (identifier->type->base == TYPE_STRUCT) {
-    DEBUGS('t', "Validating initializer list for struct %s", identifier->lexinfo);
+    DEBUGS('t', "Validating initializer list for struct %s",
+           identifier->lexinfo);
     AuxSpec *struct_aux =
         llist_front((LinkedList *)&identifier->type->auxspecs);
     if (struct_aux->aux != AUX_STRUCT) {
@@ -1260,7 +1267,8 @@ int init_list_compatible(ASTree *declarator, ASTree *init_list) {
       }
     }
   } else if (typespec_is_array(identifier->type)) {
-    DEBUGS('t', "Validating initializer list for array %s", identifier->lexinfo);
+    DEBUGS('t', "Validating initializer list for array %s",
+           identifier->lexinfo);
     TypeSpec element_type = SPEC_EMPTY;
     int status = strip_aux_type(&element_type, identifier->type);
     if (status) return status;
@@ -1345,7 +1353,7 @@ int define_function(ASTree *function) {
   SymbolValue *symbol = symbol_value_init(extract_loc(declarator));
   int status = validate_type(astree_first(function), &symbol->type);
   if (status) return status;
-  typespec_init(&symbol->type);
+
   size_t i;
   for (i = 0; i < astree_count(declarator); ++i) {
     int status =
@@ -1444,12 +1452,14 @@ int define_members(ASTree *composite_type, SymbolValue *composite_type_entry) {
 
 int define_composite_type(ASTree *composite_type) {
   const char *composite_type_name = extract_ident(composite_type)->lexinfo;
-  const size_t composite_type_name_len = strnlen(composite_type_name, MAX_IDENT_LEN);
+  const size_t composite_type_name_len =
+      strnlen(composite_type_name, MAX_IDENT_LEN);
   DEBUGS('t', "Defining composite type: %s", composite_type_name);
   SymbolValue *exists = NULL;
   /* TODO(Robert): do not cast away const */
   locate_symbol((char *)composite_type_name, composite_type_name_len, &exists);
-  SymbolValue *composite_type_symbol = symbol_value_init(extract_loc(composite_type));
+  SymbolValue *composite_type_symbol =
+      symbol_value_init(extract_loc(composite_type));
   if (composite_type->symbol == TOK_STRUCT) {
     composite_type_symbol->type.base = TYPE_STRUCT;
   } else if (composite_type->symbol == TOK_UNION) {
@@ -1465,13 +1475,14 @@ int define_composite_type(ASTree *composite_type) {
 
   if (astree_count(composite_type) < 2 && !exists) {
     composite_type_symbol->is_defined = 0;
-    return insert_symbol(composite_type_name, composite_type_name_len, composite_type_symbol);
+    return insert_symbol(composite_type_name, composite_type_name_len,
+                         composite_type_symbol);
   } else {
     if (exists) {
       int status = define_members(composite_type, composite_type_symbol);
       if (status) return status;
-      if (types_compatible(exists, composite_type_symbol, ARG1_SMV | ARG2_SMV) !=
-          TCHK_COMPATIBLE) {
+      if (types_compatible(exists, composite_type_symbol,
+                           ARG1_SMV | ARG2_SMV) != TCHK_COMPATIBLE) {
         fprintf(stderr, "ERROR: redefinition of composite_type %s\n",
                 composite_type_name);
         return -1;
@@ -1479,8 +1490,8 @@ int define_composite_type(ASTree *composite_type) {
       /* discard duplicate */
       return symbol_value_destroy(composite_type_symbol);
     } else {
-      int status =
-          insert_symbol(composite_type_name, composite_type_name_len, composite_type_symbol);
+      int status = insert_symbol(composite_type_name, composite_type_name_len,
+                                 composite_type_symbol);
       if (status) return status;
       composite_type_symbol->is_defined = 1;
       return define_members(composite_type, composite_type_symbol);

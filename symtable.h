@@ -24,7 +24,7 @@ typedef struct symbol_value {
 /* SymbolValue functions */
 SymbolValue *symbol_value_init(const Location *loc);
 int symbol_value_destroy(SymbolValue *symbol_value);
-void symbol_value_print(const SymbolValue *symbol, FILE *out);
+int symbol_value_print(const SymbolValue *symbol, char *buffer, size_t size);
 
 /* symbol table functions */
 void symbol_table_init_globals();

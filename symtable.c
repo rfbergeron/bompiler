@@ -9,6 +9,7 @@
 #include "simplestack.h"
 #include "stdlib.h"
 #include "string.h"
+#define LINESIZE 1024
 
 DECLARE_STACK(nrstack, size_t);
 /* the 'stack' of tables */
@@ -51,12 +52,17 @@ int symbol_value_destroy(SymbolValue *symbol_value) {
   return 0;
 }
 
-void symbol_value_print(const SymbolValue *symbol, FILE *out) {
-  char type_buf[256];
-  type_to_string(&(symbol->type), type_buf, 256);
-  fprintf(out, "{ %lu, %lu, %lu } { %lu } %s", symbol->loc.filenr,
-          symbol->loc.linenr, symbol->loc.offset, symbol->loc.blocknr,
-          type_buf);
+int symbol_value_print(const SymbolValue *symbol, char *buffer, size_t size) {
+  if (!symbol || !buffer || size < 1) {
+    fprintf(stderr, "ERROR: invalid arguments to symbol_value_print\n");
+    return -1;
+  }
+  char locstr[LINESIZE];
+  location_to_string(&symbol->loc, locstr, LINESIZE);
+  char typestr[LINESIZE];
+  type_to_string(&symbol->type, typestr, LINESIZE);
+
+  return snprintf(buffer, size, "{%s} {%s}", locstr, typestr);
 }
 
 void symbol_table_init_globals() {

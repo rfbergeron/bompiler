@@ -12,6 +12,7 @@
 #include "debug.h"
 #include "lyutils.h"
 #include "strset.h"
+#include "symtable.h"
 #include "yyparse.h"
 #define LINESIZE 1024
 
@@ -254,7 +255,7 @@ void astree_print_tree(ASTree *tree, FILE *out, int depth) {
          parser_get_tname(tree->symbol), tree->lexinfo,
          llist_size(&tree->children));
 
-  size_t numspaces = depth * 3;
+  size_t numspaces = depth * 2;
   char indent[LINESIZE];
   memset(indent, ' ', numspaces);
   indent[numspaces] = 0;
@@ -274,4 +275,43 @@ void astree_print_tree(ASTree *tree, FILE *out, int depth) {
       astree_print_tree(child, out, depth + 1);
     }
   }
+}
+
+int astree_print_symbols(ASTree *tree, FILE *out) {
+  if (map_size(&tree->symbol_table) > 0) {
+    LinkedList symnames = (LinkedList)BLIB_LLIST_EMPTY;
+    int status = llist_init(&symnames, NULL, NULL);
+    if (status) return status;
+    status = map_keys(&tree->symbol_table, &symnames);
+    if (status) return status;
+    DEBUGS('a', "Printing %zu symbols", map_size(&tree->symbol_table));
+    const char *tname = parser_get_tname(tree->symbol);
+    char locstr[LINESIZE];
+    location_to_string(&tree->loc, locstr, LINESIZE);
+    if (strlen(tname) > 4) tname += 4;
+
+    fprintf(out, "%s \"%s\" {%s}\n", parser_get_tname(tree->symbol),
+            tree->lexinfo, locstr);
+    size_t i;
+    for (i = 0; i < llist_size(&symnames); ++i) {
+      const char *symname = llist_get(&symnames, i);
+      SymbolValue *symval =
+          map_get(&tree->symbol_table, (char *)symname, strlen(symname));
+      char symval_str[LINESIZE];
+      int characters_printed = symbol_value_print(symval, symval_str, LINESIZE);
+      if (characters_printed < 0) {
+        fprintf(stderr,
+                "ERROR: failed to print symbol table associated with "
+                "astree node, symbol: %s, lexinfo: %s\n",
+                parser_get_tname(tree->symbol), tree->lexinfo);
+        return status;
+      }
+      fprintf(out, "  %s: %s\n", symname, symval_str);
+    }
+  }
+  size_t i;
+  for (i = 0; i < astree_count(tree); ++i) {
+    astree_print_symbols(astree_get(tree, i), out);
+  }
+  return 0;
 }
