@@ -205,10 +205,10 @@ int main(int argc, char **argv) {
     goto cleanup;
   }
 
-  /* type_checker_dump_symbols (symfile); */
 print_untyped:
 cleanup:
   astree_print_tree(parser_root, astfile, 0);
+  astree_print_symbols(parser_root, symfile);
 
   /*
   if (skip_asm || skip_type_check) goto cleanup;

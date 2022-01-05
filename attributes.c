@@ -127,17 +127,17 @@ int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {
     switch (auxspec->aux) {
       case AUX_ARRAY:
         if (auxspec->data.ptr_or_arr.length > 0) {
-          ret += sprintf((buf + ret), " array of size %zu of",
+          ret += sprintf((buf + ret), "array of size %zu of ",
                          auxspec->data.ptr_or_arr.length);
         } else {
-          ret += sprintf((buf + ret), " array of");
+          ret += sprintf((buf + ret), "array of ");
         }
         break;
       case AUX_POINTER:
-        ret += sprintf((buf + ret), " pointer to");
+        ret += sprintf((buf + ret), "pointer to ");
         break;
       case AUX_FUNCTION:
-        ret += sprintf((buf + ret), " function with parameters (");
+        ret += sprintf((buf + ret), "function with parameters (");
         LinkedList *params = &auxspec->data.params;
         for (j = 0; j < llist_size(params); ++j) {
           SymbolValue *param_symval = llist_get(params, j);
@@ -147,12 +147,12 @@ int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {
             ret += sprintf((buf + ret), ", ");
           }
         }
-        ret += sprintf((buf + ret), ") returning");
+        ret += sprintf((buf + ret), ") returning ");
         break;
       case AUX_STRUCT:
       case AUX_UNION:
-        ret += sprintf((buf + ret), " %s with members {",
-                auxspec->aux == AUX_STRUCT ? "struct" : "union");
+        ret += sprintf((buf + ret), "%s with members {",
+                       auxspec->aux == AUX_STRUCT ? "struct" : "union");
         LinkedList *members = &auxspec->data.composite.members;
         for (j = 0; j < llist_size(members); ++j) {
           SymbolValue *member = llist_get(members, j);
@@ -161,6 +161,7 @@ int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {
             ret += sprintf((buf + ret), ", ");
           }
         }
+        ret += sprintf((buf + ret), "}");
         break;
       default:
         break;
@@ -175,21 +176,21 @@ int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {
       buf[ret] = 0;
       break;
     case TYPE_VOID:
-      ret += sprintf(buf + ret, " void");
+      ret += sprintf(buf + ret, "void");
       break;
     case TYPE_SIGNED:
       switch (type->width) {
         case 8:
-          ret += sprintf(buf + ret, " signed long");
+          ret += sprintf(buf + ret, "signed long");
           break;
         case 4:
-          ret += sprintf(buf + ret, " signed int");
+          ret += sprintf(buf + ret, "signed int");
           break;
         case 2:
-          ret += sprintf(buf + ret, " signed short");
+          ret += sprintf(buf + ret, "signed short");
           break;
         case 1:
-          ret += sprintf(buf + ret, " signed char");
+          ret += sprintf(buf + ret, "signed char");
           break;
         default:
           fprintf(stderr, "ERROR: Unknown width of signed type: %lu\n",
@@ -200,16 +201,16 @@ int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {
     case TYPE_UNSIGNED:
       switch (type->width) {
         case 8:
-          ret += sprintf(buf + ret, " unsigned long");
+          ret += sprintf(buf + ret, "unsigned long");
           break;
         case 4:
-          ret += sprintf(buf + ret, " unsigned int");
+          ret += sprintf(buf + ret, "unsigned int");
           break;
         case 2:
-          ret += sprintf(buf + ret, " unsigned short");
+          ret += sprintf(buf + ret, "unsigned short");
           break;
         case 1:
-          ret += sprintf(buf + ret, " unsigned char");
+          ret += sprintf(buf + ret, "unsigned char");
           break;
         default:
           fprintf(stderr, "ERROR: Unknown width of unsigned type: %lu\n",
@@ -254,8 +255,8 @@ int auxspec_copy(AuxSpec *dest, const AuxSpec *src) {
 }
 
 int typespec_init(TypeSpec *spec) {
-  llist_init(&spec->auxspecs, (void (*)(void *)) & auxspec_destroy, NULL);
-  return 0;
+  return llist_init(&spec->auxspecs, (void (*)(void *)) & auxspec_destroy,
+                    NULL);
 }
 
 int typespec_destroy(TypeSpec *spec) {

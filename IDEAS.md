@@ -501,3 +501,38 @@ return the name of the register the result was placed into.
 
 The contents of source lines to be written out will be tracked in a struct with
 fields for label, instruction, left/right operands, and comment.
+
+# Printing of symbol table
+Unfortunately, because of the way symbols are stored, it would be difficult to
+organize them in a way that is readable in the same way as the abstract syntax
+tree.
+
+For now, the thing that makes the most sense is to list the details of the
+abstract syntax tree node, followed by a list of all the symbols stored in the
+table associated with that node.
+
+## Functions
+### `symbol_value_print`
+Takes as arguments the `SymbolValue` to be printed, the buffer to be printed to,
+and the length of the buffer. Prints the declaration location, followed by the
+base type and auxiliary information. More information will be printed out as
+those features are implemented.
+
+### `symbol_table_print_table`
+Takes as an argument the `const map *` to be printed. This function will use
+`map_foreach_pair` to iterate over every symbol in the current scope. Pairs will
+be passed as arguments to `symbol_table_print_entry`.
+
+### `astree_print_symbols`
+Takes as an argument the `ASTree *` node whose symbol table is to be printed,
+the output file to be printed to, and the depth of the node in the abstract
+syntax tree.
+
+## Silly extensions
+A fun extension would be the ability to return fixed-length arrays by value.
+The function declaration/definition would need the size of the returned array
+to be specified in the declaration. The appropriate amount of space would be
+allocated on the stack by the caller, and a pointer to this space would be
+passed as an additional parameter to the function. Attempts to convert the
+returned value directly into a pointer would fail, since semantically the
+returned value is an lvalue, whose address cannot be taken? I think?
