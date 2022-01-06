@@ -109,10 +109,9 @@ int attributes_to_string(const unsigned int attributes, char *buf,
   return 0;
 }
 
-void location_to_string(const Location *loc, char *buffer, size_t size) {
-  int bufsize = snprintf(buffer, size, "%lu, %lu, %lu, %lu", loc->filenr,
-                         loc->linenr, loc->offset, loc->blocknr) +
-                1;
+int location_to_string(const Location *loc, char *buffer, size_t size) {
+  return snprintf(buffer, size, "%lu, %lu, %lu, %lu", loc->filenr, loc->linenr,
+                  loc->offset, loc->blocknr);
 }
 
 int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {

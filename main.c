@@ -196,7 +196,7 @@ int main(int argc, char **argv) {
     goto cleanup;
   }
 
-  string_set_dump(strfile);
+  string_set_print(strfile);
 
   if (skip_type_check) goto print_untyped;
   status = type_checker_make_table(parser_root);

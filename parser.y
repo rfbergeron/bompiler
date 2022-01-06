@@ -18,7 +18,11 @@
 
 %destructor { astree_destroy($$); } <>
 %destructor { ; } program
-%printer { assert (yyoutput == stderr); astree_dump($$, stderr); } <>
+%printer {
+  char nodestr[1024];
+  astree_to_string($$, nodestr, 1024);
+  fprintf(yyoutput, "%p->%s", $$, nodestr);
+} <>
 
 /* TODO(Robert): postfix increment/decrement should get
  * their own token codes to make assembly generation easier.

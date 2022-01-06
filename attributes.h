@@ -146,7 +146,7 @@ extern const Location LOC_EMPTY;
 
 int attributes_to_string(const unsigned int attributes, char *buf,
                          size_t bufsize);
-void location_to_string(const Location *loc, char *buffer, size_t size);
+int location_to_string(const Location *loc, char *buffer, size_t size);
 int type_to_string(const TypeSpec *type, char *buf, size_t bufsize);
 
 int auxspec_destroy(AuxSpec *auxspec);
