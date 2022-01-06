@@ -45,8 +45,8 @@ int validate_expr(ASTree *statement);
 int validate_stmt(ASTree *statement);
 int validate_declaration(ASTree *statement); /* required to process params */
 int types_compatible(
-    const void *arg1, const void *arg2,
-    unsigned int flags); /* required to check param and member types */
+    const TypeSpec *type1,
+    const TypeSpec *type2); /* required to check param and member types */
 
 ASTree *extract_ident(ASTree *tree) {
   switch (tree->symbol) {
@@ -181,7 +181,7 @@ int compare_params(LinkedList *dests, LinkedList *srcs) {
     if (dest == NULL || src == NULL) {
       return TCHK_EXPLICIT_CAST;
     } else {
-      int symbol_compat = types_compatible(dest, src, ARG1_SMV | ARG2_SMV);
+      int symbol_compat = types_compatible(&dest->type, &src->type);
       if (symbol_compat == TCHK_COMPATIBLE) continue;
       return TCHK_EXPLICIT_CAST;
     }
@@ -199,14 +199,14 @@ int compare_members(LinkedList *dests, LinkedList *srcs) {
     if (dest == NULL || src == NULL) {
       return TCHK_EXPLICIT_CAST;
     } else {
-      int ret = types_compatible(dest, src, ARG1_SMV | ARG2_SMV);
+      int ret = types_compatible(&dest->type, &src->type);
       if (ret != TCHK_COMPATIBLE) return ret;
     }
   }
   return TCHK_COMPATIBLE;
 }
 
-int compare_auxspecs(LinkedList *dests, LinkedList *srcs) {
+int compare_auxspecs(const LinkedList *dests, const LinkedList *srcs) {
   size_t aux_count = llist_size(dests) > llist_size(srcs) ? llist_size(dests)
                                                           : llist_size(srcs);
   size_t i;
@@ -272,37 +272,11 @@ int compare_declspecs(const TypeSpec *dest, const TypeSpec *src) {
  * It is used to determine conversions after promotions, casts, assignments, and
  * function calls/definitions/declarations.
  */
-int types_compatible(const void *arg1, const void *arg2, unsigned int flags) {
-  const TypeSpec *type1 = NULL;
-  const TypeSpec *type2 = NULL;
+int types_compatible(const TypeSpec *type1, const TypeSpec *type2) {
   int action = TCHK_COMPATIBLE;
 
-  /* extract type from first argument */
-  if (flags & ARG1_AST) {
-    type1 = extract_type((ASTree *)arg1);
-  } else if (flags & ARG1_SMV) {
-    type1 = &(((SymbolValue *)arg1)->type);
-  } else if (flags & ARG1_TYPE) {
-    type1 = arg1;
-  } else {
-    fprintf(stderr, "ERROR: no flags provided for argument 1\n");
-    return TCHK_E_NO_FLAGS;
-  }
-
-  /* extract type from second argument */
-  if (flags & ARG2_AST) {
-    type2 = extract_type((ASTree *)arg2);
-  } else if (flags & ARG2_SMV) {
-    type2 = &(((SymbolValue *)arg2)->type);
-  } else if (flags & ARG2_TYPE) {
-    type2 = arg2;
-  } else {
-    fprintf(stderr, "ERROR: no flags provided for argument 2\n");
-    return TCHK_E_NO_FLAGS;
-  }
-
-  LinkedList *auxspecs1 = (LinkedList *)&type1->auxspecs;
-  LinkedList *auxspecs2 = (LinkedList *)&type2->auxspecs;
+  const LinkedList *auxspecs1 = &type1->auxspecs;
+  const LinkedList *auxspecs2 = &type2->auxspecs;
   /* special cases */
   if (typespec_is_pointer(type1) && typespec_is_pointer(type2) &&
       (type1->base == TYPE_VOID || type2->base == TYPE_VOID)) {
@@ -624,8 +598,9 @@ int validate_call(ASTree *call) {
 
     if (status != 0) return status;
     DEBUGS('t', "Comparing types");
-    int compatibility = types_compatible(llist_get(param_list, i), call_param,
-                                         ARG1_SMV | ARG2_AST);
+    SymbolValue *param_symval = llist_get(param_list, i);
+    int compatibility =
+        types_compatible(&param_symval->type, extract_type(call_param));
     if (compatibility == TCHK_INCOMPATIBLE ||
         compatibility == TCHK_EXPLICIT_CAST) {
       fprintf(stderr, "ERROR: incompatible type for argument: %s\n",
@@ -651,7 +626,7 @@ int validate_assignment(ASTree *assignment) {
   status = validate_expr(src);
   if (status != 0) return status;
 
-  int compatibility = types_compatible(dest, src, ARG1_AST | ARG2_AST);
+  int compatibility = types_compatible(extract_type(dest), extract_type(src));
   if (compatibility == TCHK_INCOMPATIBLE ||
       compatibility == TCHK_EXPLICIT_CAST) {
     fprintf(stderr, "ERROR: Incompatible types for tokens: %s,%s %s,%s\n",
@@ -816,7 +791,7 @@ int validate_cast(ASTree *cast) {
 
   status = validate_expr(expr);
   if (status) return status;
-  int compatibility = types_compatible(cast, expr, ARG1_AST | ARG2_AST);
+  int compatibility = types_compatible(extract_type(cast), extract_type(expr));
   if (compatibility == TCHK_INCOMPATIBLE)
     return -1;
   else
@@ -887,8 +862,7 @@ int validate_binop(ASTree *operator) {
   status = determine_promotion(left, right, &promoted_type);
   if (status != 0) return status;
 
-  int compatibility =
-      types_compatible(promoted_type, left, ARG1_TYPE | ARG2_AST);
+  int compatibility = types_compatible(promoted_type, extract_type(left));
   if (compatibility == TCHK_IMPLICIT_CAST) {
     insert_cast(left, promoted_type);
   } else if (compatibility == TCHK_INCOMPATIBLE ||
@@ -900,7 +874,7 @@ int validate_binop(ASTree *operator) {
     abort();
   }
 
-  compatibility = types_compatible(promoted_type, right, ARG1_TYPE | ARG2_AST);
+  compatibility = types_compatible(promoted_type, extract_type(right));
   if (compatibility == TCHK_IMPLICIT_CAST) {
     insert_cast(right, promoted_type);
   } else if (compatibility == TCHK_INCOMPATIBLE ||
@@ -1039,8 +1013,7 @@ int validate_equality(ASTree *operator) {
     const TypeSpec *promoted_type = NULL;
     status = determine_promotion(left, right, &promoted_type);
     if (status) return status;
-    int compatibility =
-        types_compatible(promoted_type, left, ARG1_TYPE | ARG2_AST);
+    int compatibility = types_compatible(promoted_type, extract_type(left));
     if (compatibility == TCHK_IMPLICIT_CAST) {
       insert_cast(left, promoted_type);
     } else if (compatibility == TCHK_INCOMPATIBLE ||
@@ -1052,8 +1025,7 @@ int validate_equality(ASTree *operator) {
       abort();
     }
 
-    compatibility =
-        types_compatible(promoted_type, right, ARG1_TYPE | ARG2_AST);
+    compatibility = types_compatible(promoted_type, extract_type(right));
     if (compatibility == TCHK_IMPLICIT_CAST) {
       insert_cast(right, promoted_type);
     } else if (compatibility == TCHK_INCOMPATIBLE ||
@@ -1191,8 +1163,7 @@ int declare_symbol(ASTree *declaration, size_t i) {
   if (exists && in_current_scope) {
     if (typespec_is_function(&exists->type) &&
         typespec_is_function(&symbol->type)) {
-      int compatibility =
-          types_compatible(&exists->type, &symbol->type, ARG1_SMV | ARG2_SMV);
+      int compatibility = types_compatible(&exists->type, &symbol->type);
       if (compatibility != TCHK_COMPATIBLE) {
         fprintf(stderr, "ERROR: redefinition of symbol %s\n",
                 identifier->lexinfo);
@@ -1253,8 +1224,8 @@ int init_list_compatible(ASTree *declarator, ASTree *init_list) {
     for (i = 0; i < astree_count(init_list); ++i) {
       ASTree *initializer = astree_get(init_list, i);
       SymbolValue *member_symbol = llist_get((LinkedList *)members, i);
-      int compatibility = types_compatible(
-          &member_symbol->type, initializer->type, ARG1_TYPE | ARG2_TYPE);
+      int compatibility =
+          types_compatible(&member_symbol->type, extract_type(initializer));
       if (compatibility == TCHK_EXPLICIT_CAST ||
           compatibility == TCHK_INCOMPATIBLE) {
         fprintf(stderr,
@@ -1275,8 +1246,8 @@ int init_list_compatible(ASTree *declarator, ASTree *init_list) {
     size_t i;
     for (i = 0; i < astree_count(init_list); ++i) {
       ASTree *initializer = astree_get(init_list, i);
-      int compatibility = types_compatible(&element_type, initializer->type,
-                                           ARG1_TYPE | ARG2_TYPE);
+      int compatibility =
+          types_compatible(&element_type, extract_type(initializer));
       if (compatibility == TCHK_EXPLICIT_CAST ||
           compatibility == TCHK_INCOMPATIBLE) {
         fprintf(stderr,
@@ -1312,7 +1283,7 @@ int define_symbol(ASTree *declaration, size_t i) {
   } else {
     status = determine_promotion(declarator, initializer, &promoted_type);
     int compatibility =
-        types_compatible(declarator, initializer, ARG1_AST | ARG2_AST);
+        types_compatible(extract_type(declarator), extract_type(initializer));
     if (compatibility == TCHK_INCOMPATIBLE ||
         compatibility == TCHK_EXPLICIT_CAST) {
       fprintf(stderr, "ERROR: Incompatible type for object %s\n",
@@ -1366,7 +1337,7 @@ int define_function(ASTree *function) {
   SymbolValue *existing_entry = NULL;
   locate_symbol(function_ident, function_ident_len, &existing_entry);
   if (existing_entry) {
-    if (types_compatible(existing_entry, symbol, ARG1_SMV | ARG2_SMV) ==
+    if (types_compatible(&existing_entry->type, &symbol->type) ==
         TCHK_INCOMPATIBLE) {
       fprintf(stderr, "ERROR: redeclaration of function: %s\n", function_ident);
       return -1;
@@ -1481,8 +1452,8 @@ int define_composite_type(ASTree *composite_type) {
     if (exists) {
       int status = define_members(composite_type, composite_type_symbol);
       if (status) return status;
-      if (types_compatible(exists, composite_type_symbol,
-                           ARG1_SMV | ARG2_SMV) != TCHK_COMPATIBLE) {
+      if (types_compatible(&exists->type, &composite_type_symbol->type) !=
+          TCHK_COMPATIBLE) {
         fprintf(stderr, "ERROR: redefinition of composite_type %s\n",
                 composite_type_name);
         return -1;
@@ -1529,8 +1500,7 @@ int validate_return(ASTree *ret) {
 
   const TypeSpec *expr_spec =
       astree_count(ret) > 0 ? astree_first(ret)->type : &SPEC_VOID;
-  int compatibility =
-      types_compatible(&ret_spec, expr_spec, ARG1_TYPE | ARG2_TYPE);
+  int compatibility = types_compatible(&ret_spec, expr_spec);
   if (compatibility == TCHK_INCOMPATIBLE ||
       compatibility == TCHK_EXPLICIT_CAST) {
     fprintf(stderr, "ERROR: Incompatible return type\n");
