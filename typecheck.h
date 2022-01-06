@@ -4,6 +4,5 @@
 #include "astree.h"
 
 int type_checker_make_table(ASTree *root);
-void type_checker_dump_symbols(FILE *out);
 
 #endif

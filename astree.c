@@ -211,45 +211,30 @@ ASTree *astree_inject(ASTree *old_node, ASTree *new_node) {
 
 size_t astree_count(ASTree *parent) { return llist_size(&parent->children); }
 
-void astree_dump_tree(ASTree *tree, FILE *out, int depth) {
-  /* Dump formatted tree: current pointer, current token, followed
-   * by pointers to children, on one line. Then call recursively on
-   * children with increased depth (identation)
-   */
-}
-
-void astree_dump(ASTree *tree, FILE *out) {
-  /* print pointer value and tree contents without any special formatting,
-   * followed by the pointer values of this node's children
-   */
-  if (tree == NULL) return;
-  DEBUGS('t', "Dumping astree node.");
-  char nodestr[LINESIZE];
-  astree_to_string(tree, nodestr, LINESIZE);
-
-  fprintf(out, "%p->%s", tree, nodestr);
-}
-
-void astree_to_string(ASTree *tree, char *buffer, size_t size) {
+int astree_to_string(ASTree *tree, char *buffer, size_t size) {
   /* print token name, lexinfo in quotes, the location, block number,
    * attributes, and the typeid if this is a struct
    */
-  if (tree == NULL) return;
+  if (tree == NULL) return -1;
 
   const char *tname = parser_get_tname(tree->symbol);
   char locstr[LINESIZE];
-  location_to_string(&tree->loc, locstr, LINESIZE);
+  int characters_printed = location_to_string(&tree->loc, locstr, LINESIZE);
+  if (characters_printed < 0) return characters_printed;
   char attrstr[LINESIZE];
-  attributes_to_string(tree->attributes, attrstr, LINESIZE);
+  characters_printed =
+      attributes_to_string(tree->attributes, attrstr, LINESIZE);
+  if (characters_printed < 0) return characters_printed;
   char typestr[LINESIZE];
-  type_to_string(tree->type, typestr, LINESIZE);
+  characters_printed = type_to_string(tree->type, typestr, LINESIZE);
+  if (characters_printed < 0) return characters_printed;
 
   if (strlen(tname) > 4) tname += 4;
-  snprintf(buffer, size, "%s \"%s\" {%s} {%s} {%s}", tname, tree->lexinfo,
-           locstr, typestr, attrstr);
+  return snprintf(buffer, size, "%s \"%s\" {%s} {%s} {%s}", tname,
+                  tree->lexinfo, locstr, typestr, attrstr);
 }
 
-void astree_print_tree(ASTree *tree, FILE *out, int depth) {
+int astree_print_tree(ASTree *tree, FILE *out, int depth) {
   /* print out the whole tree */
   DEBUGS('t', "Tree info: token: %s, lexinfo: %s, children: %u",
          parser_get_tname(tree->symbol), tree->lexinfo,
@@ -260,7 +245,8 @@ void astree_print_tree(ASTree *tree, FILE *out, int depth) {
   memset(indent, ' ', numspaces);
   indent[numspaces] = 0;
   char nodestr[LINESIZE];
-  astree_to_string(tree, nodestr, LINESIZE);
+  int characters_printed = astree_to_string(tree, nodestr, LINESIZE);
+  if (characters_printed < 0) return characters_printed;
   fprintf(out, "%s%s\n", indent, nodestr);
 
   size_t i;
@@ -272,9 +258,11 @@ void astree_print_tree(ASTree *tree, FILE *out, int depth) {
     ASTree *child = (ASTree *)llist_get(&tree->children, i);
 
     if (child != NULL) {
-      astree_print_tree(child, out, depth + 1);
+      int status = astree_print_tree(child, out, depth + 1);
+      if (status) return status;
     }
   }
+  return 0;
 }
 
 int astree_print_symbols(ASTree *tree, FILE *out) {
