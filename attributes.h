@@ -67,18 +67,55 @@ enum conversion_type {
 };
 */
 
-enum type_flag {
-  TYPE_FLAG_NONE = 0,
+enum typespec_index {
+  TYPESPEC_INDEX_INT = 0,
+  TYPESPEC_INDEX_CHAR,
+  TYPESPEC_INDEX_SHORT,
+  TYPESPEC_INDEX_LONG,
+  TYPESPEC_INDEX_LONG_LONG,
+  TYPESPEC_INDEX_SIGNED,
+  TYPESPEC_INDEX_UNSIGNED,
+  TYPESPEC_INDEX_VOID,
+  TYPESPEC_INDEX_STRUCT,
+  TYPESPEC_INDEX_UNION,
+  TYPESPEC_INDEX_ENUM,
   /* storage class */
-  TYPE_FLAG_REGISTER = 1 << 0,
-  TYPE_FLAG_STATIC = 1 << 1,
-  TYPE_FLAG_EXTERN = 1 << 2,
-  TYPE_FLAG_AUTO = 1 << 2,
+  TYPESPEC_INDEX_REGISTER,
+  TYPESPEC_INDEX_STATIC,
+  TYPESPEC_INDEX_EXTERN,
+  TYPESPEC_INDEX_AUTO,
   /* qualifiers */
-  TYPE_FLAG_CONST = 1 << 4,
-  TYPE_FLAG_VOLATILE = 1 << 5,
+  TYPESPEC_INDEX_CONST,
+  TYPESPEC_INDEX_VOLATILE,
   /* function only */
-  TYPE_FLAG_INLINE = 1 << 6
+  TYPESPEC_INDEX_INLINE,
+  /* number of type specifiers */
+  TYPESPEC_INDEX_COUNT
+};
+
+enum typespec_flag {
+  TYPESPEC_FLAG_NONE = 0,
+  TYPESPEC_FLAG_INT = 1 << TYPESPEC_INDEX_INT,
+  TYPESPEC_FLAG_CHAR = 1 << TYPESPEC_INDEX_CHAR,
+  TYPESPEC_FLAG_SHORT = 1 << TYPESPEC_INDEX_SHORT,
+  TYPESPEC_FLAG_LONG = 1 << TYPESPEC_INDEX_LONG,
+  TYPESPEC_FLAG_LONG_LONG = 1 << TYPESPEC_INDEX_LONG_LONG,
+  TYPESPEC_FLAG_SIGNED = 1 << TYPESPEC_INDEX_SIGNED,
+  TYPESPEC_FLAG_UNSIGNED = 1 << TYPESPEC_INDEX_UNSIGNED,
+  TYPESPEC_FLAG_VOID = 1 << TYPESPEC_INDEX_VOID,
+  TYPESPEC_FLAG_STRUCT = 1 << TYPESPEC_INDEX_STRUCT,
+  TYPESPEC_FLAG_UNION = 1 << TYPESPEC_INDEX_UNION,
+  TYPESPEC_FLAG_ENUM = 1 << TYPESPEC_INDEX_ENUM,
+  /* storage class */
+  TYPESPEC_FLAG_REGISTER = 1 << TYPESPEC_INDEX_REGISTER,
+  TYPESPEC_FLAG_STATIC = 1 << TYPESPEC_INDEX_STATIC,
+  TYPESPEC_FLAG_EXTERN = 1 << TYPESPEC_INDEX_EXTERN,
+  TYPESPEC_FLAG_AUTO = 1 << TYPESPEC_INDEX_AUTO,
+  /* qualifiers */
+  TYPESPEC_FLAG_CONST = 1 << TYPESPEC_INDEX_CONST,
+  TYPESPEC_FLAG_VOLATILE = 1 << TYPESPEC_INDEX_VOLATILE,
+  /* function only */
+  TYPESPEC_FLAG_INLINE = 1 << TYPESPEC_INDEX_INLINE
 };
 
 enum imm_type {
@@ -144,10 +181,10 @@ extern const TypeSpec SPEC_CHAR;
 
 extern const Location LOC_EMPTY;
 
-int attributes_to_string(const unsigned int attributes, char *buf,
-                         size_t bufsize);
-int location_to_string(const Location *loc, char *buffer, size_t size);
-int type_to_string(const TypeSpec *type, char *buf, size_t bufsize);
+int attributes_to_string(const unsigned int attributes, char *buf, size_t size);
+int location_to_string(const Location *loc, char *buf, size_t size);
+int flags_to_string(const unsigned int flags, char *buf, size_t size);
+int type_to_string(const TypeSpec *type, char *buf, size_t size);
 
 int auxspec_destroy(AuxSpec *auxspec);
 int auxspec_copy(AuxSpec *dest, const AuxSpec *src);
