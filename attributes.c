@@ -8,10 +8,11 @@
 #include "symtable.h"
 
 #define INDEX_FROM_INT(sign, width) INDEX_##sign##_##width
-#define SPECIFY_INT(sign, width)                                 \
-  {                                                              \
-      X64_SIZEOF_##width, X64_ALIGNOF_##width, BLIB_LLIST_EMPTY, \
-      TYPE_FLAG_NONE,     TYPE_##sign,                           \
+#define SPECIFY_INT(sign, width)                                        \
+  {                                                                     \
+      X64_SIZEOF_##width, X64_ALIGNOF_##width,                          \
+      BLIB_LLIST_EMPTY,   TYPESPEC_FLAG_##sign | TYPESPEC_FLAG_##width, \
+      TYPE_##sign,                                                      \
   };
 
 /*
@@ -42,6 +43,16 @@ const char STRING_INT_MAP[][32] = {
     "unsigned short int", "signed short int", "unsigned char", "signed char",
 };
 
+const char typespec_flag_string[][10] = {"int", "char", "short", "long",
+                                         "long long", "signed", "unsigned",
+                                         "void", "struct", "union", "enum",
+                                         /* storage class */
+                                         "register", "static", "extern", "auto",
+                                         /* qualifiers */
+                                         "const", "volatile",
+                                         /* function only */
+                                         "inline"};
+
 const char *STRING_ULONG = STRING_INT_MAP[INDEX_FROM_INT(UNSIGNED, LONG)];
 const char *STRING_LONG = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, LONG)];
 const char *STRING_UINT = STRING_INT_MAP[INDEX_FROM_INT(UNSIGNED, INT)];
@@ -51,8 +62,10 @@ const char *STRING_SHRT = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, SHORT)];
 const char *STRING_UCHAR = STRING_INT_MAP[INDEX_FROM_INT(UNSIGNED, CHAR)];
 const char *STRING_CHAR = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, CHAR)];
 
-const TypeSpec SPEC_EMPTY = {0, 0, BLIB_LLIST_EMPTY, TYPE_FLAG_NONE, TYPE_NONE};
-const TypeSpec SPEC_VOID = {0, 0, BLIB_LLIST_EMPTY, TYPE_FLAG_NONE, TYPE_VOID};
+const TypeSpec SPEC_EMPTY = {0, 0, BLIB_LLIST_EMPTY, TYPESPEC_FLAG_NONE,
+                             TYPE_NONE};
+const TypeSpec SPEC_VOID = {0, 0, BLIB_LLIST_EMPTY, TYPESPEC_FLAG_NONE,
+                            TYPE_VOID};
 const TypeSpec SPEC_ULONG = SPECIFY_INT(UNSIGNED, LONG);
 const TypeSpec SPEC_LONG = SPECIFY_INT(SIGNED, LONG);
 const TypeSpec SPEC_UINT = SPECIFY_INT(UNSIGNED, INT);
@@ -91,11 +104,11 @@ const char attr_map[][16] = {"reg", "lval", "rval", "addr", "const"};
  */
 
 int attributes_to_string(const unsigned int attributes, char *buf,
-                         size_t bufsize) {
+                         size_t size) {
   size_t i, buf_index = 0;
   for (i = 0; i < NUM_ATTRIBUTES; ++i) {
     if (attributes & (1 << i)) {
-      if (buf_index + strlen(attr_map[i]) > bufsize) {
+      if (buf_index + strlen(attr_map[i]) > size) {
         fprintf(stderr, "WARN: buffer too small to print all attributes");
         return 1;
       } else if (i == 0) {
@@ -109,12 +122,28 @@ int attributes_to_string(const unsigned int attributes, char *buf,
   return 0;
 }
 
-int location_to_string(const Location *loc, char *buffer, size_t size) {
-  return snprintf(buffer, size, "%lu, %lu, %lu, %lu", loc->filenr, loc->linenr,
+int location_to_string(const Location *loc, char *buf, size_t size) {
+  return snprintf(buf, size, "%lu, %lu, %lu, %lu", loc->filenr, loc->linenr,
                   loc->offset, loc->blocknr);
 }
 
-int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {
+int flags_to_string(const unsigned int flags, char *buf, size_t size) {
+  size_t i, offset = 0;
+  for (i = 0; i < TYPESPEC_INDEX_COUNT; ++i) {
+    enum typespec_flag flag_i = 1 << i;
+    if (flags & flag_i) {
+      if (offset > 0) {
+        buf[offset++] = ' ';
+        buf[offset] = 0;
+      }
+      strcpy(buf + offset, typespec_flag_string[i]);
+      offset = strlen(buf);
+    }
+  }
+  return offset;
+}
+
+int type_to_string(const TypeSpec *type, char *buf, size_t size) {
   int ret = 0;
   /* TODO(Robert): casting away const bad; redo badlib so that query functions
    * have const arguments
@@ -140,8 +169,7 @@ int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {
         LinkedList *params = &auxspec->data.params;
         for (j = 0; j < llist_size(params); ++j) {
           SymbolValue *param_symval = llist_get(params, j);
-          ret +=
-              type_to_string(&(param_symval->type), (buf + ret), bufsize - ret);
+          ret += type_to_string(&(param_symval->type), (buf + ret), size - ret);
           if (j + 1 < llist_size(params)) {
             ret += sprintf((buf + ret), ", ");
           }
@@ -155,7 +183,7 @@ int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {
         LinkedList *members = &auxspec->data.composite.members;
         for (j = 0; j < llist_size(members); ++j) {
           SymbolValue *member = llist_get(members, j);
-          ret += type_to_string(&(member->type), (buf + ret), bufsize - ret);
+          ret += type_to_string(&(member->type), (buf + ret), size - ret);
           if (j + 1 < llist_size(members)) {
             ret += sprintf((buf + ret), ", ");
           }

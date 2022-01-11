@@ -15,22 +15,55 @@
 /* TODO(Robert): Linux-specific; replace with strtoul or similar */
 #include "inttypes.h"
 
-#define ARG1_AST (1 << 0)
-#define ARG1_SMV (1 << 1)
-#define ARG1_TYPE (1 << 2)
-#define ARG2_AST (1 << 3)
-#define ARG2_SMV (1 << 4)
-#define ARG2_TYPE (1 << 5)
+/*
+ * The following enum definitions correspond to one another as follows:
+ *
+ *   If TYPESPEC_FLAGSET_X has value Y, that means that TYPESPEC_FLAG_X has bit
+ *   Y set and all other bits unset. The flagset listing incompatible flags for
+ *   specifier X is at index Y in INCOMPATIBLE_FLAGSETS. So, to get the set of
+ *   incompatible flags, you would write
+ *
+ *   INCOMPATIBLE_FLAGSETS[TYPESPEC_FLAGSET_X]
+ *
+ *   and take the bitwise AND of this value and the flagset you are currently
+ *   validating.
+ */
 
-#define IFLAG_INT (1 << 0)
-#define IFLAG_CHAR (1 << 1)
-#define IFLAG_SHRT (1 << 2)
-#define IFLAG_LONG (1 << 3)
-#define IFLAG_SIGNED (1 << 4)
-#define IFLAG_UNSIGNED (1 << 5)
-#define IFLAG_VOID (1 << 6)
-#define IFLAG_STRUCT (1 << 7)
-#define IFLAG_UNION (1 << 8)
+/* "char" is not included in any of these groups */
+#define TYPESPEC_FLAGS_INTEGER                                    \
+  (TYPESPEC_FLAG_INT | TYPESPEC_FLAG_SHORT | TYPESPEC_FLAG_LONG | \
+   TYPESPEC_FLAG_LONG_LONG)
+#define TYPESPEC_FLAGS_NON_INTEGER                                   \
+  (TYPESPEC_FLAG_VOID | TYPESPEC_FLAG_STRUCT | TYPESPEC_FLAG_UNION | \
+   TYPESPEC_FLAG_ENUM)
+#define TYPESPEC_FLAGS_SIGNEDNESS \
+  (TYPESPEC_FLAG_SIGNED | TYPESPEC_FLAG_UNSIGNED)
+
+/* TODO(Robert): Implement "long long" integer type. For now, the type checker
+ * should report an error if "long" is specified twice.
+ */
+const unsigned int INCOMPATIBLE_FLAGSETS[] = {
+    TYPESPEC_FLAG_INT | TYPESPEC_FLAG_CHAR |
+        TYPESPEC_FLAGS_NON_INTEGER, /* int */
+    TYPESPEC_FLAG_CHAR | TYPESPEC_FLAGS_INTEGER |
+        TYPESPEC_FLAGS_NON_INTEGER, /* char */
+    TYPESPEC_FLAG_SHORT | TYPESPEC_FLAG_LONG | TYPESPEC_FLAG_LONG_LONG |
+        TYPESPEC_FLAG_CHAR | TYPESPEC_FLAGS_NON_INTEGER, /* short */
+    TYPESPEC_FLAG_LONG | TYPESPEC_FLAG_LONG_LONG | TYPESPEC_FLAG_SHORT |
+        TYPESPEC_FLAG_CHAR | TYPESPEC_FLAGS_NON_INTEGER, /* long */
+    TYPESPEC_FLAG_LONG | TYPESPEC_FLAG_LONG_LONG | TYPESPEC_FLAG_SHORT |
+        TYPESPEC_FLAG_CHAR | TYPESPEC_FLAGS_NON_INTEGER,    /* long long */
+    TYPESPEC_FLAGS_SIGNEDNESS | TYPESPEC_FLAGS_NON_INTEGER, /* signed */
+    TYPESPEC_FLAGS_SIGNEDNESS | TYPESPEC_FLAGS_NON_INTEGER, /* unsigned */
+    TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_NON_INTEGER |
+        TYPESPEC_FLAGS_SIGNEDNESS, /* void */
+    TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_NON_INTEGER |
+        TYPESPEC_FLAGS_SIGNEDNESS, /* struct */
+    TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_NON_INTEGER |
+        TYPESPEC_FLAGS_SIGNEDNESS, /* union */
+    TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_NON_INTEGER |
+        TYPESPEC_FLAGS_SIGNEDNESS, /* enum */
+};
 
 enum type_checker_action {
   TCHK_COMPATIBLE,
@@ -220,7 +253,7 @@ int compare_auxspecs(const LinkedList *dests, const LinkedList *srcs) {
                (src->aux == AUX_POINTER || src->aux == AUX_ARRAY) &&
                !((dest->data.ptr_or_arr.qualifiers ^
                   src->data.ptr_or_arr.qualifiers) &
-                 (TYPE_FLAG_CONST | TYPE_FLAG_VOLATILE))) {
+                 (TYPESPEC_FLAG_CONST | TYPESPEC_FLAG_VOLATILE))) {
       continue;
     } else if ((dest->aux == AUX_FUNCTION && src->aux == AUX_FUNCTION)) {
       int ret = compare_params(&dest->data.params, &src->data.params);
@@ -389,109 +422,32 @@ int validate_intcon(ASTree *intcon) {
   return status;
 }
 
-int validate_int_type(ASTree *spec_list, TypeSpec *out) {
-  int status = 0;
-  unsigned int flags = 0;
-
-  /* TODO(Robert): this is hideous and a roundabout way of figuring out the
-   * the integer type; this should probably be handled by the parser in some
-   * way
-   */
-  size_t i;
-  for (i = 0; i < astree_count(spec_list); ++i) {
-    ASTree *type = astree_get(spec_list, i);
-    switch (type->symbol) {
-      case TOK_INT:
-        if (flags & (IFLAG_INT | IFLAG_CHAR | IFLAG_VOID | IFLAG_UNION |
-                     IFLAG_STRUCT)) {
-          fprintf(stderr, "ERROR: bad occurrence of int type secifier %s\n",
-                  parser_get_tname(type->symbol));
-          status = -1;
-        } else if (!(flags & (IFLAG_LONG | IFLAG_SHRT | IFLAG_UNSIGNED))) {
-          *out = SPEC_INT;
-        }
-        flags |= IFLAG_INT;
-        break;
-      case TOK_CHAR:
-        if (flags & (IFLAG_CHAR | IFLAG_INT | IFLAG_SHRT | IFLAG_LONG |
-                     IFLAG_VOID | IFLAG_UNION | IFLAG_STRUCT)) {
-          fprintf(stderr, "ERROR: bad occurrence of int type secifier %s\n",
-                  parser_get_tname(type->symbol));
-          status = -1;
-        } else if (flags & IFLAG_UNSIGNED) {
-          *out = SPEC_UCHAR;
-        } else {
-          *out = SPEC_CHAR;
-        }
-        flags |= IFLAG_CHAR;
-        break;
-      case TOK_LONG:
-        if (flags & (IFLAG_LONG | IFLAG_SHRT | IFLAG_CHAR | IFLAG_VOID)) {
-          fprintf(stderr, "ERROR: bad occurrence of int type secifier %s\n",
-                  parser_get_tname(type->symbol));
-          status = -1;
-        } else if (flags & IFLAG_UNSIGNED) {
-          *out = SPEC_ULONG;
-        } else {
-          *out = SPEC_LONG;
-        }
-        flags |= IFLAG_LONG;
-        break;
-      case TOK_SHORT:
-        if (flags & (IFLAG_SHRT | IFLAG_LONG | IFLAG_CHAR | IFLAG_VOID)) {
-          fprintf(stderr, "ERROR: bad occurrence of int type secifier %s\n",
-                  parser_get_tname(type->symbol));
-          status = -1;
-        } else if (flags & IFLAG_UNSIGNED) {
-          *out = SPEC_USHRT;
-        } else {
-          *out = SPEC_SHRT;
-        }
-        flags |= IFLAG_SHRT;
-        break;
-      case TOK_SIGNED:
-        if (flags & (IFLAG_SIGNED | IFLAG_UNSIGNED | IFLAG_VOID)) {
-          fprintf(stderr, "ERROR: bad occurrence of int type secifier %s\n",
-                  parser_get_tname(type->symbol));
-          status = -1;
-        } else if (!(flags & (IFLAG_LONG | IFLAG_SHRT | IFLAG_CHAR))) {
-          *out = SPEC_INT;
-        }
-        flags |= IFLAG_SIGNED;
-        break;
-      case TOK_UNSIGNED:
-        if (flags & (IFLAG_UNSIGNED | IFLAG_SIGNED | IFLAG_VOID)) {
-          fprintf(stderr, "ERROR: bad occurrence of int type secifier %s\n",
-                  parser_get_tname(type->symbol));
-          status = -1;
-        } else if (flags & IFLAG_LONG) {
-          *out = SPEC_ULONG;
-        } else if (flags & IFLAG_SHRT) {
-          *out = SPEC_USHRT;
-        } else if (flags & IFLAG_CHAR) {
-          *out = SPEC_UCHAR;
-        } else {
-          *out = SPEC_UINT;
-        }
-        flags |= IFLAG_UNSIGNED;
-        break;
-      default:
-        fprintf(stderr, "ERROR: unexpected type specifier %s\n",
-                parser_get_tname(type->symbol));
-        status = -1;
-        break;
+int validate_integer_typespec(TypeSpec *out, enum typespec_index i,
+                              enum typespec_flag f, size_t bytes) {
+  if (out->flags & INCOMPATIBLE_FLAGSETS[i]) {
+    char buf[1024];
+    flags_to_string(f, buf, 1024);
+    char buf2[1024];
+    flags_to_string(out->flags, buf2, 1024);
+    fprintf(stderr,
+            "ERROR: typespec flag \"%s\" incompatible with flagset \"%s\"\n",
+            buf, buf2);
+    return -1;
+  } else {
+    out->flags |= f;
+    if (bytes > 0) {
+      out->width = bytes;
+      out->alignment = bytes;
+    } else if (f == TYPESPEC_FLAG_SIGNED) {
+      out->base = TYPE_SIGNED;
+    } else {
+      out->base = TYPE_UNSIGNED;
     }
-
-    if (status) {
-      fprintf(stderr, "fuck\n");
-      return status;
-    }
+    return 0;
   }
-
-  return status;
 }
 
-int validate_composite_type(ASTree *type, TypeSpec *out) {
+int validate_composite_typespec(ASTree *type, TypeSpec *out) {
   ASTree *composite_type = astree_first(type);
   const char *composite_type_name = composite_type->lexinfo;
   size_t composite_type_name_len = strlen(composite_type_name);
@@ -512,29 +468,73 @@ int validate_composite_type(ASTree *type, TypeSpec *out) {
   }
 }
 
-int validate_type(ASTree *type, TypeSpec *out) {
-  switch (type->symbol) {
-    case TOK_VOID:
-      *out = SPEC_VOID;
-      return 0;
-    case TOK_STRUCT:
-    case TOK_UNION:
-      /* go to struct/union validation function */
-      return validate_composite_type(type, out);
-    case TOK_SPEC:
-      /* go to integer validation function */
-      return validate_int_type(type, out);
-    case TOK_IDENT:
-      /* TODO(Robert): handle typedefs */
-      fprintf(stderr,
-              "ERROR: type specifier in incorrect"
-              "location\n");
-      return -1;
-    default:
-      fprintf(stderr, "ERROR: unimplemented type: %s\n",
-              parser_get_tname(type->symbol));
-      return -1;
+int validate_typespec_list(ASTree *spec_list, TypeSpec *out) {
+  int status = 0;
+  size_t i;
+  for (i = 0; i < astree_count(spec_list); ++i) {
+    ASTree *type = astree_get(spec_list, i);
+    switch (type->symbol) {
+      case TOK_VOID:
+        status = out->flags & INCOMPATIBLE_FLAGSETS[TYPESPEC_INDEX_VOID];
+        out->base = TYPE_VOID;
+        out->flags |= TYPESPEC_FLAG_VOID;
+        break;
+      case TOK_INT:
+        status = validate_integer_typespec(out, TYPESPEC_INDEX_INT,
+                                           TYPESPEC_FLAG_INT, X64_SIZEOF_INT);
+        break;
+      case TOK_LONG:
+        status = validate_integer_typespec(out, TYPESPEC_INDEX_LONG,
+                                           TYPESPEC_FLAG_LONG, X64_SIZEOF_LONG);
+        break;
+      case TOK_SHORT:
+        status = validate_integer_typespec(
+            out, TYPESPEC_INDEX_SHORT, TYPESPEC_FLAG_SHORT, X64_SIZEOF_SHORT);
+        break;
+      case TOK_CHAR:
+        status = validate_integer_typespec(out, TYPESPEC_INDEX_CHAR,
+                                           TYPESPEC_FLAG_CHAR, X64_SIZEOF_CHAR);
+        break;
+      case TOK_SIGNED:
+        status = validate_integer_typespec(out, TYPESPEC_INDEX_SIGNED,
+                                           TYPESPEC_FLAG_SIGNED, 0);
+        break;
+      case TOK_UNSIGNED:
+        status = validate_integer_typespec(out, TYPESPEC_INDEX_UNSIGNED,
+                                           TYPESPEC_FLAG_UNSIGNED, 0);
+        break;
+      case TOK_UNION:
+      case TOK_STRUCT:
+        status = validate_composite_typespec(type, out);
+        break;
+      case TOK_CONST:
+        break;
+      case TOK_VOLATILE:
+        break;
+      case TOK_IDENT:
+        break;
+      default:
+        fprintf(stderr, "ERROR: unimplemented type: %s\n",
+                parser_get_tname(type->symbol));
+        status = -1;
+        break;
+    }
   }
+
+  if ((out->flags & (TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAG_CHAR)) &&
+      !(out->flags & TYPESPEC_FLAGS_SIGNEDNESS)) {
+    /* default to signed if not specified */
+    out->base = TYPE_SIGNED;
+  } else if ((out->flags & TYPESPEC_FLAGS_SIGNEDNESS) &&
+             !(out->flags & (TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAG_CHAR))) {
+    /* default to width of "int" if not specified */
+    out->width = X64_SIZEOF_INT;
+    out->alignment = X64_ALIGNOF_INT;
+  } else if (out->base == TYPE_NONE) {
+    /* error; only storage class and qualifiers provided */
+    status = -1;
+  }
+  return status;
 }
 
 int validate_ident(ASTree *ident) {
@@ -764,7 +764,7 @@ int validate_cast(ASTree *cast) {
    * an already-initialized spec
    */
   TypeSpec declspecs = SPEC_EMPTY;
-  int status = validate_type(spec_list, &declspecs);
+  int status = validate_typespec_list(spec_list, &declspecs);
   if (status) return status;
   TypeSpec *spec = calloc(1, sizeof(*cast->type));
   spec->base = declspecs.base;
@@ -1146,7 +1146,7 @@ int declare_symbol(ASTree *declaration, size_t i) {
   ASTree *identifier = extract_ident(declarator);
   DEBUGS('t', "Making object entry for value %s", identifier->lexinfo);
   SymbolValue *symbol = symbol_value_init(&declarator->loc);
-  int status = validate_type(astree_first(declaration), &symbol->type);
+  int status = validate_typespec_list(astree_first(declaration), &symbol->type);
   if (status) return status;
 
   size_t j;
@@ -1322,7 +1322,7 @@ int define_function(ASTree *function) {
   ASTree *identifier = extract_ident(declarator);
 
   SymbolValue *symbol = symbol_value_init(extract_loc(declarator));
-  int status = validate_type(astree_first(function), &symbol->type);
+  int status = validate_typespec_list(astree_first(function), &symbol->type);
   if (status) return status;
 
   size_t i;

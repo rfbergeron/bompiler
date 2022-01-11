@@ -3,6 +3,17 @@ This document will be where I do my thinking. It will probably be messy and not
 very readable, but that's fine because my brain garbage needs to go somewhere,
 and that somewhere can't be my design document like it was before
 
+## Tempering expectations
+A couple of non-goals:
+- Full standards compliance: I will relax the standard if it makes the
+  implementation simpler without introducing ambiguity; accepting code that a
+  standards compliant compiler would complain about isn't a big deal.
+- Floating point: Floating point arithmetic is a secondary concern.
+- Preprocessor: I do not plan to implement a preprocessor.
+- Lexing/Parsing: the compiler uses Flex and Bison. It does not implement its
+  own lexer and parser.
+- Assembler: The compiler will not include an assembler.
+
 ## Things to hold off on
 There are a few features that seem difficult to implement, not important for the
 purpose of achieving self-hosting, or both. These include:
@@ -32,6 +43,18 @@ their own. Just something to note for later.
 Labels have their own namespace. Structures and unions share a namespace
 separate from other types of declarations, and functions and objects share a
 namespace.
+
+## Struct padding
+The auxiliary info for struct should include a way to record the amount of
+extra padding that each field needs. The padding value for a member specifies
+the number of extra bits to be inserted before their storage location in the
+struct. When defining a structure, the memory offset given the current size
+of the structure is compared with the alignment requirements of the member
+being added. If this value does not meet alignment requirements, padding bytes
+are added until the current structure size matches, at which point the member
+is registered with the current memory address, and, if necessary, the alignment
+requirements of the structure are raised to match that of the member. The first
+member of the structure will always have zero padding bytes.
 
 ## Increment and decrement
 These operators must have an lval argument. Postfix and prefix versions must
@@ -510,6 +533,33 @@ tree.
 For now, the thing that makes the most sense is to list the details of the
 abstract syntax tree node, followed by a list of all the symbols stored in the
 table associated with that node.
+
+# Simpler integer type specifier verification
+Currently, the function that checks integer specifiers is very long and
+complicated because it uses flags and a large switch statement to ensure that
+the order is "correct". I think relaxing the standard here would make the
+implementation easier while relaxing requirements on the input in a way that
+does not introduce ambiguity.
+
+# Simplifying type specifier verification in general
+The verification of type specifiers as a whole could be reduced to a single
+function that compares and modifies bitmasks as opposed to the current system
+that separates functionality into multiple functions depending on the base type.
+
+There are a few "base" types:
+- integer types (including characters)
+- enums
+- structs
+- unions
+- void
+
+When declared, objects must specify exactly one of these types.
+
+Simplyfing the parser and having the type checker catch these errors might be
+helpful and/or easier.
+
+It would also mean less `TypeSpec` constants would have to be defined, as the
+only "default" ones would be `signed int` and `char`.
 
 ## Functions
 ### `symbol_value_print`
