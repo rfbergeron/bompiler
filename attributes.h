@@ -166,10 +166,11 @@ typedef struct location {
 /* TODO(Robert): maybe define this in some other common file? */
 extern const size_t MAX_IDENT_LEN;
 extern const TypeSpec SPEC_PTR;
-extern const TypeSpec SPEC_EMPTY;
 extern const TypeSpec SPEC_FUNCTION;
 extern const TypeSpec SPEC_STRUCT;
+extern const TypeSpec SPEC_EMPTY;
 extern const TypeSpec SPEC_VOID;
+extern const TypeSpec SPEC_CHAR;
 extern const TypeSpec SPEC_ULONG;
 extern const TypeSpec SPEC_LONG;
 extern const TypeSpec SPEC_UINT;
@@ -177,7 +178,7 @@ extern const TypeSpec SPEC_INT;
 extern const TypeSpec SPEC_USHRT;
 extern const TypeSpec SPEC_SHRT;
 extern const TypeSpec SPEC_UCHAR;
-extern const TypeSpec SPEC_CHAR;
+extern const TypeSpec SPEC_SCHAR;
 
 extern const Location LOC_EMPTY;
 

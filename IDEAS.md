@@ -513,6 +513,14 @@ an additional field indicating the type of the label (string constant, function,
 global variable, conditional, loop body, loop end, etc.) which the label printer
 function will use to determine how the label should be printed.
 
+## String literals
+All string literals get stored in the `.data` section of the assembly file. When
+assigning a string literal to a `char[]` or a `char*`, one of two things happen.
+- When assigning to a `char[]`, the contents of the string literal are copied
+  into the array.
+- When assigning to a `char*`, the variable is made to point at the string
+  literal's location in the `.data` section, which may or may not be read-only.
+
 # Register Allocation
 Before register allocation is done, all lines that will be written to the output
 file will first be stored in a linearly traversible and maybe random access data
