@@ -4,6 +4,7 @@
 #include "attributes.h"
 #include "badlib/badllist.h"
 #include "badlib/badmap.h"
+#include "ctype.h"
 #include "debug.h"
 #include "err.h"
 #include "lyutils.h"
@@ -410,7 +411,7 @@ int validate_intcon(ASTree *intcon) {
       intcon->type = &SPEC_ULONG;
     }
   } else if (signed_value > INT8_MIN && signed_value < INT8_MAX) {
-    intcon->type = &SPEC_CHAR;
+    intcon->type = &SPEC_SCHAR;
   } else if (signed_value > INT16_MIN && signed_value < INT16_MAX) {
     intcon->type = &SPEC_SHRT;
   } else if (signed_value > INT32_MIN && signed_value < INT32_MAX) {
@@ -420,6 +421,43 @@ int validate_intcon(ASTree *intcon) {
   }
 
   return status;
+}
+
+int validate_charcon(ASTree *charcon) {
+  const char *const_str = charcon->lexinfo + 1;
+  size_t const_str_len = strlen(const_str) - 1;
+  /* TODO(Robert): validate constant information */
+  if (const_str[0] == '\\') {
+    if (const_str[1] == 'x') {
+      /* hex number */
+    } else if (isalpha(const_str[1])) {
+      /* ASCII control sequence */
+    } else if (isdigit(const_str[1])) {
+      /* octal number */
+    } else {
+      /* \?, \", \', or \\ */
+    }
+  } else {
+  }
+  charcon->type = &SPEC_CHAR;
+  return 0;
+}
+
+int validate_stringcon(ASTree *stringcon) {
+  /* add one to skip first doublequote */
+  const char *const_str = stringcon->lexinfo + 1;
+  /* subtract one to omit last doublequote */
+  size_t const_str_len = strlen(const_str) - 1;
+  TypeSpec *stringcon_type = malloc(sizeof(*stringcon->type));
+  stringcon->type = stringcon_type;
+  *stringcon_type = SPEC_CHAR;
+  int status = typespec_init(stringcon_type);
+  if (status) return status;
+  AuxSpec *aux_stringcon = calloc(1, sizeof(*aux_stringcon));
+  aux_stringcon->aux = AUX_ARRAY;
+  /* add one to include nul character */
+  aux_stringcon->data.ptr_or_arr.length = const_str_len + 1;
+  return llist_push_back(&stringcon_type->auxspecs, aux_stringcon);
 }
 
 int validate_integer_typespec(TypeSpec *out, enum typespec_index i,
@@ -1119,12 +1157,10 @@ int validate_expr(ASTree *expression) {
       status = validate_intcon(expression);
       break;
     case TOK_CHARCON:
-      /* types are set on construction and we don't need to do
-       * anything else
-       */
+      status = validate_charcon(expression);
       break;
     case TOK_STRINGCON:
-      /* do nothing? this will get taking of during assembly generation */
+      status = validate_stringcon(expression);
       break;
     case TOK_IDENT:
       DEBUGS('t', "bonk");
@@ -1201,6 +1237,7 @@ int validate_initializer(ASTree *initializer) {
   return 0;
 }
 
+/* only to be used when declarator is of type array or struct */
 int init_list_compatible(ASTree *declarator, ASTree *init_list) {
   ASTree *identifier = extract_ident(declarator);
   if (identifier->type->base == TYPE_STRUCT) {
