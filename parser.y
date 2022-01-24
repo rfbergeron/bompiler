@@ -203,6 +203,8 @@ unary_expr    : postfix_expr                                                    
               | '~' unary_expr                                                    { $$ = astree_adopt($1, $2, NULL, NULL); }
               | '+' unary_expr %prec TOK_CAST                                     { $$ = astree_adopt_sym($1, TOK_POS, $2, NULL); }
               | '-' unary_expr %prec TOK_CAST                                     { $$ = astree_adopt_sym($1, TOK_NEG, $2, NULL); }
+              | '*' unary_expr %prec TOK_INDIRECTION                              { $$ = astree_adopt_sym($1, TOK_INDIRECTION, $2, NULL); }
+              | '&' unary_expr %prec TOK_ADDROF                                   { $$ = astree_adopt_sym($1, TOK_ADDROF, $2, NULL); }
               ;
 postfix_expr  : primary_expr                                                      { $$ = $1; }
               | postfix_expr TOK_INC %prec TOK_POST_INC                           { $$ = astree_adopt_sym($2, TOK_POST_INC, $1, NULL); }

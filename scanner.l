@@ -35,7 +35,7 @@ OCTCHAR         (\\{OCTDIGIT}{OCTDIGIT}?{OCTDIGIT}?)
 HEXCHAR         (\\x{HEXDIGIT}+)
 ESCSEQUENCE     (\\[ntvbrfa\\?'"])
 CHARCON         ('([^\\'\n]|{ESCSEQUENCE}|{OCTCHAR}|{HEXCHAR})')
-STRINGCON       (\"([^\\"\n]|\\[\\'"0nt])*\")
+STRINGCON       (\"([^\\"\n]|{ESCSEQUENCE}|{OCTCHAR}|{HEXCHAR})*\")
 NOTCHAR         ('[^']*)
 NOTSTRING       (\"[^"]*)
 %%
