@@ -39,7 +39,7 @@
 /* tokens constructed by lexer */
 %token TOK_VOID TOK_INT TOK_SHORT TOK_LONG TOK_CHAR TOK_UNSIGNED TOK_SIGNED
 %token TOK_CONST TOK_VOLATILE TOK_RESTRICT
-%token TOK_IF TOK_ELSE TOK_WHILE TOK_RETURN TOK_STRUCT TOK_UNION
+%token TOK_IF TOK_ELSE TOK_DO TOK_WHILE TOK_RETURN TOK_STRUCT TOK_UNION
 %token TOK_ARROW TOK_EQ TOK_NE TOK_LE TOK_GE TOK_SHL TOK_SHR TOK_AND TOK_OR TOK_INC TOK_DEC
 %token TOK_SUBEQ TOK_ADDEQ TOK_MULEQ TOK_DIVEQ TOK_REMEQ TOK_ANDEQ TOK_OREQ TOK_XOREQ TOK_SHREQ TOK_SHLEQ
 %token TOK_IDENT TOK_INTCON TOK_CHARCON TOK_STRINGCON
@@ -156,12 +156,15 @@ stmt_list     : stmt_list stmt                                                  
               | stmt                                                              { $$ = $1; }
               ;
 stmt          : block                                                             { $$ = $1; }
+              | dowhile                                                           { $$ = $1; }
               | while                                                             { $$ = $1; }
               | ifelse                                                            { $$ = $1; }
               | return                                                            { $$ = $1; }
               | expr ';'                                                          { $$ = $1; parser_cleanup (1, $2); }
               | declaration ';'                                                   { $$ = $1; parser_cleanup (1, $2); }
               | ';'                                                               { $$ = NULL; astree_destroy($1); }
+              ;
+dowhile       : TOK_DO stmt TOK_WHILE '(' expr ')' ';'                            { $$ = astree_adopt($1, $2, $5, NULL); parser_cleanup (3, $3, $4, $6); }
               ;
 while         : TOK_WHILE '(' expr ')' stmt                                       { $$ = astree_adopt($1, $3, $5, NULL); parser_cleanup (2, $2, $4); }
               ;
