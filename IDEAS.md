@@ -34,6 +34,24 @@ purpose of achieving self-hosting, or both. These include:
   extension. The Microsoft x64 ABI defines how to do this, and it seems fairly
   straightforward.
 
+## Things that I DO NOT have to do
+A problem that I have noticed when designing the compiler is that I made a lot
+of assumptions about what the C type checker is required to do. I have learned
+that has does not do most of the things that I thought:
+- You do not need to explicitly convert integer types to a narrower types
+- You do not need to explicitly convert signed types to unsigned types
+- You do not need to check the bounds of an array access when the expression
+  between the brackets is a constant.
+
+## Strange things that I have learned are syntactically valid
+- You may use the arrow operator directly on an expression of array type, which
+  treats the array as a pointer to the first element of the array (which it
+  is, more or less), which you can then perform member access on if the
+  underlying type is a struct or union.
+- In fact, in all but a few cases, arrays are treated as above.
+- You can only implicitly convert between `void*` and other pointer types, not
+  any other kind of void pointer (for example `void**`).
+
 ## Labels
 Based on the language definition, it looks like labels are attached to the
 statement immediately following them. They are not a valid statement all on
@@ -310,6 +328,20 @@ other pointer not be allowed (no implicit conversions and the fact that the
 object underlying the pointer has no specified width), but I am not certain of
 this.
 
+## Pointer conversions
+According to the standard, expressions with array type decay to pointer type
+except when their parent expression is "&", "++", "--", or "sizeof", or as the
+left operand of the assignment and dot operators. In all cases except for the
+"sizeof" operator, this is so that the compiler issues errors or warnings,
+since expressions of array type are not lvalues and cannot be changed, and the
+dot operator would otherwise give crytic errors about member access with the dot
+operator.
+
+The "sizeof" operator gives the number of elements in the array.
+
+Similarly, expressions of function type become expressions of function pointer
+type except when their parent expression is the address-of operator.
+
 ## Scope
 The standard defines three scopes: The first is file scope, which is occupied by
 all objects not declared within a block, and which is visible anywhere within
@@ -346,19 +378,175 @@ retrieved from the global table for use.
 The function which resolves symbols (besides labels) will search each symbol
 table, starting at the top, for the corresponding symbol.
 
-## Promotion and casting
-Promotion rules for arithmetic values are as follows:
-- unsigned types are promoted to signed types
-- integers are promoted to wider types
-- any integer less wide than `signed int` is promoted to `signed int` when used;
-  the increase in width can be optimized away by compilers but not the change in
-  signedness.
+## Promotions, conversions, and casting
+Promotion for arithmetic values is:
+- Any character or short integer whose value can be represented by signed by
+  `signed int` is converted to `signed int`. Otherwise, it is converted to
+  `unsigned int`.
+
+Conversions:
+- If one of the operands of the expression is a floating point value, the result
+  is a floating point value and the operands are converted to floating point
+  values.
+- Otherwise, the result and operands are converted to be the widest integral
+  type present in the expression after integral promotions are performed. The
+  widest type is preferred; if two types are of equal width, then the unsigned
+  type is preferred.
+- Expressions of array type are converted to pointer type, except when the
+  expression is the operand of `&`, `++`, `--`, `sizeof`, or on the left side
+  of the `.`
 
 Casting/compatibility rules are as follows:
 - arrays and pointers are compatible, so long as the underlying types are compatible
 - pointers to functions and functions are compatible, so long as the underlying types are
   compatible and the pointer is on the left hand/destination side
 - all explicit casts are allowed, without exception; be mindful of width
+
+## Printing of symbol table
+Unfortunately, because of the way symbols are stored, it would be difficult to
+organize them in a way that is readable in the same way as the abstract syntax
+tree.
+
+For now, the thing that makes the most sense is to list the details of the
+abstract syntax tree node, followed by a list of all the symbols stored in the
+table associated with that node.
+
+### Functions
+#### `symbol_value_print`
+Takes as arguments the `SymbolValue` to be printed, the buffer to be printed to,
+and the length of the buffer. Prints the declaration location, followed by the
+base type and auxiliary information. More information will be printed out as
+those features are implemented.
+
+#### `symbol_table_print_table`
+Takes as an argument the `const map *` to be printed. This function will use
+`map_foreach_pair` to iterate over every symbol in the current scope. Pairs will
+be passed as arguments to `symbol_table_print_entry`.
+
+#### `astree_print_symbols`
+Takes as an argument the `ASTree *` node whose symbol table is to be printed,
+the output file to be printed to, and the depth of the node in the abstract
+syntax tree.
+
+## Simplifying type specifier verification in general
+The verification of type specifiers as a whole could be reduced to a single
+function that compares and modifies bitmasks as opposed to the current system
+that separates functionality into multiple functions depending on the base type.
+
+There are a few "base" types:
+- integer types (including characters)
+- enums
+- structs
+- unions
+- void
+
+When declared, objects must specify exactly one of these types.
+
+Simplyfing the parser and having the type checker catch these errors might be
+helpful and/or easier.
+
+It would also mean less `TypeSpec` constants would have to be defined, as the
+only "default" ones would be `signed int` and `char`.
+
+## Restructuring type checking
+There are many functions that share the burden of type checking, and their
+relationship is not very clear. These functions are:
+- `compare_declspecs`
+- `compare_auxspecs`
+- `determine_promotion`
+- `types_compatible`
+- `init_list_compatible`, which I am already working on replacing
+
+First, `determine_promotion` is called to figure out a possible common type for
+its two arguments. Then, `types_compatible` checks that this type is actually
+compatible. It performs some checks of its own, then calls `compare_auxspecs`,
+an then `compare_declspecs`. `init_list_compatible` is only called when
+initializing a struct, union, or array with an initializer list.
+
+It would make more sense to call a single function that handles promotion and
+type checking, instead of having to perform those two steps separately at the
+call site. It would also make more sense for this function to also be capable
+of checking the compatibility of initializer lists and string constants, rather
+than having a separate function handle that.
+
+Special cases:
+1. Any pointer may be implicitly converted to/from `void *` (with type
+   qualifiers and storage class specifiers) without warning or error.
+2. Any pointer may be implicitly converted to/from any other pointer, with a
+   warning.
+3. Binary arithmetic operations may not be performed on two pointers, except for
+   subtraction between compatible types.
+4. Implicit conversion between integers and pointers is allowed, with a warning,
+   and explicit conversion is allowed without a warning or error.
+5. `void` is never a valid type, and the type checker should report an error if
+   an expression of type `void` is evaluated by this function(s).
+
+### Steps
+```
+function check(src, dest):
+    for each pair of auxspecs:
+        if dest is a pointer:
+            if src a pointer or array:
+                verify that the element type is the same
+            else if src a multicharacter constant:
+                
+            else:
+        else if dest is an array:
+            if src an initializer list:
+                verify that each element has the same type as the array
+            else if src a multicharacter constant:
+                verify that base type of dest is any (wide) char type
+            else: 
+        else if dest is a struct:
+            if src an initializer list:
+                verify that types match
+            else if src a struct:
+                verify that struct type is identical
+            else:
+        else if dest is a union:
+            if src an initializer list:
+                verify that it is a brace-enclosed initializer for the
+                first member of the structure
+            else if src a union:
+                verify that union type is identical
+            else:
+        end
+    end
+
+    if src or dest has more auxspecs:
+        if 
+    else if src and dest have the same struct type:
+    else if src and dest have the same union type:
+    else if src is an initializer list:
+    else if src is a string constant:
+    else if src and dest are of integral type:
+    else if 
+end
+```
+
+## Storing type information of initializer lists
+Currently, syntax tree nodes with the token `TOK_INIT_LIST` do not store any
+type information. If they auxiliary type auxiliary type information, much like
+structs and functions do about members and parameters respectively, checking
+the types of initializer lists may be simpler and easier to understand.
+
+A "fake" base type, `TYPE_INIT_LIST`, will be added, along with an auxilary type
+`AUX_INIT_LIST`. Every `TypeSpec` with this base type will also have exactly one
+piece of auxiliary type information with this auxilary type, the same way that
+structures and unions are handled.
+
+This type can be implicitly converted to struct or array types, given that the
+component types are appropriate. It cannot be converted or casted to any other
+type.
+
+## Storing type information of multicharacter constants
+Multicharacter constants cannot be treated the same as initializer lists. You
+cannot assign a pointer a value that is an initializer list, but you can assign
+a `char *`, or any pointer or integer value if you use casts, a value that is a
+string constant.
+
+Multicharacter constants will have their own distinct base type,
+`TYPE_MULTICHAR_CONST`, and their own auxiliary type, `AUX_MULTICHAR_CONST`.
 
 ## Operations that will be identical during assembly generation
 Some operations map pretty well to assembly instructions:
@@ -387,7 +575,7 @@ process:
   operations. This is inefficient, but I feel it will simplify code generation.
   Values will enter registers via the `mov` instruction.
 
-# Assembler generation
+## Assembler generation
 The most basic assembly to be generated is the assembly having to do with
 integer/arithmetic expressions. This involves loading objects from memory,
 performing operations on them, then storing new values back to memory in the
@@ -459,7 +647,7 @@ Notes:
   function must have been exported with the `global` directive in the module
   that defined it.
 
-# Assembly generation procudures
+## Assembly generation procudures
 Assembly generation for each instruction or type of instruction will have a
 dedicated method, each with responsibilities mirroring the ones in the type
 checker. There will be one "primary" function, `write_instruction`, that is
@@ -472,7 +660,7 @@ All of these functions will have three parameters:
 - an `unsigned int`, with some flags holding information about what's going on
   higher up in the recursion
 
-# Assembly Expression Generation
+## Assembly Expression Generation
 By default, the left(destination) operand of every instruction is a register,
 while the right operand may be addressed from memory. This is not a restriction
 of x64, but it makes generation a little simpler.
@@ -521,7 +709,7 @@ assigning a string literal to a `char[]` or a `char*`, one of two things happen.
 - When assigning to a `char*`, the variable is made to point at the string
   literal's location in the `.data` section, which may or may not be read-only.
 
-# Register Allocation
+## Register Allocation
 Before register allocation is done, all lines that will be written to the output
 file will first be stored in a linearly traversible and maybe random access data
 structure. Instructions will use virtual registers as operands.
@@ -532,65 +720,3 @@ return the name of the register the result was placed into.
 
 The contents of source lines to be written out will be tracked in a struct with
 fields for label, instruction, left/right operands, and comment.
-
-# Printing of symbol table
-Unfortunately, because of the way symbols are stored, it would be difficult to
-organize them in a way that is readable in the same way as the abstract syntax
-tree.
-
-For now, the thing that makes the most sense is to list the details of the
-abstract syntax tree node, followed by a list of all the symbols stored in the
-table associated with that node.
-
-# Simpler integer type specifier verification
-Currently, the function that checks integer specifiers is very long and
-complicated because it uses flags and a large switch statement to ensure that
-the order is "correct". I think relaxing the standard here would make the
-implementation easier while relaxing requirements on the input in a way that
-does not introduce ambiguity.
-
-# Simplifying type specifier verification in general
-The verification of type specifiers as a whole could be reduced to a single
-function that compares and modifies bitmasks as opposed to the current system
-that separates functionality into multiple functions depending on the base type.
-
-There are a few "base" types:
-- integer types (including characters)
-- enums
-- structs
-- unions
-- void
-
-When declared, objects must specify exactly one of these types.
-
-Simplyfing the parser and having the type checker catch these errors might be
-helpful and/or easier.
-
-It would also mean less `TypeSpec` constants would have to be defined, as the
-only "default" ones would be `signed int` and `char`.
-
-## Functions
-### `symbol_value_print`
-Takes as arguments the `SymbolValue` to be printed, the buffer to be printed to,
-and the length of the buffer. Prints the declaration location, followed by the
-base type and auxiliary information. More information will be printed out as
-those features are implemented.
-
-### `symbol_table_print_table`
-Takes as an argument the `const map *` to be printed. This function will use
-`map_foreach_pair` to iterate over every symbol in the current scope. Pairs will
-be passed as arguments to `symbol_table_print_entry`.
-
-### `astree_print_symbols`
-Takes as an argument the `ASTree *` node whose symbol table is to be printed,
-the output file to be printed to, and the depth of the node in the abstract
-syntax tree.
-
-## Silly extensions
-A fun extension would be the ability to return fixed-length arrays by value.
-The function declaration/definition would need the size of the returned array
-to be specified in the declaration. The appropriate amount of space would be
-allocated on the stack by the caller, and a pointer to this space would be
-passed as an additional parameter to the function. Attempts to convert the
-returned value directly into a pointer would fail, since semantically the
-returned value is an lvalue, whose address cannot be taken? I think?

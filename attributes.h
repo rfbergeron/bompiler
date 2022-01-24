@@ -118,13 +118,6 @@ enum typespec_flag {
   TYPESPEC_FLAG_INLINE = 1 << TYPESPEC_INDEX_INLINE
 };
 
-enum imm_type {
-  IMM_TYPE_POINTER,
-  IMM_TYPE_FUNCTION,
-  IMM_TYPE_ARITHMETIC,
-  IMM_TYPE_SCALAR,
-};
-
 /* Structs and unions require a member map, as well as the order of the members.
  * This would be best provided by an ordered_map data structure.
  */
@@ -197,11 +190,10 @@ int strip_aux_type(TypeSpec *dest, const TypeSpec *src);
 
 int typespec_is_arithmetic(const TypeSpec *type);
 int typespec_is_integer(const TypeSpec *type);
-int typespec_is_aux(const TypeSpec *type, const AuxType aux);
 int typespec_is_pointer(const TypeSpec *type);
 int typespec_is_array(const TypeSpec *type);
 int typespec_is_function(const TypeSpec *type);
-int typespec_is_int_or_ptr(const TypeSpec *type);
 int typespec_is_scalar(const TypeSpec *type);
-int typespec_is_comparable(const TypeSpec *type);
+int typespec_is_voidptr(const TypeSpec *type);
+int typespec_is_fnptr(const TypeSpec *type);
 #endif

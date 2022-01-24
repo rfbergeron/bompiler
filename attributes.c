@@ -325,36 +325,33 @@ int typespec_is_integer(const TypeSpec *type) {
   return (type->base == TYPE_SIGNED || type->base == TYPE_UNSIGNED);
 }
 
-int typespec_is_aux(const TypeSpec *type, const AuxType aux) {
-  AuxSpec *auxspec = llist_front((LinkedList *)&type->auxspecs);
+int typespec_is_aux(const TypeSpec *type, const AuxType aux,
+                    const size_t index) {
+  AuxSpec *auxspec = llist_get((LinkedList *)&type->auxspecs, index);
   return auxspec != NULL && auxspec->aux == aux;
 }
 
 int typespec_is_pointer(const TypeSpec *type) {
-  return typespec_is_aux(type, AUX_POINTER);
+  return typespec_is_aux(type, AUX_POINTER, 0);
 }
 
 int typespec_is_array(const TypeSpec *type) {
-  return typespec_is_aux(type, AUX_ARRAY);
+  return typespec_is_aux(type, AUX_ARRAY, 0);
 }
 
 int typespec_is_function(const TypeSpec *type) {
-  return typespec_is_aux(type, AUX_FUNCTION);
-}
-
-int typespec_is_int_or_ptr(const TypeSpec *type) {
-  return (typespec_is_integer(type) || typespec_is_pointer(type));
+  return typespec_is_aux(type, AUX_FUNCTION, 0);
 }
 
 int typespec_is_scalar(const TypeSpec *type) {
   return typespec_is_pointer(type) || typespec_is_arithmetic(type);
 }
 
-int typespec_is_comparable(const TypeSpec *type) {
-  if (type->base == TYPE_SIGNED || type->base == TYPE_UNSIGNED ||
-      typespec_is_pointer(type)) {
-    return 1;
-  } else {
-    return 0;
-  }
+int typespec_is_voidptr(const TypeSpec *type) {
+  return typespec_is_pointer(type) && type->base == TYPE_VOID &&
+         llist_size(&type->auxspecs) == 1;
+}
+
+int typespec_is_fnptr(const TypeSpec *type) {
+  return typespec_is_pointer(type) && typespec_is_aux(type, AUX_FUNCTION, 1);
 }
