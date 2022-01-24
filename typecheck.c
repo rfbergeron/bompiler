@@ -1573,7 +1573,8 @@ int validate_ifelse(ASTree *ifelse) {
 }
 
 int validate_while(ASTree *while_) {
-  ASTree *expr = astree_first(while_);
+  ASTree *expr = while_->symbol == TOK_WHILE ? astree_first(while_)
+                                             : astree_second(while_);
   int status = validate_expr(expr);
   if (status) return status;
   status = perform_pointer_conv(expr);
@@ -1583,7 +1584,8 @@ int validate_while(ASTree *while_) {
     status = -1;
     return status;
   }
-  ASTree *while_body = astree_second(while_);
+  ASTree *while_body = while_->symbol == TOK_WHILE ? astree_second(while_)
+                                                   : astree_first(while_);
   create_scope(&while_body->symbol_table);
   status = validate_stmt(while_body);
   finalize_scope(&while_body->symbol_table);
@@ -1617,6 +1619,7 @@ int validate_stmt(ASTree *statement) {
     case TOK_IF:
       status = validate_ifelse(statement);
       break;
+    case TOK_DO:
     case TOK_WHILE:
       status = validate_while(statement);
       break;
