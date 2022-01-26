@@ -255,7 +255,6 @@ int type_to_string(const TypeSpec *type, char *buf, size_t size) {
 }
 
 int auxspec_destroy(AuxSpec *auxspec) {
-  size_t i;
   switch (auxspec->aux) {
     case AUX_NONE:
       break;
@@ -277,9 +276,29 @@ int auxspec_destroy(AuxSpec *auxspec) {
   return 0;
 }
 
-/* TODO(Robert): make sure this doesn't need to be more thorough */
 int auxspec_copy(AuxSpec *dest, const AuxSpec *src) {
-  *dest = *src;
+  int status;
+  dest->aux = src->aux;
+  switch (src->aux) {
+    case AUX_POINTER:
+    case AUX_ARRAY:
+      dest->data.ptr_or_arr.length = src->data.ptr_or_arr.length;
+      dest->data.ptr_or_arr.qualifiers = src->data.ptr_or_arr.qualifiers;
+      break;
+    case AUX_UNION:
+    case AUX_STRUCT:
+      dest->data.composite.symbol_table = src->data.composite.symbol_table;
+      status = llist_copy(&dest->data.composite.members,
+                          &src->data.composite.members);
+      if (status) return status;
+      break;
+    case AUX_FUNCTION:
+      status = llist_copy(&dest->data.params, &src->data.params);
+      if (status) return status;
+      break;
+    default:
+      break;
+  }
   return 0;
 }
 
@@ -354,4 +373,20 @@ int typespec_is_voidptr(const TypeSpec *type) {
 
 int typespec_is_fnptr(const TypeSpec *type) {
   return typespec_is_pointer(type) && typespec_is_aux(type, AUX_FUNCTION, 1);
+}
+
+int typespec_is_struct(const TypeSpec *type) {
+  return typespec_is_aux(type, AUX_STRUCT, 0);
+}
+
+int typespec_is_structptr(const TypeSpec *type) {
+  return typespec_is_pointer(type) && typespec_is_aux(type, AUX_STRUCT, 1);
+}
+
+int typespec_is_union(const TypeSpec *type) {
+  return typespec_is_aux(type, AUX_UNION, 0);
+}
+
+int typespec_is_unionptr(const TypeSpec *type) {
+  return typespec_is_pointer(type) && typespec_is_aux(type, AUX_UNION, 1);
 }

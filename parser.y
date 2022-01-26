@@ -214,6 +214,8 @@ postfix_expr  : primary_expr                                                    
               | postfix_expr TOK_DEC %prec TOK_POST_DEC                           { $$ = astree_adopt_sym($2, TOK_POST_DEC, $1, NULL); }
               | postfix_expr '(' arg_list ')'                                     { $$ = astree_adopt_sym($2, TOK_CALL, $1, $3); parser_cleanup (1, $4); }
               | postfix_expr '[' expr ']'                                         { $$ = astree_adopt_sym($2, TOK_SUBSCRIPT, $1, $3); astree_destroy($4); }
+              | postfix_expr '.' TOK_IDENT                                        { $$ = astree_adopt($2, $1, $3, NULL); }
+              | postfix_expr TOK_ARROW TOK_IDENT                                  { $$ = astree_adopt($2, $1, $3, NULL); }
               ;
 arg_list      : %empty                                                            { $$ = NULL; }
               | arg_list ',' expr                                                 { $$ = astree_twin($1, $3); astree_destroy($2); }
