@@ -490,7 +490,24 @@ int validate_composite_typespec(ASTree *type, TypeSpec *out) {
     fprintf(stderr, "ERROR: type %s is not a union\n", composite_type_name);
     return -1;
   } else {
-    return typespec_copy(out, &exists->type);
+    out->base = exists->type.base;
+    out->width = exists->type.width;
+    out->alignment = exists->type.alignment;
+
+    if (out->auxspecs.anchor == NULL) {
+      typespec_init(out);
+    }
+
+    size_t i;
+    for (i = 0; i < llist_size(&exists->type.auxspecs); ++i) {
+      AuxSpec *dest = calloc(1, sizeof(*dest));
+      AuxSpec *src = llist_get(&exists->type.auxspecs, i);
+      int status = auxspec_copy(dest, src);
+      if (status) return status;
+      status = llist_push_back(&out->auxspecs, dest);
+      if (status) return status;
+    }
+    return 0;
   }
 }
 
@@ -760,25 +777,12 @@ int validate_dirdecl(ASTree *dirdecl, ASTree *ident, TypeSpec *spec) {
 
 int validate_cast(ASTree *cast) {
   ASTree *spec_list = astree_first(cast);
-  /* validate_type overrides every field in the spec so we can't just pass it
-   * an already-initialized spec
-   */
-  TypeSpec declspecs = SPEC_EMPTY;
-  int status = validate_typespec_list(spec_list, &declspecs);
-  if (status) return status;
   TypeSpec *spec = calloc(1, sizeof(*cast->type));
-  spec->base = declspecs.base;
-  spec->width = declspecs.width;
-  spec->alignment = declspecs.alignment;
   cast->type = spec;
-  typespec_init(spec);
-  if (status) return status;
-
-  ASTree *abstract_decl = NULL;
   ASTree *expr = NULL;
 
   if (astree_second(cast)->symbol == TOK_DECLARATOR) {
-    abstract_decl = astree_second(cast);
+    ASTree *abstract_decl = astree_second(cast);
     expr = astree_third(cast);
     size_t i;
     for (i = 0; i < astree_count(abstract_decl); ++i) {
@@ -789,6 +793,8 @@ int validate_cast(ASTree *cast) {
     expr = astree_second(cast);
   }
 
+  int status = validate_typespec_list(spec_list, spec);
+  if (status) return status;
   status = validate_expr(expr);
   if (status) return status;
   status = perform_pointer_conv(expr);
@@ -1095,6 +1101,72 @@ int validate_subscript(ASTree *subscript) {
   }
 }
 
+int validate_reference(ASTree *reference) {
+  ASTree *strunion = astree_first(reference);
+  int status = validate_expr(strunion);
+  if (status) return status;
+
+  const TypeSpec *strunion_type = extract_type(strunion);
+  if (!typespec_is_struct(strunion_type) && !typespec_is_union(strunion_type)) {
+    /* error: cannot access member of non struct/union type */
+    fprintf(stderr,
+            "ERROR: cannot reference member of type that is not struct "
+            "or union.\n");
+    return -1;
+  } else {
+    ASTree *member = astree_second(reference);
+    const char *member_name = member->lexinfo;
+    const size_t member_name_len = strlen(member_name);
+    AuxSpec *strunion_aux = llist_front(&strunion_type->auxspecs);
+    Map *strunion_members = strunion_aux->data.composite.symbol_table;
+    SymbolValue *member_symbol =
+        map_get(strunion_members, (char *)member_name, member_name_len);
+    if (member_symbol == NULL) {
+      fprintf(stderr, "ERROR: structure does not have member named %s.\n",
+              member_name);
+      return -1;
+    } else {
+      reference->type = &member_symbol->type;
+      return 0;
+    }
+  }
+}
+
+int validate_arrow(ASTree *arrow) {
+  ASTree *strunion = astree_first(arrow);
+  int status = validate_expr(strunion);
+  if (status) return status;
+  status = perform_pointer_conv(strunion);
+  if (status) return status;
+
+  const TypeSpec *strunion_type = extract_type(strunion);
+  if (!typespec_is_structptr(strunion_type) &&
+      !typespec_is_unionptr(strunion_type)) {
+    /* error: cannot access member of non struct/union type */
+    fprintf(stderr,
+            "ERROR: cannot reference member of type that is not struct "
+            "or union.\n");
+    return -1;
+  } else {
+    ASTree *member = astree_second(arrow);
+    const char *member_name = member->lexinfo;
+    const size_t member_name_len = strlen(member_name);
+    /* first auxtype is pointer; second is struct/union */
+    AuxSpec *strunion_aux = llist_get(&strunion_type->auxspecs, 1);
+    Map *strunion_members = strunion_aux->data.composite.symbol_table;
+    SymbolValue *member_symbol =
+        map_get(strunion_members, (char *)member_name, member_name_len);
+    if (member_symbol == NULL) {
+      fprintf(stderr, "ERROR: structure does not have member named %s.\n",
+              member_name);
+      return -1;
+    } else {
+      arrow->type = &member_symbol->type;
+      return 0;
+    }
+  }
+}
+
 int validate_expr(ASTree *expression) {
   int status;
   const char *ident;
@@ -1149,12 +1221,11 @@ int validate_expr(ASTree *expression) {
     case TOK_SUBSCRIPT:
       status = validate_subscript(expression);
       break;
+    case '.':
+      status = validate_reference(expression);
+      break;
     case TOK_ARROW:
-      /* TODO(Robert): pointers and struct member access */
-      /* evaluate left but not right since right
-       * is always an ident
-       */
-      status = -1;
+      status = validate_arrow(expression);
       break;
     case TOK_INTCON:
       status = validate_intcon(expression);
@@ -1185,8 +1256,6 @@ int declare_symbol(ASTree *declaration, size_t i) {
   ASTree *identifier = extract_ident(declarator);
   DEBUGS('t', "Making object entry for value %s", identifier->lexinfo);
   SymbolValue *symbol = symbol_value_init(&declarator->loc);
-  int status = validate_typespec_list(astree_first(declaration), &symbol->type);
-  if (status) return status;
 
   size_t j;
   for (j = 0; j < astree_count(declarator); ++j) {
@@ -1194,6 +1263,9 @@ int declare_symbol(ASTree *declaration, size_t i) {
         validate_dirdecl(astree_get(declarator, j), identifier, &symbol->type);
     if (status) return status;
   }
+
+  int status = validate_typespec_list(astree_first(declaration), &symbol->type);
+  if (status) return status;
 
   size_t identifier_len = strnlen(identifier->lexinfo, MAX_IDENT_LEN);
   SymbolValue *exists = NULL;
@@ -1348,8 +1420,6 @@ int define_function(ASTree *function) {
   ASTree *identifier = extract_ident(declarator);
 
   SymbolValue *symbol = symbol_value_init(extract_loc(declarator));
-  int status = validate_typespec_list(astree_first(function), &symbol->type);
-  if (status) return status;
 
   size_t i;
   for (i = 0; i < astree_count(declarator); ++i) {
@@ -1357,6 +1427,9 @@ int define_function(ASTree *function) {
         validate_dirdecl(astree_get(declarator, i), identifier, &symbol->type);
     if (status) return status;
   }
+
+  int status = validate_typespec_list(astree_first(function), &symbol->type);
+  if (status) return status;
 
   const char *function_ident = extract_ident(declarator)->lexinfo;
   size_t function_ident_len = strnlen(function_ident, MAX_IDENT_LEN);
