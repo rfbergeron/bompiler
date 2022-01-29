@@ -196,7 +196,7 @@ int main(int argc, char **argv) {
     goto cleanup;
   }
 
-  string_set_dump(strfile);
+  string_set_print(strfile);
 
   if (skip_type_check) goto print_untyped;
   status = type_checker_make_table(parser_root);
@@ -205,7 +205,7 @@ int main(int argc, char **argv) {
     goto cleanup;
   }
 
-  /* type_checker_dump_symbols (symfile); */
+  astree_print_symbols(parser_root, symfile);
 print_untyped:
   astree_print_tree(parser_root, astfile, 0);
 
@@ -223,7 +223,6 @@ print_untyped:
   }
 
 cleanup:
-
   DEBUGS('m', "Execution finished; wrapping up.");
 
   /* restore stdin */

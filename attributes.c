@@ -8,20 +8,20 @@
 #include "symtable.h"
 
 #define INDEX_FROM_INT(sign, width) INDEX_##sign##_##width
-#define SPECIFY_INT(sign, width) \
-  {X64_SIZEOF_##width,           \
-   X64_ALIGNOF_##width,          \
-   NULL,                         \
-   BLIB_MAP_EMPTY,               \
-   TYPE_FLAG_NONE,               \
-   TYPE_##sign,                  \
-   STRING_INT_MAP[INDEX_FROM_INT(sign, width)]};
+#define SPECIFY_INT(sign, width)                                        \
+  {                                                                     \
+      X64_SIZEOF_##width, X64_ALIGNOF_##width,                          \
+      BLIB_LLIST_EMPTY,   TYPESPEC_FLAG_##sign | TYPESPEC_FLAG_##width, \
+      TYPE_##sign,                                                      \
+  };
 
+/*
 struct conversion_entry {
   enum base_type from;
   enum base_type to;
   enum conversion_type conversion;
 };
+*/
 
 enum string_int_index {
   INDEX_FROM_INT(UNSIGNED, LONG),
@@ -43,6 +43,16 @@ const char STRING_INT_MAP[][32] = {
     "unsigned short int", "signed short int", "unsigned char", "signed char",
 };
 
+const char typespec_flag_string[][10] = {"int", "char", "short", "long",
+                                         "long long", "signed", "unsigned",
+                                         "void", "struct", "union", "enum",
+                                         /* storage class */
+                                         "register", "static", "extern", "auto",
+                                         /* qualifiers */
+                                         "const", "volatile",
+                                         /* function only */
+                                         "inline"};
+
 const char *STRING_ULONG = STRING_INT_MAP[INDEX_FROM_INT(UNSIGNED, LONG)];
 const char *STRING_LONG = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, LONG)];
 const char *STRING_UINT = STRING_INT_MAP[INDEX_FROM_INT(UNSIGNED, INT)];
@@ -50,17 +60,14 @@ const char *STRING_INT = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, INT)];
 const char *STRING_USHRT = STRING_INT_MAP[INDEX_FROM_INT(UNSIGNED, SHORT)];
 const char *STRING_SHRT = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, SHORT)];
 const char *STRING_UCHAR = STRING_INT_MAP[INDEX_FROM_INT(UNSIGNED, CHAR)];
-const char *STRING_CHAR = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, CHAR)];
+const char *STRING_SCHAR = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, CHAR)];
 
-const TypeSpec SPEC_PTR = {X64_SIZEOF_LONG, X64_ALIGNOF_LONG, NULL,
-                           BLIB_MAP_EMPTY,  TYPE_FLAG_NONE,   TYPE_POINTER,
-                           "_ptr_empty"};
-const TypeSpec SPEC_EMPTY = {
-    0, 0, NULL, BLIB_MAP_EMPTY, TYPE_FLAG_NONE, TYPE_NONE, "_empty"};
-const TypeSpec SPEC_FUNCTION = {
-    0, 0, NULL, BLIB_MAP_EMPTY, TYPE_FLAG_NONE, TYPE_FUNCTION, "_function"};
-const TypeSpec SPEC_STRUCT = {
-    0, 0, NULL, BLIB_MAP_EMPTY, TYPE_FLAG_NONE, TYPE_STRUCT, "_struct"};
+const TypeSpec SPEC_EMPTY = {0, 0, BLIB_LLIST_EMPTY, TYPESPEC_FLAG_NONE,
+                             TYPE_NONE};
+const TypeSpec SPEC_VOID = {0, 0, BLIB_LLIST_EMPTY, TYPESPEC_FLAG_VOID,
+                            TYPE_VOID};
+const TypeSpec SPEC_CHAR = {1, 1, BLIB_LLIST_EMPTY, TYPESPEC_FLAG_CHAR,
+                            TYPE_SIGNED};
 const TypeSpec SPEC_ULONG = SPECIFY_INT(UNSIGNED, LONG);
 const TypeSpec SPEC_LONG = SPECIFY_INT(SIGNED, LONG);
 const TypeSpec SPEC_UINT = SPECIFY_INT(UNSIGNED, INT);
@@ -68,7 +75,7 @@ const TypeSpec SPEC_INT = SPECIFY_INT(SIGNED, INT);
 const TypeSpec SPEC_USHRT = SPECIFY_INT(UNSIGNED, SHORT);
 const TypeSpec SPEC_SHRT = SPECIFY_INT(SIGNED, SHORT);
 const TypeSpec SPEC_UCHAR = SPECIFY_INT(UNSIGNED, CHAR);
-const TypeSpec SPEC_CHAR = SPECIFY_INT(SIGNED, CHAR);
+const TypeSpec SPEC_SCHAR = SPECIFY_INT(SIGNED, CHAR);
 
 const Location LOC_EMPTY = {0, 0, 0, 0};
 
@@ -99,11 +106,11 @@ const char attr_map[][16] = {"reg", "lval", "rval", "addr", "const"};
  */
 
 int attributes_to_string(const unsigned int attributes, char *buf,
-                         size_t bufsize) {
+                         size_t size) {
   size_t i, buf_index = 0;
   for (i = 0; i < NUM_ATTRIBUTES; ++i) {
     if (attributes & (1 << i)) {
-      if (buf_index + strlen(attr_map[i]) > bufsize) {
+      if (buf_index + strlen(attr_map[i]) > size) {
         fprintf(stderr, "WARN: buffer too small to print all attributes");
         return 1;
       } else if (i == 0) {
@@ -117,55 +124,102 @@ int attributes_to_string(const unsigned int attributes, char *buf,
   return 0;
 }
 
-void location_to_string(const Location *loc, char *buffer, size_t size) {
-  int bufsize = snprintf(buffer, size, "%lu, %lu, %lu, %lu", loc->filenr,
-                         loc->linenr, loc->offset, loc->blocknr) +
-                1;
+int location_to_string(const Location *loc, char *buf, size_t size) {
+  return snprintf(buf, size, "%lu, %lu, %lu, %lu", loc->filenr, loc->linenr,
+                  loc->offset, loc->blocknr);
 }
 
-int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {
+int flags_to_string(const unsigned int flags, char *buf, size_t size) {
+  size_t i, offset = 0;
+  for (i = 0; i < TYPESPEC_INDEX_COUNT; ++i) {
+    enum typespec_flag flag_i = 1 << i;
+    if (flags & flag_i) {
+      if (offset > 0) {
+        buf[offset++] = ' ';
+        buf[offset] = 0;
+      }
+      strcpy(buf + offset, typespec_flag_string[i]);
+      offset = strlen(buf);
+    }
+  }
+  return offset;
+}
+
+int type_to_string(const TypeSpec *type, char *buf, size_t size) {
   int ret = 0;
-  int i = 0;
+  /* TODO(Robert): casting away const bad; redo badlib so that query functions
+   * have const arguments
+   */
+  size_t i;
+  for (i = 0; i < llist_size((LinkedList *)&type->auxspecs); ++i) {
+    AuxSpec *auxspec = llist_get((LinkedList *)&type->auxspecs, i);
+    size_t j;
+    switch (auxspec->aux) {
+      case AUX_ARRAY:
+        if (auxspec->data.ptr_or_arr.length > 0) {
+          ret += sprintf((buf + ret), "array of size %zu of ",
+                         auxspec->data.ptr_or_arr.length);
+        } else {
+          ret += sprintf((buf + ret), "array of ");
+        }
+        break;
+      case AUX_POINTER:
+        ret += sprintf((buf + ret), "pointer to ");
+        break;
+      case AUX_FUNCTION:
+        ret += sprintf((buf + ret), "function with parameters (");
+        LinkedList *params = &auxspec->data.params;
+        for (j = 0; j < llist_size(params); ++j) {
+          SymbolValue *param_symval = llist_get(params, j);
+          ret += type_to_string(&(param_symval->type), (buf + ret), size - ret);
+          if (j + 1 < llist_size(params)) {
+            ret += sprintf((buf + ret), ", ");
+          }
+        }
+        ret += sprintf((buf + ret), ") returning ");
+        break;
+      case AUX_STRUCT:
+      case AUX_UNION:
+        ret += sprintf((buf + ret), "%s with members {",
+                       auxspec->aux == AUX_STRUCT ? "struct" : "union");
+        LinkedList *members = &auxspec->data.composite.members;
+        for (j = 0; j < llist_size(members); ++j) {
+          SymbolValue *member = llist_get(members, j);
+          ret += type_to_string(&(member->type), (buf + ret), size - ret);
+          if (j + 1 < llist_size(members)) {
+            ret += sprintf((buf + ret), ", ");
+          }
+        }
+        ret += sprintf((buf + ret), "}");
+        break;
+      default:
+        break;
+    }
+  }
   /* TODO(Robert): use the mappings defined above to print instead of this
    * silly shit
    */
   switch (type->base) {
-    case TYPE_VOID:
-      ret = sprintf(buf, "void");
-      break;
-    case TYPE_FUNCTION:
-      ret += type_to_string(type->nested, buf, bufsize);
-      ret += sprintf((buf + ret), " ()(");
-      if (type->data.params.size > 0) {
-        for (i = 0; i < type->data.params.size; ++i) {
-          SymbolValue *param_symval = llist_get((void *)&type->data.params, i);
-          ret +=
-              type_to_string(&(param_symval->type), (buf + ret), bufsize - ret);
-          if (i + 1 < llist_size((void *)&type->data.params)) {
-            ret += sprintf((buf + ret), ", ");
-          }
-        }
-        ret += sprintf((buf + ret), ")");
-      } else {
-        ret += sprintf((buf + ret), "void)");
-      }
-      break;
     case TYPE_NONE:
-      buf[0] = 0;
+      /* ret += sprintf(buf + ret, " none"); */
+      buf[ret] = 0;
+      break;
+    case TYPE_VOID:
+      ret += sprintf(buf + ret, "void");
       break;
     case TYPE_SIGNED:
       switch (type->width) {
         case 8:
-          ret = sprintf(buf, "signed long");
+          ret += sprintf(buf + ret, "signed long");
           break;
         case 4:
-          ret = sprintf(buf, "signed int");
+          ret += sprintf(buf + ret, "signed int");
           break;
         case 2:
-          ret = sprintf(buf, "signed short");
+          ret += sprintf(buf + ret, "signed short");
           break;
         case 1:
-          ret = sprintf(buf, "signed char");
+          ret += sprintf(buf + ret, "signed char");
           break;
         default:
           fprintf(stderr, "ERROR: Unknown width of signed type: %lu\n",
@@ -176,16 +230,16 @@ int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {
     case TYPE_UNSIGNED:
       switch (type->width) {
         case 8:
-          ret = sprintf(buf, "unsigned long");
+          ret += sprintf(buf + ret, "unsigned long");
           break;
         case 4:
-          ret = sprintf(buf, "unsigned int");
+          ret += sprintf(buf + ret, "unsigned int");
           break;
         case 2:
-          ret = sprintf(buf, "unsigned short");
+          ret += sprintf(buf + ret, "unsigned short");
           break;
         case 1:
-          ret = sprintf(buf, "unsigned char");
+          ret += sprintf(buf + ret, "unsigned char");
           break;
         default:
           fprintf(stderr, "ERROR: Unknown width of unsigned type: %lu\n",
@@ -196,48 +250,143 @@ int type_to_string(const TypeSpec *type, char *buf, size_t bufsize) {
     default:
       break;
   }
+
   return ret;
 }
 
-int typespec_copy(TypeSpec *dst, const TypeSpec *src) {
-  /* copy contents of source type
-   * allocate new space to copy nested type into
-   * recursively call typespec_copy on nested type
-   */
-  *dst = *src;
-  if (src->nested != NULL) {
-    dst->nested = malloc(sizeof(TypeSpec));
-    return typespec_copy(dst->nested, src->nested);
-  } else {
-    dst->nested = NULL;
-    return 0;
+int auxspec_destroy(AuxSpec *auxspec) {
+  switch (auxspec->aux) {
+    case AUX_NONE:
+      break;
+    case AUX_POINTER:
+      break;
+    case AUX_ARRAY:
+      break;
+    case AUX_STRUCT:
+    case AUX_UNION:
+      llist_destroy(&auxspec->data.composite.members);
+      break;
+    case AUX_FUNCTION:
+      llist_destroy(&auxspec->data.params);
+      break;
+    case AUX_TYPEDEF:
+      break;
   }
+  free(auxspec);
+  return 0;
 }
 
-int typespec_destroy(TypeSpec *type) {
+int auxspec_copy(AuxSpec *dest, const AuxSpec *src) {
+  int status;
+  dest->aux = src->aux;
+  switch (src->aux) {
+    case AUX_POINTER:
+    case AUX_ARRAY:
+      dest->data.ptr_or_arr.length = src->data.ptr_or_arr.length;
+      dest->data.ptr_or_arr.qualifiers = src->data.ptr_or_arr.qualifiers;
+      break;
+    case AUX_UNION:
+    case AUX_STRUCT:
+      dest->data.composite.symbol_table = src->data.composite.symbol_table;
+      status = llist_copy(&dest->data.composite.members,
+                          &src->data.composite.members);
+      if (status) return status;
+      break;
+    case AUX_FUNCTION:
+      status = llist_copy(&dest->data.params, &src->data.params);
+      if (status) return status;
+      break;
+    default:
+      break;
+  }
+  return 0;
+}
+
+int typespec_init(TypeSpec *spec) {
+  return llist_init(&spec->auxspecs, (void (*)(void *)) & auxspec_destroy,
+                    NULL);
+}
+
+int typespec_destroy(TypeSpec *spec) {
   /* the badlib functions won't segfault when attempting to destroy a data
    * structure a second time because they do a paranoid free (free and set to
    * NULL) on the fields of the structure, so we can repeat the process as
    * many times as we like
    */
-  if (type == NULL) return -1;
-  switch (type->base) {
-    case TYPE_FUNCTION:
-      llist_destroy(&(type->data.params));
-      goto free_nested_typesec;
-    case TYPE_STRUCT:
-    case TYPE_UNION:
-      map_destroy(&(type->data.members));
-      goto free_nested_typesec;
-    case TYPE_POINTER:
-    case TYPE_ARRAY:
-    free_nested_typesec:
-      typespec_destroy(type->nested);
-      free(type->nested);
-      break;
-    default:
-      /* do nothing */
-      break;
+  if (spec == NULL) return -1;
+  llist_destroy(&spec->auxspecs);
+  return 0;
+}
+
+int typespec_copy(TypeSpec *dest, const TypeSpec *src) {
+  *dest = *src;
+  memset(&dest->auxspecs, 0, sizeof(dest->auxspecs));
+  llist_copy(&dest->auxspecs, (LinkedList *)&src->auxspecs);
+  return 0;
+}
+
+int strip_aux_type(TypeSpec *dest, const TypeSpec *src) {
+  int status = typespec_copy(dest, src);
+  if (status) return status;
+  void *stripped = llist_pop_front(&dest->auxspecs);
+  if (stripped == NULL) {
+    fprintf(stderr, "ERROR: unable to strip auxiliary type information\n");
+    return -1;
   }
   return 0;
+}
+
+int typespec_is_arithmetic(const TypeSpec *type) {
+  return (type->base == TYPE_SIGNED || type->base == TYPE_UNSIGNED);
+}
+
+int typespec_is_integer(const TypeSpec *type) {
+  return (type->base == TYPE_SIGNED || type->base == TYPE_UNSIGNED);
+}
+
+int typespec_is_aux(const TypeSpec *type, const AuxType aux,
+                    const size_t index) {
+  AuxSpec *auxspec = llist_get((LinkedList *)&type->auxspecs, index);
+  return auxspec != NULL && auxspec->aux == aux;
+}
+
+int typespec_is_pointer(const TypeSpec *type) {
+  return typespec_is_aux(type, AUX_POINTER, 0);
+}
+
+int typespec_is_array(const TypeSpec *type) {
+  return typespec_is_aux(type, AUX_ARRAY, 0);
+}
+
+int typespec_is_function(const TypeSpec *type) {
+  return typespec_is_aux(type, AUX_FUNCTION, 0);
+}
+
+int typespec_is_scalar(const TypeSpec *type) {
+  return typespec_is_pointer(type) || typespec_is_arithmetic(type);
+}
+
+int typespec_is_voidptr(const TypeSpec *type) {
+  return typespec_is_pointer(type) && type->base == TYPE_VOID &&
+         llist_size(&type->auxspecs) == 1;
+}
+
+int typespec_is_fnptr(const TypeSpec *type) {
+  return typespec_is_pointer(type) && typespec_is_aux(type, AUX_FUNCTION, 1);
+}
+
+int typespec_is_struct(const TypeSpec *type) {
+  return typespec_is_aux(type, AUX_STRUCT, 0);
+}
+
+int typespec_is_structptr(const TypeSpec *type) {
+  return typespec_is_pointer(type) && typespec_is_aux(type, AUX_STRUCT, 1);
+}
+
+int typespec_is_union(const TypeSpec *type) {
+  return typespec_is_aux(type, AUX_UNION, 0);
+}
+
+int typespec_is_unionptr(const TypeSpec *type) {
+  return typespec_is_pointer(type) && typespec_is_aux(type, AUX_UNION, 1);
 }
