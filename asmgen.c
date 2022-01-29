@@ -958,9 +958,15 @@ int translate_return(ASTree *ret, InstructionData *data) {
     mov_data->instruction = instructions[INSTR_MOV];
     strcpy(mov_data->src_operand, value_data->dest_operand);
 
-    const TypeSpec *function_type =
-        astree_second(astree_first(current_function))->type->nested;
-    status = assign_vreg(function_type, mov_data, RETURN_VREG, DEST_OPERAND);
+    const TypeSpec *function_spec = extract_type(current_function);
+    TypeSpec *return_spec = malloc(sizeof(*return_spec));
+    /* strip pointer */
+    status = strip_aux_type(return_spec, function_spec);
+    if (status) return status;
+    /* strip function */
+    /* TODO(Robert): free temporary copies created by the first strip */
+    status = strip_aux_type(return_spec, function_spec);
+    status = assign_vreg(return_spec, mov_data, RETURN_VREG, DEST_OPERAND);
     if (status) return status;
 
     llist_push_back(text_section, mov_data);

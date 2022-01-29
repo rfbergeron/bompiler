@@ -15,11 +15,16 @@
 
 /* attributes correspond to array indices in the order they are listed here */
 /* the following operations resolve to an lvalue:
- * - identifiers
+ * - most identifiers
  * - the result of the arrow operator
  * - the result of the dot operator
- * - the result of the dereference operator
- * - the result of the array indexing operator
+ * - the result of the indirection operator
+ * - the result of the subscript operator
+ *
+ * the following resolve to an rvalue:
+ * - plain array and function identifiers
+ * - the result of the address-of operator
+ * - the result of any expression not explicitly listed as an lval
  */
 enum attribute {
   ATTR_NONE = 0,            /* no attributes set */
@@ -30,24 +35,26 @@ enum attribute {
   ATTR_EXPR_VADDR = 1 << 4, /* int is memory address */
 };
 
-enum base_type {
+typedef enum base_type {
   TYPE_NONE,
-  /* arithmetic types */
   TYPE_SIGNED,
   TYPE_UNSIGNED,
-  TYPE_FLOAT,
-  TYPE_DOUBLE,
-  /* compound types */
-  TYPE_POINTER,
-  TYPE_ARRAY,
+  TYPE_VOID,
   TYPE_STRUCT,
   TYPE_UNION,
-  TYPE_FUNCTION,
-  /* other types */
-  TYPE_TYPEDEF,
-  TYPE_VOID
-};
+} BaseType;
 
+typedef enum aux_type {
+  AUX_NONE,
+  AUX_POINTER,
+  AUX_ARRAY,
+  AUX_STRUCT,
+  AUX_UNION,
+  AUX_FUNCTION,
+  AUX_TYPEDEF,
+} AuxType;
+
+/*
 enum conversion_type {
   CONV_COMPATIBLE,
   CONV_IMPLICIT_CAST,
@@ -58,40 +65,88 @@ enum conversion_type {
   CONV_PROMOTE_BOTH,
   CONV_PROMOTE_WIDER
 };
+*/
 
-enum type_flag {
-  TYPE_FLAG_NONE = 0,
+enum typespec_index {
+  TYPESPEC_INDEX_INT = 0,
+  TYPESPEC_INDEX_CHAR,
+  TYPESPEC_INDEX_SHORT,
+  TYPESPEC_INDEX_LONG,
+  TYPESPEC_INDEX_LONG_LONG,
+  TYPESPEC_INDEX_SIGNED,
+  TYPESPEC_INDEX_UNSIGNED,
+  TYPESPEC_INDEX_VOID,
+  TYPESPEC_INDEX_STRUCT,
+  TYPESPEC_INDEX_UNION,
+  TYPESPEC_INDEX_ENUM,
   /* storage class */
-  TYPE_FLAG_REGISTER = 1 << 0,
-  TYPE_FLAG_STATIC = 1 << 1,
-  TYPE_FLAG_EXTERN = 1 << 2,
-  TYPE_FLAG_AUTO = 1 << 2,
+  TYPESPEC_INDEX_REGISTER,
+  TYPESPEC_INDEX_STATIC,
+  TYPESPEC_INDEX_EXTERN,
+  TYPESPEC_INDEX_AUTO,
   /* qualifiers */
-  TYPE_FLAG_CONST = 1 << 4,
-  TYPE_FLAG_VOLATILE = 1 << 5,
+  TYPESPEC_INDEX_CONST,
+  TYPESPEC_INDEX_VOLATILE,
   /* function only */
-  TYPE_FLAG_INLINE = 1 << 6
+  TYPESPEC_INDEX_INLINE,
+  /* number of type specifiers */
+  TYPESPEC_INDEX_COUNT
 };
 
+enum typespec_flag {
+  TYPESPEC_FLAG_NONE = 0,
+  TYPESPEC_FLAG_INT = 1 << TYPESPEC_INDEX_INT,
+  TYPESPEC_FLAG_CHAR = 1 << TYPESPEC_INDEX_CHAR,
+  TYPESPEC_FLAG_SHORT = 1 << TYPESPEC_INDEX_SHORT,
+  TYPESPEC_FLAG_LONG = 1 << TYPESPEC_INDEX_LONG,
+  TYPESPEC_FLAG_LONG_LONG = 1 << TYPESPEC_INDEX_LONG_LONG,
+  TYPESPEC_FLAG_SIGNED = 1 << TYPESPEC_INDEX_SIGNED,
+  TYPESPEC_FLAG_UNSIGNED = 1 << TYPESPEC_INDEX_UNSIGNED,
+  TYPESPEC_FLAG_VOID = 1 << TYPESPEC_INDEX_VOID,
+  TYPESPEC_FLAG_STRUCT = 1 << TYPESPEC_INDEX_STRUCT,
+  TYPESPEC_FLAG_UNION = 1 << TYPESPEC_INDEX_UNION,
+  TYPESPEC_FLAG_ENUM = 1 << TYPESPEC_INDEX_ENUM,
+  /* storage class */
+  TYPESPEC_FLAG_REGISTER = 1 << TYPESPEC_INDEX_REGISTER,
+  TYPESPEC_FLAG_STATIC = 1 << TYPESPEC_INDEX_STATIC,
+  TYPESPEC_FLAG_EXTERN = 1 << TYPESPEC_INDEX_EXTERN,
+  TYPESPEC_FLAG_AUTO = 1 << TYPESPEC_INDEX_AUTO,
+  /* qualifiers */
+  TYPESPEC_FLAG_CONST = 1 << TYPESPEC_INDEX_CONST,
+  TYPESPEC_FLAG_VOLATILE = 1 << TYPESPEC_INDEX_VOLATILE,
+  /* function only */
+  TYPESPEC_FLAG_INLINE = 1 << TYPESPEC_INDEX_INLINE
+};
+
+/* Structs and unions require a member map, as well as the order of the members.
+ * This would be best provided by an ordered_map data structure.
+ */
+typedef struct auxspec {
+  union {
+    const char *type_id;
+    struct {
+      unsigned int qualifiers;
+      size_t length;
+    } ptr_or_arr;
+    struct {
+      LinkedList members;
+      Map *symbol_table;
+    } composite;
+    LinkedList params;
+  } data;
+  AuxType aux;
+} AuxSpec;
+
+/*
+ * auxinfo will contain information about structs/unions, pointers, functions,
+ * typedefs, and arrays.
+ */
 typedef struct typespec {
   size_t width;
-  /*
-   * 1. only structures and unions need their alignment specified
-   * 2. only structures and unions need a map
-   * 3. only arrays need length
-   * 4. only functions need  parameters
-   * 5. only functions, pointers, and arrays need nested types
-   */
   size_t alignment;
-  struct typespec *nested; /* for functions, pointers and arrays */
-  union {
-    struct map members;  /* for structs and unions */
-    struct llist params; /* for functions */
-    size_t length;       /* for arrays */
-  } data;
+  LinkedList auxspecs;
   unsigned int flags;
-  enum base_type base;
-  const char *identifier;
+  BaseType base;
 } TypeSpec;
 
 typedef struct location {
@@ -104,9 +159,11 @@ typedef struct location {
 /* TODO(Robert): maybe define this in some other common file? */
 extern const size_t MAX_IDENT_LEN;
 extern const TypeSpec SPEC_PTR;
-extern const TypeSpec SPEC_EMPTY;
 extern const TypeSpec SPEC_FUNCTION;
 extern const TypeSpec SPEC_STRUCT;
+extern const TypeSpec SPEC_EMPTY;
+extern const TypeSpec SPEC_VOID;
+extern const TypeSpec SPEC_CHAR;
 extern const TypeSpec SPEC_ULONG;
 extern const TypeSpec SPEC_LONG;
 extern const TypeSpec SPEC_UINT;
@@ -114,15 +171,33 @@ extern const TypeSpec SPEC_INT;
 extern const TypeSpec SPEC_USHRT;
 extern const TypeSpec SPEC_SHRT;
 extern const TypeSpec SPEC_UCHAR;
-extern const TypeSpec SPEC_CHAR;
+extern const TypeSpec SPEC_SCHAR;
 
 extern const Location LOC_EMPTY;
 
-int attributes_to_string(const unsigned int attributes, char *buf,
-                         size_t bufsize);
-void location_to_string(const Location *loc, char *buffer, size_t size);
-int type_to_string(const TypeSpec *type, char *buf, size_t bufsize);
-int typespec_copy(TypeSpec *dst, const TypeSpec *src);
-int typespec_destroy(TypeSpec *type);
+int attributes_to_string(const unsigned int attributes, char *buf, size_t size);
+int location_to_string(const Location *loc, char *buf, size_t size);
+int flags_to_string(const unsigned int flags, char *buf, size_t size);
+int type_to_string(const TypeSpec *type, char *buf, size_t size);
 
+int auxspec_destroy(AuxSpec *auxspec);
+int auxspec_copy(AuxSpec *dest, const AuxSpec *src);
+
+int typespec_init(TypeSpec *spec);
+int typespec_destroy(TypeSpec *spec);
+int typespec_copy(TypeSpec *dst, const TypeSpec *src);
+int strip_aux_type(TypeSpec *dest, const TypeSpec *src);
+
+int typespec_is_arithmetic(const TypeSpec *type);
+int typespec_is_integer(const TypeSpec *type);
+int typespec_is_pointer(const TypeSpec *type);
+int typespec_is_array(const TypeSpec *type);
+int typespec_is_function(const TypeSpec *type);
+int typespec_is_scalar(const TypeSpec *type);
+int typespec_is_voidptr(const TypeSpec *type);
+int typespec_is_fnptr(const TypeSpec *type);
+int typespec_is_struct(const TypeSpec *type);
+int typespec_is_structptr(const TypeSpec *type);
+int typespec_is_union(const TypeSpec *type);
+int typespec_is_unionptr(const TypeSpec *type);
 #endif

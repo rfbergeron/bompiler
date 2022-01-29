@@ -12,7 +12,11 @@
 #include "debug.h"
 #include "lyutils.h"
 #include "strset.h"
+#include "symtable.h"
+#include "yyparse.h"
 #define LINESIZE 1024
+
+extern int skip_type_check;
 
 ASTree *astree_first(ASTree *parent) { return llist_get(&parent->children, 0); }
 
@@ -68,7 +72,7 @@ ASTree *astree_init(int symbol, const Location location, const char *info) {
       /* tree->attributes[ATTR_VREG] = 1; */
       break;
     case TOK_ARROW:
-    case TOK_INDEX:
+    case TOK_SUBSCRIPT:
       /* tree->attributes[ATTR_LVAL] = 1; */
       /* tree->attributes[ATTR_VADDR] = 1; */
       break;
@@ -100,6 +104,22 @@ int astree_destroy(ASTree *tree) {
   /* free symbol entries associated with scope */
   map_destroy(&tree->symbol_table);
 
+  /* free one-off TypeSpec objects */
+  if (!skip_type_check) {
+    switch (tree->symbol) {
+      case TOK_ADDROF:
+        /* free pointer auxspec that was added */
+        auxspec_destroy(llist_pop_front((LinkedList *)&tree->type->auxspecs));
+      case TOK_CAST:
+      case TOK_SUBSCRIPT:
+      case TOK_INDIRECTION:
+      case TOK_CALL:
+        typespec_destroy((TypeSpec *)tree->type);
+        free((TypeSpec *)tree->type);
+        break;
+    }
+  }
+
   free(tree);
   return 0;
 }
@@ -107,31 +127,31 @@ int astree_destroy(ASTree *tree) {
 ASTree *astree_adopt(ASTree *parent, ASTree *child1, ASTree *child2,
                      ASTree *child3) {
   if (child1 != NULL) {
-    DEBUGS('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
-           parser_get_tname(child1->symbol));
     ASTree *current_sibling = child1->firstborn;
 
     do {
+      DEBUGS('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
+             parser_get_tname(current_sibling->symbol));
       llist_push_back(&parent->children, current_sibling);
       current_sibling = current_sibling->next_sibling;
     } while (current_sibling != NULL);
   }
   if (child2 != NULL) {
-    DEBUGS('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
-           parser_get_tname(child2->symbol));
     ASTree *current_sibling = child2->firstborn;
 
     do {
+      DEBUGS('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
+             parser_get_tname(current_sibling->symbol));
       llist_push_back(&parent->children, current_sibling);
       current_sibling = current_sibling->next_sibling;
     } while (current_sibling != NULL);
   }
   if (child3 != NULL) {
-    DEBUGS('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
-           parser_get_tname(child3->symbol));
     ASTree *current_sibling = child3->firstborn;
 
     do {
+      DEBUGS('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
+             parser_get_tname(current_sibling->symbol));
       llist_push_back(&parent->children, current_sibling);
       current_sibling = current_sibling->next_sibling;
     } while (current_sibling != NULL);
@@ -145,7 +165,7 @@ ASTree *astree_adopt_sym(ASTree *parent, int symbol_, ASTree *child1,
   if (symbol_ == '<' || symbol_ == '>') {
     /* attributes.set((size_t)attr::INT); */
     /* attributes.set((size_t)attr::VREG); */
-  } else if (symbol_ == TOK_INDEX) {
+  } else if (symbol_ == TOK_SUBSCRIPT) {
     /* attributes.set((size_t)attr::VADDR); */
     /* attributes.set((size_t)attr::LVAL); */
   } else if (symbol_ == TOK_CALL) {
@@ -162,8 +182,11 @@ ASTree *astree_twin(ASTree *sibling1, ASTree *sibling2) {
   /* if it is the head of the list, this node points to itself */
   sibling2->firstborn = sibling1->firstborn;
   /* want to append to the end of the "list" */
-  sibling1->next_sibling = sibling2;
-  return sibling2;
+  ASTree *current = sibling1;
+  while (current->next_sibling) current = current->next_sibling;
+  current->next_sibling = sibling2;
+  /* return the head of the list */
+  return sibling1;
 }
 
 ASTree *astree_descend(ASTree *parent, ASTree *descendant) {
@@ -175,58 +198,55 @@ ASTree *astree_descend(ASTree *parent, ASTree *descendant) {
   return parent;
 }
 
+ASTree *astree_inject(ASTree *old_node, ASTree *new_node) {
+  ASTree temp = *old_node;
+  *old_node = *new_node;
+  *new_node = temp;
+  new_node->firstborn = old_node->firstborn;
+  new_node->next_sibling = old_node->next_sibling;
+  old_node->firstborn = temp.firstborn;
+  old_node->next_sibling = temp.next_sibling;
+  return astree_adopt(old_node, new_node, NULL, NULL);
+}
+
 size_t astree_count(ASTree *parent) { return llist_size(&parent->children); }
 
-void astree_dump_tree(ASTree *tree, FILE *out, int depth) {
-  /* Dump formatted tree: current pointer, current token, followed
-   * by pointers to children, on one line. Then call recursively on
-   * children with increased depth (identation)
-   */
-}
-
-void astree_dump(ASTree *tree, FILE *out) {
-  /* print pointer value and tree contents without any special formatting,
-   * followed by the pointer values of this node's children
-   */
-  if (tree == NULL) return;
-  DEBUGS('t', "Dumping astree node.");
-  char nodestr[LINESIZE];
-  astree_to_string(tree, nodestr, LINESIZE);
-
-  fprintf(out, "%p->%s", tree, nodestr);
-}
-
-void astree_to_string(ASTree *tree, char *buffer, size_t size) {
+int astree_to_string(ASTree *tree, char *buffer, size_t size) {
   /* print token name, lexinfo in quotes, the location, block number,
    * attributes, and the typeid if this is a struct
    */
-  if (tree == NULL) return;
+  if (tree == NULL) return -1;
 
   const char *tname = parser_get_tname(tree->symbol);
   char locstr[LINESIZE];
-  location_to_string(&tree->loc, locstr, LINESIZE);
+  int characters_printed = location_to_string(&tree->loc, locstr, LINESIZE);
+  if (characters_printed < 0) return characters_printed;
   char attrstr[LINESIZE];
-  attributes_to_string(tree->attributes, attrstr, LINESIZE);
+  characters_printed =
+      attributes_to_string(tree->attributes, attrstr, LINESIZE);
+  if (characters_printed < 0) return characters_printed;
   char typestr[LINESIZE];
-  type_to_string(tree->type, typestr, LINESIZE);
+  characters_printed = type_to_string(tree->type, typestr, LINESIZE);
+  if (characters_printed < 0) return characters_printed;
 
   if (strlen(tname) > 4) tname += 4;
-  snprintf(buffer, size, "%s \"%s\" {%s} {%s} {%s}", tname, tree->lexinfo,
-           locstr, typestr, attrstr);
+  return snprintf(buffer, size, "%s \"%s\" {%s} {%s} {%s}", tname,
+                  tree->lexinfo, locstr, typestr, attrstr);
 }
 
-void astree_print_tree(ASTree *tree, FILE *out, int depth) {
+int astree_print_tree(ASTree *tree, FILE *out, int depth) {
   /* print out the whole tree */
   DEBUGS('t', "Tree info: token: %s, lexinfo: %s, children: %u",
          parser_get_tname(tree->symbol), tree->lexinfo,
          llist_size(&tree->children));
 
-  size_t numspaces = depth * 3;
+  size_t numspaces = depth * 2;
   char indent[LINESIZE];
   memset(indent, ' ', numspaces);
   indent[numspaces] = 0;
   char nodestr[LINESIZE];
-  astree_to_string(tree, nodestr, LINESIZE);
+  int characters_printed = astree_to_string(tree, nodestr, LINESIZE);
+  if (characters_printed < 0) return characters_printed;
   fprintf(out, "%s%s\n", indent, nodestr);
 
   size_t i;
@@ -238,7 +258,104 @@ void astree_print_tree(ASTree *tree, FILE *out, int depth) {
     ASTree *child = (ASTree *)llist_get(&tree->children, i);
 
     if (child != NULL) {
-      astree_print_tree(child, out, depth + 1);
+      int status = astree_print_tree(child, out, depth + 1);
+      if (status) return status;
     }
+  }
+  return 0;
+}
+
+int astree_print_symbols(ASTree *tree, FILE *out) {
+  if (map_size(&tree->symbol_table) > 0) {
+    LinkedList symnames = (LinkedList)BLIB_LLIST_EMPTY;
+    int status = llist_init(&symnames, NULL, NULL);
+    if (status) return status;
+    status = map_keys(&tree->symbol_table, &symnames);
+    if (status) return status;
+    DEBUGS('a', "Printing %zu symbols", map_size(&tree->symbol_table));
+    const char *tname = parser_get_tname(tree->symbol);
+    char locstr[LINESIZE];
+    location_to_string(&tree->loc, locstr, LINESIZE);
+    if (strlen(tname) > 4) tname += 4;
+
+    fprintf(out, "%s \"%s\" {%s}\n", parser_get_tname(tree->symbol),
+            tree->lexinfo, locstr);
+    size_t i;
+    for (i = 0; i < llist_size(&symnames); ++i) {
+      const char *symname = llist_get(&symnames, i);
+      SymbolValue *symval =
+          map_get(&tree->symbol_table, (char *)symname, strlen(symname));
+      char symval_str[LINESIZE];
+      int characters_printed = symbol_value_print(symval, symval_str, LINESIZE);
+      if (characters_printed < 0) {
+        fprintf(stderr,
+                "ERROR: failed to print symbol table associated with "
+                "astree node, symbol: %s, lexinfo: %s\n",
+                parser_get_tname(tree->symbol), tree->lexinfo);
+        return status;
+      }
+      fprintf(out, "  %s: %s\n", symname, symval_str);
+    }
+  }
+  size_t i;
+  for (i = 0; i < astree_count(tree); ++i) {
+    astree_print_symbols(astree_get(tree, i), out);
+  }
+  return 0;
+}
+
+ASTree *extract_ident(ASTree *tree) {
+  switch (tree->symbol) {
+    case TOK_STRUCT:
+    case TOK_UNION:
+    case TOK_CALL:
+      return astree_first(tree);
+    case TOK_IDENT:
+      return tree;
+    case TOK_DECLARATOR:
+      if (astree_first(tree)->symbol == TOK_DECLARATOR) {
+        return extract_ident(astree_first(tree));
+      } else {
+        size_t i;
+        for (i = 0; i < astree_count(tree); ++i) {
+          ASTree *direct_decl = astree_get(tree, i);
+          if (direct_decl->symbol == TOK_IDENT) {
+            return direct_decl;
+          }
+        }
+      }
+      /* do not break; fall through and return error when no ident */
+    default:
+      fprintf(stderr, "ERROR: unable to get identifier for tree node %s\n",
+              parser_get_tname(tree->symbol));
+      return NULL;
+  }
+}
+
+const TypeSpec *extract_type(ASTree *tree) {
+  switch (tree->symbol) {
+    case TOK_STRUCT:
+    case TOK_UNION:
+    case TOK_FUNCTION:
+    case TOK_DECLARATOR:
+    case TOK_CALL:
+      return extract_ident(tree)->type;
+    case TOK_IDENT:
+    default:
+      return tree->type;
+  }
+}
+
+const Location *extract_loc(ASTree *tree) {
+  switch (tree->symbol) {
+    case TOK_STRUCT:
+    case TOK_UNION:
+    case TOK_FUNCTION:
+    case TOK_DECLARATOR:
+    case TOK_CALL:
+      return &extract_ident(tree)->loc;
+    case TOK_IDENT:
+    default:
+      return &tree->loc;
   }
 }

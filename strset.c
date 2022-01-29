@@ -9,9 +9,7 @@
 #include "debug.h"
 
 static const size_t starting_size = 100;
-static const char *entry_format = "string_set[%4d,%4d]: %p->\"%s\"\n";
 static Map string_set = {0};
-static FILE *strfile;
 
 static int strncmp_wrapper(void *s1, void *s2) {
   int ret = 0;
@@ -21,13 +19,6 @@ static int strncmp_wrapper(void *s1, void *s2) {
     ret = !strncmp(s1, s2, MAX_IDENT_LEN);
   }
   return ret;
-}
-
-void dump_string(void *string) {
-  size_t map_location[] = {-1, -1};
-  map_find(&string_set, string, strnlen(string, MAX_IDENT_LEN), map_location);
-  int result = fprintf(strfile, entry_format, map_location[0], map_location[1],
-                       string, (char *)string);
 }
 
 /* the key and value will point to the same thing so only one of the destructors
@@ -70,8 +61,21 @@ const char *string_set_intern(const char *string) {
   return ret;
 }
 
-void string_set_dump(FILE *out) {
-  DEBUGS('s', "Dumping string set");
-  strfile = out;
-  map_foreach_key(&string_set, dump_string);
+int string_set_print(FILE *out) {
+  DEBUGS('s', "Printing string set");
+  LinkedList key_list = (LinkedList)BLIB_LLIST_EMPTY;
+  int status = llist_init(&key_list, NULL, NULL);
+  if (status) return status;
+  status = map_keys(&string_set, &key_list);
+  if (status) return status;
+
+  size_t i;
+  for (i = 0; i < llist_size(&key_list); ++i) {
+    char *key = llist_get(&key_list, i);
+    size_t map_location[] = {-1, -1};
+    map_find(&string_set, key, strnlen(key, MAX_IDENT_LEN), map_location);
+    fprintf(out, "string_set[%4zu,%4zu]: %p->\"%s\"\n", map_location[0],
+            map_location[1], key, key);
+  }
+  return 0;
 }

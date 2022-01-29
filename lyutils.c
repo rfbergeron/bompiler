@@ -50,7 +50,9 @@ size_t lexer_include_linenr(int filenr) {
 
 void lexer_new_filename(const char *filename) {
   lexer_loc.filenr = llist_size(&lexer_filenames);
-  llist_push_front(&lexer_filenames, (char *)filename);
+  char *filename_copy = malloc((strlen(filename) + 1) * sizeof(char *));
+  strcpy(filename_copy, filename);
+  llist_push_front(&lexer_filenames, filename_copy);
   push_linenr(lexer_loc.linenr + 1);
 }
 
@@ -133,6 +135,7 @@ void lexer_dump_filenames(FILE *out) {
   }
 }
 
+/* TODO(Robert): add filename comparator to prevent duplicates */
 void lexer_init_globals() {
   lexer_interactive = 0;
   lexer_loc = (Location){0, 1, 0};
@@ -140,11 +143,13 @@ void lexer_init_globals() {
   lexer_include_linenrs.size = 10;
   lexer_include_linenrs.data =
       malloc(lexer_include_linenrs.size * sizeof(size_t));
+  llist_init(&lexer_filenames, free, NULL);
 }
 
 void lexer_free_globals() {
   llist_destroy(&lexer_filenames);
   free(lexer_include_linenrs.data);
+  llist_destroy(&lexer_filenames);
 }
 
 void yyerror(const char *message) { lexer_error(message); }

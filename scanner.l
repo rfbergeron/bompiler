@@ -31,8 +31,11 @@ DECCON          ([1-9]{DIGIT}*)
 OCTCON          (0{OCTDIGIT}*)
 HEXCON          (0[xX]{HEXDIGIT}+)
 INTCON          ({DECCON}|{OCTCON}|{HEXCON})
-CHARCON         ('([^\\'\n]|\\[\\'"0nt])')
-STRINGCON       (\"([^\\"\n]|\\[\\'"0nt])*\")
+OCTCHAR         (\\{OCTDIGIT}{OCTDIGIT}?{OCTDIGIT}?)
+HEXCHAR         (\\x{HEXDIGIT}+)
+ESCSEQUENCE     (\\[ntvbrfa\\?'"])
+CHARCON         ('([^\\'\n]|{ESCSEQUENCE}|{OCTCHAR}|{HEXCHAR})')
+STRINGCON       (\"([^\\"\n]|{ESCSEQUENCE}|{OCTCHAR}|{HEXCHAR})*\")
 NOTCHAR         ('[^']*)
 NOTSTRING       (\"[^"]*)
 %%
@@ -50,9 +53,11 @@ NOTSTRING       (\"[^"]*)
 "unsigned"      { return lexer_token (TOK_UNSIGNED); }
 "if"            { return lexer_token (TOK_IF); }
 "else"          { return lexer_token (TOK_ELSE); }
+"do"            { return lexer_token (TOK_DO); }
 "while"         { return lexer_token (TOK_WHILE); }
 "return"        { return lexer_token (TOK_RETURN); }
 "struct"        { return lexer_token (TOK_STRUCT); }
+"union"         { return lexer_token (TOK_UNION); }
 {IDENT}         { return lexer_token (TOK_IDENT); }
 {STRINGCON}     { return lexer_token (TOK_STRINGCON); }
 {INTCON}        { return lexer_token (TOK_INTCON); }

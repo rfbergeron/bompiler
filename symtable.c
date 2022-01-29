@@ -9,12 +9,14 @@
 #include "simplestack.h"
 #include "stdlib.h"
 #include "string.h"
+#define LINESIZE 1024
 
 DECLARE_STACK(nrstack, size_t);
 /* the 'stack' of tables */
 static struct llist tables = BLIB_LLIST_EMPTY;
 static struct nrstack block_nrs = {NULL, 0, 0};
 static struct nrstack sequence_nrs = {NULL, 0, 0};
+static SymbolValue *current_function = NULL;
 
 /*
  * wrapper functions for use with badlib
@@ -37,6 +39,7 @@ SymbolValue *symbol_value_init(const Location *loc) {
   ret->type = SPEC_EMPTY;
   ret->loc = *loc;
   ret->sequence = nrstack_postfix_inc(&sequence_nrs);
+  typespec_init(&ret->type);
   return ret;
 }
 
@@ -49,12 +52,17 @@ int symbol_value_destroy(SymbolValue *symbol_value) {
   return 0;
 }
 
-void symbol_value_print(const SymbolValue *symbol, FILE *out) {
-  char type_buf[256];
-  type_to_string(&(symbol->type), type_buf, 256);
-  fprintf(out, "{ %lu, %lu, %lu } { %lu } %s", symbol->loc.filenr,
-          symbol->loc.linenr, symbol->loc.offset, symbol->loc.blocknr,
-          type_buf);
+int symbol_value_print(const SymbolValue *symbol, char *buffer, size_t size) {
+  if (!symbol || !buffer || size < 1) {
+    fprintf(stderr, "ERROR: invalid arguments to symbol_value_print\n");
+    return -1;
+  }
+  char locstr[LINESIZE];
+  location_to_string(&symbol->loc, locstr, LINESIZE);
+  char typestr[LINESIZE];
+  type_to_string(&symbol->type, typestr, LINESIZE);
+
+  return snprintf(buffer, size, "{%s} {%s}", locstr, typestr);
 }
 
 void symbol_table_init_globals() {
@@ -137,4 +145,20 @@ int leave_scope(Map *scope) {
   if (llist_front(&tables) != scope) return 1;
   llist_pop_front(&tables);
   return 0;
+}
+
+int enter_body(Map *scope, SymbolValue *symbol) {
+  current_function = symbol;
+  return enter_scope(scope);
+}
+
+int leave_body(Map *scope, SymbolValue *symbol) {
+  if (current_function != symbol) return -1;
+  current_function = NULL;
+  symbol->is_defined = 1;
+  return finalize_scope(scope);
+}
+
+int get_ret_type(TypeSpec *out) {
+  return strip_aux_type(out, &current_function->type);
 }
