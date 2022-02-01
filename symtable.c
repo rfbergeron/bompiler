@@ -10,13 +10,9 @@
 #include "stdlib.h"
 #include "string.h"
 #define LINESIZE 1024
+#define EMPTY_SYMTABLE = ((SymbolTable){ BLIB_MAP_EMPTY, NULL, NULL, NULL });
 
-DECLARE_STACK(nrstack, size_t);
-/* the 'stack' of tables */
-static struct llist tables = BLIB_LLIST_EMPTY;
-static struct nrstack block_nrs = {NULL, 0, 0};
-static struct nrstack sequence_nrs = {NULL, 0, 0};
-static SymbolValue *current_function = NULL;
+SymbolTable *current_table = NULL;
 
 /*
  * wrapper functions for use with badlib
@@ -38,7 +34,7 @@ SymbolValue *symbol_value_init(const Location *loc) {
   SymbolValue *ret = malloc(sizeof(*ret));
   ret->type = SPEC_EMPTY;
   ret->loc = *loc;
-  ret->sequence = nrstack_postfix_inc(&sequence_nrs);
+  ret->sequence = map_size(&current_table->map);
   typespec_init(&ret->type);
   return ret;
 }
@@ -65,100 +61,80 @@ int symbol_value_print(const SymbolValue *symbol, char *buffer, size_t size) {
   return snprintf(buffer, size, "{%s} {%s}", locstr, typestr);
 }
 
-void symbol_table_init_globals() {
-  /* stacks */
-  nrstack_init(&block_nrs, 120);
-  nrstack_init(&sequence_nrs, 120);
-  /* linked lists, the syntax tree is responsible for freeing symbol tables so
-   * the linked list just has to clean itself up
-   */
-  llist_init(&tables, NULL, NULL);
-}
-
-void symbol_table_free_globals() {
-  DEBUGS('t', "DESTROYING SYMTABLES");
-  llist_destroy(&tables);
-  nrstack_destroy(&block_nrs);
-  nrstack_destroy(&sequence_nrs);
-  DEBUGS('t', "  SYMTABLES DESTROYED");
-}
-
-int insert_symbol(const char *ident, const size_t ident_len,
-                  SymbolValue *symval) {
-  return map_insert(llist_front(&tables), (void *)ident, ident_len, symval);
-}
-
-int locate_symbol(const char *ident, const size_t ident_len,
-                  SymbolValue **out) {
-  size_t i;
-  for (i = 0; i < llist_size(&tables); ++i) {
-    struct map *current_table = llist_get(&tables, i);
-    *out = map_get(current_table, (char *)ident, ident_len);
-    if (*out) break;
-  }
-  /* true if the top of the stack (current scope) contains the symbol */
-  return !i;
-}
-
-/* scopes and blocks are kept separate; although a new scope is created with
- * each block, it is not the case that a new block is created with each scope
+/*
+ * SymbolTable functions
  */
-int create_scope(Map *scope) {
-  /* prevent scope from being created twice, specifically for compound
-   * statements
-   */
-  if (llist_front(&tables) == scope) return 1;
-  int status =
-      map_init(scope, DEFAULT_MAP_SIZE, NULL,
+SymbolTable *symbol_table_init(void) {
+  SymbolTable *table = malloc(sizeof(*table));
+  int status = map_init(&table->map, DEFAULT_MAP_SIZE, NULL,
                (void (*)(void *))symbol_value_destroy, strncmp_wrapper);
   if (status) {
     fprintf(stderr, "fuck you\n");
     abort();
   }
-  llist_push_front(&tables, scope);
-  nrstack_push(&block_nrs, 0);
-  nrstack_push(&sequence_nrs, 0);
+  if (current_table != NULL) {
+    if (current_table->nested_tables == NULL) {
+      current_table->nested_tables = malloc(sizeof(LinkedList));
+      int status = llist_init(current_table->nested_tables,
+              (void(*)(void*))symbol_table_destroy, NULL);
+      /* TODO(Robert): cleanup on failure */
+      if (status) return NULL;
+    }
+    int status = llist_push_back(current_table->nested_tables, table);
+      /* TODO(Robert): cleanup on failure */
+    if (status) return NULL;
+  }
+  table->parent_table = current_table;
+  current_table = table;
+  return table;
+}
+
+int symbol_table_destroy(SymbolTable *table) {
+  DEBUGS('t', "Freeing symbol table");
+  int status = map_destroy(&table->map);
+  if (status) return status;
+  if (table->nested_tables != NULL) {
+    int status = llist_destroy(table->nested_tables);
+    if (status) return status;
+    free(table->nested_tables);
+  }
+  free(table);
   return 0;
 }
 
-int finalize_scope(Map *scope) {
-  /* make sure that the caller is finalizing the scope they think they are */
-  if (llist_front(&tables) != scope) return 1;
-  llist_pop_front(&tables);
-  nrstack_pop(&sequence_nrs);
-  nrstack_pop(&block_nrs);
-  nrstack_postfix_inc(&block_nrs);
-  return 0;
+int symbol_table_insert(const char *ident, const size_t ident_len,
+                  SymbolValue *symval) {
+  return map_insert(&current_table->map, (void *)ident, ident_len, symval);
 }
 
-int enter_scope(Map *scope) {
+int symbol_table_get(const char *ident, const size_t ident_len,
+                  SymbolValue **out) {
+  SymbolTable *table = current_table;
+  while (table != NULL) {
+    *out = map_get(&table->map, (char *)ident, ident_len);
+    if (*out) break;
+    table = table->parent_table;
+  }
+  /* return whether or not the symbol is located in the current scope */
+  return table == current_table;
+}
+
+int symbol_table_enter(SymbolTable *table) {
   /* prevent scope from being entered twice; this should not happen during a
    * correct execution, but we will try to prevent it here anyways
    */
-  if (llist_front(&tables) == scope) return 1;
-  llist_push_front(&tables, scope);
-  return 0;
+  if (current_table == table) return 1;
+  SymbolTable *old_table = current_table;
+  current_table = table;
+  /* also indicate an error if the new table is not reachable from the old table */
+  return current_table->parent_table != old_table;
 }
 
-int leave_scope(Map *scope) {
+int symbol_table_leave(SymbolTable *table) {
   /* make sure that the caller is leaving the scope they think they are */
-  if (llist_front(&tables) != scope) return 1;
-  llist_pop_front(&tables);
+  if (current_table != table) return 1;
+  /* do not allow the caller to leave file scope */
+  else if (current_table->parent_table == NULL) return 1;
+  current_table = current_table->parent_table;
   return 0;
-}
-
-int enter_body(Map *scope, SymbolValue *symbol) {
-  current_function = symbol;
-  return enter_scope(scope);
-}
-
-int leave_body(Map *scope, SymbolValue *symbol) {
-  if (current_function != symbol) return -1;
-  current_function = NULL;
-  symbol->is_defined = 1;
-  return finalize_scope(scope);
-}
-
-int get_ret_type(TypeSpec *out) {
-  return strip_aux_type(out, &current_function->type);
 }
