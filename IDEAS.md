@@ -159,6 +159,25 @@ will store other type information.
 Both of these structures will have a copy, init, and destroy function associated
 with them, to make (re)using the information stored in them easier.
 
+## A better symbol table
+Currently, symbols are stored directly in a map data structure from badlib. This
+has been convenient, but it has some limitations that make using it awkward:
+- Symbol tables are not structured relative to one another in any way.
+  Relationships can only be established between them using the syntax tree,
+  which has been inconvenient.
+- Two stack data structures are used to track the number and order of nested
+  scopes and object declarations, which could be combined with the symbol map
+  into another data structure.
+
+### Definition
+```
+typedef struct symbol_table {
+  Map map;
+  struct symbol_table *nested_tables;
+  struct symbol_table *parent_table;
+} SymbolTable;
+```
+
 ## Special handling of function identifiers
 Function identifiers and pointers receive special treatment based on their
 location in an expression. When used on their own in/as an expression, they

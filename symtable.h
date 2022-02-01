@@ -7,9 +7,6 @@
 
 #define DEFAULT_MAP_SIZE 100
 
-/* This structure should be used for grouping together a function or object's
- * name, type, and declaration location
- */
 typedef struct symbol_value {
   size_t sequence;  /* used to order declarations in a given block */
   Location loc;     /* declaration location */
@@ -18,8 +15,16 @@ typedef struct symbol_value {
   TypeSpec type;    /* type of symbol */
   int stack_offset; /* location in the current stack frame */
   char obj_loc[64]; /* location, represented as a string */
-  Map *label_namespace;
 } SymbolValue;
+
+typedef struct symbol_table {
+  Map map;                           /* symbol values */
+  struct symbol_table *parent_table; /* scope above this one */
+  LinkedList *nested_tables;         /* scope(s) below this one */
+  SymbolValue *enclosing_function;   /* function this belongs to, if applicable */
+} SymbolTable;
+
+extern SymbolTable *current_table;
 
 /* SymbolValue functions */
 SymbolValue *symbol_value_init(const Location *loc);
@@ -27,18 +32,11 @@ int symbol_value_destroy(SymbolValue *symbol_value);
 int symbol_value_print(const SymbolValue *symbol, char *buffer, size_t size);
 
 /* symbol table functions */
-void symbol_table_init_globals();
-void symbol_table_free_globals();
-int insert_symbol(const char *ident, const size_t ident_len,
+SymbolTable *symbol_table_init(void);
+int symbol_table_destroy(SymbolTable *table);
+int symbol_table_insert(const char *ident, const size_t ident_len,
                   SymbolValue *symval);
-int locate_symbol(const char *ident, const size_t ident_len, SymbolValue **out);
-int insert_tag();
-int locate_tag();
-int create_scope(Map *scope);
-int finalize_scope(Map *scope);
-int enter_scope(Map *scope);
-int leave_scope(Map *scope);
-int enter_body(Map *scope, SymbolValue *symbol);
-int leave_body(Map *scope, SymbolValue *symbol);
-int get_ret_type(TypeSpec *out);
+int symbol_table_get(const char *ident, const size_t ident_len, SymbolValue **out);
+int symbol_table_enter(SymbolTable *table);
+int symbol_table_leave(SymbolTable *table);
 #endif
