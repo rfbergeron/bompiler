@@ -138,6 +138,7 @@ const char instructions[][MAX_INSTRUCTION_LENGTH] = {
  */
 static const char INDEX_FMT[] = "[%s+%s*%hhu+%i]";
 static const char OFFSET_FMT[] = "[%s+%i]";
+static const char INDIRECT_FMT[] = "[%s]";
 static const char VREG_FMT[] = "vr%zu%c";
 static const char BINOP_FMT[] = "%8s%8s%8s,%s\n";
 static const char UNOP_FMT[] = "%8s%8s%8s\n";
@@ -521,6 +522,28 @@ int translate_comparison(ASTree *operator, InstructionData * data,
   data->instruction = instructions[num];
   status = assign_vreg(&SPEC_INT, data, vreg_count++, DEST_OPERAND);
   return status;
+}
+
+int translate_indirection(ASTree *indirection, InstructionData *data,
+        unsigned int flags) {
+  DEBUGS('g', "Translating indirection operation.");
+  InstructionData *src_data = calloc(1, sizeof(*src_data));
+  int status = translate_expr(astree_first(indirection), src_data, DEST_OPERAND);
+  if (status) return status;
+  llist_push_back(text_section, src_data);
+
+  sprintf(data->src_operand, INDIRECT_FMT, src_data->dest_operand);
+  status = assign_vreg(indirection->type, data, vreg_count++, DEST_OPERAND);
+  if (status) return status;
+  data->instruction = instructions[INSTR_MOV];
+  return 0;
+}
+
+int translate_addrof(ASTree *addrof, InstructionData *data,
+        unsigned int flags) {
+  DEBUGS('g', "Translating address operation.");
+  /* TODO(Robert): handle other types of lvalues, like struct and union members */
+  return translate_expr(astree_first(addrof), data, WANT_OBJ_VADDR);
 }
 
 int translate_inc_dec(ASTree *operator, InstructionData * data,
@@ -1097,7 +1120,7 @@ int translate_global_decl(ASTree *type_id, InstructionData *data) {
 
 int translate_function(ASTree *function, InstructionData *data) {
   DEBUGS('g', "Translating function definition");
-  ASTree *name_node = astree_second(astree_first(function));
+  ASTree *name_node = extract_ident(function);
   current_function = function;
   strcpy(data->label, name_node->lexinfo);
   int status = save_registers(NONVOLATILE_START, NONVOLATILE_COUNT);
