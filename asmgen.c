@@ -136,7 +136,7 @@ const char instructions[][MAX_INSTRUCTION_LENGTH] = {
  * stars indicate that field width is an argument
  * TODO(Robert): make field width an argument
  */
-static const char INDEX_FMT[] = "[%s+%s*%hhu+%i]";
+static const char INDEX_FMT[] = "[%s+%s*%zu+%i]";
 static const char OFFSET_FMT[] = "[%s+%i]";
 static const char INDIRECT_FMT[] = "[%s]";
 static const char VREG_FMT[] = "vr%zu%c";
@@ -420,7 +420,7 @@ int translate_logical(ASTree *operator, InstructionData * data,
                       InstructionEnum num, unsigned int flags) {
   /* set short circuit label if necessary */
   int set_bool_info = !strlen(bool_label);
-  if(set_bool_info) {
+  if (set_bool_info) {
     sprintf(bool_label, BOOL_FMT, branch_count++);
     bool_vreg = vreg_count++;
   }
@@ -525,10 +525,11 @@ int translate_comparison(ASTree *operator, InstructionData * data,
 }
 
 int translate_indirection(ASTree *indirection, InstructionData *data,
-        unsigned int flags) {
+                          unsigned int flags) {
   DEBUGS('g', "Translating indirection operation.");
   InstructionData *src_data = calloc(1, sizeof(*src_data));
-  int status = translate_expr(astree_first(indirection), src_data, DEST_OPERAND);
+  int status =
+      translate_expr(astree_first(indirection), src_data, DEST_OPERAND);
   if (status) return status;
   llist_push_back(text_section, src_data);
 
@@ -540,9 +541,10 @@ int translate_indirection(ASTree *indirection, InstructionData *data,
 }
 
 int translate_addrof(ASTree *addrof, InstructionData *data,
-        unsigned int flags) {
+                     unsigned int flags) {
   DEBUGS('g', "Translating address operation.");
-  /* TODO(Robert): handle other types of lvalues, like struct and union members */
+  /* TODO(Robert): handle other types of lvalues, like struct and union members
+   */
   return translate_expr(astree_first(addrof), data, WANT_OBJ_VADDR);
 }
 
@@ -661,6 +663,84 @@ int translate_assignment(ASTree *assignment, InstructionData *data,
   data->instruction = instructions[INSTR_MOV];
 
   return 0;
+}
+
+int translate_subscript(ASTree *subscript, InstructionData *data,
+                        unsigned int flags) {
+  DEBUGS('g', "Translating pointer subscript");
+  InstructionData *pointer_data = calloc(1, sizeof(*pointer_data));
+  int status =
+      translate_expr(astree_first(subscript), pointer_data, SRC_OPERAND);
+  if (status) return status;
+  llist_push_back(text_section, pointer_data);
+
+  InstructionData *index_data = calloc(1, sizeof(*index_data));
+  /* both pointer and index will be used as part of the "source" operand */
+  status = translate_expr(astree_second(subscript), index_data, SRC_OPERAND);
+  if (status) return status;
+  llist_push_back(text_section, pointer_data);
+
+  data->instruction = instructions[INSTR_MOV];
+  sprintf(data->src_operand, INDEX_FMT, pointer_data->dest_operand,
+          index_data->dest_operand, subscript->type->width, 0);
+  return assign_vreg(subscript->type, data, vreg_count++, DEST_OPERAND);
+}
+
+/* When fetching a struct member, we must be able to return either the location
+ * or value of the symbol, depending on the presence of WANT_OBJ_VADDR.
+ *
+ * Because of the way structures are used, it may make the most sense to have
+ * expressions of structure value always result in the address of the structure.
+ */
+int translate_reference(ASTree *reference, InstructionData *data,
+                        unsigned int flags) {
+  DEBUGS('g', "Translating reference operator");
+  ASTree *composite_object = astree_first(reference);
+  InstructionData *composite_data = calloc(1, sizeof(*composite_data));
+  int status = translate_expr(composite_object, composite_data,
+                              SRC_OPERAND | WANT_OBJ_VADDR);
+  if (status) return status;
+
+  const AuxSpec *composite_aux = llist_front(&composite_object->type->auxspecs);
+  const char *member_name = astree_second(reference)->lexinfo;
+  size_t member_name_len = strlen(member_name);
+  SymbolValue *member_symbol =
+      map_get(composite_aux->data.composite.symbol_table, (char *)member_name,
+              member_name_len);
+
+  if (flags & WANT_OBJ_VADDR)
+    data->instruction = instructions[INSTR_LEA];
+  else
+    data->instruction = instructions[INSTR_MOV];
+  sprintf(data->src_operand, OFFSET_FMT, composite_data->dest_operand,
+          member_symbol->stack_offset);
+  return assign_vreg(reference->type, data, vreg_count++, DEST_OPERAND);
+}
+
+int translate_arrow(ASTree *arrow, InstructionData *data, unsigned int flags) {
+  DEBUGS('g', "Translating arrow operator");
+  ASTree *pointer = astree_first(arrow);
+  InstructionData *pointer_data = calloc(1, sizeof(*pointer_data));
+  int status = translate_expr(pointer, pointer_data, DEST_OPERAND);
+  if (status) return status;
+
+  const AuxSpec *struct_aux = llist_get(&pointer->type->auxspecs, 1);
+  const char *member_name = astree_second(arrow)->lexinfo;
+  size_t member_name_len = strlen(member_name);
+  SymbolValue *member_symbol = map_get(struct_aux->data.composite.symbol_table,
+                                       (char *)member_name, member_name_len);
+
+  if (flags & WANT_OBJ_VADDR) {
+    data->instruction = instructions[INSTR_ADD];
+    sprintf(data->src_operand, "%i", member_symbol->stack_offset);
+    strcpy(data->dest_operand, pointer_data->dest_operand);
+    return 0;
+  } else {
+    data->instruction = instructions[INSTR_MOV];
+    sprintf(data->src_operand, OFFSET_FMT, pointer_data->dest_operand,
+            member_symbol->stack_offset);
+    return assign_vreg(arrow->type, data, vreg_count++, DEST_OPERAND);
+  }
 }
 
 int translate_call(ASTree *call, InstructionData *data, unsigned int flags) {
@@ -878,6 +958,15 @@ static int translate_expr(ASTree *tree, InstructionData *out,
     case TOK_CALL:
       status = translate_call(tree, out, flags);
       break;
+    case TOK_SUBSCRIPT:
+      status = translate_subscript(tree, out, flags);
+      break;
+    case '.':
+      status = translate_reference(tree, out, flags);
+      break;
+    case TOK_ARROW:
+      status = translate_arrow(tree, out, flags);
+      break;
     default:
       fprintf(stderr, "ERROR: Unimplemented token: %s, lexinfo: %s\n",
               parser_get_tname(tree->symbol), tree->lexinfo);
@@ -982,14 +1071,14 @@ int translate_return(ASTree *ret, InstructionData *data) {
     strcpy(mov_data->src_operand, value_data->dest_operand);
 
     const TypeSpec *function_spec = extract_type(current_function);
-    TypeSpec *return_spec = malloc(sizeof(*return_spec));
+    TypeSpec return_spec = SPEC_EMPTY;
     /* strip pointer */
-    status = strip_aux_type(return_spec, function_spec);
+    status = strip_aux_type(&return_spec, function_spec);
     if (status) return status;
     /* strip function */
     /* TODO(Robert): free temporary copies created by the first strip */
-    status = strip_aux_type(return_spec, function_spec);
-    status = assign_vreg(return_spec, mov_data, RETURN_VREG, DEST_OPERAND);
+    status = strip_aux_type(&return_spec, function_spec);
+    status = assign_vreg(&return_spec, mov_data, RETURN_VREG, DEST_OPERAND);
     if (status) return status;
 
     llist_push_back(text_section, mov_data);
