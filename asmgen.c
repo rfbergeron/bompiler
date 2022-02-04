@@ -113,18 +113,19 @@ typedef enum instruction_enum {
 /* rbx, rsp, rbp, r12-r15 are preserved across function calls in the System V
  * ABI; Microsoft's ABI additionally preserves rdi and rsi
  */
-typedef enum instruction_flags {
-  SRC_OPERAND = 1 << 0,    /* result does not need to be in a register */
-  DEST_OPERAND = 1 << 1,   /* result does need to be in a register */
-  WANT_OBJ_VADDR = 1 << 2, /* result should be object address, not value */
-  MOV_TO_MEM = 1 << 3,     /* parent instruction is MOV */
-  RETURN_REG = 1 << 4,     /* result is to be placed in a return register */
-  QUOTIENT_REG = 1 << 4,   /* assign quotient register */
-  REMAINDER_REG = 1 << 5,  /* assign remainder register */
-  LO_REG = 1 << 4,         /* assign low-order product register */
-  HI_REG = 1 << 5,         /* assign high-order product register */
-  MOD_STACK = 1 << 6,      /* allow stack pointer to be assigned */
-} InstructionFlags;
+enum instruction_flag {
+  NO_INSTR_FLAGS = 0,
+  SRC_OPERAND = 1 << 0,   /* place result in the source field */
+  DEST_OPERAND = 1 << 1,  /* place result in the destination field */
+  USE_REG = 1 << 2,       /* result must be placed in a register */
+  RETURN_REG = 1 << 3,    /* assign return register */
+  QUOTIENT_REG = 1 << 4,  /* assign quotient register */
+  REMAINDER_REG = 1 << 5, /* assign remainder register */
+  LO_REG = 1 << 6,        /* assign low-order product register */
+  HI_REG = 1 << 7,        /* assign high-order product register */
+  WANT_ADDR = 1 << 8,     /* result should be object address, not value */
+  MOD_STACK = 1 << 9,     /* allow stack pointer to be assigned */
+};
 
 const char instructions[][MAX_INSTRUCTION_LENGTH] = {
     FOREACH_INSTRUCTION(GENERATE_STRING)};
@@ -210,7 +211,7 @@ int assign_vreg(const TypeSpec *type, InstructionData *data,
     /* do not attempt to assign vreg to void type */
     dest[0] = 0;
     return 0;
-  } else if (opflags & WANT_OBJ_VADDR) {
+  } else if (opflags & WANT_ADDR) {
     reg_width = 'q';
   } else {
     switch (type->width) {
@@ -253,7 +254,7 @@ int resolve_object(const ASTree *ident, InstructionData *out,
     return -1;
   }
 
-  if (flags & WANT_OBJ_VADDR) {
+  if (flags & WANT_ADDR) {
     sprintf(dest, "%s", symval->obj_loc);
   } else {
     sprintf(dest, "[%s]", symval->obj_loc);
@@ -288,11 +289,11 @@ int restore_registers(size_t start, size_t count) {
 }
 
 int translate_ident(ASTree *ident, InstructionData *data, unsigned int flags) {
-  if (flags & WANT_OBJ_VADDR) {
-    int status = resolve_object(ident, data, SRC_OPERAND & WANT_OBJ_VADDR);
+  if (flags & WANT_ADDR) {
+    int status = resolve_object(ident, data, SRC_OPERAND & WANT_ADDR);
     if (status) return status;
-    status = assign_vreg(ident->type, data, vreg_count++,
-                         DEST_OPERAND & WANT_OBJ_VADDR);
+    status =
+        assign_vreg(ident->type, data, vreg_count++, DEST_OPERAND & WANT_ADDR);
     if (status) return status;
 
     data->instruction = instructions[INSTR_LEA];
@@ -328,7 +329,7 @@ int translate_conversion(ASTree *operator, InstructionData * data,
     converted_expr = astree_first(operator);
   else
     converted_expr = astree_second(operator);
-  int status = translate_expr(converted_expr, src_data, SRC_OPERAND);
+  int status = translate_expr(converted_expr, src_data, NO_INSTR_FLAGS);
   if (status) return status;
   llist_push_back(text_section, src_data);
   strcpy(data->src_operand, src_data->dest_operand);
@@ -500,16 +501,20 @@ int translate_logical(ASTree *operator, InstructionData * data,
   return assign_vreg(&SPEC_INT, data, bool_vreg, DEST_OPERAND);
 }
 
+/* TODO(Robert): check location of result of first subexpression, and require
+ * second subexpression to place result in a register if the first was not
+ */
 int translate_comparison(ASTree *operator, InstructionData * data,
                          InstructionEnum num, unsigned int flags) {
   /* CMP operands, then SETG/SETGE/SETL/SETLE/SETE/SETNE */
   InstructionData *first_data = calloc(1, sizeof(*first_data));
-  int status = translate_expr(astree_first(operator), first_data, DEST_OPERAND);
+  int status =
+      translate_expr(astree_first(operator), first_data, NO_INSTR_FLAGS);
   if (status) return status;
   llist_push_back(text_section, first_data);
 
   InstructionData *second_data = calloc(1, sizeof(*second_data));
-  status = translate_expr(astree_second(operator), second_data, SRC_OPERAND);
+  status = translate_expr(astree_second(operator), second_data, NO_INSTR_FLAGS);
   if (status) return status;
   llist_push_back(text_section, second_data);
 
@@ -545,7 +550,7 @@ int translate_addrof(ASTree *addrof, InstructionData *data,
   DEBUGS('g', "Translating address operation.");
   /* TODO(Robert): handle other types of lvalues, like struct and union members
    */
-  return translate_expr(astree_first(addrof), data, WANT_OBJ_VADDR);
+  return translate_expr(astree_first(addrof), data, WANT_ADDR);
 }
 
 int translate_inc_dec(ASTree *operator, InstructionData * data,
@@ -566,7 +571,7 @@ int translate_inc_dec(ASTree *operator, InstructionData * data,
     to_push_data = mov_data;
   }
 
-  int status = translate_expr(astree_first(operator), mov_data, SRC_OPERAND);
+  int status = translate_expr(astree_first(operator), mov_data, NO_INSTR_FLAGS);
   if (status) return status;
 
   inc_dec_data->instruction = instructions[num];
@@ -589,6 +594,9 @@ int translate_unop(ASTree *operator, InstructionData * data,
   return 0;
 }
 
+/* TODO(Robert): check location of result of first subexpression, and require
+ * second subexpression to place result in a register if the first was not
+ */
 int translate_binop(ASTree *operator, InstructionData * data,
                     InstructionEnum num, unsigned int flags) {
   DEBUGS('g', "Translating binary operation: %s", instructions[num]);
@@ -596,12 +604,13 @@ int translate_binop(ASTree *operator, InstructionData * data,
    * correct
    */
   InstructionData *src_data = calloc(1, sizeof(*src_data));
-  int status = translate_expr(astree_second(operator), src_data, SRC_OPERAND);
+  int status =
+      translate_expr(astree_second(operator), src_data, NO_INSTR_FLAGS);
   if (status) return status;
   llist_push_back(text_section, src_data);
 
   InstructionData *dest_data = calloc(1, sizeof(*dest_data));
-  status = translate_expr(astree_first(operator), dest_data, DEST_OPERAND);
+  status = translate_expr(astree_first(operator), dest_data, NO_INSTR_FLAGS);
   if (status) return status;
   llist_push_back(text_section, dest_data);
 
@@ -647,14 +656,13 @@ int translate_assignment(ASTree *assignment, InstructionData *data,
   DEBUGS('g', "Translating assignment");
 
   InstructionData *src_data = calloc(1, sizeof(*src_data));
-  int status = translate_expr(astree_second(assignment), src_data,
-                              SRC_OPERAND & MOV_TO_MEM);
+  /* place result in register since destination will be a memory location */
+  int status = translate_expr(astree_second(assignment), src_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, src_data);
 
   InstructionData *dest_data = calloc(1, sizeof(*dest_data));
-  status = translate_expr(astree_first(assignment), dest_data,
-                          DEST_OPERAND & MOV_TO_MEM);
+  status = translate_expr(astree_first(assignment), dest_data, NO_INSTR_FLAGS);
   if (status) return status;
   llist_push_back(text_section, dest_data);
 
@@ -668,15 +676,16 @@ int translate_assignment(ASTree *assignment, InstructionData *data,
 int translate_subscript(ASTree *subscript, InstructionData *data,
                         unsigned int flags) {
   DEBUGS('g', "Translating pointer subscript");
+  /* both the pointer and index must be in a register so that the offset and
+   * scale addressing mode can be used
+   */
   InstructionData *pointer_data = calloc(1, sizeof(*pointer_data));
-  int status =
-      translate_expr(astree_first(subscript), pointer_data, SRC_OPERAND);
+  int status = translate_expr(astree_first(subscript), pointer_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, pointer_data);
 
   InstructionData *index_data = calloc(1, sizeof(*index_data));
-  /* both pointer and index will be used as part of the "source" operand */
-  status = translate_expr(astree_second(subscript), index_data, SRC_OPERAND);
+  status = translate_expr(astree_second(subscript), index_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, pointer_data);
 
@@ -687,7 +696,7 @@ int translate_subscript(ASTree *subscript, InstructionData *data,
 }
 
 /* When fetching a struct member, we must be able to return either the location
- * or value of the symbol, depending on the presence of WANT_OBJ_VADDR.
+ * or value of the symbol, depending on the presence of WANT_ADDR.
  *
  * Because of the way structures are used, it may make the most sense to have
  * expressions of structure value always result in the address of the structure.
@@ -697,8 +706,8 @@ int translate_reference(ASTree *reference, InstructionData *data,
   DEBUGS('g', "Translating reference operator");
   ASTree *composite_object = astree_first(reference);
   InstructionData *composite_data = calloc(1, sizeof(*composite_data));
-  int status = translate_expr(composite_object, composite_data,
-                              SRC_OPERAND | WANT_OBJ_VADDR);
+  int status =
+      translate_expr(composite_object, composite_data, USE_REG | WANT_ADDR);
   if (status) return status;
 
   const AuxSpec *composite_aux = llist_front(&composite_object->type->auxspecs);
@@ -708,7 +717,7 @@ int translate_reference(ASTree *reference, InstructionData *data,
       map_get(composite_aux->data.composite.symbol_table, (char *)member_name,
               member_name_len);
 
-  if (flags & WANT_OBJ_VADDR)
+  if (flags & WANT_ADDR)
     data->instruction = instructions[INSTR_LEA];
   else
     data->instruction = instructions[INSTR_MOV];
@@ -730,7 +739,7 @@ int translate_arrow(ASTree *arrow, InstructionData *data, unsigned int flags) {
   SymbolValue *member_symbol = map_get(struct_aux->data.composite.symbol_table,
                                        (char *)member_name, member_name_len);
 
-  if (flags & WANT_OBJ_VADDR) {
+  if (flags & WANT_ADDR) {
     data->instruction = instructions[INSTR_ADD];
     sprintf(data->src_operand, "%i", member_symbol->stack_offset);
     strcpy(data->dest_operand, pointer_data->dest_operand);
@@ -751,7 +760,7 @@ int translate_call(ASTree *call, InstructionData *data, unsigned int flags) {
     /* compute parameter */
     ASTree *param = astree_get(call, i);
     InstructionData *param_data = calloc(1, sizeof(*param_data));
-    int status = translate_expr(param, param_data, SRC_OPERAND);
+    int status = translate_expr(param, param_data, NO_INSTR_FLAGS);
     if (status) return status;
     llist_push_back(text_section, param_data);
 
@@ -808,7 +817,7 @@ int translate_param(ASTree *param, InstructionData *data) {
   }
   status = assign_space(symval, STACK_POINTER_STRING);
   if (status) return status;
-  status = resolve_object(param_ident, data, DEST_OPERAND & MOV_TO_MEM);
+  status = resolve_object(param_ident, data, DEST_OPERAND);
   if (status) return status;
   data->instruction = instructions[INSTR_MOV];
   return 0;
@@ -831,11 +840,10 @@ int translate_local_decl(ASTree *type_id, InstructionData *data) {
   if (status) return status;
 
   if (astree_count(type_id) == 3) {
-    int status = resolve_object(ident, data, DEST_OPERAND & MOV_TO_MEM);
+    int status = resolve_object(ident, data, DEST_OPERAND);
     if (status) return status;
     InstructionData *value_data = calloc(1, sizeof(*value_data));
-    status = translate_expr(astree_third(type_id), value_data,
-                            SRC_OPERAND & MOV_TO_MEM);
+    status = translate_expr(astree_third(type_id), value_data, USE_REG);
     if (status) return status;
     llist_push_back(text_section, value_data);
 
@@ -1062,7 +1070,7 @@ int translate_return(ASTree *ret, InstructionData *data) {
 
   if (astree_count(ret) > 0) {
     InstructionData *value_data = calloc(1, sizeof(*value_data));
-    int status = translate_expr(astree_first(ret), value_data, SRC_OPERAND);
+    int status = translate_expr(astree_first(ret), value_data, NO_INSTR_FLAGS);
     if (status) return status;
     llist_push_back(text_section, value_data);
 
