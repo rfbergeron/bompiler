@@ -192,9 +192,8 @@ int assign_space(SymbolValue *symval, const char *location) {
   size_t required_padding =
       symval->type.alignment - (stack_window % symval->type.alignment);
   stack_window += required_padding;
-  symval->stack_offset = stack_window;
+  sprintf(symval->obj_loc, "%s+%zu", location, stack_window);
   stack_window += symval->type.width;
-  sprintf(symval->obj_loc, "%s%+i", location, symval->stack_offset);
   return 0;
 }
 
@@ -704,52 +703,29 @@ int translate_subscript(ASTree *subscript, InstructionData *data,
 int translate_reference(ASTree *reference, InstructionData *data,
                         unsigned int flags) {
   DEBUGS('g', "Translating reference operator");
-  ASTree *composite_object = astree_first(reference);
-  InstructionData *composite_data = calloc(1, sizeof(*composite_data));
-  int status =
-      translate_expr(composite_object, composite_data, USE_REG | WANT_ADDR);
+  ASTree *struct_ = astree_first(reference);
+  InstructionData *struct_data = calloc(1, sizeof(*struct_data));
+  unsigned int struct_flags =
+      reference->symbol == TOK_ARROW ? USE_REG : USE_REG | WANT_ADDR;
+  int status = translate_expr(struct_, struct_data, struct_flags);
   if (status) return status;
 
-  const AuxSpec *composite_aux = llist_front(&composite_object->type->auxspecs);
+  const AuxSpec *struct_aux = reference->symbol == TOK_ARROW
+                                  ? llist_get(&struct_->type->auxspecs, 1)
+                                  : llist_front(&struct_->type->auxspecs);
   const char *member_name = astree_second(reference)->lexinfo;
   size_t member_name_len = strlen(member_name);
-  SymbolValue *member_symbol =
-      map_get(composite_aux->data.composite.symbol_table, (char *)member_name,
-              member_name_len);
+  SymbolValue *member_symbol = map_get(struct_aux->data.composite.symbol_table,
+                                       (char *)member_name, member_name_len);
 
   if (flags & WANT_ADDR)
     data->instruction = instructions[INSTR_LEA];
   else
     data->instruction = instructions[INSTR_MOV];
-  sprintf(data->src_operand, OFFSET_FMT, composite_data->dest_operand,
-          member_symbol->stack_offset);
+  char temp[MAX_OP_LENGTH];
+  sprintf(temp, member_symbol->obj_loc, struct_data->dest_operand);
+  sprintf(data->src_operand, INDIRECT_FMT, temp);
   return assign_vreg(reference->type, data, vreg_count++, DEST_OPERAND);
-}
-
-int translate_arrow(ASTree *arrow, InstructionData *data, unsigned int flags) {
-  DEBUGS('g', "Translating arrow operator");
-  ASTree *pointer = astree_first(arrow);
-  InstructionData *pointer_data = calloc(1, sizeof(*pointer_data));
-  int status = translate_expr(pointer, pointer_data, DEST_OPERAND);
-  if (status) return status;
-
-  const AuxSpec *struct_aux = llist_get(&pointer->type->auxspecs, 1);
-  const char *member_name = astree_second(arrow)->lexinfo;
-  size_t member_name_len = strlen(member_name);
-  SymbolValue *member_symbol = map_get(struct_aux->data.composite.symbol_table,
-                                       (char *)member_name, member_name_len);
-
-  if (flags & WANT_ADDR) {
-    data->instruction = instructions[INSTR_ADD];
-    sprintf(data->src_operand, "%i", member_symbol->stack_offset);
-    strcpy(data->dest_operand, pointer_data->dest_operand);
-    return 0;
-  } else {
-    data->instruction = instructions[INSTR_MOV];
-    sprintf(data->src_operand, OFFSET_FMT, pointer_data->dest_operand,
-            member_symbol->stack_offset);
-    return assign_vreg(arrow->type, data, vreg_count++, DEST_OPERAND);
-  }
 }
 
 int translate_call(ASTree *call, InstructionData *data, unsigned int flags) {
@@ -976,10 +952,8 @@ static int translate_expr(ASTree *tree, InstructionData *out,
       status = translate_subscript(tree, out, flags);
       break;
     case '.':
-      status = translate_reference(tree, out, flags);
-      break;
     case TOK_ARROW:
-      status = translate_arrow(tree, out, flags);
+      status = translate_reference(tree, out, flags);
       break;
     default:
       fprintf(stderr, "ERROR: Unimplemented token: %s, lexinfo: %s\n",
