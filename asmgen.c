@@ -823,15 +823,15 @@ int translate_param(ASTree *param, InstructionData *data) {
   return 0;
 }
 
-int translate_local_decl(ASTree *type_id, InstructionData *data) {
+int translate_local_decl(ASTree *declaration, InstructionData *data) {
   /* figure out how much stack space to allocate, assign address to be the
    * location for this object and, if the value is initialized upon
    * declaration, write out the instructions which assign the value
    */
   DEBUGS('g', "Translating local declaration");
-  ASTree *ident = astree_second(type_id);
+  ASTree *ident = extract_ident(declaration);
   SymbolValue *symval = NULL;
-  locate_symbol((void *)ident->lexinfo, strlen(ident->lexinfo), &symval);
+  locate_symbol((char *)ident->lexinfo, strlen(ident->lexinfo), &symval);
   if (symval == NULL) {
     fprintf(stderr, "ERROR: unable to resolve symbol %s\n", ident->lexinfo);
     return -1;
@@ -839,11 +839,11 @@ int translate_local_decl(ASTree *type_id, InstructionData *data) {
   int status = assign_space(symval, STACK_POINTER_STRING);
   if (status) return status;
 
-  if (astree_count(type_id) == 3) {
+  if (astree_count(declaration) == 3) {
     int status = resolve_object(ident, data, DEST_OPERAND);
     if (status) return status;
     InstructionData *value_data = calloc(1, sizeof(*value_data));
-    status = translate_expr(astree_third(type_id), value_data, USE_REG);
+    status = translate_expr(astree_third(declaration), value_data, USE_REG);
     if (status) return status;
     llist_push_back(text_section, value_data);
 
@@ -954,6 +954,12 @@ static int translate_expr(ASTree *tree, InstructionData *out,
     case TOK_CHARCON:
       break;
     /* miscellaneous */
+    case TOK_ADDROF:
+      status = translate_addrof(tree, out, flags);
+      break;
+    case TOK_INDIRECTION:
+      status = translate_indirection(tree, out, flags);
+      break;
     case TOK_IDENT:
       status = translate_ident(tree, out, flags);
       break;
@@ -1016,7 +1022,7 @@ static int translate_ifelse(ASTree *ifelse) {
   return 0;
 }
 
-static int translate_while(ASTree *whilestmt) {
+static int translate_while(ASTree *while_) {
   size_t current_branch = branch_count++;
   /* emit label at beginning of condition */
   InstructionData *cond_label = calloc(1, sizeof(*cond_label));
@@ -1024,7 +1030,7 @@ static int translate_while(ASTree *whilestmt) {
   llist_push_back(text_section, cond_label);
   /* translate conditional expression */
   InstructionData *cond_data = calloc(1, sizeof(*cond_data));
-  int status = translate_expr(astree_first(whilestmt), cond_data, DEST_OPERAND);
+  int status = translate_expr(astree_first(while_), cond_data, DEST_OPERAND);
   if (status) return status;
   llist_push_back(text_section, cond_data);
   /* check if condition is zero and jump if it is */
@@ -1039,7 +1045,7 @@ static int translate_while(ASTree *whilestmt) {
   sprintf(test_jmp_data->dest_operand, END_FMT, current_branch);
   llist_push_back(text_section, test_jmp_data);
   /* translate while body */
-  status = translate_stmt(astree_second(whilestmt));
+  status = translate_stmt(astree_second(while_));
   if (status) return status;
   /* emit jump to condition */
   InstructionData *cond_jmp_data = calloc(1, sizeof(*cond_jmp_data));
@@ -1050,6 +1056,34 @@ static int translate_while(ASTree *whilestmt) {
   InstructionData *end_label = calloc(1, sizeof(*end_label));
   sprintf(end_label->label, END_FMT, current_branch);
   llist_push_back(text_section, end_label);
+  return 0;
+}
+
+static int translate_do(ASTree *do_) {
+  size_t current_branch = branch_count++;
+  /* emit label at beginning of body */
+  InstructionData *body_label = calloc(1, sizeof(*body_label));
+  sprintf(body_label->label, COND_FMT, current_branch);
+  llist_push_back(text_section, body_label);
+  /* translate body */
+  int status = translate_stmt(astree_first(do_));
+  if (status) return status;
+  /* translate conditional expression */
+  InstructionData *cond_data = calloc(1, sizeof(*cond_data));
+  status = translate_expr(astree_second(do_), cond_data, DEST_OPERAND);
+  if (status) return status;
+  llist_push_back(text_section, cond_data);
+  /* check if condition is one and jump if it is */
+  InstructionData *test_data = calloc(1, sizeof(*test_data));
+  test_data->instruction = instructions[INSTR_TEST];
+  strcpy(test_data->dest_operand, cond_data->dest_operand);
+  strcpy(test_data->src_operand, cond_data->dest_operand);
+  llist_push_back(text_section, test_data);
+
+  InstructionData *test_jmp_data = calloc(1, sizeof(*test_jmp_data));
+  test_jmp_data->instruction = instructions[INSTR_JNZ];
+  sprintf(test_jmp_data->dest_operand, COND_FMT, current_branch);
+  llist_push_back(text_section, test_jmp_data);
   return 0;
 }
 
@@ -1120,16 +1154,13 @@ static int translate_stmt(ASTree *stmt) {
     case TOK_WHILE:
       status = translate_while(stmt);
       break;
-    /*
     case TOK_DO:
-      fprintf(stderr, "ERROR: do-while constructs not implemented\n");
-      status = -1;
-        break;
-    */
+      status = translate_do(stmt);
+      break;
     case TOK_IF:
       status = translate_ifelse(stmt);
       break;
-    case TOK_TYPE_ID:
+    case TOK_DECLARATION:
       data = calloc(1, sizeof(*data));
       status = translate_local_decl(stmt, data);
       if (status) break;
