@@ -164,9 +164,7 @@ static const char STACK_POINTER_STRING[] = "vr9q";
 static size_t branch_count = 0;
 static size_t vreg_count = 0;
 static size_t stack_window = 0;
-static size_t bool_vreg = 0;
 static char current_label[MAX_LABEL_LENGTH];
-static char bool_label[MAX_LABEL_LENGTH];
 static ASTree *current_function;
 
 static LinkedList *text_section;
@@ -405,86 +403,48 @@ int translate_logical_not(ASTree *tree, InstructionData *data) {
 
 int translate_logical(ASTree *operator, InstructionData * data,
                       InstructionEnum num, unsigned int flags) {
-  /* set short circuit label if necessary */
-  int set_bool_info = !strlen(bool_label);
-  if (set_bool_info) {
-    sprintf(bool_label, BOOL_FMT, branch_count++);
-    bool_vreg = vreg_count++;
-  }
+  /* create label used to skip second operand */
+  InstructionData *label_data = calloc(1, sizeof(InstructionData));
+  sprintf(label_data->label, BOOL_FMT, branch_count++);
 
-  /* set result to true by default for ||, false by default for && */
-  InstructionData *mov_data = calloc(1, sizeof(*mov_data));
-  mov_data->instruction = instructions[INSTR_MOV];
-  int status = assign_vreg(&SPEC_INT, mov_data, bool_vreg, DEST_OPERAND);
-  if (status) return status;
-  if (operator->symbol == TOK_AND)
-    strcpy(mov_data->src_operand, "0");
-  else if (operator->symbol == TOK_OR)
-    strcpy(mov_data->src_operand, "1");
-  llist_push_back(text_section, mov_data);
-
+  /* test first operand; jump on false for && and true for || */
   InstructionData *first_data = calloc(1, sizeof(InstructionData));
-  status = translate_expr(astree_first(operator), first_data, USE_REG);
+  int status = translate_expr(astree_first(operator), first_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, first_data);
 
-  /* test first operand; jump on false for && and true for || */
   InstructionData *test_first_data = calloc(1, sizeof(InstructionData));
   test_first_data->instruction = instructions[INSTR_TEST];
   strcpy(test_first_data->dest_operand, first_data->dest_operand);
   strcpy(test_first_data->src_operand, first_data->dest_operand);
   llist_push_back(text_section, test_first_data);
 
-  InstructionData *jmp_first_data = calloc(1, sizeof(*jmp_first_data));
+  InstructionData *jmp_first_data = calloc(1, sizeof(InstructionData));
   if (operator->symbol == TOK_AND)
     jmp_first_data->instruction = instructions[INSTR_JZ];
   else if (operator->symbol == TOK_OR)
     jmp_first_data->instruction = instructions[INSTR_JNZ];
-  strcpy(jmp_first_data->dest_operand, bool_label);
+  strcpy(jmp_first_data->dest_operand, label_data->label);
   llist_push_back(text_section, jmp_first_data);
 
+  /* test second operand; no need to jump afterwards */
   InstructionData *second_data = calloc(1, sizeof(InstructionData));
   status = translate_expr(astree_second(operator), second_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, second_data);
 
-  /* test second operand; jump on false for && and true for || */
   InstructionData *test_second_data = calloc(1, sizeof(InstructionData));
   test_second_data->instruction = instructions[INSTR_TEST];
   strcpy(test_second_data->dest_operand, second_data->dest_operand);
   strcpy(test_second_data->src_operand, second_data->dest_operand);
   llist_push_back(text_section, test_second_data);
 
-  InstructionData *jmp_second_data = calloc(1, sizeof(*jmp_second_data));
-  if (operator->symbol == TOK_AND)
-    jmp_second_data->instruction = instructions[INSTR_JZ];
-  else if (operator->symbol == TOK_OR)
-    jmp_second_data->instruction = instructions[INSTR_JNZ];
-  strcpy(jmp_second_data->dest_operand, bool_label);
-  llist_push_back(text_section, jmp_second_data);
+  /* write label used to skip second operand */
+  llist_push_back(text_section, label_data);
 
-  /* set result to true if both fall through for &&, or false for || */
-  InstructionData *mov_data_two = calloc(1, sizeof(*mov_data_two));
-  mov_data_two->instruction = instructions[INSTR_MOV];
-  status = assign_vreg(&SPEC_INT, mov_data_two, bool_vreg, DEST_OPERAND);
-  if (status) return status;
-  if (operator->symbol == TOK_AND)
-    strcpy(mov_data_two->src_operand, "1");
-  else if (operator->symbol == TOK_OR)
-    strcpy(mov_data_two->src_operand, "0");
-  llist_push_back(text_section, mov_data_two);
-
-  /* emit and unset label if it was set during this call */
-  if (set_bool_info) {
-    InstructionData *label_data = calloc(1, sizeof(*label_data));
-    strcpy(label_data->label, bool_label);
-    llist_push_back(text_section, label_data);
-    memset(bool_label, 0, MAX_LABEL_LENGTH);
-  }
-
-  /* use nop to communicate result register to parent statement/expression */
-  data->instruction = instructions[INSTR_NOP];
-  return assign_vreg(&SPEC_INT, data, bool_vreg, DEST_OPERAND);
+  /* result will always be the truth value of the last evaluated expression */
+  data->instruction = instructions[INSTR_SETNZ];
+  return assign_vreg(&SPEC_INT, data, vreg_count++, DEST_OPERAND);
 }
 
 /* TODO(Robert): check location of result of first subexpression, and require
