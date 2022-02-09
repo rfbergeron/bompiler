@@ -200,15 +200,25 @@ int assign_space(SymbolValue *symval, const char *location) {
  * allocation easier
  */
 int assign_vreg(const TypeSpec *type, InstructionData *data,
-                const size_t vreg_num, unsigned int opflags) {
-  char *dest = opflags & SRC_OPERAND ? data->src_operand : data->dest_operand;
+                const size_t vreg_num, unsigned int flags) {
+  char *dest;
+  if (flags & SRC_OPERAND) {
+    dest = data->src_operand;
+  } else if (flags & DEST_OPERAND) {
+    dest = data->dest_operand;
+  } else {
+    fprintf(stderr,
+            "ERROR: source/destination register unspecified; unable to assign "
+            "vreg\n");
+    return -1;
+  }
   char reg_width = 0;
 
   if (type->base == TYPE_VOID) {
     /* do not attempt to assign vreg to void type */
     dest[0] = 0;
     return 0;
-  } else if (opflags & WANT_ADDR) {
+  } else if (flags & WANT_ADDR) {
     reg_width = 'q';
   } else {
     switch (type->width) {
@@ -232,7 +242,7 @@ int assign_vreg(const TypeSpec *type, InstructionData *data,
     }
   }
 
-  if (vreg_num == STACK_POINTER_VREG && !(opflags & MOD_STACK)) {
+  if (vreg_num == STACK_POINTER_VREG && !(flags & MOD_STACK)) {
     /* skip stack pointer */
     sprintf(dest, VREG_FMT, vreg_count++, reg_width);
   } else {
@@ -241,9 +251,19 @@ int assign_vreg(const TypeSpec *type, InstructionData *data,
   return 0;
 }
 
-int resolve_object(const ASTree *ident, InstructionData *out,
+int resolve_object(const ASTree *ident, InstructionData *data,
                    unsigned int flags) {
-  char *dest = flags & SRC_OPERAND ? out->src_operand : out->dest_operand;
+  char *dest;
+  if (flags & SRC_OPERAND) {
+    dest = data->src_operand;
+  } else if (flags & DEST_OPERAND) {
+    dest = data->dest_operand;
+  } else {
+    fprintf(stderr,
+            "ERROR: source/destination register unspecified; unable to resolve "
+            "object\n");
+    return -1;
+  }
   SymbolValue *symval = NULL;
   locate_symbol((void *)ident->lexinfo, strlen(ident->lexinfo), &symval);
   if (symval == NULL) {
@@ -540,30 +560,22 @@ int translate_unop(ASTree *operator, InstructionData * data,
   return 0;
 }
 
-/* TODO(Robert): check location of result of first subexpression, and require
- * second subexpression to place result in a register if the first was not
- */
 int translate_binop(ASTree *operator, InstructionData * data,
                     InstructionEnum num, unsigned int flags) {
   DEBUGS('g', "Translating binary operation: %s", instructions[num]);
-  /* TODO(Robert): make sure that the order (left or right op first) is
-   * correct
-   */
-  InstructionData *src_data = calloc(1, sizeof(*src_data));
-  int status =
-      translate_expr(astree_second(operator), src_data, NO_INSTR_FLAGS);
-  if (status) return status;
-  llist_push_back(text_section, src_data);
-
   InstructionData *dest_data = calloc(1, sizeof(*dest_data));
-  status = translate_expr(astree_first(operator), dest_data, NO_INSTR_FLAGS);
+  int status = translate_expr(astree_first(operator), dest_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, dest_data);
+
+  InstructionData *src_data = calloc(1, sizeof(*src_data));
+  status = translate_expr(astree_second(operator), src_data, NO_INSTR_FLAGS);
+  if (status) return status;
+  llist_push_back(text_section, src_data);
 
   strcpy(data->dest_operand, dest_data->dest_operand);
   strcpy(data->src_operand, src_data->dest_operand);
   data->instruction = instructions[num];
-
   return 0;
 }
 
@@ -758,31 +770,34 @@ int translate_param(ASTree *param, InstructionData *data) {
 }
 
 int translate_local_decl(ASTree *declaration, InstructionData *data) {
-  /* figure out how much stack space to allocate, assign address to be the
-   * location for this object and, if the value is initialized upon
-   * declaration, write out the instructions which assign the value
-   */
   DEBUGS('g', "Translating local declaration");
-  ASTree *ident = extract_ident(declaration);
-  SymbolValue *symval = NULL;
-  locate_symbol((char *)ident->lexinfo, strlen(ident->lexinfo), &symval);
-  if (symval == NULL) {
-    fprintf(stderr, "ERROR: unable to resolve symbol %s\n", ident->lexinfo);
-    return -1;
-  }
-  int status = assign_space(symval, STACK_POINTER_STRING);
-  if (status) return status;
-
-  if (astree_count(declaration) == 3) {
-    int status = resolve_object(ident, data, DEST_OPERAND);
+  size_t i;
+  /* skip typespec list */
+  for (i = 1; i < astree_count(declaration); ++i) {
+    ASTree *declarator = astree_get(declaration, i);
+    ASTree *ident = extract_ident(declarator);
+    SymbolValue *symval = NULL;
+    locate_symbol((char *)ident->lexinfo, strlen(ident->lexinfo), &symval);
+    if (symval == NULL) {
+      fprintf(stderr, "ERROR: unable to resolve symbol %s\n", ident->lexinfo);
+      return -1;
+    }
+    int status = assign_space(symval, STACK_POINTER_STRING);
     if (status) return status;
-    InstructionData *value_data = calloc(1, sizeof(*value_data));
-    status = translate_expr(astree_third(declaration), value_data, USE_REG);
-    if (status) return status;
-    llist_push_back(text_section, value_data);
 
-    strcpy(data->src_operand, value_data->dest_operand);
-    data->instruction = instructions[INSTR_MOV];
+    /* check if next child is an initializer */
+    if (i < astree_count(declaration) - 1 &&
+        astree_get(declaration, i + 1)->symbol != TOK_DECLARATOR) {
+      int status = resolve_object(ident, data, DEST_OPERAND);
+      if (status) return status;
+      InstructionData *value_data = calloc(1, sizeof(*value_data));
+      status = translate_expr(astree_third(declaration), value_data, USE_REG);
+      if (status) return status;
+      llist_push_back(text_section, value_data);
+
+      strcpy(data->src_operand, value_data->dest_operand);
+      data->instruction = instructions[INSTR_MOV];
+    }
   }
   return 0;
 }
@@ -1110,69 +1125,78 @@ static int translate_stmt(ASTree *stmt) {
   return status;
 }
 
-int translate_global_decl(ASTree *type_id, InstructionData *data) {
+int translate_global_decl(ASTree *declaration, InstructionData *data) {
   DEBUGS('g', "Translating global declaration");
-  ASTree *ident = astree_second(type_id);
-  sprintf(data->label, "%s:", ident->lexinfo);
-  /* TODO(Robert): indicate somehow in the tree or symbol table that this
-   * is a global variable and should be referenced by its name, as
-   * opposed to a stack offset
-   */
-  /* TODO(Robert): figure out how to initialize data for a struct or any
-   * type wider than a quadword
-   */
-  if (astree_count(type_id) == 3) {
-    /* put in data section */
+  size_t i;
+  /* skip typespec list */
+  for (i = 1; i < astree_count(declaration); ++i) {
+    ASTree *declarator = astree_get(declaration, i);
+    ASTree *ident = extract_ident(declarator);
+    sprintf(data->label, "%s:", ident->lexinfo);
+
+    /* TODO(Robert): indicate somehow in the tree or symbol table that this
+     * is a global variable and should be referenced by its name, as
+     * opposed to a stack offset
+     */
+    /* TODO(Robert): figure out how to initialize data for a struct or any
+     * type wider than a quadword
+     */
     /* TODO(Robert): have the compiler evaluate compile-time constants
      */
-    ASTree *init_value = astree_third(type_id);
-    strcpy(data->dest_operand, "COMPILE-TIME CONSTANT");
 
-    switch (ident->type->width) {
-      case X64_SIZEOF_LONG:
-        data->instruction = instructions[INSTR_DQ];
-        break;
-      case X64_SIZEOF_INT:
-        data->instruction = instructions[INSTR_DD];
-        break;
-      case X64_SIZEOF_SHORT:
-        data->instruction = instructions[INSTR_DW];
-        break;
-      case X64_SIZEOF_CHAR:
-        data->instruction = instructions[INSTR_DB];
-        break;
-      default:
-        fprintf(stderr,
-                "ERROR: unable to determine instruction for initialized"
-                " data of width %zu\n",
-                ident->type->width);
-        return -1;
-        break;
-    }
-  } else {
-    /* put in bss/uninitialized data section */
-    data->dest_operand[0] = '1';
-    data->dest_operand[1] = 0;
-    switch (ident->type->width) {
-      case X64_SIZEOF_LONG:
-        data->instruction = instructions[INSTR_RESQ];
-        break;
-      case X64_SIZEOF_INT:
-        data->instruction = instructions[INSTR_RESD];
-        break;
-      case X64_SIZEOF_SHORT:
-        data->instruction = instructions[INSTR_RESW];
-        break;
-      case X64_SIZEOF_CHAR:
-        data->instruction = instructions[INSTR_RESB];
-        break;
-      default:
-        fprintf(stderr,
-                "ERROR: unable to determine instruction for uninitialized"
-                " data of width %zu\n",
-                ident->type->width);
-        return -1;
-        break;
+    /* check if next child is an initializer */
+    if (i < astree_count(declaration) - 1 &&
+        astree_get(declaration, i + 1)->symbol != TOK_DECLARATOR) {
+      /* put in data section */
+      ASTree *init_value = astree_get(declarator, ++i);
+      strcpy(data->dest_operand, "COMPILE-TIME CONSTANT");
+
+      switch (ident->type->width) {
+        case X64_SIZEOF_LONG:
+          data->instruction = instructions[INSTR_DQ];
+          break;
+        case X64_SIZEOF_INT:
+          data->instruction = instructions[INSTR_DD];
+          break;
+        case X64_SIZEOF_SHORT:
+          data->instruction = instructions[INSTR_DW];
+          break;
+        case X64_SIZEOF_CHAR:
+          data->instruction = instructions[INSTR_DB];
+          break;
+        default:
+          fprintf(stderr,
+                  "ERROR: unable to determine instruction for initialized"
+                  " data of width %zu for symbol %s\n",
+                  ident->type->width, ident->lexinfo);
+          return -1;
+          break;
+      }
+    } else {
+      /* put in bss/uninitialized data section */
+      data->dest_operand[0] = '1';
+      data->dest_operand[1] = 0;
+      switch (ident->type->width) {
+        case X64_SIZEOF_LONG:
+          data->instruction = instructions[INSTR_RESQ];
+          break;
+        case X64_SIZEOF_INT:
+          data->instruction = instructions[INSTR_RESD];
+          break;
+        case X64_SIZEOF_SHORT:
+          data->instruction = instructions[INSTR_RESW];
+          break;
+        case X64_SIZEOF_CHAR:
+          data->instruction = instructions[INSTR_RESB];
+          break;
+        default:
+          fprintf(stderr,
+                  "ERROR: unable to determine instruction for uninitialized"
+                  " data of width %zu for symbol %s\n",
+                  ident->type->width, ident->lexinfo);
+          return -1;
+          break;
+      }
     }
   }
   return 0;
@@ -1233,7 +1257,7 @@ int translate_file(ASTree *root) {
     InstructionData *topdecl_data = calloc(1, sizeof(*topdecl_data));
     int status = 0;
     switch (topdecl->symbol) {
-      case TOK_TYPE_ID:
+      case TOK_DECLARATION:
         status = translate_global_decl(topdecl, topdecl_data);
         llist_push_back(data_section, topdecl_data);
         break;
@@ -1247,13 +1271,16 @@ int translate_file(ASTree *root) {
           status = translate_function(topdecl, topdecl_data);
         }
         break;
-      /*
       case TOK_STRUCT:
       case TOK_UNION:
+        /* nothing to do here; member location should already have been set */
+        break;
+      /*
       case TOK_TYPEDEF:
       */
       default:
-        fprintf(stderr, "ERROR: unrecognized symbol at top level\n");
+        fprintf(stderr, "ERROR: unrecognized symbol %s at top level\n",
+                parser_get_tname(topdecl->symbol));
         status = -1;
     }
 
