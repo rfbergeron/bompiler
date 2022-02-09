@@ -1444,6 +1444,8 @@ int define_members(ASTree *composite_type, SymbolValue *composite_type_entry) {
         composite_type_entry->type.alignment = member_entry->type.alignment;
       }
       if (composite_type_entry->type.base == TYPE_STRUCT) {
+        /* set member offset within the struct */
+        sprintf(member_entry->obj_loc, "%%s+%zu", composite_type->type->width);
         size_t padding =
             member_entry->type.alignment -
             (composite_type_entry->type.width % member_entry->type.alignment);

@@ -289,10 +289,10 @@ int restore_registers(size_t start, size_t count) {
 
 int translate_ident(ASTree *ident, InstructionData *data, unsigned int flags) {
   if (flags & WANT_ADDR) {
-    int status = resolve_object(ident, data, SRC_OPERAND & WANT_ADDR);
+    int status = resolve_object(ident, data, SRC_OPERAND);
     if (status) return status;
     status =
-        assign_vreg(ident->type, data, vreg_count++, DEST_OPERAND & WANT_ADDR);
+        assign_vreg(ident->type, data, vreg_count++, DEST_OPERAND | WANT_ADDR);
     if (status) return status;
 
     data->instruction = instructions[INSTR_LEA];
@@ -361,10 +361,7 @@ int translate_conversion(ASTree *operator, InstructionData * data,
 int translate_intcon(ASTree *constant, InstructionData *data,
                      unsigned int flags) {
   DEBUGS('g', "Translating integer constant");
-  if (flags & DEST_OPERAND) {
-    /* result will be destination register of parent operand; mov constant
-     * into a register first
-     */
+  if (flags & USE_REG) {
     int status = assign_vreg(constant->type, data, vreg_count++, DEST_OPERAND);
     if (status) return status;
     strcpy(data->src_operand, constant->lexinfo);
@@ -397,7 +394,7 @@ int cvt_to_bool(ASTree *tree, InstructionData *data, unsigned int logical_not) {
 
   /* evaluate operand */
   InstructionData *tree_data = calloc(1, sizeof(InstructionData));
-  int status = translate_expr(tree, tree_data, DEST_OPERAND);
+  int status = translate_expr(tree, tree_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, tree_data);
 
@@ -532,8 +529,7 @@ int translate_indirection(ASTree *indirection, InstructionData *data,
                           unsigned int flags) {
   DEBUGS('g', "Translating indirection operation.");
   InstructionData *src_data = calloc(1, sizeof(*src_data));
-  int status =
-      translate_expr(astree_first(indirection), src_data, DEST_OPERAND);
+  int status = translate_expr(astree_first(indirection), src_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, src_data);
 
@@ -584,7 +580,8 @@ int translate_unop(ASTree *operator, InstructionData * data,
                    InstructionEnum num, unsigned int flags) {
   DEBUGS('g', "Translating unary operation: %s", instructions[num]);
   InstructionData *dest_data = calloc(1, sizeof(*dest_data));
-  int status = translate_expr(astree_first(operator), dest_data, DEST_OPERAND);
+  /* put value in register so that it is not modified in place */
+  int status = translate_expr(astree_first(operator), dest_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, dest_data);
 
@@ -713,19 +710,30 @@ int translate_reference(ASTree *reference, InstructionData *data,
   const AuxSpec *struct_aux = reference->symbol == TOK_ARROW
                                   ? llist_get(&struct_->type->auxspecs, 1)
                                   : llist_front(&struct_->type->auxspecs);
-  const char *member_name = astree_second(reference)->lexinfo;
-  size_t member_name_len = strlen(member_name);
-  SymbolValue *member_symbol = map_get(struct_aux->data.composite.symbol_table,
-                                       (char *)member_name, member_name_len);
-
-  if (flags & WANT_ADDR)
-    data->instruction = instructions[INSTR_LEA];
-  else
+  if (struct_aux->aux == AUX_STRUCT) {
+    if (flags & WANT_ADDR)
+      data->instruction = instructions[INSTR_LEA];
+    else
+      data->instruction = instructions[INSTR_MOV];
+    const char *member_name = astree_second(reference)->lexinfo;
+    size_t member_name_len = strlen(member_name);
+    SymbolValue *member_symbol =
+        map_get(struct_aux->data.composite.symbol_table, (char *)member_name,
+                member_name_len);
+    char temp[MAX_OP_LENGTH];
+    sprintf(temp, member_symbol->obj_loc, struct_data->dest_operand);
+    sprintf(data->src_operand, INDIRECT_FMT, temp);
+    return assign_vreg(reference->type, data, vreg_count++, DEST_OPERAND);
+  } else if (flags & WANT_ADDR) {
+    /* use nop to communicate address to parent expression */
+    data->instruction = instructions[INSTR_NOP];
+    strcpy(data->dest_operand, struct_data->dest_operand);
+    return 0;
+  } else {
     data->instruction = instructions[INSTR_MOV];
-  char temp[MAX_OP_LENGTH];
-  sprintf(temp, member_symbol->obj_loc, struct_data->dest_operand);
-  sprintf(data->src_operand, INDIRECT_FMT, temp);
-  return assign_vreg(reference->type, data, vreg_count++, DEST_OPERAND);
+    sprintf(data->src_operand, INDIRECT_FMT, struct_data->dest_operand);
+    return assign_vreg(reference->type, data, vreg_count++, DEST_OPERAND);
+  }
 }
 
 int translate_call(ASTree *call, InstructionData *data, unsigned int flags) {
@@ -968,7 +976,7 @@ static int translate_ifelse(ASTree *ifelse) {
   size_t current_branch = branch_count++;
   /* translate conditional expression */
   InstructionData *cond_data = calloc(1, sizeof(*cond_data));
-  int status = translate_expr(astree_first(ifelse), cond_data, DEST_OPERAND);
+  int status = translate_expr(astree_first(ifelse), cond_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, cond_data);
   /* check if condition is zero and jump if it is */
@@ -1004,7 +1012,7 @@ static int translate_while(ASTree *while_) {
   llist_push_back(text_section, cond_label);
   /* translate conditional expression */
   InstructionData *cond_data = calloc(1, sizeof(*cond_data));
-  int status = translate_expr(astree_first(while_), cond_data, DEST_OPERAND);
+  int status = translate_expr(astree_first(while_), cond_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, cond_data);
   /* check if condition is zero and jump if it is */
@@ -1044,7 +1052,7 @@ static int translate_do(ASTree *do_) {
   if (status) return status;
   /* translate conditional expression */
   InstructionData *cond_data = calloc(1, sizeof(*cond_data));
-  status = translate_expr(astree_second(do_), cond_data, DEST_OPERAND);
+  status = translate_expr(astree_second(do_), cond_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, cond_data);
   /* check if condition is one and jump if it is */
