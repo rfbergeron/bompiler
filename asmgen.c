@@ -377,17 +377,11 @@ int translate_intcon(ASTree *constant, InstructionData *data,
  * - comparison: >, <, >=, <=, ==, !=
  * - logical: &&, ||, !
  *
- * logical operators require their operands to be a boolean value (0 or 1)
- *
  * logical NOT does the same thing as the conversion from an arbitrary value to
  * a boolean except instead of using SETNZ it does SETZ
  */
-int cvt_to_bool(ASTree *tree, InstructionData *data, unsigned int logical_not) {
-  /* TODO(Robert): this function does not follow the convention that only the
-   * translate_* function recur, which may be confusing when coming back to
-   * modify this
-   *
-   * TODO(Robert): add attribute indicating when the result of an expression is
+int translate_logical_not(ASTree *tree, InstructionData *data) {
+  /* TODO(Robert): add attribute indicating when the result of an expression is
    * boolean so that we can skip doing all of this if we don't need to, or maybe
    * even add a whole boolean type, though that may be overkill
    */
@@ -405,11 +399,7 @@ int cvt_to_bool(ASTree *tree, InstructionData *data, unsigned int logical_not) {
   strcpy(test_data->src_operand, tree_data->dest_operand);
   llist_push_back(text_section, test_data);
 
-  /* invert result if parent is logical not */
-  if (logical_not)
-    data->instruction = instructions[INSTR_SETZ];
-  else
-    data->instruction = instructions[INSTR_SETNZ];
+  data->instruction = instructions[INSTR_SETZ];
   return assign_vreg(&SPEC_INT, data, vreg_count++, DEST_OPERAND);
 }
 
@@ -434,7 +424,7 @@ int translate_logical(ASTree *operator, InstructionData * data,
   llist_push_back(text_section, mov_data);
 
   InstructionData *first_data = calloc(1, sizeof(InstructionData));
-  status = cvt_to_bool(astree_first(operator), first_data, 0);
+  status = translate_expr(astree_first(operator), first_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, first_data);
 
@@ -454,7 +444,7 @@ int translate_logical(ASTree *operator, InstructionData * data,
   llist_push_back(text_section, jmp_first_data);
 
   InstructionData *second_data = calloc(1, sizeof(InstructionData));
-  status = cvt_to_bool(astree_second(operator), second_data, 0);
+  status = translate_expr(astree_second(operator), second_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, second_data);
 
@@ -923,7 +913,7 @@ static int translate_expr(ASTree *tree, InstructionData *out,
       break;
     /* logical operators */
     case '!':
-      status = cvt_to_bool(astree_first(tree), out, 1);
+      status = translate_logical_not(astree_first(tree), out);
       break;
     case TOK_AND:
       status = translate_logical(tree, out, INSTR_AND, flags);
