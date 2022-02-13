@@ -750,7 +750,8 @@ int translate_call(ASTree *call, InstructionData *data, unsigned int flags) {
 
 int translate_param(ASTree *param, InstructionData *data) {
   DEBUGS('g', "Translating parameter");
-  ASTree *param_ident = astree_second(param);
+  ASTree *declarator = astree_second(param);
+  ASTree *param_ident = extract_ident(declarator);
   int status = assign_vreg(param_ident->type, data, vreg_count++, SRC_OPERAND);
   if (status) return status;
   SymbolValue *symval = NULL;
@@ -1204,8 +1205,9 @@ int translate_global_decl(ASTree *declaration, InstructionData *data) {
 
 int translate_function(ASTree *function, InstructionData *data) {
   DEBUGS('g', "Translating function definition");
-  ASTree *name_node = extract_ident(function);
-  current_function = function;
+  ASTree *declarator = astree_second(function);
+  ASTree *name_node = extract_ident(declarator);
+  current_function = name_node;
   strcpy(data->label, name_node->lexinfo);
   int status = save_registers(NONVOLATILE_START, NONVOLATILE_COUNT);
   if (status) return status;
@@ -1218,15 +1220,18 @@ int translate_function(ASTree *function, InstructionData *data) {
    */
   vreg_count = 1;
   /* enter function parameter/body scope briefly to handle parameters */
-  enter_scope(&body->symbol_table);
-  for (i = 0; i < astree_count(params); ++i) {
-    ASTree *param = astree_get(params, i);
+  enter_scope(&name_node->symbol_table);
+  /* last direct declarator should be parent of parameter nodes */
+  ASTree *function_dirdecl =
+      astree_get(declarator, astree_count(declarator) - 1);
+  for (i = 0; i < astree_count(function_dirdecl); ++i) {
+    ASTree *param = astree_get(function_dirdecl, i);
     InstructionData *param_data = calloc(1, sizeof(*param_data));
     int status = translate_param(param, param_data);
     if (status) return status;
     llist_push_back(text_section, param_data);
   }
-  leave_scope(&body->symbol_table);
+  leave_scope(&name_node->symbol_table);
 
   /* the following is necessary for void functions without an explicit return
    * statement, but (should) be unreachable for all other functions
@@ -1254,37 +1259,30 @@ int translate_file(ASTree *root) {
   enter_scope(&root->symbol_table);
   for (i = 0; i < astree_count(root); ++i) {
     ASTree *topdecl = astree_get(root, i);
-    InstructionData *topdecl_data = calloc(1, sizeof(*topdecl_data));
-    int status = 0;
-    switch (topdecl->symbol) {
-      case TOK_DECLARATION:
-        status = translate_global_decl(topdecl, topdecl_data);
-        llist_push_back(data_section, topdecl_data);
-        break;
-      case TOK_FUNCTION:
-        /* do nothing if this is just a prototype */
-        if (astree_count(topdecl) > 2) {
-          /* data will hold the function label, which should appear before
-           * the function body
-           */
-          llist_push_back(text_section, topdecl_data);
-          status = translate_function(topdecl, topdecl_data);
+    if (topdecl->symbol == TOK_DECLARATION) {
+      ASTree *declarator = astree_second(topdecl);
+      if (typespec_is_function(extract_type(declarator))) {
+        /* skip if this is a function declaration, not definition */
+        if (astree_count(topdecl) == 3) {
+          InstructionData *label_data = calloc(1, sizeof(*label_data));
+          /* put label before function body */
+          llist_push_back(text_section, label_data);
+          int status = translate_function(topdecl, label_data);
+          if (status) return status;
         }
-        break;
-      case TOK_STRUCT:
-      case TOK_UNION:
-        /* nothing to do here; member location should already have been set */
-        break;
-      /*
-      case TOK_TYPEDEF:
-      */
-      default:
-        fprintf(stderr, "ERROR: unrecognized symbol %s at top level\n",
-                parser_get_tname(topdecl->symbol));
-        status = -1;
+      } else {
+        InstructionData *global_data = calloc(1, sizeof(*global_data));
+        int status = translate_global_decl(topdecl, global_data);
+        llist_push_back(data_section, global_data);
+        if (status) return status;
+      }
+    } else if (topdecl->symbol == TOK_STRUCT || topdecl->symbol == TOK_UNION) {
+      /* nothing to do here; member location should already have been set */
+    } else {
+      fprintf(stderr, "ERROR: unrecognized symbol %s at top level\n",
+              parser_get_tname(topdecl->symbol));
+      return -1;
     }
-
-    if (status) return status;
   }
 
   leave_scope(&root->symbol_table);
