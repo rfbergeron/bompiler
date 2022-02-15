@@ -722,6 +722,49 @@ int translate_param(ASTree *param, InstructionData *data) {
   return 0;
 }
 
+int translate_list_initialization(ASTree *declarator, ASTree *init_list) {
+  DEBUGS('g', "Transating struct initiazation by initializer list");
+  InstructionData *struct_data = calloc(1, sizeof(InstructionData));
+  struct_data->instruction = instructions[INSTR_LEA];
+  ASTree *struct_ident = extract_ident(declarator);
+  int status = resolve_object(struct_ident->lexinfo, struct_data->dest_operand,
+                              INDIRECT_FMT);
+  if (status) return status;
+  const TypeSpec *struct_type = extract_type(declarator);
+  status = assign_vreg(&SPEC_ULONG, struct_data->dest_operand, vreg_count++);
+  if (status) return status;
+  llist_push_back(text_section, struct_data);
+
+  AuxSpec *struct_aux = llist_back(&struct_type->auxspecs);
+  LinkedList *member_symbols = &struct_aux->data.composite.members;
+  size_t i;
+  for (i = 0; i < llist_size(member_symbols); ++i) {
+    if (i < astree_count(init_list)) {
+      ASTree *initializer = astree_get(init_list, i);
+      InstructionData *initializer_data = calloc(1, sizeof(InstructionData));
+      int status = translate_expr(initializer, initializer_data, USE_REG);
+      if (status) return status;
+
+      SymbolValue *member_symbol = llist_get(member_symbols, i);
+      char temp[MAX_OP_LENGTH];
+      sprintf(temp, member_symbol->obj_loc, struct_data->dest_operand);
+      InstructionData *assignment_data = calloc(1, sizeof(InstructionData));
+      assignment_data->instruction = instructions[INSTR_MOV];
+      sprintf(initializer_data->dest_operand, INDIRECT_FMT, temp);
+      strcpy(assignment_data->src_operand, initializer_data->dest_operand);
+    } else if (struct_aux->aux == AUX_UNION) {
+      /* do not initialize other members of the union */
+      break;
+    } else {
+      /* TODO(Robert): initialize unset struct members and array elements to
+       * zero if the object is static
+       */
+      break;
+    }
+  }
+  return 0;
+}
+
 int translate_local_decl(ASTree *declaration, InstructionData *data) {
   DEBUGS('g', "Translating local declaration");
   size_t i;
@@ -739,18 +782,23 @@ int translate_local_decl(ASTree *declaration, InstructionData *data) {
     if (status) return status;
 
     /* check if next child is an initializer */
-    if (i < astree_count(declaration) - 1 &&
-        astree_get(declaration, i + 1)->symbol != TOK_DECLARATOR) {
-      int status =
-          resolve_object(ident->lexinfo, data->dest_operand, INDIRECT_FMT);
-      if (status) return status;
-      InstructionData *value_data = calloc(1, sizeof(*value_data));
-      status = translate_expr(astree_third(declaration), value_data, USE_REG);
-      if (status) return status;
-      llist_push_back(text_section, value_data);
+    if (i < astree_count(declaration) - 1) {
+      ASTree *next_child = astree_get(declaration, i + 1);
+      if (next_child->symbol == TOK_INIT_LIST) {
+        int status = translate_list_initialization(declarator, next_child);
+        if (status) return status;
+      } else if (next_child->symbol != TOK_DECLARATOR) {
+        int status =
+            resolve_object(ident->lexinfo, data->dest_operand, INDIRECT_FMT);
+        if (status) return status;
+        InstructionData *value_data = calloc(1, sizeof(*value_data));
+        status = translate_expr(next_child, value_data, USE_REG);
+        if (status) return status;
+        llist_push_back(text_section, value_data);
 
-      strcpy(data->src_operand, value_data->dest_operand);
-      data->instruction = instructions[INSTR_MOV];
+        strcpy(data->src_operand, value_data->dest_operand);
+        data->instruction = instructions[INSTR_MOV];
+      }
     }
   }
   return 0;
