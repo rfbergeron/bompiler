@@ -115,16 +115,8 @@ typedef enum instruction_enum {
  */
 enum instruction_flag {
   NO_INSTR_FLAGS = 0,
-  SRC_OPERAND = 1 << 0,   /* place result in the source field */
-  DEST_OPERAND = 1 << 1,  /* place result in the destination field */
-  USE_REG = 1 << 2,       /* result must be placed in a register */
-  RETURN_REG = 1 << 3,    /* assign return register */
-  QUOTIENT_REG = 1 << 4,  /* assign quotient register */
-  REMAINDER_REG = 1 << 5, /* assign remainder register */
-  LO_REG = 1 << 6,        /* assign low-order product register */
-  HI_REG = 1 << 7,        /* assign high-order product register */
-  WANT_ADDR = 1 << 8,     /* result should be object address, not value */
-  MOD_STACK = 1 << 9,     /* allow stack pointer to be assigned */
+  USE_REG = 1 << 1,   /* result must be placed in a register */
+  WANT_ADDR = 1 << 2, /* result should be object address, not value */
 };
 
 const char instructions[][MAX_INSTRUCTION_LENGTH] = {
@@ -749,7 +741,8 @@ int translate_local_decl(ASTree *declaration, InstructionData *data) {
     /* check if next child is an initializer */
     if (i < astree_count(declaration) - 1 &&
         astree_get(declaration, i + 1)->symbol != TOK_DECLARATOR) {
-      int status = resolve_object(ident, data, DEST_OPERAND);
+      int status =
+          resolve_object(ident->lexinfo, data->dest_operand, INDIRECT_FMT);
       if (status) return status;
       InstructionData *value_data = calloc(1, sizeof(*value_data));
       status = translate_expr(astree_third(declaration), value_data, USE_REG);
