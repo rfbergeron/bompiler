@@ -133,10 +133,10 @@ static const char INDEX_FMT[] = "[%s+%s*%zu+%i]";
 static const char OFFSET_FMT[] = "[%s+%i]";
 static const char INDIRECT_FMT[] = "[%s]";
 static const char VREG_FMT[] = "vr%zu%c";
-static const char BINOP_FMT[] = "%8s%8s%8s,%s\n";
-static const char UNOP_FMT[] = "%8s%8s%8s\n";
+static const char BINOP_FMT[] = "%8s%8s %16s, %s\n";
+static const char UNOP_FMT[] = "%8s%8s %16s\n";
 static const char NULLOP_FMT[] = "%8s%8s\n";
-static const char LABEL_FMT[] = "%s:\n";
+static const char LABEL_FMT[] = "%s: \n";
 static const char COND_FMT[] = ".C%zu";
 static const char END_FMT[] = ".E%zu";
 static const char LOOP_FMT[] = ".L%zu";
@@ -277,26 +277,36 @@ int translate_ident(ASTree *ident, InstructionData *data, unsigned int flags) {
   return 0;
 }
 
+/* NOTE: on x64, most operations that write to the lower 32 bits of a
+ * register will zero the upper 32 bits. However, I will be zero- and
+ * sign-extensions whenever the conversion requires it, just to be safe.
+ *
+ * any signed int -> any wider unsigned int: movzx
+ * any signed int -> any wider signed int: movsx
+ * any unsigned int -> any wider int: movzx
+ * any int -> any narrower int: simple mov
+ * any int -> any int of same width: nop
+ */
 int translate_conversion(ASTree *operator, InstructionData * data,
                          unsigned int flags) {
-  /* NOTE: on x64, most operations that write to the lower 32 bits of a
-   * register will zero the upper 32 bits. However, I will be zero- and
-   * sign-extensions whenever the conversion requires it, just to be safe.
-   */
-  /* any signed int -> any wider unsigned int: movzx
-   * any signed int -> any wider signed int: movsx
-   * any unsigned int -> any wider int: movzx
-   * any int -> any narrower int: simple mov
-   * any int -> any int of same width: nop
-   */
   DEBUGS('g', "Translating conversion");
 
   InstructionData *src_data = calloc(1, sizeof(*src_data));
   ASTree *converted_expr = NULL;
-  if (astree_count(operator) == 1)
+  if (astree_count(operator) == 1) {
     converted_expr = astree_first(operator);
-  else
+  } else if (astree_count(operator) == 2) {
     converted_expr = astree_second(operator);
+  } else if (astree_count(operator) == 3) {
+    converted_expr = astree_third(operator);
+  } else {
+    fprintf(
+        stderr,
+        "ERROR: unable to perform conversion on node which has %zu children\n",
+        astree_count(operator));
+    return -1;
+  }
+
   int status = translate_expr(converted_expr, src_data, NO_INSTR_FLAGS);
   if (status) return status;
   llist_push_back(text_section, src_data);
@@ -346,13 +356,13 @@ int translate_intcon(ASTree *constant, InstructionData *data,
  * - comparison: >, <, >=, <=, ==, !=
  * - logical: &&, ||, !
  *
- * logical NOT does the same thing as the conversion from an arbitrary value to
- * a boolean except instead of using SETNZ it does SETZ
+ * logical NOT does the same thing as the conversion from an arbitrary value
+ * to a boolean except instead of using SETNZ it does SETZ
  */
 int translate_logical_not(ASTree *tree, InstructionData *data) {
-  /* TODO(Robert): add attribute indicating when the result of an expression is
-   * boolean so that we can skip doing all of this if we don't need to, or maybe
-   * even add a whole boolean type, though that may be overkill
+  /* TODO(Robert): add attribute indicating when the result of an expression
+   * is boolean so that we can skip doing all of this if we don't need to, or
+   * maybe even add a whole boolean type, though that may be overkill
    */
 
   /* evaluate operand */
@@ -464,7 +474,8 @@ int translate_indirection(ASTree *indirection, InstructionData *data,
 int translate_addrof(ASTree *addrof, InstructionData *data,
                      unsigned int flags) {
   DEBUGS('g', "Translating address operation.");
-  /* TODO(Robert): handle other types of lvalues, like struct and union members
+  /* TODO(Robert): handle other types of lvalues, like struct and union
+   * members
    */
   return translate_expr(astree_first(addrof), data, WANT_ADDR);
 }
@@ -532,7 +543,8 @@ int translate_binop(ASTree *operator, InstructionData * data,
 
 int translate_mul_div_mod(ASTree *operator, InstructionData * data,
                           InstructionEnum num, unsigned int flags) {
-  /* TODO(Robert): designate vregs for quotient/lo bits and remainder/hi bits */
+  /* TODO(Robert): designate vregs for quotient/lo bits and remainder/hi bits
+   */
   if (operator->symbol == '%') {
     /* return remainder instead of quotient */
     InstructionData *remainder_data = calloc(1, sizeof(*remainder_data));
@@ -604,11 +616,12 @@ int translate_subscript(ASTree *subscript, InstructionData *data,
   return assign_vreg(subscript->type, data->dest_operand, vreg_count++);
 }
 
-/* When fetching a struct member, we must be able to return either the location
- * or value of the symbol, depending on the presence of WANT_ADDR.
+/* When fetching a struct member, we must be able to return either the
+ * location or value of the symbol, depending on the presence of WANT_ADDR.
  *
  * Because of the way structures are used, it may make the most sense to have
- * expressions of structure value always result in the address of the structure.
+ * expressions of structure value always result in the address of the
+ * structure.
  */
 int translate_reference(ASTree *reference, InstructionData *data,
                         unsigned int flags) {
@@ -661,8 +674,8 @@ int translate_call(ASTree *call, InstructionData *data, unsigned int flags) {
     if (status) return status;
     llist_push_back(text_section, param_data);
 
-    /* TODO(Robert): temporarily restrict number of arguments to 4 until I have
-     * implemented passing subroutine parameters on the stack
+    /* TODO(Robert): temporarily restrict number of arguments to 4 until I
+     * have implemented passing subroutine parameters on the stack
      */
     /* mov parameter to argument register */
     InstructionData *mov_data = calloc(1, sizeof(*mov_data));
@@ -787,6 +800,7 @@ int translate_local_decl(ASTree *declaration, InstructionData *data) {
       if (next_child->symbol == TOK_INIT_LIST) {
         int status = translate_list_initialization(declarator, next_child);
         if (status) return status;
+        ++i;
       } else if (next_child->symbol != TOK_DECLARATOR) {
         int status =
             resolve_object(ident->lexinfo, data->dest_operand, INDIRECT_FMT);
@@ -798,6 +812,7 @@ int translate_local_decl(ASTree *declaration, InstructionData *data) {
 
         strcpy(data->src_operand, value_data->dest_operand);
         data->instruction = instructions[INSTR_MOV];
+        ++i;
       }
     }
   }
@@ -1087,7 +1102,8 @@ static int translate_stmt(ASTree *stmt) {
   InstructionData *data;
   int status = 0;
 
-  /* TODO(Robert): add badlib function to verify that a data structure is valid
+  /* TODO(Robert): add badlib function to verify that a data structure is
+   * valid
    */
   if (stmt->symbol_table.buckets) enter_scope(&stmt->symbol_table);
   switch (stmt->symbol) {
@@ -1216,8 +1232,8 @@ int translate_function(ASTree *function, InstructionData *data) {
   size_t i;
   ASTree *params = astree_second(function);
   ASTree *body = astree_third(function);
-  /* cleanup vregs from last function and skip return reg since we don't need to
-   * save or store it
+  /* cleanup vregs from last function and skip return reg since we don't need
+   * to save or store it
    */
   vreg_count = 1;
   /* enter function parameter/body scope briefly to handle parameters */
@@ -1234,9 +1250,9 @@ int translate_function(ASTree *function, InstructionData *data) {
   }
   leave_scope(&name_node->symbol_table);
 
-  /* start vreg counter outside of numbers which can be automatically mapped to
-   * real registers to eliminate duplicates and clobbered values when saving
-   * and restoring registers
+  /* start vreg counter outside of numbers which can be automatically mapped
+   * to real registers to eliminate duplicates and clobbered values when
+   * saving and restoring registers
    */
   vreg_count = VOLATILE_COUNT + NONVOLATILE_COUNT;
   status = translate_stmt(astree_third(function));
@@ -1291,9 +1307,9 @@ int write_instruction(InstructionData *data, FILE *out) {
    * which are always legal to pass to printf and co., so we only need to
    * check to see whether or not the instruction is NULL before printing
    */
-  /* we want to defer as much of the formatting as possible until we get to this
-   * point so that we have as much information as possible to align fields in
-   * the generated assembly
+  /* we want to defer as much of the formatting as possible until we get to
+   * this point so that we have as much information as possible to align
+   * fields in the generated assembly
    */
 
   if (data->instruction == NULL && strlen(data->label) > 0) {
