@@ -199,27 +199,13 @@ int assign_space(SymbolValue *symval, const char *location) {
  * use specific registers as their source or destination to make register
  * allocation easier
  */
-int assign_vreg(const TypeSpec *type, InstructionData *data,
-                const size_t vreg_num, unsigned int flags) {
-  char *dest;
-  if (flags & SRC_OPERAND) {
-    dest = data->src_operand;
-  } else if (flags & DEST_OPERAND) {
-    dest = data->dest_operand;
-  } else {
-    fprintf(stderr,
-            "ERROR: source/destination register unspecified; unable to assign "
-            "vreg\n");
-    return -1;
-  }
+int assign_vreg(const TypeSpec *type, char *dest, const size_t vreg_num) {
   char reg_width = 0;
 
   if (type->base == TYPE_VOID) {
     /* do not attempt to assign vreg to void type */
     dest[0] = 0;
     return 0;
-  } else if (flags & WANT_ADDR) {
-    reg_width = 'q';
   } else {
     switch (type->width) {
       case X64_SIZEOF_LONG:
@@ -242,40 +228,19 @@ int assign_vreg(const TypeSpec *type, InstructionData *data,
     }
   }
 
-  if (vreg_num == STACK_POINTER_VREG && !(flags & MOD_STACK)) {
-    /* skip stack pointer */
-    sprintf(dest, VREG_FMT, vreg_count++, reg_width);
-  } else {
-    sprintf(dest, VREG_FMT, vreg_num, reg_width);
-  }
+  sprintf(dest, VREG_FMT, vreg_num, reg_width);
   return 0;
 }
 
-int resolve_object(const ASTree *ident, InstructionData *data,
-                   unsigned int flags) {
-  char *dest;
-  if (flags & SRC_OPERAND) {
-    dest = data->src_operand;
-  } else if (flags & DEST_OPERAND) {
-    dest = data->dest_operand;
-  } else {
-    fprintf(stderr,
-            "ERROR: source/destination register unspecified; unable to resolve "
-            "object\n");
-    return -1;
-  }
+int resolve_object(const char *ident, char *dest, const char *fmt) {
   SymbolValue *symval = NULL;
-  locate_symbol((void *)ident->lexinfo, strlen(ident->lexinfo), &symval);
+  locate_symbol((void *)ident, strlen(ident), &symval);
   if (symval == NULL) {
-    fprintf(stderr, "ERROR: unable to resolve symbol %s\n", ident->lexinfo);
+    fprintf(stderr, "ERROR: unable to resolve symbol %s\n", ident);
     return -1;
   }
 
-  if (flags & WANT_ADDR) {
-    sprintf(dest, "%s", symval->obj_loc);
-  } else {
-    sprintf(dest, "[%s]", symval->obj_loc);
-  }
+  sprintf(dest, fmt, symval->obj_loc);
   return 0;
 }
 
@@ -285,8 +250,7 @@ int save_registers(size_t start, size_t count) {
     DEBUGS('g', "Saving register %lu to stack", start + i);
     InstructionData *data = calloc(1, sizeof(InstructionData));
     data->instruction = instructions[INSTR_PUSH];
-    int status =
-        assign_vreg(&SPEC_ULONG, data, start + i, SRC_OPERAND | MOD_STACK);
+    int status = assign_vreg(&SPEC_ULONG, data->src_operand, start + i);
     llist_push_back(text_section, data);
   }
   return 0;
@@ -298,31 +262,26 @@ int restore_registers(size_t start, size_t count) {
     DEBUGS('g', "Restoring register %lu from stack", start + (count - i));
     InstructionData *data = calloc(1, sizeof(InstructionData));
     data->instruction = instructions[INSTR_POP];
-    int status = assign_vreg(&SPEC_ULONG, data, start + (count - i),
-                             SRC_OPERAND | MOD_STACK);
+    int status =
+        assign_vreg(&SPEC_ULONG, data->src_operand, start + (count - i));
     llist_push_back(text_section, data);
   }
   return 0;
 }
 
 int translate_ident(ASTree *ident, InstructionData *data, unsigned int flags) {
+  int status = resolve_object(ident->lexinfo, data->src_operand, INDIRECT_FMT);
+  if (status) return status;
   if (flags & WANT_ADDR) {
-    int status = resolve_object(ident, data, SRC_OPERAND);
-    if (status) return status;
-    status =
-        assign_vreg(ident->type, data, vreg_count++, DEST_OPERAND | WANT_ADDR);
-    if (status) return status;
-
     data->instruction = instructions[INSTR_LEA];
+    /* TODO(Robert): define pointer type constant */
+    int status = assign_vreg(&SPEC_ULONG, data->dest_operand, vreg_count++);
+    if (status) return status;
   } else {
-    int status = resolve_object(ident, data, SRC_OPERAND);
-    if (status) return status;
-    status = assign_vreg(ident->type, data, vreg_count++, DEST_OPERAND);
-    if (status) return status;
-
     data->instruction = instructions[INSTR_MOV];
+    int status = assign_vreg(ident->type, data->dest_operand, vreg_count++);
+    if (status) return status;
   }
-
   return 0;
 }
 
@@ -350,7 +309,7 @@ int translate_conversion(ASTree *operator, InstructionData * data,
   if (status) return status;
   llist_push_back(text_section, src_data);
   strcpy(data->src_operand, src_data->dest_operand);
-  status = assign_vreg(operator->type, data, vreg_count++, DEST_OPERAND);
+  status = assign_vreg(operator->type, data->dest_operand, vreg_count++);
   if (status) return status;
 
   const TypeSpec *target_type = operator->type;
@@ -380,7 +339,7 @@ int translate_intcon(ASTree *constant, InstructionData *data,
                      unsigned int flags) {
   DEBUGS('g', "Translating integer constant");
   if (flags & USE_REG) {
-    int status = assign_vreg(constant->type, data, vreg_count++, DEST_OPERAND);
+    int status = assign_vreg(constant->type, data->dest_operand, vreg_count++);
     if (status) return status;
     strcpy(data->src_operand, constant->lexinfo);
     data->instruction = instructions[INSTR_MOV];
@@ -418,7 +377,7 @@ int translate_logical_not(ASTree *tree, InstructionData *data) {
   llist_push_back(text_section, test_data);
 
   data->instruction = instructions[INSTR_SETZ];
-  return assign_vreg(&SPEC_INT, data, vreg_count++, DEST_OPERAND);
+  return assign_vreg(&SPEC_INT, data->dest_operand, vreg_count++);
 }
 
 int translate_logical(ASTree *operator, InstructionData * data,
@@ -464,7 +423,7 @@ int translate_logical(ASTree *operator, InstructionData * data,
 
   /* result will always be the truth value of the last evaluated expression */
   data->instruction = instructions[INSTR_SETNZ];
-  return assign_vreg(&SPEC_INT, data, vreg_count++, DEST_OPERAND);
+  return assign_vreg(&SPEC_INT, data->dest_operand, vreg_count++);
 }
 
 /* TODO(Robert): check location of result of first subexpression, and require
@@ -491,7 +450,7 @@ int translate_comparison(ASTree *operator, InstructionData * data,
   llist_push_back(text_section, cmp_data);
 
   data->instruction = instructions[num];
-  status = assign_vreg(&SPEC_INT, data, vreg_count++, DEST_OPERAND);
+  status = assign_vreg(&SPEC_INT, data->dest_operand, vreg_count++);
   return status;
 }
 
@@ -504,7 +463,7 @@ int translate_indirection(ASTree *indirection, InstructionData *data,
   llist_push_back(text_section, src_data);
 
   sprintf(data->src_operand, INDIRECT_FMT, src_data->dest_operand);
-  status = assign_vreg(indirection->type, data, vreg_count++, DEST_OPERAND);
+  status = assign_vreg(indirection->type, data->dest_operand, vreg_count++);
   if (status) return status;
   data->instruction = instructions[INSTR_MOV];
   return 0;
@@ -589,7 +548,7 @@ int translate_mul_div_mod(ASTree *operator, InstructionData * data,
     if (status) return status;
     llist_push_back(text_section, remainder_data);
     data->instruction = instructions[INSTR_NOP];
-    return assign_vreg(operator->type, data, vreg_count++, DEST_OPERAND);
+    return assign_vreg(operator->type, data->dest_operand, vreg_count++);
   } else {
     int status = translate_binop(operator, data, num, flags);
     if (status) return status;
@@ -650,7 +609,7 @@ int translate_subscript(ASTree *subscript, InstructionData *data,
   data->instruction = instructions[INSTR_MOV];
   sprintf(data->src_operand, INDEX_FMT, pointer_data->dest_operand,
           index_data->dest_operand, subscript->type->width, 0);
-  return assign_vreg(subscript->type, data, vreg_count++, DEST_OPERAND);
+  return assign_vreg(subscript->type, data->dest_operand, vreg_count++);
 }
 
 /* When fetching a struct member, we must be able to return either the location
@@ -685,7 +644,7 @@ int translate_reference(ASTree *reference, InstructionData *data,
     char temp[MAX_OP_LENGTH];
     sprintf(temp, member_symbol->obj_loc, struct_data->dest_operand);
     sprintf(data->src_operand, INDIRECT_FMT, temp);
-    return assign_vreg(reference->type, data, vreg_count++, DEST_OPERAND);
+    return assign_vreg(reference->type, data->dest_operand, vreg_count++);
   } else if (flags & WANT_ADDR) {
     /* use nop to communicate address to parent expression */
     data->instruction = instructions[INSTR_NOP];
@@ -694,7 +653,7 @@ int translate_reference(ASTree *reference, InstructionData *data,
   } else {
     data->instruction = instructions[INSTR_MOV];
     sprintf(data->src_operand, INDIRECT_FMT, struct_data->dest_operand);
-    return assign_vreg(reference->type, data, vreg_count++, DEST_OPERAND);
+    return assign_vreg(reference->type, data->dest_operand, vreg_count++);
   }
 }
 
@@ -716,7 +675,7 @@ int translate_call(ASTree *call, InstructionData *data, unsigned int flags) {
     /* mov parameter to argument register */
     InstructionData *mov_data = calloc(1, sizeof(*mov_data));
     mov_data->instruction = instructions[INSTR_MOV];
-    status = assign_vreg(param->type, mov_data, i, DEST_OPERAND);
+    status = assign_vreg(param->type, mov_data->dest_operand, i);
     if (status) return status;
     strcpy(mov_data->src_operand, param_data->dest_operand);
     llist_push_back(text_section, mov_data);
@@ -734,9 +693,9 @@ int translate_call(ASTree *call, InstructionData *data, unsigned int flags) {
   if (call->type->base != TYPE_VOID) {
     InstructionData *mov_data = calloc(1, sizeof(*mov_data));
     mov_data->instruction = instructions[INSTR_MOV];
-    int status = assign_vreg(call->type, mov_data, RETURN_VREG, SRC_OPERAND);
+    int status = assign_vreg(call->type, mov_data->src_operand, RETURN_VREG);
     if (status) return status;
-    status = assign_vreg(call->type, mov_data, vreg_count++, DEST_OPERAND);
+    status = assign_vreg(call->type, mov_data->dest_operand, vreg_count++);
     if (status) return status;
     llist_push_back(text_section, mov_data);
     strcpy(data->dest_operand, mov_data->dest_operand);
@@ -752,7 +711,7 @@ int translate_param(ASTree *param, InstructionData *data) {
   DEBUGS('g', "Translating parameter");
   ASTree *declarator = astree_second(param);
   ASTree *param_ident = extract_ident(declarator);
-  int status = assign_vreg(param_ident->type, data, vreg_count++, SRC_OPERAND);
+  int status = assign_vreg(param_ident->type, data->src_operand, vreg_count++);
   if (status) return status;
   SymbolValue *symval = NULL;
   locate_symbol((void *)param_ident->lexinfo, strlen(param_ident->lexinfo),
@@ -764,7 +723,8 @@ int translate_param(ASTree *param, InstructionData *data) {
   }
   status = assign_space(symval, STACK_POINTER_STRING);
   if (status) return status;
-  status = resolve_object(param_ident, data, DEST_OPERAND);
+  status =
+      resolve_object(param_ident->lexinfo, data->dest_operand, INDIRECT_FMT);
   if (status) return status;
   data->instruction = instructions[INSTR_MOV];
   return 0;
@@ -1068,7 +1028,7 @@ int translate_return(ASTree *ret, InstructionData *data) {
     /* strip function */
     /* TODO(Robert): free temporary copies created by the first strip */
     status = strip_aux_type(&return_spec, function_spec);
-    status = assign_vreg(&return_spec, mov_data, RETURN_VREG, DEST_OPERAND);
+    status = assign_vreg(&return_spec, mov_data->dest_operand, RETURN_VREG);
     if (status) return status;
 
     llist_push_back(text_section, mov_data);
@@ -1232,10 +1192,6 @@ int translate_function(ASTree *function, InstructionData *data) {
     llist_push_back(text_section, param_data);
   }
   leave_scope(&name_node->symbol_table);
-
-  /* the following is necessary for void functions without an explicit return
-   * statement, but (should) be unreachable for all other functions
-   */
 
   /* start vreg counter outside of numbers which can be automatically mapped to
    * real registers to eliminate duplicates and clobbered values when saving
