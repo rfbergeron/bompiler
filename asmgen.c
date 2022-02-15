@@ -264,7 +264,10 @@ int restore_registers(size_t start, size_t count) {
 int translate_ident(ASTree *ident, InstructionData *data, unsigned int flags) {
   int status = resolve_object(ident->lexinfo, data->src_operand, INDIRECT_FMT);
   if (status) return status;
-  if (flags & WANT_ADDR) {
+  const TypeSpec *ident_type = extract_type(ident);
+  AuxSpec *ident_aux = llist_back(&ident_type->auxspecs);
+  if (flags & WANT_ADDR || (ident_aux && (ident_aux->aux == AUX_FUNCTION ||
+                                          ident_aux->aux == AUX_ARRAY))) {
     data->instruction = instructions[INSTR_LEA];
     /* TODO(Robert): define pointer type constant */
     int status = assign_vreg(&SPEC_ULONG, data->dest_operand, vreg_count++);
@@ -314,10 +317,15 @@ int translate_conversion(ASTree *operator, InstructionData * data,
   status = assign_vreg(operator->type, data->dest_operand, vreg_count++);
   if (status) return status;
 
-  const TypeSpec *target_type = operator->type;
-  const TypeSpec *source_type = converted_expr->type;
+  const TypeSpec *target_type = extract_type(operator);
+  const TypeSpec *source_type = extract_type(converted_expr);
+  AuxSpec *source_aux = llist_back(&source_type->auxspecs);
 
-  if (source_type->width > target_type->width) {
+  if (source_aux &&
+      (source_aux->aux == AUX_ARRAY || source_aux->aux == AUX_FUNCTION)) {
+    /* functions and arrays have special conversion rules */
+    data->instruction = instructions[INSTR_MOV];
+  } else if (source_type->width > target_type->width) {
     data->instruction = instructions[INSTR_MOV];
   } else if (source_type->width == target_type->width) {
     data->instruction = instructions[INSTR_NOP];
@@ -664,6 +672,7 @@ int translate_reference(ASTree *reference, InstructionData *data,
 
 int translate_call(ASTree *call, InstructionData *data, unsigned int flags) {
   DEBUGS('g', "Translating function call");
+
   size_t i;
   for (i = 1; i < astree_count(call); ++i) {
     DEBUGS('g', "Translating parameter %i", i);
@@ -689,9 +698,16 @@ int translate_call(ASTree *call, InstructionData *data, unsigned int flags) {
   int status = save_registers(VOLATILE_START, VOLATILE_COUNT);
   if (status) return status;
 
+  /* compute function pointer value */
+  InstructionData *function_data = calloc(1, sizeof(InstructionData));
+  ASTree *function_expr = astree_first(call);
+  status = translate_expr(function_expr, function_data, USE_REG);
+  if (status) return status;
+  llist_push_back(text_section, function_data);
+
   InstructionData *call_data = calloc(1, sizeof(*call_data));
   call_data->instruction = instructions[INSTR_CALL];
-  strcpy(call_data->dest_operand, astree_first(call)->lexinfo);
+  strcpy(call_data->dest_operand, function_data->dest_operand);
   llist_push_back(text_section, call_data);
 
   /* mov result to any other register if return type isn't void */
@@ -1226,12 +1242,16 @@ int translate_function(ASTree *function, InstructionData *data) {
   ASTree *name_node = extract_ident(declarator);
   current_function = name_node;
   strcpy(data->label, name_node->lexinfo);
+
+  SymbolValue *function_symval = NULL;
+  locate_symbol(name_node->lexinfo, strlen(name_node->lexinfo),
+                &function_symval);
+  strcpy(function_symval->obj_loc, name_node->lexinfo);
+
   int status = save_registers(NONVOLATILE_START, NONVOLATILE_COUNT);
   if (status) return status;
 
   size_t i;
-  ASTree *params = astree_second(function);
-  ASTree *body = astree_third(function);
   /* cleanup vregs from last function and skip return reg since we don't need
    * to save or store it
    */
