@@ -159,6 +159,35 @@ will store other type information.
 Both of these structures will have a copy, init, and destroy function associated
 with them, to make (re)using the information stored in them easier.
 
+## Name spaces
+These namespaces are different from the namespaces described in C++. They
+provide separation for names, but they are not something that can be manipulated
+using the syntax by the programmer. Instead, they are an internal feature of
+the language.
+
+The name spaces present in ANSI C are:
+1. Objects, functions, typedef names, and enumeration constants.
+2. Structs, unions, and enum tags.
+3. Labels.
+4. Individual members of each struct or union.
+
+Labels may only appear within a function body and all labels in a function body
+share a single, flat scope, with no nesting of scopes.
+
+Struct and union members are only valid inside and only conflict with members of
+the same struct/union tag. Nesting is possible when declaring the members of a
+struct or union, since struct, union, and enum tags may be declared within a
+struct or union tag definition.
+
+## Struct and label information
+Struct/union definitions and labels do not need to have the same information as
+symbols, so they should have their own structures used to track them.
+
+## Handling function parameter types and identifiers
+Another problem I noticed with the way I've been handling function parameters is
+that function prototype parameters don't need to be named, or to have the same
+names as those used in the function definition.
+
 ## A better symbol table
 Currently, symbols are stored directly in a map data structure from badlib. This
 has been convenient, but it has some limitations that make using it awkward:
@@ -169,13 +198,60 @@ has been convenient, but it has some limitations that make using it awkward:
   scopes and object declarations, which could be combined with the symbol map
   into another data structure.
 
+The ideal symbol table would have the following:
+- A `Map`, used for the primary namespace.
+- A `Map *`, used for the struct/union/enum tag namespace.
+- A `Map *`, used for the label namespace.
+
+The latter two maps are pointers because most table scopes would not need
+either, since labels only occur at function scope and most tags are declared
+at file scope, in my experience.
+
+The tag and label namespaces will not use normal `SymbolValue` structs to store
+their information, and will have dedicated ones instead.
+
 ### Definition
 ```
 typedef struct symbol_table {
-  Map map;
-  struct symbol_table *nested_tables;
-  struct symbol_table *parent_table;
+  Map primary_namespace;
+  Map *tag_namespace;
+  Map *label_namespace;
+  struct symbol_table *parent;
+  LinkedList *children;
 } SymbolTable;
+
+typedef struct symbol_value {
+  size_t sequence;  /* used to order declarations in a given block */
+  Location loc;     /* declaration location */
+  TypeSpec type;    /* type of symbol */
+  int is_defined;   /* whether this function/struct/union has been
+                       specified/defined */
+  char obj_loc[64]; /* location, represented as a string */
+} SymbolValue;
+
+typedef enum tag_type {
+  TAG_STRUCT,
+  TAG_UNION,
+  TAG_ENUM
+} TagType;
+
+typedef struct tag_value {
+  size_t width;
+  size_t alignment;
+  union {
+    Map enumerators;       /* mapping from names to integer constants */
+    struct {
+      SymbolTable by_name; /* struct members by name */
+      LinkedList in_order; /* struct members in declaration order */
+    } members;
+  } data;
+  TagType tag;
+} TagValue;
+
+typedef struct label_value {
+  Location *loc;
+  int is_defined;
+} LabelValue;
 ```
 
 ## Special handling of function identifiers
