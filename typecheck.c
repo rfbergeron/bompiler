@@ -258,13 +258,12 @@ int compare_auxspecs(const LinkedList *dests, const LinkedList *srcs) {
     } else if (dest->aux == AUX_POINTER && src->aux == AUX_POINTER) {
       continue;
     } else if ((dest->aux == AUX_FUNCTION && src->aux == AUX_FUNCTION)) {
-      int ret = compare_params(&dest->data.params, &src->data.params);
+      int ret = compare_params(dest->data.params, src->data.params);
       if (ret != TCHK_COMPATIBLE) return ret;
     } else if ((dest->aux == AUX_STRUCT && src->aux == AUX_STRUCT) ||
                (dest->aux == AUX_UNION && src->aux == AUX_UNION)) {
-      int ret = compare_members(&dest->data.composite.members,
-                                &src->data.composite.members);
-      if (ret != TCHK_COMPATIBLE) return ret;
+      int tags_equal = strcmp(dest->data.tag, src->data.tag);
+      if (!tags_equal) return TCHK_EXPLICIT_CAST;
     } else {
       return TCHK_EXPLICIT_CAST;
     }
@@ -444,7 +443,7 @@ int validate_stringcon(ASTree *stringcon) {
    * but since strlen does not include the terminating null byte, we only
    * subtract one.
    */
-  array_aux->data.ptr_or_arr.length = strlen(stringcon->lexinfo) - 1;
+  array_aux->data.memory_loc.length = strlen(stringcon->lexinfo) - 1;
 
   stringcon->type = stringcon_type;
   return 0;
@@ -607,7 +606,7 @@ int validate_call(ASTree *call) {
 
   /* second auxspec will be the function; first is pointer */
   AuxSpec *param_spec = llist_get(&function_spec->auxspecs, 1);
-  LinkedList *param_list = &param_spec->data.params;
+  LinkedList *param_list = param_spec->data.params;
   /* subtract one since function identifier is also a child */
   if (astree_count(call) - 1 != llist_size(param_list)) {
     fprintf(stderr, "ERROR: incorrect number of arguments for function call\n");
@@ -668,7 +667,8 @@ int validate_assignment(ASTree *assignment) {
 int define_params(ASTree *params, ASTree *ident, TypeSpec *spec) {
   AuxSpec *aux_function = calloc(1, sizeof(*aux_function));
   aux_function->aux = AUX_FUNCTION;
-  LinkedList *param_entries = &(aux_function->data.params);
+  aux_function->data.params = malloc(sizeof(*aux_function->data.params));
+  LinkedList *param_entries = aux_function->data.params;
   /* type is not resposible for freeing symbol information */
   llist_init(param_entries, NULL, NULL);
   ident->symbol_table = symbol_table_init();
@@ -704,9 +704,9 @@ int define_array(ASTree *array, TypeSpec *spec) {
   AuxSpec *aux_array = calloc(1, sizeof(*aux_array));
   aux_array->aux = AUX_ARRAY;
   if (astree_count(array) > 0) {
-    aux_array->data.ptr_or_arr.length =
+    aux_array->data.memory_loc.length =
         strtoumax(astree_first(array)->lexinfo, NULL, 0);
-    if (aux_array->data.ptr_or_arr.length == ULONG_MAX) {
+    if (aux_array->data.memory_loc.length == ULONG_MAX) {
       fprintf(stderr, "ERROR: array size too large\n");
       return -1;
     }
@@ -1108,7 +1108,6 @@ int validate_reference(ASTree *reference) {
   ASTree *strunion = astree_first(reference);
   int status = validate_expr(strunion);
   if (status) return status;
-
   const TypeSpec *strunion_type = extract_type(strunion);
   if (!typespec_is_struct(strunion_type) && !typespec_is_union(strunion_type)) {
     /* error: cannot access member of non struct/union type */
@@ -1116,22 +1115,32 @@ int validate_reference(ASTree *reference) {
             "ERROR: cannot reference member of type that is not struct "
             "or union.\n");
     return -1;
+  }
+
+  ASTree *member = astree_second(reference);
+  const char *member_name = member->lexinfo;
+  const size_t member_name_len = strlen(member_name);
+  AuxSpec *strunion_aux = llist_front(&strunion_type->auxspecs);
+  const char *tag = strunion_aux->data.tag;
+  TagValue *tagval = tag_table_get(tag, strlen(tag));
+  if (tagval == NULL) {
+    fprintf(stderr, "ERROR: unable to locate struct/union tag %s\n.", tag);
+    return -1;
+  }
+
+  symbol_table_enter(tagval->data.members.by_name);
+  SymbolValue *symval = NULL;
+  int is_member =
+      symbol_table_get((char *)member_name, member_name_len, &symval);
+  symbol_table_leave(tagval->data.members.by_name);
+
+  if (symval == NULL || !is_member) {
+    fprintf(stderr, "ERROR: structure does not have member named %s.\n",
+            member_name);
+    return -1;
   } else {
-    ASTree *member = astree_second(reference);
-    const char *member_name = member->lexinfo;
-    const size_t member_name_len = strlen(member_name);
-    AuxSpec *strunion_aux = llist_front(&strunion_type->auxspecs);
-    Map *strunion_members = strunion_aux->data.composite.symbol_table;
-    SymbolValue *member_symbol =
-        map_get(strunion_members, (char *)member_name, member_name_len);
-    if (member_symbol == NULL) {
-      fprintf(stderr, "ERROR: structure does not have member named %s.\n",
-              member_name);
-      return -1;
-    } else {
-      reference->type = &member_symbol->type;
-      return 0;
-    }
+    reference->type = &symval->type;
+    return 0;
   }
 }
 
@@ -1150,23 +1159,32 @@ int validate_arrow(ASTree *arrow) {
             "ERROR: cannot reference member of type that is not struct "
             "or union.\n");
     return -1;
+  }
+  ASTree *member = astree_second(arrow);
+  const char *member_name = member->lexinfo;
+  const size_t member_name_len = strlen(member_name);
+  /* first auxtype is pointer; second is struct/union */
+  AuxSpec *strunion_aux = llist_get(&strunion_type->auxspecs, 1);
+  const char *tag = strunion_aux->data.tag;
+  TagValue *tagval = tag_table_get(tag, strlen(tag));
+  if (tagval == NULL) {
+    fprintf(stderr, "ERROR: unable to locate struct/union tag %s\n.", tag);
+    return -1;
+  }
+
+  symbol_table_enter(tagval->data.members.by_name);
+  SymbolValue *symval = NULL;
+  int is_member =
+      symbol_table_get((char *)member_name, member_name_len, &symval);
+  symbol_table_leave(tagval->data.members.by_name);
+
+  if (symval == NULL || !is_member) {
+    fprintf(stderr, "ERROR: structure does not have member named %s.\n",
+            member_name);
+    return -1;
   } else {
-    ASTree *member = astree_second(arrow);
-    const char *member_name = member->lexinfo;
-    const size_t member_name_len = strlen(member_name);
-    /* first auxtype is pointer; second is struct/union */
-    AuxSpec *strunion_aux = llist_get(&strunion_type->auxspecs, 1);
-    Map *strunion_members = strunion_aux->data.composite.symbol_table;
-    SymbolValue *member_symbol =
-        map_get(strunion_members, (char *)member_name, member_name_len);
-    if (member_symbol == NULL) {
-      fprintf(stderr, "ERROR: structure does not have member named %s.\n",
-              member_name);
-      return -1;
-    } else {
-      arrow->type = &member_symbol->type;
-      return 0;
-    }
+    arrow->type = &symval->type;
+    return 0;
   }
 }
 
@@ -1305,8 +1323,8 @@ int declare_symbol(ASTree *declaration, size_t i) {
 int typecheck_array_initializer(ASTree *declarator, ASTree *init_list) {
   const TypeSpec *array_type = extract_type(declarator);
   AuxSpec *array_aux = llist_front((LinkedList *)&array_type->auxspecs);
-  if (array_aux->data.ptr_or_arr.length > 0 &&
-      array_aux->data.ptr_or_arr.length < astree_count(init_list)) {
+  if (array_aux->data.memory_loc.length > 0 &&
+      array_aux->data.memory_loc.length < astree_count(init_list)) {
     fprintf(stderr, "ERROR: too many elements in array initializer.\n");
     return -1;
   } else {
@@ -1330,7 +1348,14 @@ int typecheck_array_initializer(ASTree *declarator, ASTree *init_list) {
 int typecheck_union_initializer(ASTree *declarator, ASTree *init_list) {
   ASTree *identifier = extract_ident(declarator);
   AuxSpec *union_aux = llist_front((LinkedList *)&identifier->type->auxspecs);
-  const LinkedList *members = &union_aux->data.composite.members;
+  const char *tag = union_aux->data.tag;
+  TagValue *tagval = tag_table_get(tag, strlen(tag));
+  if (tagval == NULL) {
+    fprintf(stderr, "ERROR: unable to locate struct/union tag %s\n.", tag);
+    return -1;
+  }
+
+  const LinkedList *members = &tagval->data.members.in_order;
   if (astree_count(init_list) > 1) {
     fprintf(stderr, "ERROR: too many initializers provided for union type\n");
     return -1;
@@ -1351,7 +1376,14 @@ int typecheck_union_initializer(ASTree *declarator, ASTree *init_list) {
 int typecheck_struct_initializer(ASTree *declarator, ASTree *init_list) {
   ASTree *identifier = extract_ident(declarator);
   AuxSpec *struct_aux = llist_front((LinkedList *)&identifier->type->auxspecs);
-  const LinkedList *members = &struct_aux->data.composite.members;
+  const char *tag = struct_aux->data.tag;
+  TagValue *tagval = tag_table_get(tag, strlen(tag));
+  if (tagval == NULL) {
+    fprintf(stderr, "ERROR: unable to locate struct/union tag %s\n.", tag);
+    return -1;
+  }
+
+  const LinkedList *members = &tagval->data.members.in_order;
   if (members->size < astree_count(init_list)) {
     fprintf(stderr,
             "ERROR: struct has %zu members, but %zu were provided, "
@@ -1468,29 +1500,17 @@ int define_function(ASTree *function) {
   }
 }
 
-int define_members(ASTree *composite_type, SymbolValue *composite_type_entry) {
-  AuxSpec *composite_aux = calloc(1, sizeof(*composite_aux));
-  if (composite_type->symbol == TOK_STRUCT) {
-    composite_aux->aux = AUX_STRUCT;
-  } else if (composite_type->symbol == TOK_UNION) {
-    composite_aux->aux = AUX_UNION;
-  } else {
-    /* should not happen, but I have been wrong before */
-    fprintf(stderr, "ERROR: invalid token for composite type: %s\n",
-            parser_get_tname(composite_type->symbol));
-    return -1;
-  }
-  LinkedList *members = &composite_aux->data.composite.members;
-  llist_init(members, NULL, NULL);
+int define_members(ASTree *composite_type, TagValue *tagval) {
   /* TODO(Robert): in the interest of code reuse I used the existing functions
    * for entering and leaving scopes and making entries within a scope that
    * are normally used for objects and functions, even though struct members
    * don't work quite the same way. check to make sure everything is doing
    * okay later on
    */
-  composite_type->symbol_table = symbol_table_init();
-  composite_aux->data.composite.symbol_table =
-      &composite_type->symbol_table->primary_namespace;
+  tagval->data.members.by_name = symbol_table_init();
+  symbol_table_enter(tagval->data.members.by_name);
+  LinkedList *members = &tagval->data.members.in_order;
+  llist_init(members, NULL, NULL);
   /* start from 2nd child; 1st was type name */
   size_t i;
   for (i = 1; i < astree_count(composite_type); ++i) {
@@ -1510,23 +1530,21 @@ int define_members(ASTree *composite_type, SymbolValue *composite_type_entry) {
       int status = validate_declaration(member);
       if (status != 0) return status;
       symbol_table_get(member_id_str, member_id_str_len, &member_entry);
-      if (composite_type_entry->type.alignment < member_entry->type.alignment) {
-        composite_type_entry->type.alignment = member_entry->type.alignment;
+      if (tagval->alignment < member_entry->type.alignment) {
+        tagval->alignment = member_entry->type.alignment;
       }
-      if (composite_type_entry->type.base == TYPE_STRUCT) {
-        size_t padding =
-            member_entry->type.alignment -
-            (composite_type_entry->type.width % member_entry->type.alignment);
-        composite_type_entry->type.width += padding + member_entry->type.width;
-      } else if (composite_type_entry->type.width < member_entry->type.width) {
-        composite_type_entry->type.width = member_entry->type.width;
+      if (tagval->tag == TAG_STRUCT) {
+        size_t padding = member_entry->type.alignment -
+                         (tagval->width % member_entry->type.alignment);
+        tagval->width += padding + member_entry->type.width;
+      } else if (tagval->width < member_entry->type.width) {
+        tagval->width = member_entry->type.width;
       }
       llist_push_back(members, member_entry);
-      DEBUGS('t', "Field inserted at %s", astree_second(member)->lexinfo);
+      DEBUGS('t', "Field inserted at %s", extract_ident(declarator)->lexinfo);
     }
   }
   symbol_table_leave(composite_type->symbol_table);
-  llist_push_back(&composite_type_entry->type.auxspecs, composite_aux);
   return 0;
 }
 
@@ -1535,47 +1553,27 @@ int define_composite_type(ASTree *composite_type) {
   const size_t composite_type_name_len =
       strnlen(composite_type_name, MAX_IDENT_LEN);
   DEBUGS('t', "Defining composite type: %s", composite_type_name);
-  SymbolValue *exists = NULL;
-  /* TODO(Robert): do not cast away const */
-  symbol_table_get((char *)composite_type_name, composite_type_name_len,
-                   &exists);
-  SymbolValue *composite_type_symbol =
-      symbol_value_init(extract_loc(composite_type));
-  if (composite_type->symbol == TOK_STRUCT) {
-    composite_type_symbol->type.base = TYPE_STRUCT;
-  } else if (composite_type->symbol == TOK_UNION) {
-    composite_type_symbol->type.base = TYPE_UNION;
-  } else {
-    /* should not happen, but I have been wrong before */
-    fprintf(stderr, "ERROR: invalid token for composite type: %s\n",
-            parser_get_tname(composite_type->symbol));
-    return -1;
-  }
-
-  typespec_init(&composite_type_symbol->type);
+  TagValue *exists =
+      tag_table_get(composite_type_name, composite_type_name_len);
+  TagValue *tagval = tag_value_init(
+      composite_type->symbol == TOK_STRUCT ? TAG_STRUCT : TAG_UNION);
 
   if (astree_count(composite_type) < 2 && !exists) {
-    composite_type_symbol->is_defined = 0;
-    return symbol_table_insert(composite_type_name, composite_type_name_len,
-                               composite_type_symbol);
+    tagval->is_defined = 0;
+    return tag_table_insert(composite_type_name, composite_type_name_len,
+                            tagval);
   } else {
     if (exists) {
-      int status = define_members(composite_type, composite_type_symbol);
-      if (status) return status;
-      if (types_compatible(&exists->type, &composite_type_symbol->type) !=
-          TCHK_COMPATIBLE) {
-        fprintf(stderr, "ERROR: redefinition of composite_type %s\n",
-                composite_type_name);
-        return -1;
-      }
-      /* discard duplicate */
-      return symbol_value_destroy(composite_type_symbol);
+      /* TODO(Robert): allow identical redefinitions */
+      fprintf(stderr, "ERROR: redefinition of composite_type %s\n",
+              composite_type_name);
+      return -1;
     } else {
-      int status = symbol_table_insert(
-          composite_type_name, composite_type_name_len, composite_type_symbol);
+      int status = tag_table_insert(composite_type_name,
+                                    composite_type_name_len, tagval);
       if (status) return status;
-      composite_type_symbol->is_defined = 1;
-      return define_members(composite_type, composite_type_symbol);
+      return define_members(composite_type, tagval);
+      tagval->is_defined = 1;
     }
   }
 }

@@ -473,6 +473,30 @@ retrieved from the global table for use.
 The function which resolves symbols (besides labels) will search each symbol
 table, starting at the top, for the corresponding symbol.
 
+## Forward declarations
+Forward declarations, as they are currently handled, are fine so far as I can
+tell, with the exception that debug information about types may not make sense.
+
+The location associated with a type is supposed to be the declaration location,
+which should not be overwritten when the function is defined. However, the names
+of variables should be overwritten, so we cannot just reuse the symbol value and
+table defined by the function prototype, because the function prototype may have
+different names for parameters or none at all.
+
+## Ownership of type information
+The current invariant for ownership of type information that I have been trying
+to maintain is that the symbol table "owns" the type information and is
+responsible for freeing it. This has proven difficult for representing functions
+and their parameters.
+
+Currently, it is unclear whether a function is responsible for the types of its
+parameters, or the block scope associated with the function. This is because
+function prototypes do not have a block associated with them, so the normal
+location for the symbol table is unavailable.
+
+The cleanest solution I can come up with is to have the declarator node of
+function prototypes store the "function prototype scope" variables.
+
 ## Promotions, conversions, and casting
 Promotion for arithmetic values is:
 - Any character or short integer whose value can be represented by signed by

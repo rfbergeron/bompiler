@@ -65,7 +65,7 @@ int symbol_table_leave(SymbolTable *table);
 
 int tag_table_insert(const char *ident, const size_t ident_len,
                      TagValue *tagval);
-TagValue *struct_table_get(const char *ident, const size_t ident_len);
+TagValue *tag_table_get(const char *ident, const size_t ident_len);
 
 int label_table_insert(const char *ident, const size_t ident_len,
                        LabelValue *labval);

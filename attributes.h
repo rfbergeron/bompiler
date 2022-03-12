@@ -50,6 +50,7 @@ typedef enum aux_type {
   AUX_ARRAY,
   AUX_STRUCT,
   AUX_UNION,
+  AUX_ENUM,
   AUX_FUNCTION,
   AUX_TYPEDEF,
 } AuxType;
@@ -118,21 +119,15 @@ enum typespec_flag {
   TYPESPEC_FLAG_INLINE = 1 << TYPESPEC_INDEX_INLINE
 };
 
-/* Structs and unions require a member map, as well as the order of the members.
- * This would be best provided by an ordered_map data structure.
- */
 typedef struct auxspec {
   union {
     const char *type_id;
+    const char *tag;
+    LinkedList *params;
     struct {
-      unsigned int qualifiers;
       size_t length;
-    } ptr_or_arr;
-    struct {
-      LinkedList members;
-      Map *symbol_table;
-    } composite;
-    LinkedList params;
+      unsigned int qualifiers;
+    } memory_loc;
   } data;
   AuxType aux;
 } AuxSpec;
