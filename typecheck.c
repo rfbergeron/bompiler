@@ -60,6 +60,8 @@ enum type_checker_action {
   TCHK_E_NO_FLAGS
 };
 
+static SymbolValue *current_function = NULL;
+
 /* forward declarations for mutual recursion */
 int validate_expr(ASTree *statement);
 int validate_stmt(ASTree *statement);
@@ -135,7 +137,7 @@ int assign_type(ASTree *tree) {
   const char *id_str = identifier->lexinfo;
   size_t id_str_len = strnlen(id_str, MAX_IDENT_LEN);
   SymbolValue *symval = NULL;
-  int in_current_scope = locate_symbol(id_str, id_str_len, &symval);
+  int in_current_scope = symbol_table_get(id_str, id_str_len, &symval);
   if (symval) {
     DEBUGS('t', "Assigning %s a symbol", id_str);
     identifier->type = &(symval->type);
@@ -478,7 +480,7 @@ int validate_composite_typespec(ASTree *type, TypeSpec *out) {
   const char *composite_type_name = composite_type->lexinfo;
   size_t composite_type_name_len = strlen(composite_type_name);
   SymbolValue *exists = NULL;
-  locate_symbol(composite_type_name, composite_type_name_len, &exists);
+  symbol_table_get(composite_type_name, composite_type_name_len, &exists);
   if (!exists) {
     fprintf(stderr, "ERROR: structure type %s is not defined\n",
             composite_type_name);
@@ -669,7 +671,8 @@ int define_params(ASTree *params, ASTree *ident, TypeSpec *spec) {
   LinkedList *param_entries = &(aux_function->data.params);
   /* type is not resposible for freeing symbol information */
   llist_init(param_entries, NULL, NULL);
-  create_scope(&(ident->symbol_table));
+  ident->symbol_table = symbol_table_init();
+  symbol_table_enter(ident->symbol_table);
   size_t i;
   for (i = 0; i < astree_count(params); ++i) {
     ASTree *param = astree_get(params, i);
@@ -682,7 +685,7 @@ int define_params(ASTree *params, ASTree *ident, TypeSpec *spec) {
     size_t param_id_str_len = strnlen(param_id_str, MAX_IDENT_LEN);
     SymbolValue *param_entry = NULL;
     int in_current_scope =
-        locate_symbol(param_id_str, param_id_str_len, &param_entry);
+        symbol_table_get(param_id_str, param_id_str_len, &param_entry);
     if (!in_current_scope) {
       fprintf(stderr,
               "ERROR: parameter symbol was not inserted into function table\n");
@@ -694,7 +697,7 @@ int define_params(ASTree *params, ASTree *ident, TypeSpec *spec) {
   int status = llist_push_back(&spec->auxspecs, aux_function);
   if (status) return status;
   /* temporarily leave function prototype scope to work on global table */
-  return leave_scope(&(ident->symbol_table));
+  return symbol_table_leave(ident->symbol_table);
 }
 
 int define_array(ASTree *array, TypeSpec *spec) {
@@ -1270,7 +1273,7 @@ int declare_symbol(ASTree *declaration, size_t i) {
   size_t identifier_len = strnlen(identifier->lexinfo, MAX_IDENT_LEN);
   SymbolValue *exists = NULL;
   int in_current_scope =
-      locate_symbol(identifier->lexinfo, identifier_len, &exists);
+      symbol_table_get(identifier->lexinfo, identifier_len, &exists);
   if (exists && in_current_scope) {
     if (typespec_is_function(&exists->type) &&
         typespec_is_function(&symbol->type)) {
@@ -1288,7 +1291,8 @@ int declare_symbol(ASTree *declaration, size_t i) {
       return -1;
     }
   } else {
-    int status = insert_symbol(identifier->lexinfo, identifier_len, symbol);
+    int status =
+        symbol_table_insert(identifier->lexinfo, identifier_len, symbol);
     if (status) {
       fprintf(stderr, "ERROR: your data structure library sucks.\n");
       abort();
@@ -1400,7 +1404,7 @@ int define_body(ASTree *function, SymbolValue *entry) {
   int status = 0;
   ASTree *declarator = astree_second(function);
   ASTree *identifier = extract_ident(declarator);
-  enter_body(&identifier->symbol_table, entry);
+  symbol_table_enter(identifier->symbol_table);
 
   if (astree_count(function) == 3) {
     DEBUGS('t', "Defining function: %s", identifier->lexinfo);
@@ -1410,7 +1414,7 @@ int define_body(ASTree *function, SymbolValue *entry) {
   }
 
   /* finalize scope */
-  leave_body(&identifier->symbol_table, entry);
+  symbol_table_leave(identifier->symbol_table);
   return status;
 }
 
@@ -1434,7 +1438,7 @@ int define_function(ASTree *function) {
   const char *function_ident = extract_ident(declarator)->lexinfo;
   size_t function_ident_len = strnlen(function_ident, MAX_IDENT_LEN);
   SymbolValue *existing_entry = NULL;
-  locate_symbol(function_ident, function_ident_len, &existing_entry);
+  symbol_table_get(function_ident, function_ident_len, &existing_entry);
   if (existing_entry) {
     if (types_compatible(&existing_entry->type, &symbol->type) ==
         TCHK_INCOMPATIBLE) {
@@ -1444,16 +1448,21 @@ int define_function(ASTree *function) {
       fprintf(stderr, "ERROR: redefinition of function: %s\n", function_ident);
       return -1;
     } else if (astree_count(function) == 3) {
+      current_function = existing_entry;
       int status = define_body(function, existing_entry);
+      current_function = NULL;
       if (status) return status;
     }
     /* use existing type info */
     symbol_value_destroy(symbol);
     return assign_type(identifier);
   } else {
-    int status = insert_symbol(function_ident, function_ident_len, symbol);
+    int status =
+        symbol_table_insert(function_ident, function_ident_len, symbol);
     if (status) return status;
+    current_function = existing_entry;
     status = define_body(function, symbol);
+    current_function = NULL;
     if (status) return status;
     return assign_type(identifier);
   }
@@ -1479,8 +1488,9 @@ int define_members(ASTree *composite_type, SymbolValue *composite_type_entry) {
    * don't work quite the same way. check to make sure everything is doing
    * okay later on
    */
-  create_scope(&composite_type->symbol_table);
-  composite_aux->data.composite.symbol_table = &composite_type->symbol_table;
+  composite_type->symbol_table = symbol_table_init();
+  composite_aux->data.composite.symbol_table =
+      &composite_type->symbol_table->primary_namespace;
   /* start from 2nd child; 1st was type name */
   size_t i;
   for (i = 1; i < astree_count(composite_type); ++i) {
@@ -1491,7 +1501,7 @@ int define_members(ASTree *composite_type, SymbolValue *composite_type_entry) {
     DEBUGS('t', "Found composite type member: %s", member_id_str);
     SymbolValue *member_entry = NULL;
     int member_exists =
-        locate_symbol(member_id_str, member_id_str_len, &member_entry);
+        symbol_table_get(member_id_str, member_id_str_len, &member_entry);
     if (member_exists) {
       fprintf(stderr, "ERROR: Duplicate declaration of member: %s\n",
               member_id_str);
@@ -1499,7 +1509,7 @@ int define_members(ASTree *composite_type, SymbolValue *composite_type_entry) {
     } else {
       int status = validate_declaration(member);
       if (status != 0) return status;
-      locate_symbol(member_id_str, member_id_str_len, &member_entry);
+      symbol_table_get(member_id_str, member_id_str_len, &member_entry);
       if (composite_type_entry->type.alignment < member_entry->type.alignment) {
         composite_type_entry->type.alignment = member_entry->type.alignment;
       }
@@ -1515,7 +1525,7 @@ int define_members(ASTree *composite_type, SymbolValue *composite_type_entry) {
       DEBUGS('t', "Field inserted at %s", astree_second(member)->lexinfo);
     }
   }
-  finalize_scope(&composite_type->symbol_table);
+  symbol_table_leave(composite_type->symbol_table);
   llist_push_back(&composite_type_entry->type.auxspecs, composite_aux);
   return 0;
 }
@@ -1527,7 +1537,8 @@ int define_composite_type(ASTree *composite_type) {
   DEBUGS('t', "Defining composite type: %s", composite_type_name);
   SymbolValue *exists = NULL;
   /* TODO(Robert): do not cast away const */
-  locate_symbol((char *)composite_type_name, composite_type_name_len, &exists);
+  symbol_table_get((char *)composite_type_name, composite_type_name_len,
+                   &exists);
   SymbolValue *composite_type_symbol =
       symbol_value_init(extract_loc(composite_type));
   if (composite_type->symbol == TOK_STRUCT) {
@@ -1545,8 +1556,8 @@ int define_composite_type(ASTree *composite_type) {
 
   if (astree_count(composite_type) < 2 && !exists) {
     composite_type_symbol->is_defined = 0;
-    return insert_symbol(composite_type_name, composite_type_name_len,
-                         composite_type_symbol);
+    return symbol_table_insert(composite_type_name, composite_type_name_len,
+                               composite_type_symbol);
   } else {
     if (exists) {
       int status = define_members(composite_type, composite_type_symbol);
@@ -1560,8 +1571,8 @@ int define_composite_type(ASTree *composite_type) {
       /* discard duplicate */
       return symbol_value_destroy(composite_type_symbol);
     } else {
-      int status = insert_symbol(composite_type_name, composite_type_name_len,
-                                 composite_type_symbol);
+      int status = symbol_table_insert(
+          composite_type_name, composite_type_name_len, composite_type_symbol);
       if (status) return status;
       composite_type_symbol->is_defined = 1;
       return define_members(composite_type, composite_type_symbol);
@@ -1590,11 +1601,12 @@ int validate_declaration(ASTree *declaration) {
 
 int validate_return(ASTree *ret) {
   TypeSpec ret_spec = SPEC_EMPTY;
-  int status = get_ret_type(&ret_spec);
+  /* strip function type */
+  int status = strip_aux_type(&ret_spec, &current_function->type);
   if (status) return status;
   if (astree_count(ret) > 0) {
     ASTree *expr = astree_first(ret);
-    status = validate_expr(expr);
+    int status = validate_expr(expr);
     if (status) return status;
     status = perform_pointer_conv(expr);
     if (status) return status;
@@ -1630,16 +1642,16 @@ int validate_ifelse(ASTree *ifelse) {
    * be visible anywhere
    */
   ASTree *if_body = astree_second(ifelse);
-  create_scope(&if_body->symbol_table);
+  if_body->symbol_table = symbol_table_init();
   status = validate_stmt(if_body);
-  finalize_scope(&if_body->symbol_table);
+  symbol_table_leave(if_body->symbol_table);
   if (status) return status;
 
   if (astree_count(ifelse) == 3) {
     ASTree *else_body = astree_third(ifelse);
-    create_scope(&else_body->symbol_table);
+    else_body->symbol_table = symbol_table_init();
     status = validate_stmt(else_body);
-    finalize_scope(&else_body->symbol_table);
+    symbol_table_leave(else_body->symbol_table);
     if (status) return status;
   }
   return 0;
@@ -1659,26 +1671,23 @@ int validate_while(ASTree *while_) {
   }
   ASTree *while_body = while_->symbol == TOK_WHILE ? astree_second(while_)
                                                    : astree_first(while_);
-  create_scope(&while_body->symbol_table);
+  while_body->symbol_table = symbol_table_init();
   status = validate_stmt(while_body);
-  finalize_scope(&while_body->symbol_table);
+  symbol_table_leave(while_body->symbol_table);
   return status;
 }
 
 int validate_block(ASTree *block) {
   size_t i;
   int status = 0;
-  /* always safe; a scope should never be created twice in the same place */
-  create_scope(&(block->symbol_table));
+  if (block->symbol_table == NULL) block->symbol_table = symbol_table_init();
+  symbol_table_enter(block->symbol_table);
   for (i = 0; i < astree_count(block); ++i) {
     ASTree *statement = astree_get(block, i);
     status = validate_stmt(statement);
     if (status) break;
   }
-  /* always safe; a scope should never be finalized unless it is at the top
-   * of the stack
-   */
-  finalize_scope(&block->symbol_table);
+  symbol_table_leave(block->symbol_table);
   return status;
 }
 
@@ -1718,7 +1727,8 @@ int validate_stmt(ASTree *statement) {
 
 int type_checker_make_table(ASTree *root) {
   DEBUGS('t', "Making symbol table");
-  create_scope(&(root->symbol_table));
+  root->symbol_table = symbol_table_init();
+  symbol_table_enter(root->symbol_table);
   size_t i;
   for (i = 0; i < astree_count(root); ++i) {
     ASTree *child = astree_get(root, i);
@@ -1742,6 +1752,6 @@ int type_checker_make_table(ASTree *root) {
         return -1;
     }
   }
-  finalize_scope(&root->symbol_table);
+  symbol_table_leave(root->symbol_table);
   return 0;
 }

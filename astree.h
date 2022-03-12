@@ -5,15 +5,16 @@
 #include "badlib/badllist.h"
 #include "badlib/badmap.h"
 #include "debug.h"
+#include "symtable.h"
 
 typedef struct astree {
   struct astree *next_sibling; /* for adopting long lists of siblings */
   struct astree *firstborn;    /* head of the list of siblings */
   const TypeSpec *type;        /* type info */
   const char *lexinfo;         /* lexical information */
+  SymbolTable *symbol_table;   /* symbol table for scope, if applicable */
   Location loc;                /* source location */
   LinkedList children;         /* children of this n-way node */
-  Map symbol_table;            /* symbol table for scope, if applicable */
   int symbol;                  /* token code */
   unsigned int attributes;     /* node-specific attributes */
 } ASTree;
