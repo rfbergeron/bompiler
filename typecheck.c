@@ -1432,24 +1432,6 @@ int define_symbol(ASTree *declaration, size_t i) {
   }
 }
 
-int define_body(ASTree *function, SymbolValue *entry) {
-  int status = 0;
-  ASTree *declarator = astree_second(function);
-  ASTree *identifier = extract_ident(declarator);
-  symbol_table_enter(identifier->symbol_table);
-
-  if (astree_count(function) == 3) {
-    DEBUGS('t', "Defining function: %s", identifier->lexinfo);
-    ASTree *body = astree_third(function);
-    /* set return status */
-    status = validate_stmt(body);
-  }
-
-  /* finalize scope */
-  symbol_table_leave(identifier->symbol_table);
-  return status;
-}
-
 int define_function(ASTree *function) {
   ASTree *declaration = function;
   ASTree *declarator = astree_second(function);
@@ -1481,7 +1463,9 @@ int define_function(ASTree *function) {
       return -1;
     } else if (astree_count(function) == 3) {
       current_function = existing_entry;
-      int status = define_body(function, existing_entry);
+      ASTree *body = astree_third(function);
+      body->symbol_table = identifier->symbol_table;
+      int status = validate_stmt(body);
       current_function = NULL;
       if (status) return status;
     }
@@ -1492,10 +1476,14 @@ int define_function(ASTree *function) {
     int status =
         symbol_table_insert(function_ident, function_ident_len, symbol);
     if (status) return status;
-    current_function = existing_entry;
-    status = define_body(function, symbol);
-    current_function = NULL;
-    if (status) return status;
+    if (astree_count(function) == 3) {
+      current_function = existing_entry;
+      ASTree *body = astree_third(function);
+      body->symbol_table = identifier->symbol_table;
+      int status = validate_stmt(body);
+      current_function = NULL;
+      if (status) return status;
+    }
     return assign_type(identifier);
   }
 }
@@ -1634,22 +1622,14 @@ int validate_ifelse(ASTree *ifelse) {
     status = -1;
     return status;
   }
-  /* Note: no matter whether or not there is an actual block here or just a
-   * single statement, a new scope still needs to be created for it. For
-   * example, if the single statement was a declaration, that object would not
-   * be visible anywhere
-   */
+
   ASTree *if_body = astree_second(ifelse);
-  if_body->symbol_table = symbol_table_init();
   status = validate_stmt(if_body);
-  symbol_table_leave(if_body->symbol_table);
   if (status) return status;
 
   if (astree_count(ifelse) == 3) {
     ASTree *else_body = astree_third(ifelse);
-    else_body->symbol_table = symbol_table_init();
     status = validate_stmt(else_body);
-    symbol_table_leave(else_body->symbol_table);
     if (status) return status;
   }
   return 0;
@@ -1669,15 +1649,13 @@ int validate_while(ASTree *while_) {
   }
   ASTree *while_body = while_->symbol == TOK_WHILE ? astree_second(while_)
                                                    : astree_first(while_);
-  while_body->symbol_table = symbol_table_init();
-  status = validate_stmt(while_body);
-  symbol_table_leave(while_body->symbol_table);
-  return status;
+  return validate_stmt(while_body);
 }
 
 int validate_block(ASTree *block) {
   size_t i;
   int status = 0;
+  /* don't overwrite scope if this block belongs to a function */
   if (block->symbol_table == NULL) block->symbol_table = symbol_table_init();
   symbol_table_enter(block->symbol_table);
   for (i = 0; i < astree_count(block); ++i) {
