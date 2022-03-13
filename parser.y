@@ -149,11 +149,13 @@ pointer       : pointer '*'                                                     
 param_list    : param_list ',' typespec_list declarator                           { $$ = astree_twin($1, parser_make_declaration($3, $4)); astree_destroy($2); }
               | typespec_list declarator                                          { $$ = parser_make_declaration($1, $2); }
               ;
-block         : '{' stmt_list '}'                                                 { $$ = astree_adopt_sym($1, TOK_BLOCK, $2, NULL); astree_destroy($3); }
+block         : '{' block_content '}'                                             { $$ = astree_adopt_sym($1, TOK_BLOCK, $2, NULL); astree_destroy($3); }
               | '{' '}'                                                           { $$ = astree_adopt_sym($1, TOK_BLOCK, NULL, NULL); astree_destroy($2); }
               ;
-stmt_list     : stmt_list stmt                                                    { $$ = astree_twin($1, $2); }
+block_content : block_content stmt                                                { $$ = astree_twin($1, $2); }
+              | block_content declaration ';'                                     { $$ = astree_twin($1, $2); astree_destroy($3); }
               | stmt                                                              { $$ = $1; }
+              | declaration ';'                                                   { $$ = $1; astree_destroy($2); }
               ;
 stmt          : block                                                             { $$ = $1; }
               | dowhile                                                           { $$ = $1; }
@@ -161,7 +163,6 @@ stmt          : block                                                           
               | ifelse                                                            { $$ = $1; }
               | return                                                            { $$ = $1; }
               | expr ';'                                                          { $$ = $1; parser_cleanup (1, $2); }
-              | declaration ';'                                                   { $$ = $1; parser_cleanup (1, $2); }
               | ';'                                                               { $$ = NULL; astree_destroy($1); }
               ;
 dowhile       : TOK_DO stmt TOK_WHILE '(' expr ')' ';'                            { $$ = astree_adopt($1, $2, $5, NULL); parser_cleanup (3, $3, $4, $6); }
