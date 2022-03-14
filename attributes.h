@@ -42,6 +42,7 @@ typedef enum base_type {
   TYPE_VOID,
   TYPE_STRUCT,
   TYPE_UNION,
+  TYPE_ENUM,
 } BaseType;
 
 typedef enum aux_type {
