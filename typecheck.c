@@ -261,7 +261,8 @@ int compare_auxspecs(const LinkedList *dests, const LinkedList *srcs) {
       int ret = compare_params(dest->data.params, src->data.params);
       if (ret != TCHK_COMPATIBLE) return ret;
     } else if ((dest->aux == AUX_STRUCT && src->aux == AUX_STRUCT) ||
-               (dest->aux == AUX_UNION && src->aux == AUX_UNION)) {
+               (dest->aux == AUX_UNION && src->aux == AUX_UNION) ||
+               (dest->aux = AUX_ENUM && src->aux == AUX_ENUM)) {
       int tags_equal = strcmp(dest->data.tag, src->data.tag);
       if (!tags_equal) return TCHK_EXPLICIT_CAST;
     } else {
@@ -275,13 +276,10 @@ int compare_auxspecs(const LinkedList *dests, const LinkedList *srcs) {
 int compare_declspecs(const TypeSpec *dest, const TypeSpec *src) {
   /* TODO(Robert): check qualifiers */
   if (typespec_is_integer(dest) && typespec_is_integer(src)) {
-    if (dest->base == src->base && dest->width == src->width) {
-      return TCHK_COMPATIBLE;
-    } else {
-      return TCHK_IMPLICIT_CAST;
-    }
+    return TCHK_COMPATIBLE;
   } else if ((dest->base == TYPE_STRUCT && src->base == TYPE_STRUCT) ||
-             (src->base == TYPE_UNION && src->base == TYPE_UNION)) {
+             (dest->base == TYPE_UNION && src->base == TYPE_UNION) ||
+             (dest->base == TYPE_ENUM && src->base == TYPE_ENUM)) {
     return TCHK_COMPATIBLE;
   } else {
     return TCHK_INCOMPATIBLE;
@@ -290,7 +288,7 @@ int compare_declspecs(const TypeSpec *dest, const TypeSpec *src) {
 
 /* This function determines compatibility in situations where there is a
  * distinct 'destination' and 'source' type. It answers the question "does X
- * need to be converted to Y, and if so, does that need to be done explicity".
+ * need to be converted to Y, and if so, does that need to be done explicitly".
  *
  * It is used to determine conversions after promotions, casts, assignments, and
  * function calls/definitions/declarations.
@@ -474,40 +472,36 @@ int validate_integer_typespec(TypeSpec *out, enum typespec_index i,
   }
 }
 
-int validate_composite_typespec(ASTree *type, TypeSpec *out) {
-  ASTree *composite_type = astree_first(type);
-  const char *composite_type_name = composite_type->lexinfo;
-  size_t composite_type_name_len = strlen(composite_type_name);
-  SymbolValue *exists = NULL;
-  symbol_table_get(composite_type_name, composite_type_name_len, &exists);
-  if (!exists) {
-    fprintf(stderr, "ERROR: structure type %s is not defined\n",
-            composite_type_name);
+int validate_tag_typespec(ASTree *type, TypeSpec *out) {
+  ASTree *tag_type = astree_first(type);
+  const char *tag_type_name = tag_type->lexinfo;
+  size_t tag_type_name_len = strlen(tag_type_name);
+  TagValue *tagval = tag_table_get(tag_type_name, tag_type_name_len);
+  if (!tagval) {
+    fprintf(stderr, "ERROR: structure type %s is not defined\n", tag_type_name);
     return -1;
-  } else if (type->symbol == TOK_STRUCT && exists->type.base != TYPE_STRUCT) {
-    fprintf(stderr, "ERROR: type %s is not a struct\n", composite_type_name);
+  } else if (type->symbol == TOK_STRUCT && tagval->tag != TAG_STRUCT) {
+    fprintf(stderr, "ERROR: type %s is not a struct\n", tag_type_name);
     return -1;
-  } else if (type->symbol == TOK_UNION && exists->type.base != TYPE_UNION) {
-    fprintf(stderr, "ERROR: type %s is not a union\n", composite_type_name);
+  } else if (type->symbol == TOK_UNION && tagval->tag != TAG_UNION) {
+    fprintf(stderr, "ERROR: type %s is not a union\n", tag_type_name);
     return -1;
+    /*} else if (type->symbol == TOK_ENUM && tagval->tag != TAG_ENUM) {
+        fprintf(stderr, "ERROR: type %s is not an enum\n", tag_type_name);
+        return -1;
+      }*/
   } else {
-    out->base = exists->type.base;
-    out->width = exists->type.width;
-    out->alignment = exists->type.alignment;
+    out->base = tagval->tag == TAG_STRUCT ? TYPE_STRUCT : TYPE_UNION;
+    out->width = tagval->width;
+    out->alignment = tagval->alignment;
 
     if (out->auxspecs.anchor == NULL) {
       typespec_init(out);
     }
 
-    size_t i;
-    for (i = 0; i < llist_size(&exists->type.auxspecs); ++i) {
-      AuxSpec *dest = calloc(1, sizeof(*dest));
-      AuxSpec *src = llist_get(&exists->type.auxspecs, i);
-      int status = auxspec_copy(dest, src);
-      if (status) return status;
-      status = llist_push_back(&out->auxspecs, dest);
-      if (status) return status;
-    }
+    AuxSpec *tag_aux = calloc(1, sizeof(*tag_aux));
+    tag_aux->aux = tagval->tag == TAG_STRUCT ? AUX_STRUCT : AUX_UNION;
+    tag_aux->data.tag = tag_type_name;
     return 0;
   }
 }
@@ -549,7 +543,8 @@ int validate_typespec_list(ASTree *spec_list, TypeSpec *out) {
         break;
       case TOK_UNION:
       case TOK_STRUCT:
-        status = validate_composite_typespec(type, out);
+        /* case TOK_ENUM: */
+        status = validate_tag_typespec(type, out);
         break;
       case TOK_CONST:
         break;
