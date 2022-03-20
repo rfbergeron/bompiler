@@ -156,9 +156,9 @@ int type_to_string(const TypeSpec *type, char *buf, size_t size) {
     size_t j;
     switch (auxspec->aux) {
       case AUX_ARRAY:
-        if (auxspec->data.ptr_or_arr.length > 0) {
+        if (auxspec->data.memory_loc.length > 0) {
           ret += sprintf((buf + ret), "array of size %zu of ",
-                         auxspec->data.ptr_or_arr.length);
+                         auxspec->data.memory_loc.length);
         } else {
           ret += sprintf((buf + ret), "array of ");
         }
@@ -168,7 +168,7 @@ int type_to_string(const TypeSpec *type, char *buf, size_t size) {
         break;
       case AUX_FUNCTION:
         ret += sprintf((buf + ret), "function with parameters (");
-        LinkedList *params = &auxspec->data.params;
+        LinkedList *params = auxspec->data.params;
         for (j = 0; j < llist_size(params); ++j) {
           SymbolValue *param_symval = llist_get(params, j);
           ret += type_to_string(&(param_symval->type), (buf + ret), size - ret);
@@ -179,18 +179,13 @@ int type_to_string(const TypeSpec *type, char *buf, size_t size) {
         ret += sprintf((buf + ret), ") returning ");
         break;
       case AUX_STRUCT:
+        ret += sprintf((buf + ret), "struct %s", auxspec->data.tag.name);
+        break;
       case AUX_UNION:
-        ret += sprintf((buf + ret), "%s with members {",
-                       auxspec->aux == AUX_STRUCT ? "struct" : "union");
-        LinkedList *members = &auxspec->data.composite.members;
-        for (j = 0; j < llist_size(members); ++j) {
-          SymbolValue *member = llist_get(members, j);
-          ret += type_to_string(&(member->type), (buf + ret), size - ret);
-          if (j + 1 < llist_size(members)) {
-            ret += sprintf((buf + ret), ", ");
-          }
-        }
-        ret += sprintf((buf + ret), "}");
+        ret += sprintf((buf + ret), "union %s", auxspec->data.tag.name);
+        break;
+      case AUX_ENUM:
+        ret += sprintf((buf + ret), "enum %s", auxspec->data.tag.name);
         break;
       default:
         break;
@@ -257,19 +252,16 @@ int type_to_string(const TypeSpec *type, char *buf, size_t size) {
 int auxspec_destroy(AuxSpec *auxspec) {
   switch (auxspec->aux) {
     case AUX_NONE:
-      break;
     case AUX_POINTER:
-      break;
     case AUX_ARRAY:
-      break;
+    case AUX_ENUM:
     case AUX_STRUCT:
     case AUX_UNION:
-      llist_destroy(&auxspec->data.composite.members);
+    case AUX_TYPEDEF:
       break;
     case AUX_FUNCTION:
-      llist_destroy(&auxspec->data.params);
-      break;
-    case AUX_TYPEDEF:
+      llist_destroy(auxspec->data.params);
+      free(auxspec->data.params);
       break;
   }
   free(auxspec);
@@ -282,18 +274,15 @@ int auxspec_copy(AuxSpec *dest, const AuxSpec *src) {
   switch (src->aux) {
     case AUX_POINTER:
     case AUX_ARRAY:
-      dest->data.ptr_or_arr.length = src->data.ptr_or_arr.length;
-      dest->data.ptr_or_arr.qualifiers = src->data.ptr_or_arr.qualifiers;
+      dest->data.memory_loc = src->data.memory_loc;
       break;
     case AUX_UNION:
     case AUX_STRUCT:
-      dest->data.composite.symbol_table = src->data.composite.symbol_table;
-      status = llist_copy(&dest->data.composite.members,
-                          &src->data.composite.members);
-      if (status) return status;
+      dest->data.tag = src->data.tag;
       break;
     case AUX_FUNCTION:
-      status = llist_copy(&dest->data.params, &src->data.params);
+      dest->data.params = malloc(sizeof(*dest->data.params));
+      status = llist_copy(dest->data.params, src->data.params);
       if (status) return status;
       break;
     default:

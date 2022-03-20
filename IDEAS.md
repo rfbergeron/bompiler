@@ -159,6 +159,149 @@ will store other type information.
 Both of these structures will have a copy, init, and destroy function associated
 with them, to make (re)using the information stored in them easier.
 
+## Name spaces
+These namespaces are different from the namespaces described in C++. They
+provide separation for names, but they are not something that can be manipulated
+using the syntax by the programmer. Instead, they are an internal feature of
+the language.
+
+The name spaces present in ANSI C are:
+1. Objects, functions, typedef names, and enumeration constants.
+2. Structs, unions, and enum tags.
+3. Labels.
+4. Individual members of each struct or union.
+
+Labels may only appear within a function body and all labels in a function body
+share a single, flat scope, with no nesting of scopes.
+
+Struct and union members are only valid inside and only conflict with members of
+the same struct/union tag. Nesting is possible when declaring the members of a
+struct or union, since struct, union, and enum tags may be declared within a
+struct or union tag definition.
+
+## Struct and label information
+Struct/union definitions and labels do not need to have the same information as
+symbols, so they should have their own structures used to track them.
+
+## Handling function parameter types and identifiers
+Another problem I noticed with the way I've been handling function parameters is
+that function prototype parameters don't need to be named, or to have the same
+names as those used in the function definition.
+
+## A better symbol table
+Currently, symbols are stored directly in a map data structure from badlib. This
+has been convenient, but it has some limitations that make using it awkward:
+- Symbol tables are not structured relative to one another in any way.
+  Relationships can only be established between them using the syntax tree,
+  which has been inconvenient.
+- Two stack data structures are used to track the number and order of nested
+  scopes and object declarations, which could be combined with the symbol map
+  into another data structure.
+
+The ideal symbol table would have the following:
+- A `Map`, used for the primary namespace.
+- A `Map *`, used for the struct/union/enum tag namespace.
+- A `Map *`, used for the label namespace.
+
+The latter two maps are pointers because most table scopes would not need
+either, since labels only occur at function scope and most tags are declared
+at file scope, in my experience.
+
+The tag and label namespaces will not use normal `SymbolValue` structs to store
+their information, and will have dedicated ones instead.
+
+### Definition
+```
+typedef struct symbol_table {
+  Map primary_namespace;
+  Map *tag_namespace;
+  Map *label_namespace;
+  struct symbol_table *parent;
+  LinkedList *children;
+} SymbolTable;
+
+typedef struct symbol_value {
+  size_t sequence;  /* used to order declarations in a given block */
+  Location loc;     /* declaration location */
+  TypeSpec type;    /* type of symbol */
+  int is_defined;   /* whether this function/struct/union has been
+                       specified/defined */
+  char obj_loc[64]; /* location, represented as a string */
+} SymbolValue;
+
+typedef enum tag_type {
+  TAG_STRUCT,
+  TAG_UNION,
+  TAG_ENUM
+} TagType;
+
+typedef struct tag_value {
+  size_t width;
+  size_t alignment;
+  union {
+    Map enumerators;       /* mapping from names to integer constants */
+    struct {
+      SymbolTable by_name; /* struct members by name */
+      LinkedList in_order; /* struct members in declaration order */
+    } members;
+  } data;
+  TagType tag;
+} TagValue;
+
+typedef struct label_value {
+  Location *loc;
+  int is_defined;
+} LabelValue;
+```
+
+## Struct and union member tables
+The current method for storing struct and union members is no longer adequate.
+While it would be convenient to reuse the scoping functions, scopes are
+currently tracked based on their relationship to their parent scope. Tag members
+need to be resolved in scopes that are not related to the current scope by the
+parent-child relationship, because they have been defined elsewhere.
+
+The resolution of tag members also does not need to be as robust as the
+resolution of normal variables. While tags do need full symbol tables to handle
+more complicated tags (like tags which themselves contain definitions of other
+tags), tag members do not need to be resolved at depths beyond one. The right
+hand side of the reference operators should just be an identifier that is the
+name of a member. The left hand side should have its type resolved already.
+
+The problem is actually that when we resolve the type of the left hand argument,
+we don't remember the members of the structure. If the type of the left operand
+of the reference operator is a tag defined only within another structure,
+resolving the member's info may sometimes require us to dig through the syntax
+tree again to recover that information. So, either tag type information needs
+to be stored along with the name of the tag, or we need to push tag info to the
+stack. Tag info cannot be stored on the stack because of the way scoping is
+tracked, so it must be stored along with the tag name.
+
+We can deprecate the functions for entering and leaving scopes in `symtable.c`
+and instead make that functionality local to `asmgen.c` and `typecheck.c`. We
+would also remove the `current_table` global variable, and instead put that in
+the files mentioned previously.
+
+All of the symbol table functions would need to take an additional argument,
+which would be the symbol table to operate on, instead of relying on a global
+variable.
+
+Tag tables that are not declared within other tag tables (those declared at
+global or block scope) would then need to have a NULL parent reference. Tags
+declared within other tags would not have a NULL parent reference.
+
+## Tracking table state
+Instead of tracking table state in a global variable, it should be passed as an
+argument to the all of the `SymbolTable` functions, as well as the type checker
+and assembly/intermediate language generator functions. This is (I think) a more
+robust way to implement variable scoping.
+
+## Nested structure and union declarations
+Structs (and unions) declared within other structs and unions pose a unique
+problem: the tag information for the nested struct is stored in the symbol
+table of its parent struct. This table is (currently) only accessible while
+resolving the right hand side of the arrow and dot operators. 
+
 ## Special handling of function identifiers
 Function identifiers and pointers receive special treatment based on their
 location in an expression. When used on their own in/as an expression, they
@@ -475,6 +618,30 @@ retrieved from the global table for use.
 
 The function which resolves symbols (besides labels) will search each symbol
 table, starting at the top, for the corresponding symbol.
+
+## Forward declarations
+Forward declarations, as they are currently handled, are fine so far as I can
+tell, with the exception that debug information about types may not make sense.
+
+The location associated with a type is supposed to be the declaration location,
+which should not be overwritten when the function is defined. However, the names
+of variables should be overwritten, so we cannot just reuse the symbol value and
+table defined by the function prototype, because the function prototype may have
+different names for parameters or none at all.
+
+## Ownership of type information
+The current invariant for ownership of type information that I have been trying
+to maintain is that the symbol table "owns" the type information and is
+responsible for freeing it. This has proven difficult for representing functions
+and their parameters.
+
+Currently, it is unclear whether a function is responsible for the types of its
+parameters, or the block scope associated with the function. This is because
+function prototypes do not have a block associated with them, so the normal
+location for the symbol table is unavailable.
+
+The cleanest solution I can come up with is to have the declarator node of
+function prototypes store the "function prototype scope" variables.
 
 ## Promotions, conversions, and casting
 Promotion for arithmetic values is:

@@ -46,7 +46,7 @@ ASTree *astree_init(int symbol, const Location location, const char *info) {
   llist_init(&tree->children, (void (*)(void *))(astree_destroy), NULL);
   tree->next_sibling = NULL;
   tree->firstborn = tree;
-  tree->symbol_table = (Map)BLIB_MAP_EMPTY;
+  tree->symbol_table = NULL;
 
   /* remember, attributes for nodes which adopt a different symbol
    * must have the appropriate attributes set in adopt_symbol
@@ -100,9 +100,6 @@ int astree_destroy(ASTree *tree) {
 
   /* llist should handle destruction of children */
   llist_destroy(&tree->children);
-
-  /* free symbol entries associated with scope */
-  map_destroy(&tree->symbol_table);
 
   /* free one-off TypeSpec objects */
   if (!skip_type_check) {
@@ -266,13 +263,14 @@ int astree_print_tree(ASTree *tree, FILE *out, int depth) {
 }
 
 int astree_print_symbols(ASTree *tree, FILE *out) {
-  if (map_size(&tree->symbol_table) > 0) {
+  if (tree->symbol_table != NULL) {
     LinkedList symnames = (LinkedList)BLIB_LLIST_EMPTY;
     int status = llist_init(&symnames, NULL, NULL);
     if (status) return status;
-    status = map_keys(&tree->symbol_table, &symnames);
+    status = map_keys(&tree->symbol_table->primary_namespace, &symnames);
     if (status) return status;
-    DEBUGS('a', "Printing %zu symbols", map_size(&tree->symbol_table));
+    DEBUGS('a', "Printing %zu symbols",
+           map_size(&tree->symbol_table->primary_namespace));
     const char *tname = parser_get_tname(tree->symbol);
     char locstr[LINESIZE];
     location_to_string(&tree->loc, locstr, LINESIZE);
@@ -283,8 +281,8 @@ int astree_print_symbols(ASTree *tree, FILE *out) {
     size_t i;
     for (i = 0; i < llist_size(&symnames); ++i) {
       const char *symname = llist_get(&symnames, i);
-      SymbolValue *symval =
-          map_get(&tree->symbol_table, (char *)symname, strlen(symname));
+      SymbolValue *symval = map_get(&tree->symbol_table->primary_namespace,
+                                    (char *)symname, strlen(symname));
       char symval_str[LINESIZE];
       int characters_printed = symbol_value_print(symval, symval_str, LINESIZE);
       if (characters_printed < 0) {
