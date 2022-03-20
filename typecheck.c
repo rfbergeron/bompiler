@@ -69,66 +69,6 @@ int types_compatible(
     const TypeSpec *type1,
     const TypeSpec *type2); /* required to check param and member types */
 
-ASTree *extract_ident(ASTree *tree) {
-  switch (tree->symbol) {
-    /*
-    case TOK_TYPE_ID:
-      break;
-    */
-    case TOK_STRUCT:
-    case TOK_UNION:
-    case TOK_CALL:
-      return astree_first(tree);
-    case TOK_IDENT:
-      return tree;
-    case TOK_DECLARATOR:
-      if (astree_first(tree)->symbol == TOK_DECLARATOR) {
-        return extract_ident(astree_first(tree));
-      } else {
-        size_t i;
-        for (i = 0; i < astree_count(tree); ++i) {
-          ASTree *direct_decl = astree_get(tree, i);
-          if (direct_decl->symbol == TOK_IDENT) {
-            return direct_decl;
-          }
-        }
-      }
-      /* do not break; fall through and return error when no ident */
-    default:
-      fprintf(stderr, "ERROR: unable to get identifier for tree node %s\n",
-              parser_get_tname(tree->symbol));
-      return NULL;
-  }
-}
-
-const TypeSpec *extract_type(ASTree *tree) {
-  switch (tree->symbol) {
-    case TOK_STRUCT:
-    case TOK_UNION:
-    case TOK_FUNCTION:
-    case TOK_DECLARATOR:
-    case TOK_CALL:
-      return extract_ident(tree)->type;
-    case TOK_IDENT:
-    default:
-      return tree->type;
-  }
-}
-
-const Location *extract_loc(ASTree *tree) {
-  switch (tree->symbol) {
-    case TOK_STRUCT:
-    case TOK_UNION:
-    case TOK_FUNCTION:
-    case TOK_DECLARATOR:
-    case TOK_CALL:
-      return &extract_ident(tree)->loc;
-    case TOK_IDENT:
-    default:
-      return &tree->loc;
-  }
-}
-
 int assign_type(ASTree *tree, SymbolTable *table) {
   DEBUGS('t', "Attempting to assign a type");
   ASTree *identifier = extract_ident(tree);
