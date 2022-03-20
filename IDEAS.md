@@ -254,6 +254,54 @@ typedef struct label_value {
 } LabelValue;
 ```
 
+## Struct and union member tables
+The current method for storing struct and union members is no longer adequate.
+While it would be convenient to reuse the scoping functions, scopes are
+currently tracked based on their relationship to their parent scope. Tag members
+need to be resolved in scopes that are not related to the current scope by the
+parent-child relationship, because they have been defined elsewhere.
+
+The resolution of tag members also does not need to be as robust as the
+resolution of normal variables. While tags do need full symbol tables to handle
+more complicated tags (like tags which themselves contain definitions of other
+tags), tag members do not need to be resolved at depths beyond one. The right
+hand side of the reference operators should just be an identifier that is the
+name of a member. The left hand side should have its type resolved already.
+
+The problem is actually that when we resolve the type of the left hand argument,
+we don't remember the members of the structure. If the type of the left operand
+of the reference operator is a tag defined only within another structure,
+resolving the member's info may sometimes require us to dig through the syntax
+tree again to recover that information. So, either tag type information needs
+to be stored along with the name of the tag, or we need to push tag info to the
+stack. Tag info cannot be stored on the stack because of the way scoping is
+tracked, so it must be stored along with the tag name.
+
+We can deprecate the functions for entering and leaving scopes in `symtable.c`
+and instead make that functionality local to `asmgen.c` and `typecheck.c`. We
+would also remove the `current_table` global variable, and instead put that in
+the files mentioned previously.
+
+All of the symbol table functions would need to take an additional argument,
+which would be the symbol table to operate on, instead of relying on a global
+variable.
+
+Tag tables that are not declared within other tag tables (those declared at
+global or block scope) would then need to have a NULL parent reference. Tags
+declared within other tags would not have a NULL parent reference.
+
+## Tracking table state
+Instead of tracking table state in a global variable, it should be passed as an
+argument to the all of the `SymbolTable` functions, as well as the type checker
+and assembly/intermediate language generator functions. This is (I think) a more
+robust way to implement variable scoping.
+
+## Nested structure and union declarations
+Structs (and unions) declared within other structs and unions pose a unique
+problem: the tag information for the nested struct is stored in the symbol
+table of its parent struct. This table is (currently) only accessible while
+resolving the right hand side of the arrow and dot operators. 
+
 ## Special handling of function identifiers
 Function identifiers and pointers receive special treatment based on their
 location in an expression. When used on their own in/as an expression, they

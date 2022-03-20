@@ -237,6 +237,7 @@ cleanup:
   fclose(oilfile);
 
   astree_destroy(parser_root);
+  symbol_table_destroy(parser_root->symbol_table);
   DEBUGS('m', "string set cleanup");
   string_set_free_globals();
   DEBUGS('m', "lexing/parsing helper cleanup");
