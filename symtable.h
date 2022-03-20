@@ -7,38 +7,68 @@
 
 #define DEFAULT_MAP_SIZE 100
 
-/* This structure should be used for grouping together a function or object's
- * name, type, and declaration location
- */
+typedef struct symbol_value SymbolValue;
+typedef struct symbol_table {
+  Map primary_namespace;
+  Map *tag_namespace;
+  Map *label_namespace;
+  SymbolValue *function;
+  struct symbol_table *parent;
+  LinkedList *children;
+} SymbolTable;
+
 typedef struct symbol_value {
   size_t sequence;  /* used to order declarations in a given block */
   Location loc;     /* declaration location */
-  int is_defined;   /* whether this function/struct/union has been
-                       specified/defined */
   TypeSpec type;    /* type of symbol */
-  int stack_offset; /* location in the current stack frame */
+  int is_defined;   /* whether this symbol has been specified/defined */
   char obj_loc[64]; /* location, represented as a string */
-  Map *label_namespace;
 } SymbolValue;
 
+typedef enum tag_type { TAG_STRUCT = 0, TAG_UNION, TAG_ENUM } TagType;
+
+typedef struct tag_value {
+  size_t width;     /* struct/enum width */
+  size_t alignment; /* struct/enum alignment */
+  union {
+    Map enumerators; /* mapping from names to integer constants */
+    struct {
+      SymbolTable *by_name; /* struct members by name */
+      LinkedList in_order;  /* struct members in declaration order */
+    } members;
+  } data;
+  TagType tag;    /* indicates struct, union or enum tag */
+  int is_defined; /* used to identify forward declarations */
+} TagValue;
+
+typedef struct label_value {
+  Location *loc;
+  int is_defined;
+} LabelValue;
+
 /* SymbolValue functions */
-SymbolValue *symbol_value_init(const Location *loc);
+SymbolValue *symbol_value_init(const Location *loc, size_t sequence);
 int symbol_value_destroy(SymbolValue *symbol_value);
 int symbol_value_print(const SymbolValue *symbol, char *buffer, size_t size);
 
+/* TagValue functions */
+TagValue *tag_value_init(TagType tag, SymbolTable *parent_table);
+int tag_value_destroy(TagValue *tagval);
+
 /* symbol table functions */
-void symbol_table_init_globals();
-void symbol_table_free_globals();
-int insert_symbol(const char *ident, const size_t ident_len,
-                  SymbolValue *symval);
-int locate_symbol(const char *ident, const size_t ident_len, SymbolValue **out);
-int insert_tag();
-int locate_tag();
-int create_scope(Map *scope);
-int finalize_scope(Map *scope);
-int enter_scope(Map *scope);
-int leave_scope(Map *scope);
-int enter_body(Map *scope, SymbolValue *symbol);
-int leave_body(Map *scope, SymbolValue *symbol);
-int get_ret_type(TypeSpec *out);
+SymbolTable *symbol_table_init(SymbolTable *parent);
+int symbol_table_destroy(SymbolTable *table);
+int symbol_table_insert(SymbolTable *table, const char *ident,
+                        const size_t ident_len, SymbolValue *symval);
+int symbol_table_get(SymbolTable *table, const char *ident,
+                     const size_t ident_len, SymbolValue **out);
+int symbol_table_insert_tag(SymbolTable *table, const char *ident,
+                            const size_t ident_len, TagValue *tagval);
+TagValue *symbol_table_get_tag(SymbolTable *table, const char *ident,
+                               const size_t ident_len);
+int symbol_table_insert_label(SymbolTable *table, const char *ident,
+                              const size_t ident_len, LabelValue *labval);
+LabelValue *symbol_table_get_label(SymbolTable *table, const char *ident,
+                                   const size_t ident_len);
+SymbolValue *symbol_table_get_function(SymbolTable *table);
 #endif

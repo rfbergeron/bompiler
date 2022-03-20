@@ -187,7 +187,6 @@ int main(int argc, char **argv) {
   /* remember to initialize certain things, like the string table */
   string_set_init_globals();
   lexer_init_globals();
-  symbol_table_init_globals();
   asmgen_init_globals();
 
   status = yyparse();
@@ -236,12 +235,12 @@ cleanup:
   fclose(oilfile);
 
   astree_destroy(parser_root);
+  DEBUGS('m', "symbol table cleanup");
+  symbol_table_destroy(parser_root->symbol_table);
   DEBUGS('m', "string set cleanup");
   string_set_free_globals();
   DEBUGS('m', "lexing/parsing helper cleanup");
   lexer_free_globals();
-  DEBUGS('m', "symbol table cleanup");
-  symbol_table_free_globals();
   DEBUGS('m', "assembly generator cleanup");
   asmgen_free_globals();
   return EXIT_SUCCESS;
