@@ -7,10 +7,12 @@
 
 #define DEFAULT_MAP_SIZE 100
 
+typedef struct symbol_value SymbolValue;
 typedef struct symbol_table {
   Map primary_namespace;
   Map *tag_namespace;
   Map *label_namespace;
+  SymbolValue *function;
   struct symbol_table *parent;
   LinkedList *children;
 } SymbolTable;
@@ -36,7 +38,7 @@ typedef struct tag_value {
     } members;
   } data;
   TagType tag;    /* indicates struct, union or enum tag */
-  int is_defined; /* used to indentify forward declarations */
+  int is_defined; /* used to identify forward declarations */
 } TagValue;
 
 typedef struct label_value {
@@ -45,29 +47,28 @@ typedef struct label_value {
 } LabelValue;
 
 /* SymbolValue functions */
-SymbolValue *symbol_value_init(const Location *loc);
+SymbolValue *symbol_value_init(const Location *loc, size_t sequence);
 int symbol_value_destroy(SymbolValue *symbol_value);
 int symbol_value_print(const SymbolValue *symbol, char *buffer, size_t size);
 
 /* TagValue functions */
-TagValue *tag_value_init(TagType tag);
+TagValue *tag_value_init(TagType tag, SymbolTable *parent_table);
 int tag_value_destroy(TagValue *tagval);
 
 /* symbol table functions */
-SymbolTable *symbol_table_init(void);
+SymbolTable *symbol_table_init(SymbolTable *parent);
 int symbol_table_destroy(SymbolTable *table);
-int symbol_table_insert(const char *ident, const size_t ident_len,
-                        SymbolValue *symval);
-int symbol_table_get(const char *ident, const size_t ident_len,
-                     SymbolValue **out);
-int symbol_table_enter(SymbolTable *table);
-int symbol_table_leave(SymbolTable *table);
-
-int tag_table_insert(const char *ident, const size_t ident_len,
-                     TagValue *tagval);
-TagValue *tag_table_get(const char *ident, const size_t ident_len);
-
-int label_table_insert(const char *ident, const size_t ident_len,
-                       LabelValue *labval);
-LabelValue *label_table_get(const char *ident, const size_t ident_len);
+int symbol_table_insert(SymbolTable *table, const char *ident,
+                        const size_t ident_len, SymbolValue *symval);
+int symbol_table_get(SymbolTable *table, const char *ident,
+                     const size_t ident_len, SymbolValue **out);
+int symbol_table_insert_tag(SymbolTable *table, const char *ident,
+                            const size_t ident_len, TagValue *tagval);
+TagValue *symbol_table_get_tag(SymbolTable *table, const char *ident,
+                               const size_t ident_len);
+int symbol_table_insert_label(SymbolTable *table, const char *ident,
+                              const size_t ident_len, LabelValue *labval);
+LabelValue *symbol_table_get_label(SymbolTable *table, const char *ident,
+                                   const size_t ident_len);
+SymbolValue *symbol_table_get_function(SymbolTable *table);
 #endif

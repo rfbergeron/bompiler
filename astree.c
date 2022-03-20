@@ -101,13 +101,6 @@ int astree_destroy(ASTree *tree) {
   /* llist should handle destruction of children */
   llist_destroy(&tree->children);
 
-  /* free symbol entries associated with scope */
-  if (tree->symbol_table != NULL) {
-    symbol_table_destroy(tree->symbol_table);
-    /* paranoid free */
-    tree->symbol_table = NULL;
-  }
-
   /* free one-off TypeSpec objects */
   if (!skip_type_check) {
     switch (tree->symbol) {

@@ -179,13 +179,13 @@ int type_to_string(const TypeSpec *type, char *buf, size_t size) {
         ret += sprintf((buf + ret), ") returning ");
         break;
       case AUX_STRUCT:
-        ret += sprintf((buf + ret), "struct %s", auxspec->data.tag);
+        ret += sprintf((buf + ret), "struct %s", auxspec->data.tag.name);
         break;
       case AUX_UNION:
-        ret += sprintf((buf + ret), "union %s", auxspec->data.tag);
+        ret += sprintf((buf + ret), "union %s", auxspec->data.tag.name);
         break;
       case AUX_ENUM:
-        ret += sprintf((buf + ret), "enum %s", auxspec->data.tag);
+        ret += sprintf((buf + ret), "enum %s", auxspec->data.tag.name);
         break;
       default:
         break;
