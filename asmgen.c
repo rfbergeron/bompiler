@@ -8,7 +8,7 @@
 #include "symtable.h"
 
 #define MAX_INSTRUCTION_LENGTH 8
-#define MAX_OP_LENGTH 16
+#define MAX_OP_LENGTH 32
 #define MAX_LABEL_LENGTH 32
 
 /* macros used to generate string constants for instructions */
@@ -634,7 +634,7 @@ int translate_subscript(ASTree *subscript, SymbolTable *table,
   InstructionData *index_data = calloc(1, sizeof(*index_data));
   status = translate_expr(astree_second(subscript), table, index_data, USE_REG);
   if (status) return status;
-  llist_push_back(text_section, pointer_data);
+  llist_push_back(text_section, index_data);
 
   data->instruction = instructions[INSTR_MOV];
   sprintf(data->src_operand, INDEX_FMT, pointer_data->dest_operand,
@@ -658,6 +658,7 @@ int translate_reference(ASTree *reference, SymbolTable *table,
       reference->symbol == TOK_ARROW ? USE_REG : USE_REG | WANT_ADDR;
   int status = translate_expr(struct_, table, struct_data, struct_flags);
   if (status) return status;
+  llist_push_back(text_section, struct_data);
 
   const AuxSpec *struct_aux = reference->symbol == TOK_ARROW
                                   ? llist_get(&struct_->type->auxspecs, 1)
@@ -798,14 +799,16 @@ int translate_list_initialization(ASTree *declarator, ASTree *init_list,
       int status =
           translate_expr(initializer, table, initializer_data, USE_REG);
       if (status) return status;
+      llist_push_back(text_section, initializer_data);
 
+      InstructionData *assignment_data = calloc(1, sizeof(InstructionData));
+      assignment_data->instruction = instructions[INSTR_MOV];
+      strcpy(assignment_data->src_operand, initializer_data->dest_operand);
       SymbolValue *member_symbol = llist_get(member_symbols, i);
       char temp[MAX_OP_LENGTH];
       sprintf(temp, member_symbol->obj_loc, struct_data->dest_operand);
-      InstructionData *assignment_data = calloc(1, sizeof(InstructionData));
-      assignment_data->instruction = instructions[INSTR_MOV];
-      sprintf(initializer_data->dest_operand, INDIRECT_FMT, temp);
-      strcpy(assignment_data->src_operand, initializer_data->dest_operand);
+      sprintf(assignment_data->dest_operand, INDIRECT_FMT, temp);
+      llist_push_back(text_section, assignment_data);
     } else if (struct_aux->aux == AUX_UNION) {
       /* do not initialize other members of the union */
       break;
@@ -1123,15 +1126,14 @@ int translate_return(ASTree *ret, SymbolTable *table, InstructionData *data) {
 
     SymbolValue *function_symval = symbol_table_get_function(table);
     const TypeSpec *function_spec = &function_symval->type;
+    /* strip function */
     TypeSpec return_spec = SPEC_EMPTY;
-    /* strip pointer */
     status = strip_aux_type(&return_spec, function_spec);
     if (status) return status;
-    /* strip function */
-    /* TODO(Robert): free temporary copies created by the first strip */
-    status = strip_aux_type(&return_spec, function_spec);
     status = assign_vreg(&return_spec, mov_data->dest_operand, RETURN_VREG);
     if (status) return status;
+    /* free typespec copies */
+    typespec_destroy(&return_spec);
 
     llist_push_back(text_section, mov_data);
   }

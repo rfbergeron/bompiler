@@ -294,6 +294,7 @@ int astree_print_symbols(ASTree *tree, FILE *out) {
       }
       fprintf(out, "  %s: %s\n", symname, symval_str);
     }
+    llist_destroy(&symnames);
   }
   size_t i;
   for (i = 0; i < astree_count(tree); ++i) {

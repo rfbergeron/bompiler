@@ -165,7 +165,7 @@ stmt          : block                                                           
               | expr ';'                                                          { $$ = $1; parser_cleanup (1, $2); }
               | ';'                                                               { $$ = NULL; astree_destroy($1); }
               ;
-dowhile       : TOK_DO stmt TOK_WHILE '(' expr ')' ';'                            { $$ = astree_adopt($1, $2, $5, NULL); parser_cleanup (3, $3, $4, $6); }
+dowhile       : TOK_DO stmt TOK_WHILE '(' expr ')' ';'                            { $$ = astree_adopt($1, $2, $5, NULL); parser_cleanup (4, $3, $4, $6, $7); }
               ;
 while         : TOK_WHILE '(' expr ')' stmt                                       { $$ = astree_adopt($1, $3, $5, NULL); parser_cleanup (2, $2, $4); }
               ;

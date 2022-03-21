@@ -39,6 +39,7 @@ SymbolValue *symbol_value_init(const Location *loc, const size_t sequence) {
   ret->type = SPEC_EMPTY;
   ret->loc = *loc;
   ret->sequence = sequence;
+  ret->obj_loc[0] = 0;
   typespec_init(&ret->type);
   return ret;
 }
@@ -71,6 +72,8 @@ int symbol_value_print(const SymbolValue *symbol, char *buffer, size_t size) {
 TagValue *tag_value_init(TagType tag, SymbolTable *parent_table) {
   TagValue *tagval = malloc(sizeof(*tagval));
   tagval->tag = tag;
+  tagval->width = 0;
+  tagval->alignment = 0;
   if (tag == TAG_STRUCT || tag == TAG_UNION) {
     tagval->data.members.by_name = symbol_table_init(parent_table);
     if (tagval->data.members.by_name == NULL)
@@ -96,10 +99,24 @@ TagValue *tag_value_init(TagType tag, SymbolTable *parent_table) {
 
 int tag_value_destroy(TagValue *tagval) {
   if (tagval->tag == TAG_STRUCT || tagval->tag == TAG_UNION) {
+    int status = llist_destroy(&tagval->data.members.in_order);
+    if (status) {
+      fprintf(stderr, "your data structures library sucks\n");
+      abort();
+    }
+    /* don't destroy the member table; it is a child of whatever scope the tag
+     * was declared in, so it should be destroyed recursively
+     */
   } else if (tagval->tag == TAG_ENUM) {
+    /* error: invalid tag type */
+    fprintf(stderr, "ERROR: enumerations are unimplemented.\n");
+    return -1;
   } else {
     /* error: invalid tag type */
+    fprintf(stderr, "ERROR: invalid tag type; unable to free tag value.\n");
+    return -1;
   }
+  free(tagval);
   return 0;
 }
 
@@ -219,8 +236,8 @@ int symbol_table_insert_tag(SymbolTable *table, const char *ident,
   } else if (table->tag_namespace == NULL) {
     table->tag_namespace = malloc(sizeof(Map));
     /* TODO(Robert): init and destroy functions for tag values */
-    int status = map_init(table->tag_namespace, DEFAULT_MAP_SIZE, NULL, NULL,
-                          strncmp_wrapper);
+    int status = map_init(table->tag_namespace, DEFAULT_MAP_SIZE, NULL,
+                          (void (*)(void *))tag_value_destroy, strncmp_wrapper);
   }
   return map_insert(table->tag_namespace, (char *)ident, ident_len, tagval);
 }
@@ -257,7 +274,7 @@ int symbol_table_insert_label(SymbolTable *table, const char *ident,
       table->label_namespace = malloc(sizeof(Map));
       /* TODO(Robert): init and destroy functions for label values */
       int status = map_init(table->label_namespace, DEFAULT_MAP_SIZE, NULL,
-                            NULL, strncmp_wrapper);
+                            free, strncmp_wrapper);
       if (status) return status;
     }
     return map_insert(table->label_namespace, (char *)ident, ident_len, labval);

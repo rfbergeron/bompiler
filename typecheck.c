@@ -578,14 +578,16 @@ int validate_call(ASTree *call, SymbolTable *table) {
     }
   }
 
-  TypeSpec *return_spec = malloc(sizeof(*return_spec));
   /* strip pointer */
-  status = strip_aux_type(return_spec, function_spec);
+  TypeSpec temp_spec = SPEC_EMPTY;
+  status = strip_aux_type(&temp_spec, function_spec);
   if (status) return status;
   /* strip function */
-  /* TODO(Robert): free temporary copies created by the first strip */
+  TypeSpec *return_spec = malloc(sizeof(*return_spec));
   status = strip_aux_type(return_spec, function_spec);
   if (status) return status;
+  /* free temporaries created by stripping */
+  typespec_destroy(&temp_spec);
   call->type = return_spec;
   return 0;
 }
@@ -1450,10 +1452,8 @@ int define_members(ASTree *composite_type, TagValue *tagval,
    * don't work quite the same way. check to make sure everything is doing
    * okay later on
    */
-  SymbolTable *member_table = symbol_table_init(table);
-  tagval->data.members.by_name = member_table;
+  SymbolTable *member_table = tagval->data.members.by_name;
   LinkedList *member_list = &tagval->data.members.in_order;
-  llist_init(member_list, NULL, NULL);
   /* start from 2nd child; 1st was type name */
   size_t i;
   for (i = 1; i < astree_count(composite_type); ++i) {
