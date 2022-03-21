@@ -77,5 +77,6 @@ int string_set_print(FILE *out) {
     fprintf(out, "string_set[%4zu,%4zu]: %p->\"%s\"\n", map_location[0],
             map_location[1], key, key);
   }
+  llist_destroy(&key_list);
   return 0;
 }
