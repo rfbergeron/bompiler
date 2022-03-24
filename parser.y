@@ -74,6 +74,7 @@ program       : topdecl                                                         
 topdecl       : declaration ';'                                                   { $$ = $1; astree_destroy($2); }
               | struct_spec ';'                                                   { $$ = $1; astree_destroy($2); }
               | union_spec ';'                                                    { $$ = $1; astree_destroy($2); }
+              | enum_spec ';'                                                     { $$ = $1; astree_destroy($2); }
               | typespec_list declarator block                                    { $$ = astree_adopt(parser_make_declaration($1, $2), $3, NULL, NULL); }
               | ';'                                                               { $$ = NULL; astree_destroy($1); }
               ;
@@ -84,6 +85,7 @@ union_spec    : TOK_UNION TOK_IDENT '{' struct_decl_list '}'                    
               | TOK_UNION TOK_IDENT                                               { $$ = astree_adopt($1, $2, NULL, NULL); }
               ;
 enum_spec     : TOK_ENUM TOK_IDENT '{' enum_list '}'                              { $$ = astree_adopt($1, $2, $4, NULL); astree_destroy($3); astree_destroy($5); }
+              | TOK_ENUM TOK_IDENT '{' enum_list ',' '}'                          { $$ = astree_adopt($1, $2, $4, NULL); astree_destroy($3); astree_destroy($5); astree_destroy($6); }
               | TOK_ENUM TOK_IDENT                                                { $$ = astree_adopt($1, $2, NULL, NULL); }
               ;
 struct_decl_list
@@ -114,6 +116,7 @@ typespec      : TOK_LONG                                                        
               | TOK_VOID                                                          { $$ = $1; }
               | TOK_STRUCT TOK_IDENT                                              { $$ = astree_adopt($1, $2, NULL, NULL); }
               | TOK_UNION TOK_IDENT                                               { $$ = astree_adopt($1, $2, NULL, NULL); }
+              | TOK_ENUM TOK_IDENT                                                { $$ = astree_adopt($1, $2, NULL, NULL); }
               ;
 init_decls    : init_decls ',' init_decl                                          { $$ = astree_twin($1, $3); astree_destroy($2); }
               | init_decl                                                         { $$ = $1; }
