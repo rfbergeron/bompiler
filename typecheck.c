@@ -1573,6 +1573,9 @@ int define_enumerators(ASTree *enum_, TagValue *tagval, SymbolTable *table) {
     }
   }
 
+  /* TODO(Robert): adjust enum size based on enumerator sizes */
+  tagval->width = X64_SIZEOF_INT;
+  tagval->alignment = X64_ALIGNOF_INT;
   tagval->is_defined = 1;
   return 0;
 }
