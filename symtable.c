@@ -109,9 +109,11 @@ int tag_value_destroy(TagValue *tagval) {
      * was declared in, so it should be destroyed recursively
      */
   } else if (tagval->tag == TAG_ENUM) {
-    /* error: invalid tag type */
-    fprintf(stderr, "ERROR: enumerations are unimplemented.\n");
-    return -1;
+    int status = map_destroy(&tagval->data.enumerators);
+    if (status) {
+      fprintf(stderr, "your data structures library sucks\n");
+      abort();
+    }
   } else {
     /* error: invalid tag type */
     fprintf(stderr, "ERROR: invalid tag type; unable to free tag value.\n");

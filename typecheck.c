@@ -201,9 +201,9 @@ int compare_auxspecs(const LinkedList *dests, const LinkedList *srcs) {
       if (ret != TCHK_COMPATIBLE) return ret;
     } else if ((dest->aux == AUX_STRUCT && src->aux == AUX_STRUCT) ||
                (dest->aux == AUX_UNION && src->aux == AUX_UNION) ||
-               (dest->aux = AUX_ENUM && src->aux == AUX_ENUM)) {
-      int tags_equal = strcmp(dest->data.tag.name, src->data.tag.name);
-      if (!tags_equal) return TCHK_EXPLICIT_CAST;
+               (dest->aux == AUX_ENUM && src->aux == AUX_ENUM)) {
+      int tags_different = strcmp(dest->data.tag.name, src->data.tag.name);
+      if (tags_different) return TCHK_EXPLICIT_CAST;
     } else {
       return TCHK_EXPLICIT_CAST;
     }
@@ -242,14 +242,14 @@ int types_compatible(const TypeSpec *type1, const TypeSpec *type2) {
       (typespec_is_voidptr(type1) || typespec_is_voidptr(type2))) {
     /* pointer to/from void pointer */
     return TCHK_COMPATIBLE;
-  } else if (typespec_is_pointer(type1) && typespec_is_integer(type2) &&
-             llist_size(auxspecs2) == 0) {
-    /* int to pointer */
-    return TCHK_EXPLICIT_CAST;
-  } else if (typespec_is_pointer(type2) && typespec_is_integer(type1) &&
-             llist_size(auxspecs1) == 0) {
-    /* pointer to int */
-    return TCHK_EXPLICIT_CAST;
+  } else if ((typespec_is_pointer(type1) || typespec_is_enum(type1)) &&
+             typespec_is_integer(type2) && llist_size(auxspecs2) == 0) {
+    /* int to pointer or enum */
+    return TCHK_IMPLICIT_CAST;
+  } else if ((typespec_is_pointer(type2) || typespec_is_enum(type2)) &&
+             typespec_is_integer(type1) && llist_size(auxspecs1) == 0) {
+    /* pointer or enum to int */
+    return TCHK_IMPLICIT_CAST;
   }
 
   int ret = compare_auxspecs(auxspecs1, auxspecs2);
@@ -411,27 +411,51 @@ int validate_integer_typespec(TypeSpec *out, enum typespec_index i,
   }
 }
 
+BaseType type_from_tag(TagType tag) {
+  switch (tag) {
+    case TAG_STRUCT:
+      return TYPE_STRUCT;
+    case TAG_UNION:
+      return TYPE_UNION;
+    case TAG_ENUM:
+      return TYPE_ENUM;
+    default:
+      return -1;
+  }
+}
+
+AuxType aux_from_tag(TagType tag) {
+  switch (tag) {
+    case TAG_STRUCT:
+      return AUX_STRUCT;
+    case TAG_UNION:
+      return AUX_UNION;
+    case TAG_ENUM:
+      return AUX_ENUM;
+    default:
+      return -1;
+  }
+}
+
 int validate_tag_typespec(ASTree *type, SymbolTable *table, TypeSpec *out) {
-  ASTree *tag_type = astree_first(type);
-  const char *tag_type_name = tag_type->lexinfo;
-  size_t tag_type_name_len = strlen(tag_type_name);
-  TagValue *tagval =
-      symbol_table_get_tag(table, tag_type_name, tag_type_name_len);
+  ASTree *tag = astree_first(type);
+  const char *tag_name = tag->lexinfo;
+  size_t tag_name_len = strlen(tag_name);
+  TagValue *tagval = symbol_table_get_tag(table, tag_name, tag_name_len);
   if (!tagval) {
-    fprintf(stderr, "ERROR: structure type %s is not defined\n", tag_type_name);
+    fprintf(stderr, "ERROR: structure type %s is not defined\n", tag_name);
     return -1;
   } else if (type->symbol == TOK_STRUCT && tagval->tag != TAG_STRUCT) {
-    fprintf(stderr, "ERROR: type %s is not a struct\n", tag_type_name);
+    fprintf(stderr, "ERROR: type %s is not a struct\n", tag_name);
     return -1;
   } else if (type->symbol == TOK_UNION && tagval->tag != TAG_UNION) {
-    fprintf(stderr, "ERROR: type %s is not a union\n", tag_type_name);
+    fprintf(stderr, "ERROR: type %s is not a union\n", tag_name);
     return -1;
-    /*} else if (type->symbol == TOK_ENUM && tagval->tag != TAG_ENUM) {
-        fprintf(stderr, "ERROR: type %s is not an enum\n", tag_type_name);
-        return -1;
-      }*/
+  } else if (type->symbol == TOK_ENUM && tagval->tag != TAG_ENUM) {
+    fprintf(stderr, "ERROR: type %s is not an enum\n", tag_name);
+    return -1;
   } else {
-    out->base = tagval->tag == TAG_STRUCT ? TYPE_STRUCT : TYPE_UNION;
+    out->base = type_from_tag(tagval->tag);
     out->width = tagval->width;
     out->alignment = tagval->alignment;
 
@@ -440,10 +464,12 @@ int validate_tag_typespec(ASTree *type, SymbolTable *table, TypeSpec *out) {
     }
 
     AuxSpec *tag_aux = calloc(1, sizeof(*tag_aux));
-    tag_aux->aux = tagval->tag == TAG_STRUCT ? AUX_STRUCT : AUX_UNION;
-    tag_aux->data.tag.name = tag_type_name;
-    tag_aux->data.tag.members.by_name = tagval->data.members.by_name;
-    tag_aux->data.tag.members.in_order = &tagval->data.members.in_order;
+    tag_aux->aux = aux_from_tag(tagval->tag);
+    tag_aux->data.tag.name = tag_name;
+    if (tagval->tag == TAG_STRUCT || tagval->tag == TAG_UNION) {
+      tag_aux->data.tag.members.by_name = tagval->data.members.by_name;
+      tag_aux->data.tag.members.in_order = &tagval->data.members.in_order;
+    }
     llist_push_back(&out->auxspecs, tag_aux);
     return 0;
   }
@@ -487,7 +513,7 @@ int validate_typespec_list(ASTree *spec_list, SymbolTable *table,
         break;
       case TOK_UNION:
       case TOK_STRUCT:
-        /* case TOK_ENUM: */
+      case TOK_ENUM:
         status = validate_tag_typespec(type, table, out);
         break;
       case TOK_CONST:
@@ -1532,11 +1558,13 @@ int define_enumerators(ASTree *enum_, TagValue *tagval, SymbolTable *table) {
 
     AuxSpec *enum_aux = calloc(1, sizeof(*enum_aux));
     enum_aux->aux = AUX_ENUM;
-    enum_aux->data.tag.name = enum_->lexinfo;
+    enum_aux->data.tag.name = extract_ident(enum_)->lexinfo;
     llist_push_back(&symval->type.auxspecs, enum_aux);
 
     status = symbol_table_insert(table, enum_ident, enum_ident_len, symval);
     if (status) return status;
+
+    enum_node->type = &symval->type;
 
     if (value_node != NULL) {
       /* TODO(Robert): constexprs */
@@ -1550,14 +1578,16 @@ int define_enumerators(ASTree *enum_, TagValue *tagval, SymbolTable *table) {
 }
 
 TagType tag_from_symbol(int symbol) {
-  if (symbol == TOK_STRUCT)
-    return TAG_STRUCT;
-  else if (symbol == TOK_UNION)
-    return TAG_UNION;
-  else if (symbol == TOK_ENUM)
-    return TAG_ENUM;
-  else
-    return -1;
+  switch (symbol) {
+    case TOK_STRUCT:
+      return TAG_STRUCT;
+    case TOK_UNION:
+      return TAG_UNION;
+    case TOK_ENUM:
+      return TAG_ENUM;
+    default:
+      return -1;
+  }
 }
 
 int define_tag(ASTree *tag, SymbolTable *table) {
