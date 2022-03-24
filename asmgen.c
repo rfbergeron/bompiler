@@ -1321,33 +1321,36 @@ int translate_file(ASTree *root) {
   size_t i;
   for (i = 0; i < astree_count(root); ++i) {
     ASTree *topdecl = astree_get(root, i);
-    if (topdecl->symbol == TOK_DECLARATION) {
-      ASTree *declarator = astree_second(topdecl);
-      if (typespec_is_function(extract_type(declarator))) {
-        /* skip if this is a function declaration, not definition */
-        if (astree_count(topdecl) == 3) {
-          InstructionData *label_data = calloc(1, sizeof(*label_data));
-          /* put label before function body */
-          llist_push_back(text_section, label_data);
-          int status =
-              translate_function(topdecl, root->symbol_table, label_data);
+    switch (topdecl->symbol) {
+      case TOK_DECLARATION: {
+        ASTree *declarator = astree_second(topdecl);
+        if (typespec_is_function(extract_type(declarator))) {
+          /* skip if this is a function declaration, not definition */
+          if (astree_count(topdecl) == 3) {
+            InstructionData *label_data = calloc(1, sizeof(*label_data));
+            /* put label before function body */
+            llist_push_back(text_section, label_data);
+            int status =
+                translate_function(topdecl, root->symbol_table, label_data);
+            if (status) return status;
+          }
+        } else {
+          InstructionData *global_data = calloc(1, sizeof(*global_data));
+          int status = translate_global_decl(topdecl, global_data);
+          llist_push_back(data_section, global_data);
           if (status) return status;
         }
-      } else {
-        InstructionData *global_data = calloc(1, sizeof(*global_data));
-        int status = translate_global_decl(topdecl, global_data);
-        llist_push_back(data_section, global_data);
-        if (status) return status;
       }
-    } else if (topdecl->symbol == TOK_STRUCT || topdecl->symbol == TOK_UNION) {
-      /* nothing to do here; member location should already have been set */
-    } else {
-      fprintf(stderr, "ERROR: unrecognized symbol %s at top level\n",
-              parser_get_tname(topdecl->symbol));
-      return -1;
+      case TOK_STRUCT:
+      case TOK_UNION:
+      case TOK_ENUM:
+        break;
+      default:
+        fprintf(stderr, "ERROR: unrecognized symbol %s at top level\n",
+                parser_get_tname(topdecl->symbol));
+        return -1;
     }
   }
-
   return 0;
 }
 
