@@ -307,6 +307,7 @@ ASTree *extract_ident(ASTree *tree) {
   switch (tree->symbol) {
     case TOK_STRUCT:
     case TOK_UNION:
+    case TOK_ENUM:
     case TOK_CALL:
       return astree_first(tree);
     case TOK_IDENT:
