@@ -74,6 +74,7 @@ TagValue *tag_value_init(TagType tag, SymbolTable *parent_table) {
   tagval->tag = tag;
   tagval->width = 0;
   tagval->alignment = 0;
+  tagval->is_defined = 0;
   if (tag == TAG_STRUCT || tag == TAG_UNION) {
     tagval->data.members.by_name = symbol_table_init(parent_table);
     if (tagval->data.members.by_name == NULL)

@@ -1489,36 +1489,98 @@ int define_members(ASTree *composite_type, TagValue *tagval,
       DEBUGS('t', "Field inserted at %s", extract_ident(declarator)->lexinfo);
     }
   }
+  tagval->is_defined = 1;
   return 0;
 }
 
-int define_composite_type(ASTree *composite_type, SymbolTable *table) {
-  const char *composite_type_name = extract_ident(composite_type)->lexinfo;
-  const size_t composite_type_name_len =
-      strnlen(composite_type_name, MAX_IDENT_LEN);
-  DEBUGS('t', "Defining composite type: %s", composite_type_name);
-  TagValue *exists =
-      symbol_table_get_tag(table, composite_type_name, composite_type_name_len);
-  TagValue *tagval = tag_value_init(
-      composite_type->symbol == TOK_STRUCT ? TAG_STRUCT : TAG_UNION, table);
-
-  if (astree_count(composite_type) < 2 && !exists) {
-    tagval->is_defined = 0;
-    return symbol_table_insert_tag(table, composite_type_name,
-                                   composite_type_name_len, tagval);
-  } else {
-    if (exists) {
-      /* TODO(Robert): allow identical redefinitions */
-      fprintf(stderr, "ERROR: redefinition of composite_type %s\n",
-              composite_type_name);
-      return -1;
-    } else {
-      int status = symbol_table_insert_tag(table, composite_type_name,
-                                           composite_type_name_len, tagval);
-      if (status) return status;
-      return define_members(composite_type, tagval, table);
-      tagval->is_defined = 1;
+/* Enumerations are structured as follows: the enum keyword, with an optional
+ * identifier (the tag) as its child. This is followed by a sequence of nodes,
+ * which are either a TOK_IDENT or an '=', with two children, those being the
+ * TOK_IDENT for the enumeration consntant and the value it represents.
+ */
+int define_enumerators(ASTree *enum_, TagValue *tagval, SymbolTable *table) {
+  /* TODO(Robert): Enumerators are compile time constants. Figure them out
+   * at compile time for real, like all other compile time consntants.
+   */
+  size_t i;
+  for (i = 1; i < astree_count(enum_); ++i) {
+    ASTree *enum_node = astree_get(enum_, i);
+    ASTree *value_node = NULL;
+    if (enum_node->symbol == '=') {
+      value_node = astree_second(enum_node);
+      enum_node = astree_first(enum_node);
     }
+
+    const char *enum_ident = extract_ident(enum_node)->lexinfo;
+    size_t enum_ident_len = strlen(enum_ident);
+    SymbolValue *existing = NULL;
+    int is_redefinition =
+        symbol_table_get(table, enum_ident, enum_ident_len, &existing);
+    if (is_redefinition) {
+      fprintf(stderr, "ERROR: redefinition of enumeration constant %s\n",
+              enum_ident);
+      return -1;
+    }
+
+    SymbolValue *symval =
+        symbol_value_init(&enum_->loc, map_size(&table->primary_namespace));
+    int status = typespec_init(&symval->type);
+    if (status) return status;
+    symval->type.alignment = X64_ALIGNOF_INT;
+    symval->type.width = X64_SIZEOF_INT;
+    symval->type.base = TYPE_ENUM;
+
+    AuxSpec *enum_aux = calloc(1, sizeof(*enum_aux));
+    enum_aux->aux = AUX_ENUM;
+    enum_aux->data.tag.name = enum_->lexinfo;
+    llist_push_back(&symval->type.auxspecs, enum_aux);
+
+    status = symbol_table_insert(table, enum_ident, enum_ident_len, symval);
+    if (status) return status;
+
+    if (value_node != NULL) {
+      /* TODO(Robert): constexprs */
+      int status = validate_expr(value_node, table);
+      if (status) return status;
+    }
+  }
+
+  tagval->is_defined = 1;
+  return 0;
+}
+
+TagType tag_from_symbol(int symbol) {
+  if (symbol == TOK_STRUCT)
+    return TAG_STRUCT;
+  else if (symbol == TOK_UNION)
+    return TAG_UNION;
+  else if (symbol == TOK_ENUM)
+    return TAG_ENUM;
+  else
+    return -1;
+}
+
+int define_tag(ASTree *tag, SymbolTable *table) {
+  const char *tag_name = extract_ident(tag)->lexinfo;
+  const size_t tag_name_len = strnlen(tag_name, MAX_IDENT_LEN);
+  DEBUGS('t', "Defining tag: %s", tag_name);
+  TagValue *exists = symbol_table_get_tag(table, tag_name, tag_name_len);
+  TagValue *tagval = tag_value_init(tag_from_symbol(tag->symbol), table);
+  if (tagval == NULL) return -1;
+
+  if (astree_count(tag) < 2 && !exists) {
+    return symbol_table_insert_tag(table, tag_name, tag_name_len, tagval);
+  } else if (exists) {
+    /* TODO(Robert): allow identical redefinitions */
+    fprintf(stderr, "ERROR: redefinition of tag %s\n", tag_name);
+    return -1;
+  } else {
+    int status = symbol_table_insert_tag(table, tag_name, tag_name_len, tagval);
+    if (status) return status;
+    if (tagval->tag == TAG_ENUM)
+      return define_enumerators(tag, tagval, table);
+    else
+      return define_members(tag, tagval, table);
   }
 }
 
@@ -1675,7 +1737,8 @@ int type_checker_make_table(ASTree *root) {
         break;
       case TOK_STRUCT:
       case TOK_UNION:
-        status = define_composite_type(child, root->symbol_table);
+      case TOK_ENUM:
+        status = define_tag(child, root->symbol_table);
         if (status) return status;
         break;
       default:
