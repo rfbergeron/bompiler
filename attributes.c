@@ -81,7 +81,8 @@ const Location LOC_EMPTY = {0, 0, 0, 0};
 
 const char type_map[][16] = {"void", "int", "float", "struct"};
 
-const char attr_map[][16] = {"reg", "lval", "rval", "addr", "const"};
+const char attr_map[][16] = {"REG",        "LVAL", "CONST",
+                             "ARITHCONST", "BOOL", "VADDR"};
 
 /* Precedence for conversions:
  * 1. long double
@@ -107,20 +108,24 @@ const char attr_map[][16] = {"reg", "lval", "rval", "addr", "const"};
 
 int attributes_to_string(const unsigned int attributes, char *buf,
                          size_t size) {
+  if (attributes == ATTR_NONE) {
+    buf[0] = 0;
+    return 0;
+  }
+
   size_t i, buf_index = 0;
   for (i = 0; i < NUM_ATTRIBUTES; ++i) {
     if (attributes & (1 << i)) {
       if (buf_index + strlen(attr_map[i]) > size) {
-        fprintf(stderr, "WARN: buffer too small to print all attributes");
+        fprintf(stderr, "WARN: buffer too small to print all attributes\n");
         return 1;
-      } else if (i == 0) {
-        buf_index += sprintf(buf, " %s", attr_map[i]);
       } else {
-        buf_index += sprintf(buf, "%s", attr_map[i]);
+        buf_index += sprintf(buf + buf_index, "%s ", attr_map[i]);
       }
     }
   }
-  buf[buf_index] = 0;
+
+  if (buf_index > 0) buf[buf_index - 1] = 0;
   return 0;
 }
 

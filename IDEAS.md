@@ -420,6 +420,29 @@ the parser should just add the necessary tree nodes to make those two operations
 look equivalent in the abstract syntax tree. A similar thing could be done with
 the square bracket (array indexing) operator.
 
+## Constant expression evaluation
+Constant expressions are required:
+- after `case`
+- as array bounds and bit-field lengths
+- enum values
+- in initializers
+- some preprocessor expressions (we don't need to worry about that one)
+- as the argument of `sizeof` (technically)
+
+`sizeof` doesn't really need a constant expression as its argument; it can work
+with any expression whose result has a known size. The result of sizeof is a
+constant expression, though.
+
+There are two denominations of constant expressions: one only allowing operands
+of arithmetic, character, or enumeration types, and one allowing any constants.
+The former is for enumerator values, case labels, array bounds, and bit-field
+lengths. The latter is for initializers of static objects and arrays, as well
+as automatic objects and arrays that are initialized with a brace-list.
+
+Since there are two classes of constant expressions, the `ASTree` flag field
+will need two separate bits marking constant expressions. This technically
+allows us to specify a third level of constness, for later use.
+
 ## Passing information during type checking
 The return values of the type checker's internal functions should be a flagset
 which can be used to indicate different things about the status of that branch

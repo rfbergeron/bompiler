@@ -31,8 +31,10 @@ enum attribute {
   ATTR_EXPR_VREG = 1 << 0,  /* requires a virtual register */
   ATTR_EXPR_LVAL = 1 << 1,  /* refers to an assignable location */
   ATTR_EXPR_CONST = 1 << 2, /* refers to a compile-time constant */
-  ATTR_EXPR_BOOL = 1 << 3,  /* int guaranteed to be 0 or 1 */
-  ATTR_EXPR_VADDR = 1 << 4, /* int is memory address */
+  ATTR_EXPR_ARITHCONST =
+      1 << 3,               /* as above, but only arithmetic/enum types used */
+  ATTR_EXPR_BOOL = 1 << 4,  /* int guaranteed to be 0 or 1 */
+  ATTR_EXPR_VADDR = 1 << 5, /* int is memory address */
 };
 
 typedef enum base_type {
