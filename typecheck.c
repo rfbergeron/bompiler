@@ -113,6 +113,9 @@ int convert_type(ASTree *tree, const TypeSpec *type) {
   if (status) return status;
   ASTree *cast = astree_init(TOK_CAST, tree->loc, "_cast");
   cast->type = cast_spec;
+  /* set constexpr flags on cast if set on tree */
+  cast->attributes |=
+      tree->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST);
   astree_inject(tree, cast);
   return 0;
 }
@@ -136,6 +139,9 @@ int perform_pointer_conv(ASTree *tree) {
     if (status) return status;
     ASTree *cast = astree_init(TOK_CAST, tree->loc, "_cast");
     cast->type = pointer_spec;
+    /* set constexpr flags on cast if set on tree */
+    cast->attributes |=
+        tree->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST);
     astree_inject(tree, cast);
     return 0;
   }
@@ -344,6 +350,7 @@ int validate_intcon(ASTree *intcon) {
     intcon->type = &SPEC_LONG;
   }
 
+  intcon->attributes |= ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST;
   return status;
 }
 
@@ -365,6 +372,7 @@ int validate_charcon(ASTree *charcon) {
   } else {
   }
   charcon->type = &SPEC_CHAR;
+  charcon->attributes |= ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST;
   return 0;
 }
 
@@ -383,6 +391,7 @@ int validate_stringcon(ASTree *stringcon) {
   array_aux->data.memory_loc.length = strlen(stringcon->lexinfo) - 1;
 
   stringcon->type = stringcon_type;
+  stringcon->attributes |= ATTR_EXPR_CONST;
   return 0;
 }
 
@@ -628,6 +637,8 @@ int validate_assignment(ASTree *assignment, SymbolTable *table) {
   if (status) return status;
   status = perform_pointer_conv(src);
   if (status) return status;
+  assignment->attributes |=
+      src->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST);
 
   assignment->type = dest->type;
   return convert_type(src, dest->type);
@@ -773,6 +784,9 @@ int validate_cast(ASTree *cast, SymbolTable *table) {
   if (status) return status;
   status = perform_pointer_conv(expr);
   if (status) return status;
+
+  unsigned int expr_attrs = extract_ident(expr)->attributes;
+  cast->attributes |= expr_attrs & (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST);
 
   int compatibility = types_compatible(extract_type(cast), extract_type(expr));
   if (compatibility == TCHK_INCOMPATIBLE)
@@ -936,33 +950,44 @@ int validate_binop(ASTree *operator, SymbolTable * table) {
   switch (operator->symbol) {
     case TOK_SHL:
     case TOK_SHR:
-      return typecheck_shfop(operator, left, right);
+      status = typecheck_shfop(operator, left, right);
+      break;
     case '%':
     case '&':
     case '|':
     case '^':
-      return typecheck_bitop(operator, left, right);
+      status = typecheck_bitop(operator, left, right);
+      break;
     case '*':
     case '/':
-      return typecheck_mulop(operator, left, right);
+      status = typecheck_mulop(operator, left, right);
+      break;
     case '+':
     case '-':
-      return typecheck_addop(operator, left, right);
+      status = typecheck_addop(operator, left, right);
+      break;
     case TOK_EQ:
     case TOK_NE:
     case TOK_GE:
     case TOK_LE:
     case '>':
     case '<':
-      return typecheck_relop(operator, left, right);
+      status = typecheck_relop(operator, left, right);
+      break;
     case TOK_AND:
     case TOK_OR:
-      return typecheck_logop(operator, left, right);
+      status = typecheck_logop(operator, left, right);
+      break;
     default:
       fprintf(stderr, "ERROR: unimplemented binary operator \"%s\"\n.",
               parser_get_tname(operator->symbol));
-      return -1;
+      status = -1;
   }
+
+  unsigned int result_attrs = left->attributes | right->attributes;
+  operator->attributes |=
+      result_attrs &(ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST);
+  return status;
 }
 
 int is_increment(const int symbol) {
@@ -1037,6 +1062,7 @@ int validate_addrof(ASTree *addrof, SymbolTable *table) {
   int status = validate_expr(subexpr, table);
   if (status) return status;
   /* TODO(Robert): check that operand is an lval */
+  /* TODO(Robert): set constexpr attribute if operand is static/extern */
   TypeSpec *addrof_spec = malloc(sizeof(*addrof_spec));
   status = typespec_copy(addrof_spec, extract_type(subexpr));
   if (status) return status;

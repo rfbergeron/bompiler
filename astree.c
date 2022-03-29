@@ -311,6 +311,9 @@ ASTree *extract_ident(ASTree *tree) {
     case TOK_CALL:
       return astree_first(tree);
     case TOK_IDENT:
+    case TOK_INTCON:
+    case TOK_CHARCON:
+    case TOK_STRINGCON:
       return tree;
     case TOK_DECLARATOR:
       if (astree_first(tree)->symbol == TOK_DECLARATOR) {
@@ -325,6 +328,7 @@ ASTree *extract_ident(ASTree *tree) {
         }
       }
       /* do not break; fall through and return error when no ident */
+    case TOK_DECLARATION:
     default:
       fprintf(stderr, "ERROR: unable to get identifier for tree node %s\n",
               parser_get_tname(tree->symbol));
