@@ -420,7 +420,31 @@ the parser should just add the necessary tree nodes to make those two operations
 look equivalent in the abstract syntax tree. A similar thing could be done with
 the square bracket (array indexing) operator.
 
+## Constant value storage
+Enumeration and arithmetic constants (as in TOK_INTCON and TOK_CHARCON) should
+have a way to store the actual value of their constant, so that it only needs
+to be converted from a string once. For arithmetic constants, this is
+straightforward, since it can just be stored on the syntax tree node. However,
+ever occurrence of the enumeration constant needs the value to be propogated to
+it, so it must be stored in the symbol table in some way.
+
+The `Map` member of `TagValue` is supposed to be used for this purpose, but the
+type of enumeration objects and enumeration constants is identical. The way they
+are distinguished is using the `flag` member of `SymbolValue`. If `flag` is set,
+then it is a constant, and the value of the constant should be fetched from the
+`TagValue`.
+
+This is a cryptic and terrible way to do this and it will be replaced at a later
+date, but it is sufficient for now.
+
 ## Constant expression evaluation
+NOTE: I have decided that the computation of constant expressions should not be
+done until assembly/intermediate language generation. They will still be
+validated using flags in the syntax tree, but the actual result will not be
+calculated or stored on the tree. The mechanisms for the evaluation of constant
+expressions will probably share some machinery with the mechanisms for
+optimization.
+
 Constant expressions are required:
 - after `case`
 - as array bounds and bit-field lengths
@@ -431,7 +455,8 @@ Constant expressions are required:
 
 `sizeof` doesn't really need a constant expression as its argument; it can work
 with any expression whose result has a known size. The result of sizeof is a
-constant expression, though.
+constant expression, though. NOTE: `sizeof` doesn't actually evaluate its
+argument; it just uses it to determine the type whose size it is calculating.
 
 There are two denominations of constant expressions: one only allowing operands
 of arithmetic, character, or enumeration types, and one allowing any constants.
