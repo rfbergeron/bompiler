@@ -21,7 +21,7 @@ typedef struct symbol_value {
   size_t sequence;  /* used to order declarations in a given block */
   Location loc;     /* declaration location */
   TypeSpec type;    /* type of symbol */
-  int is_defined;   /* whether this symbol has been specified/defined */
+  int flag;         /* context dependent flag */
   char obj_loc[64]; /* location, represented as a string */
 } SymbolValue;
 
@@ -31,7 +31,7 @@ typedef struct tag_value {
   size_t width;     /* struct/enum width */
   size_t alignment; /* struct/enum alignment */
   union {
-    Map enumerators; /* mapping from names to integer constants */
+    Map enumerators; /* mapping from names to string constants */
     struct {
       SymbolTable *by_name; /* struct members by name */
       LinkedList in_order;  /* struct members in declaration order */

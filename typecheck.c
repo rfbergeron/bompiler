@@ -1459,7 +1459,7 @@ int define_function(ASTree *function, SymbolTable *table) {
         TCHK_INCOMPATIBLE) {
       fprintf(stderr, "ERROR: redeclaration of function: %s\n", function_ident);
       return -1;
-    } else if (existing_entry->is_defined) {
+    } else if (existing_entry->flag) {
       fprintf(stderr, "ERROR: redefinition of function: %s\n", function_ident);
       return -1;
     } else if (astree_count(function) == 3) {
@@ -1471,6 +1471,8 @@ int define_function(ASTree *function, SymbolTable *table) {
       body->symbol_table = identifier->symbol_table;
       int status = validate_stmt(body, table);
       if (status) return status;
+      /* mark function as defined */
+      existing_entry->flag = 1;
     }
     /* TODO(Robert): keep declaration location of function prototype but use
      * the parameter names from the definition
@@ -1491,6 +1493,8 @@ int define_function(ASTree *function, SymbolTable *table) {
       body->symbol_table = identifier->symbol_table;
       int status = validate_stmt(body, table);
       if (status) return status;
+      /* mark function as defined */
+      symbol->flag = 1;
     }
     return assign_type(identifier, table);
   }
@@ -1581,6 +1585,8 @@ int define_enumerators(ASTree *enum_, TagValue *tagval, SymbolTable *table) {
     symval->type.alignment = X64_ALIGNOF_INT;
     symval->type.width = X64_SIZEOF_INT;
     symval->type.base = TYPE_ENUM;
+    /* mark as enumeration consntant */
+    symval->flag = 1;
 
     AuxSpec *enum_aux = calloc(1, sizeof(*enum_aux));
     enum_aux->aux = AUX_ENUM;
