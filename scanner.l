@@ -55,6 +55,7 @@ NOTSTRING       (\"[^"]*)
 "else"          { return lexer_token (TOK_ELSE); }
 "do"            { return lexer_token (TOK_DO); }
 "while"         { return lexer_token (TOK_WHILE); }
+"for"           { return lexer_token (TOK_FOR); }
 "return"        { return lexer_token (TOK_RETURN); }
 "struct"        { return lexer_token (TOK_STRUCT); }
 "union"         { return lexer_token (TOK_UNION); }
