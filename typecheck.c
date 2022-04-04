@@ -1599,9 +1599,15 @@ int define_enumerators(ASTree *enum_, TagValue *tagval, SymbolTable *table) {
     enum_node->type = &symval->type;
 
     if (value_node != NULL) {
-      /* TODO(Robert): constexprs */
+      /* TODO(Robert): evaluate enumeration constants */
       int status = validate_expr(value_node, table);
       if (status) return status;
+      if ((value_node->attributes & ATTR_EXPR_ARITHCONST) == 0) {
+        fprintf(stderr,
+                "ERROR: enumerator value must evaluate to an arithmetic"
+                " constant\n");
+        return -1;
+      }
     }
   }
 
