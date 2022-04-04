@@ -1070,6 +1070,68 @@ static int translate_while(ASTree *while_, SymbolTable *table) {
   return 0;
 }
 
+static int translate_for(ASTree *for_, SymbolTable *table) {
+  size_t current_branch = branch_count++;
+  ASTree *for_exprs = astree_first(for_);
+  /* translate initialization expression, if present */
+  ASTree *init_expr = astree_first(for_exprs);
+  if (init_expr->symbol != ';') {
+    InstructionData *init_data = calloc(1, sizeof(*init_data));
+    int status = translate_expr(init_expr, table, init_data, NO_INSTR_FLAGS);
+    if (status) return status;
+    llist_push_back(text_section, init_data);
+  }
+
+  /* emit label at beginning of condition */
+  InstructionData *cond_label = calloc(1, sizeof(*cond_label));
+  sprintf(cond_label->label, COND_FMT, current_branch);
+  llist_push_back(text_section, cond_label);
+  /* translate conditional expression, if present */
+  ASTree *cond_expr = astree_second(for_exprs);
+  if (cond_expr->symbol != ';') {
+    /* translate conditional expression */
+    InstructionData *cond_data = calloc(1, sizeof(*cond_data));
+    int status = translate_expr(cond_expr, table, cond_data, USE_REG);
+    if (status) return status;
+    llist_push_back(text_section, cond_data);
+    /* check if condition is zero and jump if it is */
+    InstructionData *test_data = calloc(1, sizeof(*test_data));
+    test_data->instruction = instructions[INSTR_TEST];
+    strcpy(test_data->dest_operand, cond_data->dest_operand);
+    strcpy(test_data->src_operand, cond_data->dest_operand);
+    llist_push_back(text_section, test_data);
+
+    InstructionData *test_jmp_data = calloc(1, sizeof(*test_jmp_data));
+    test_jmp_data->instruction = instructions[INSTR_JZ];
+    sprintf(test_jmp_data->dest_operand, END_FMT, current_branch);
+    llist_push_back(text_section, test_jmp_data);
+  }
+
+  /* translate for body */
+  int status = translate_stmt(astree_second(for_), table);
+  if (status) return status;
+  /* translate re-initialization, if present */
+  ASTree *reinit_expr = astree_third(for_exprs);
+  if (reinit_expr->symbol != ';' && reinit_expr->symbol != ')') {
+    InstructionData *reinit_data = calloc(1, sizeof(*reinit_data));
+    int status =
+        translate_expr(reinit_expr, table, reinit_data, NO_INSTR_FLAGS);
+    if (status) return status;
+    llist_push_back(text_section, reinit_data);
+  }
+
+  /* emit jump to condition */
+  InstructionData *cond_jmp_data = calloc(1, sizeof(*cond_jmp_data));
+  cond_jmp_data->instruction = instructions[INSTR_JMP];
+  sprintf(cond_jmp_data->dest_operand, COND_FMT, current_branch);
+  llist_push_back(text_section, cond_jmp_data);
+  /* emit label at end of statement */
+  InstructionData *end_label = calloc(1, sizeof(*end_label));
+  sprintf(end_label->label, END_FMT, current_branch);
+  llist_push_back(text_section, end_label);
+  return 0;
+}
+
 static int translate_do(ASTree *do_, SymbolTable *table) {
   size_t current_branch = branch_count++;
   /* emit label at beginning of body */
@@ -1168,6 +1230,9 @@ static int translate_stmt(ASTree *stmt, SymbolTable *table) {
       break;
     case TOK_DO:
       status = translate_do(stmt, table);
+      break;
+    case TOK_FOR:
+      status = translate_for(stmt, table);
       break;
     case TOK_IF:
       status = translate_ifelse(stmt, table);
