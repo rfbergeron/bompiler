@@ -1742,6 +1742,36 @@ int validate_while(ASTree *while_, SymbolTable *table) {
   return validate_stmt(while_body, table);
 }
 
+int validate_for(ASTree *for_, SymbolTable *table) {
+  ASTree *for_exprs = astree_first(for_);
+  ASTree *first_expr = astree_first(for_exprs);
+  if (first_expr->symbol != ';') {
+    int status = validate_expr(first_expr, table);
+    if (status) return status;
+  }
+
+  ASTree *second_expr = astree_second(for_exprs);
+  if (second_expr->symbol != ';') {
+    int status = validate_expr(second_expr, table);
+    if (status) return status;
+    if (!typespec_is_scalar(extract_type(second_expr))) {
+      fprintf(stderr,
+              "ERROR: for loop condition must be of arithmetic or "
+              "pointer type.\n");
+      return -1;
+    }
+  }
+
+  ASTree *third_expr = astree_third(for_exprs);
+  if (third_expr->symbol != ';' && third_expr->symbol != ')') {
+    int status = validate_expr(third_expr, table);
+    if (status) return status;
+  }
+
+  ASTree *for_stmt = astree_second(for_);
+  return validate_stmt(for_stmt, table);
+}
+
 int validate_block(ASTree *block, SymbolTable *table) {
   size_t i;
   int status = 0;
@@ -1776,6 +1806,9 @@ int validate_stmt(ASTree *statement, SymbolTable *table) {
       break;
     case TOK_DECLARATION:
       status = validate_declaration(statement, table);
+      break;
+    case TOK_FOR:
+      status = validate_for(statement, table);
       break;
     default:
       /* parser will catch anything that we don't want, so at this point the
