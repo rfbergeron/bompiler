@@ -254,6 +254,26 @@ typedef struct label_value {
 } LabelValue;
 ```
 
+## Redoing the symbol table (again)
+The symbol table is still clunky. I think I will solve this by reducing the
+symbol table data structure down to the maps for the namespaces. Nested scopes
+will be tracked using a stack inside a separate data structure.
+
+## Recording type checker/assembly generator state
+The extra information besides symbols in a given scope will be tracked using a
+separate data structure which records all of the state that the type checker and
+assembly generator need.
+
+This structure will have two stacks: one for symbol tables for nested scopes,
+and another for iteration and switch statements. The latter is so that the
+assembly generator knows where `break` and `continue` statements should jump
+to. It will also hold the type information for the enclosing function, if
+applicable.
+
+This is still a little clunky, since symbol table information is needed in so
+few contexts in the assembly generator, but I cannot think of a better way to
+track where symbols live on the stack.
+
 ## Struct and union member tables
 The current method for storing struct and union members is no longer adequate.
 While it would be convenient to reuse the scoping functions, scopes are
