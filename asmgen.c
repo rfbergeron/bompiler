@@ -5,6 +5,7 @@
 #include "badlib/badalist.h"
 #include "debug.h"
 #include "lyutils.h"
+#include "state.h"
 #include "symtable.h"
 
 #define MAX_INSTRUCTION_LENGTH 8
@@ -172,9 +173,9 @@ static LinkedList *bss_section;
 static char *translate_stride(ASTree *index, ASTree *memblock);
 static char *translate_reg_type(ASTree *);
 static char *translate_type(void *type, int flags);
-static int translate_stmt(ASTree *stmt, SymbolTable *table);
-static int translate_block(ASTree *block, SymbolTable *table);
-static int translate_expr(ASTree *tree, SymbolTable *table,
+static int translate_stmt(ASTree *stmt, CompilerState *state);
+static int translate_block(ASTree *block, CompilerState *state);
+static int translate_expr(ASTree *tree, CompilerState *state,
                           InstructionData *data, unsigned int flags);
 
 int assign_space(SymbolValue *symval, const char *location) {
@@ -223,10 +224,10 @@ int assign_vreg(const TypeSpec *type, char *dest, const size_t vreg_num) {
   return 0;
 }
 
-int resolve_object(SymbolTable *table, const char *ident, char *dest,
+int resolve_object(CompilerState *state, const char *ident, char *dest,
                    const char *fmt) {
   SymbolValue *symval = NULL;
-  symbol_table_get(table, ident, strlen(ident), &symval);
+  state_get_symbol(state, ident, strlen(ident), &symval);
   if (symval == NULL) {
     fprintf(stderr, "ERROR: unable to resolve symbol %s\n", ident);
     return -1;
@@ -261,10 +262,10 @@ int restore_registers(size_t start, size_t count) {
   return 0;
 }
 
-int translate_ident(ASTree *ident, SymbolTable *table, InstructionData *data,
+int translate_ident(ASTree *ident, CompilerState *state, InstructionData *data,
                     unsigned int flags) {
   int status =
-      resolve_object(table, ident->lexinfo, data->src_operand, INDIRECT_FMT);
+      resolve_object(state, ident->lexinfo, data->src_operand, INDIRECT_FMT);
   if (status) return status;
   const TypeSpec *ident_type = extract_type(ident);
   AuxSpec *ident_aux = llist_back(&ident_type->auxspecs);
@@ -292,7 +293,7 @@ int translate_ident(ASTree *ident, SymbolTable *table, InstructionData *data,
  * any int -> any narrower int: simple mov
  * any int -> any int of same width: nop
  */
-int translate_conversion(ASTree *operator, SymbolTable * table,
+int translate_conversion(ASTree *operator, CompilerState * state,
                          InstructionData *data, unsigned int flags) {
   DEBUGS('g', "Translating conversion");
 
@@ -312,7 +313,7 @@ int translate_conversion(ASTree *operator, SymbolTable * table,
     return -1;
   }
 
-  int status = translate_expr(converted_expr, table, src_data, NO_INSTR_FLAGS);
+  int status = translate_expr(converted_expr, state, src_data, NO_INSTR_FLAGS);
   if (status) return status;
   llist_push_back(text_section, src_data);
   strcpy(data->src_operand, src_data->dest_operand);
@@ -369,7 +370,7 @@ int translate_intcon(ASTree *constant, InstructionData *data,
  * logical NOT does the same thing as the conversion from an arbitrary value
  * to a boolean except instead of using SETNZ it does SETZ
  */
-int translate_logical_not(ASTree *tree, SymbolTable *table,
+int translate_logical_not(ASTree *tree, CompilerState *state,
                           InstructionData *data) {
   /* TODO(Robert): add attribute indicating when the result of an expression
    * is boolean so that we can skip doing all of this if we don't need to, or
@@ -378,7 +379,7 @@ int translate_logical_not(ASTree *tree, SymbolTable *table,
 
   /* evaluate operand */
   InstructionData *tree_data = calloc(1, sizeof(InstructionData));
-  int status = translate_expr(tree, table, tree_data, USE_REG);
+  int status = translate_expr(tree, state, tree_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, tree_data);
 
@@ -393,7 +394,7 @@ int translate_logical_not(ASTree *tree, SymbolTable *table,
   return assign_vreg(&SPEC_INT, data->dest_operand, vreg_count++);
 }
 
-int translate_logical(ASTree *operator, SymbolTable * table,
+int translate_logical(ASTree *operator, CompilerState * state,
                       InstructionData *data, InstructionEnum num,
                       unsigned int flags) {
   /* create label used to skip second operand */
@@ -403,7 +404,7 @@ int translate_logical(ASTree *operator, SymbolTable * table,
   /* test first operand; jump on false for && and true for || */
   InstructionData *first_data = calloc(1, sizeof(InstructionData));
   int status =
-      translate_expr(astree_first(operator), table, first_data, USE_REG);
+      translate_expr(astree_first(operator), state, first_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, first_data);
 
@@ -423,7 +424,7 @@ int translate_logical(ASTree *operator, SymbolTable * table,
 
   /* test second operand; no need to jump afterwards */
   InstructionData *second_data = calloc(1, sizeof(InstructionData));
-  status = translate_expr(astree_second(operator), table, second_data, USE_REG);
+  status = translate_expr(astree_second(operator), state, second_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, second_data);
 
@@ -444,18 +445,18 @@ int translate_logical(ASTree *operator, SymbolTable * table,
 /* TODO(Robert): check location of result of first subexpression, and require
  * second subexpression to place result in a register if the first was not
  */
-int translate_comparison(ASTree *operator, SymbolTable * table,
+int translate_comparison(ASTree *operator, CompilerState * state,
                          InstructionData *data, InstructionEnum num,
                          unsigned int flags) {
   /* CMP operands, then SETG/SETGE/SETL/SETLE/SETE/SETNE */
   InstructionData *first_data = calloc(1, sizeof(*first_data));
   int status =
-      translate_expr(astree_first(operator), table, first_data, NO_INSTR_FLAGS);
+      translate_expr(astree_first(operator), state, first_data, NO_INSTR_FLAGS);
   if (status) return status;
   llist_push_back(text_section, first_data);
 
   InstructionData *second_data = calloc(1, sizeof(*second_data));
-  status = translate_expr(astree_second(operator), table, second_data,
+  status = translate_expr(astree_second(operator), state, second_data,
                           NO_INSTR_FLAGS);
   if (status) return status;
   llist_push_back(text_section, second_data);
@@ -471,12 +472,12 @@ int translate_comparison(ASTree *operator, SymbolTable * table,
   return status;
 }
 
-int translate_indirection(ASTree *indirection, SymbolTable *table,
+int translate_indirection(ASTree *indirection, CompilerState *state,
                           InstructionData *data, unsigned int flags) {
   DEBUGS('g', "Translating indirection operation.");
   InstructionData *src_data = calloc(1, sizeof(*src_data));
   int status =
-      translate_expr(astree_first(indirection), table, src_data, USE_REG);
+      translate_expr(astree_first(indirection), state, src_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, src_data);
 
@@ -487,16 +488,16 @@ int translate_indirection(ASTree *indirection, SymbolTable *table,
   return 0;
 }
 
-int translate_addrof(ASTree *addrof, SymbolTable *table, InstructionData *data,
-                     unsigned int flags) {
+int translate_addrof(ASTree *addrof, CompilerState *state,
+                     InstructionData *data, unsigned int flags) {
   DEBUGS('g', "Translating address operation.");
   /* TODO(Robert): handle other types of lvalues, like struct and union
    * members
    */
-  return translate_expr(astree_first(addrof), table, data, WANT_ADDR);
+  return translate_expr(astree_first(addrof), state, data, WANT_ADDR);
 }
 
-int translate_inc_dec(ASTree *operator, SymbolTable * table,
+int translate_inc_dec(ASTree *operator, CompilerState * state,
                       InstructionData *data, InstructionEnum num,
                       unsigned int flags) {
   DEBUGS('g', "Translating increment/decrement: %s", instructions[num]);
@@ -516,7 +517,7 @@ int translate_inc_dec(ASTree *operator, SymbolTable * table,
   }
 
   int status =
-      translate_expr(astree_first(operator), table, mov_data, NO_INSTR_FLAGS);
+      translate_expr(astree_first(operator), state, mov_data, NO_INSTR_FLAGS);
   if (status) return status;
 
   inc_dec_data->instruction = instructions[num];
@@ -526,13 +527,14 @@ int translate_inc_dec(ASTree *operator, SymbolTable * table,
   return 0;
 }
 
-int translate_unop(ASTree *operator, SymbolTable * table, InstructionData *data,
-                   InstructionEnum num, unsigned int flags) {
+int translate_unop(ASTree *operator, CompilerState * state,
+                   InstructionData *data, InstructionEnum num,
+                   unsigned int flags) {
   DEBUGS('g', "Translating unary operation: %s", instructions[num]);
   InstructionData *dest_data = calloc(1, sizeof(*dest_data));
   /* put value in register so that it is not modified in place */
   int status =
-      translate_expr(astree_first(operator), table, dest_data, USE_REG);
+      translate_expr(astree_first(operator), state, dest_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, dest_data);
 
@@ -541,19 +543,19 @@ int translate_unop(ASTree *operator, SymbolTable * table, InstructionData *data,
   return 0;
 }
 
-int translate_binop(ASTree *operator, SymbolTable * table,
+int translate_binop(ASTree *operator, CompilerState * state,
                     InstructionData *data, InstructionEnum num,
                     unsigned int flags) {
   DEBUGS('g', "Translating binary operation: %s", instructions[num]);
   InstructionData *dest_data = calloc(1, sizeof(*dest_data));
   int status =
-      translate_expr(astree_first(operator), table, dest_data, USE_REG);
+      translate_expr(astree_first(operator), state, dest_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, dest_data);
 
   InstructionData *src_data = calloc(1, sizeof(*src_data));
   status =
-      translate_expr(astree_second(operator), table, src_data, NO_INSTR_FLAGS);
+      translate_expr(astree_second(operator), state, src_data, NO_INSTR_FLAGS);
   if (status) return status;
   llist_push_back(text_section, src_data);
 
@@ -563,7 +565,7 @@ int translate_binop(ASTree *operator, SymbolTable * table,
   return 0;
 }
 
-int translate_mul_div_mod(ASTree *operator, SymbolTable * table,
+int translate_mul_div_mod(ASTree *operator, CompilerState * state,
                           InstructionData *data, InstructionEnum num,
                           unsigned int flags) {
   /* TODO(Robert): designate vregs for quotient/lo bits and remainder/hi bits
@@ -571,13 +573,13 @@ int translate_mul_div_mod(ASTree *operator, SymbolTable * table,
   if (operator->symbol == '%') {
     /* return remainder instead of quotient */
     InstructionData *remainder_data = calloc(1, sizeof(*remainder_data));
-    int status = translate_binop(operator, table, remainder_data, num, flags);
+    int status = translate_binop(operator, state, remainder_data, num, flags);
     if (status) return status;
     llist_push_back(text_section, remainder_data);
     data->instruction = instructions[INSTR_NOP];
     return assign_vreg(operator->type, data->dest_operand, vreg_count++);
   } else {
-    int status = translate_binop(operator, table, data, num, flags);
+    int status = translate_binop(operator, state, data, num, flags);
     if (status) return status;
     /* use up another vreg for the remainder/high-order bits */
     ++vreg_count;
@@ -595,19 +597,19 @@ int translate_cast(ASTree *cast, InstructionData *data) {
   return 0;
 }
 
-int translate_assignment(ASTree *assignment, SymbolTable *table,
+int translate_assignment(ASTree *assignment, CompilerState *state,
                          InstructionData *data, unsigned int flags) {
   DEBUGS('g', "Translating assignment");
 
   InstructionData *src_data = calloc(1, sizeof(*src_data));
   /* place result in register since destination will be a memory location */
   int status =
-      translate_expr(astree_second(assignment), table, src_data, USE_REG);
+      translate_expr(astree_second(assignment), state, src_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, src_data);
 
   InstructionData *dest_data = calloc(1, sizeof(*dest_data));
-  status = translate_expr(astree_first(assignment), table, dest_data,
+  status = translate_expr(astree_first(assignment), state, dest_data,
                           NO_INSTR_FLAGS);
   if (status) return status;
   llist_push_back(text_section, dest_data);
@@ -619,7 +621,7 @@ int translate_assignment(ASTree *assignment, SymbolTable *table,
   return 0;
 }
 
-int translate_subscript(ASTree *subscript, SymbolTable *table,
+int translate_subscript(ASTree *subscript, CompilerState *state,
                         InstructionData *data, unsigned int flags) {
   DEBUGS('g', "Translating pointer subscript");
   /* both the pointer and index must be in a register so that the offset and
@@ -627,12 +629,12 @@ int translate_subscript(ASTree *subscript, SymbolTable *table,
    */
   InstructionData *pointer_data = calloc(1, sizeof(*pointer_data));
   int status =
-      translate_expr(astree_first(subscript), table, pointer_data, USE_REG);
+      translate_expr(astree_first(subscript), state, pointer_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, pointer_data);
 
   InstructionData *index_data = calloc(1, sizeof(*index_data));
-  status = translate_expr(astree_second(subscript), table, index_data, USE_REG);
+  status = translate_expr(astree_second(subscript), state, index_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, index_data);
 
@@ -649,14 +651,14 @@ int translate_subscript(ASTree *subscript, SymbolTable *table,
  * expressions of structure value always result in the address of the
  * structure.
  */
-int translate_reference(ASTree *reference, SymbolTable *table,
+int translate_reference(ASTree *reference, CompilerState *state,
                         InstructionData *data, unsigned int flags) {
   DEBUGS('g', "Translating reference operator");
   ASTree *struct_ = astree_first(reference);
   InstructionData *struct_data = calloc(1, sizeof(*struct_data));
   unsigned int struct_flags =
       reference->symbol == TOK_ARROW ? USE_REG : USE_REG | WANT_ADDR;
-  int status = translate_expr(struct_, table, struct_data, struct_flags);
+  int status = translate_expr(struct_, state, struct_data, struct_flags);
   if (status) return status;
   llist_push_back(text_section, struct_data);
 
@@ -670,13 +672,13 @@ int translate_reference(ASTree *reference, SymbolTable *table,
       data->instruction = instructions[INSTR_MOV];
     const char *tag_name = struct_aux->data.tag.name;
     size_t tag_name_len = strlen(tag_name);
-    TagValue *tagval = symbol_table_get_tag(table, tag_name, tag_name_len);
+    TagValue *tagval = NULL;
+    state_get_tag(state, tag_name, tag_name_len, &tagval);
     SymbolTable *member_table = tagval->data.members.by_name;
     const char *member_name = astree_second(reference)->lexinfo;
     size_t member_name_len = strlen(member_name);
-    SymbolValue *member_symbol = NULL;
-    symbol_table_get(member_table, member_name, member_name_len,
-                     &member_symbol);
+    SymbolValue *member_symbol =
+        symbol_table_get(member_table, member_name, member_name_len);
     char temp[MAX_OP_LENGTH];
     sprintf(temp, member_symbol->obj_loc, struct_data->dest_operand);
     sprintf(data->src_operand, INDIRECT_FMT, temp);
@@ -693,7 +695,7 @@ int translate_reference(ASTree *reference, SymbolTable *table,
   }
 }
 
-int translate_call(ASTree *call, SymbolTable *table, InstructionData *data,
+int translate_call(ASTree *call, CompilerState *state, InstructionData *data,
                    unsigned int flags) {
   DEBUGS('g', "Translating function call");
 
@@ -703,7 +705,7 @@ int translate_call(ASTree *call, SymbolTable *table, InstructionData *data,
     /* compute parameter */
     ASTree *param = astree_get(call, i);
     InstructionData *param_data = calloc(1, sizeof(*param_data));
-    int status = translate_expr(param, table, param_data, NO_INSTR_FLAGS);
+    int status = translate_expr(param, state, param_data, NO_INSTR_FLAGS);
     if (status) return status;
     llist_push_back(text_section, param_data);
 
@@ -725,7 +727,7 @@ int translate_call(ASTree *call, SymbolTable *table, InstructionData *data,
   /* compute function pointer value */
   InstructionData *function_data = calloc(1, sizeof(InstructionData));
   ASTree *function_expr = astree_first(call);
-  status = translate_expr(function_expr, table, function_data, USE_REG);
+  status = translate_expr(function_expr, state, function_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, function_data);
 
@@ -752,23 +754,27 @@ int translate_call(ASTree *call, SymbolTable *table, InstructionData *data,
   return restore_registers(VOLATILE_START, VOLATILE_COUNT);
 }
 
-int translate_param(ASTree *param, SymbolTable *table, InstructionData *data) {
+int translate_param(ASTree *param, CompilerState *state,
+                    InstructionData *data) {
   DEBUGS('g', "Translating parameter");
   ASTree *declarator = astree_second(param);
   ASTree *param_ident = extract_ident(declarator);
   int status = assign_vreg(param_ident->type, data->src_operand, vreg_count++);
   if (status) return status;
   SymbolValue *symval = NULL;
-  symbol_table_get(table, param_ident->lexinfo, strlen(param_ident->lexinfo),
-                   &symval);
+  int is_param = state_get_symbol(state, param_ident->lexinfo,
+                                  strlen(param_ident->lexinfo), &symval);
   if (symval == NULL) {
     fprintf(stderr, "ERROR: unable to resolve symbol %s\n",
             param_ident->lexinfo);
     return -1;
+  } else if (!is_param) {
+    fprintf(stderr, "ERROR: resolved symbol %s was not a function parameter.\n",
+            param_ident->lexinfo);
   }
   status = assign_space(symval, STACK_POINTER_STRING);
   if (status) return status;
-  status = resolve_object(table, param_ident->lexinfo, data->dest_operand,
+  status = resolve_object(state, param_ident->lexinfo, data->dest_operand,
                           INDIRECT_FMT);
   if (status) return status;
   data->instruction = instructions[INSTR_MOV];
@@ -776,12 +782,12 @@ int translate_param(ASTree *param, SymbolTable *table, InstructionData *data) {
 }
 
 int translate_list_initialization(ASTree *declarator, ASTree *init_list,
-                                  SymbolTable *table) {
+                                  CompilerState *state) {
   DEBUGS('g', "Transating struct initiazation by initializer list");
   InstructionData *struct_data = calloc(1, sizeof(InstructionData));
   struct_data->instruction = instructions[INSTR_LEA];
   ASTree *struct_ident = extract_ident(declarator);
-  int status = resolve_object(table, struct_ident->lexinfo,
+  int status = resolve_object(state, struct_ident->lexinfo,
                               struct_data->dest_operand, INDIRECT_FMT);
   if (status) return status;
   const TypeSpec *struct_type = extract_type(declarator);
@@ -797,7 +803,7 @@ int translate_list_initialization(ASTree *declarator, ASTree *init_list,
       ASTree *initializer = astree_get(init_list, i);
       InstructionData *initializer_data = calloc(1, sizeof(InstructionData));
       int status =
-          translate_expr(initializer, table, initializer_data, USE_REG);
+          translate_expr(initializer, state, initializer_data, USE_REG);
       if (status) return status;
       llist_push_back(text_section, initializer_data);
 
@@ -822,7 +828,7 @@ int translate_list_initialization(ASTree *declarator, ASTree *init_list,
   return 0;
 }
 
-int translate_local_decl(ASTree *declaration, SymbolTable *table,
+int translate_local_decl(ASTree *declaration, CompilerState *state,
                          InstructionData *data) {
   DEBUGS('g', "Translating local declaration");
   size_t i;
@@ -831,7 +837,7 @@ int translate_local_decl(ASTree *declaration, SymbolTable *table,
     ASTree *declarator = astree_get(declaration, i);
     ASTree *ident = extract_ident(declarator);
     SymbolValue *symval = NULL;
-    symbol_table_get(table, (char *)ident->lexinfo, strlen(ident->lexinfo),
+    state_get_symbol(state, (char *)ident->lexinfo, strlen(ident->lexinfo),
                      &symval);
     if (symval == NULL) {
       fprintf(stderr, "ERROR: unable to resolve symbol %s\n", ident->lexinfo);
@@ -845,15 +851,15 @@ int translate_local_decl(ASTree *declaration, SymbolTable *table,
       ASTree *next_child = astree_get(declaration, i + 1);
       if (next_child->symbol == TOK_INIT_LIST) {
         int status =
-            translate_list_initialization(declarator, next_child, table);
+            translate_list_initialization(declarator, next_child, state);
         if (status) return status;
         ++i;
       } else if (next_child->symbol != TOK_DECLARATOR) {
-        int status = resolve_object(table, ident->lexinfo, data->dest_operand,
+        int status = resolve_object(state, ident->lexinfo, data->dest_operand,
                                     INDIRECT_FMT);
         if (status) return status;
         InstructionData *value_data = calloc(1, sizeof(*value_data));
-        status = translate_expr(next_child, table, value_data, USE_REG);
+        status = translate_expr(next_child, state, value_data, USE_REG);
         if (status) return status;
         llist_push_back(text_section, value_data);
 
@@ -866,7 +872,7 @@ int translate_local_decl(ASTree *declaration, SymbolTable *table,
   return 0;
 }
 
-static int translate_expr(ASTree *tree, SymbolTable *table,
+static int translate_expr(ASTree *tree, CompilerState *state,
                           InstructionData *out, unsigned int flags) {
   int status = 0;
 
@@ -876,89 +882,89 @@ static int translate_expr(ASTree *tree, SymbolTable *table,
   switch (tree->symbol) {
     /* arithmetic operators */
     case '+':
-      status = translate_binop(tree, table, out, INSTR_ADD, flags);
+      status = translate_binop(tree, state, out, INSTR_ADD, flags);
       break;
     case '-':
-      status = translate_binop(tree, table, out, INSTR_SUB, flags);
+      status = translate_binop(tree, state, out, INSTR_SUB, flags);
       break;
     case '*':
       if (astree_first(tree)->type->base == TYPE_SIGNED)
-        status = translate_mul_div_mod(tree, table, out, INSTR_IMUL, flags);
+        status = translate_mul_div_mod(tree, state, out, INSTR_IMUL, flags);
       else
-        status = translate_mul_div_mod(tree, table, out, INSTR_MUL, flags);
+        status = translate_mul_div_mod(tree, state, out, INSTR_MUL, flags);
       break;
     case '/':
     case '%':
       if (astree_first(tree)->type->base == TYPE_SIGNED)
-        status = translate_mul_div_mod(tree, table, out, INSTR_IDIV, flags);
+        status = translate_mul_div_mod(tree, state, out, INSTR_IDIV, flags);
       else
-        status = translate_mul_div_mod(tree, table, out, INSTR_DIV, flags);
+        status = translate_mul_div_mod(tree, state, out, INSTR_DIV, flags);
       break;
     case TOK_INC:
     case TOK_POST_INC:
-      status = translate_inc_dec(tree, table, out, INSTR_INC, flags);
+      status = translate_inc_dec(tree, state, out, INSTR_INC, flags);
       break;
     case TOK_DEC:
     case TOK_POST_DEC:
-      status = translate_inc_dec(tree, table, out, INSTR_DEC, flags);
+      status = translate_inc_dec(tree, state, out, INSTR_DEC, flags);
       break;
     case TOK_NEG:
-      status = translate_unop(tree, table, out, INSTR_NEG, flags);
+      status = translate_unop(tree, state, out, INSTR_NEG, flags);
       break;
     case TOK_POS:
-      status = translate_conversion(tree, table, out, flags);
+      status = translate_conversion(tree, state, out, flags);
       break;
     /* bitwise operators */
     case '&':
-      status = translate_binop(tree, table, out, INSTR_AND, flags);
+      status = translate_binop(tree, state, out, INSTR_AND, flags);
       break;
     case '|':
-      status = translate_binop(tree, table, out, INSTR_OR, flags);
+      status = translate_binop(tree, state, out, INSTR_OR, flags);
       break;
     case '^':
-      status = translate_binop(tree, table, out, INSTR_XOR, flags);
+      status = translate_binop(tree, state, out, INSTR_XOR, flags);
       break;
     case '~':
-      status = translate_unop(tree, table, out, INSTR_NOT, flags);
+      status = translate_unop(tree, state, out, INSTR_NOT, flags);
       break;
     /* shifts */
     case TOK_SHL:
-      status = translate_binop(tree, table, out, INSTR_SHL, flags);
+      status = translate_binop(tree, state, out, INSTR_SHL, flags);
       break;
     case TOK_SHR:
       if (astree_first(tree)->type->base == TYPE_SIGNED)
-        status = translate_binop(tree, table, out, INSTR_SAR, flags);
+        status = translate_binop(tree, state, out, INSTR_SAR, flags);
       else
-        status = translate_binop(tree, table, out, INSTR_SHR, flags);
+        status = translate_binop(tree, state, out, INSTR_SHR, flags);
       break;
     /* comparison operators */
     case '>':
-      status = translate_comparison(tree, table, out, INSTR_SETG, flags);
+      status = translate_comparison(tree, state, out, INSTR_SETG, flags);
       break;
     case TOK_GE:
-      status = translate_comparison(tree, table, out, INSTR_SETGE, flags);
+      status = translate_comparison(tree, state, out, INSTR_SETGE, flags);
       break;
     case '<':
-      status = translate_comparison(tree, table, out, INSTR_SETL, flags);
+      status = translate_comparison(tree, state, out, INSTR_SETL, flags);
       break;
     case TOK_LE:
-      status = translate_comparison(tree, table, out, INSTR_SETLE, flags);
+      status = translate_comparison(tree, state, out, INSTR_SETLE, flags);
       break;
     case TOK_EQ:
-      status = translate_comparison(tree, table, out, INSTR_SETE, flags);
+      status = translate_comparison(tree, state, out, INSTR_SETE, flags);
       break;
     case TOK_NE:
-      status = translate_comparison(tree, table, out, INSTR_SETNE, flags);
+      status = translate_comparison(tree, state, out, INSTR_SETNE, flags);
       break;
     /* logical operators */
     case '!':
-      status = translate_logical_not(astree_first(tree), table, out);
+      status = translate_logical_not(astree_first(tree), state, out);
       break;
     case TOK_AND:
-      status = translate_logical(tree, table, out, INSTR_AND, flags);
+      status = translate_logical(tree, state, out, INSTR_AND, flags);
       break;
     case TOK_OR:
-      status = translate_logical(tree, table, out, INSTR_OR, flags);
+      status = translate_logical(tree, state, out, INSTR_OR, flags);
       break;
     /* constants */
     case TOK_INTCON:
@@ -968,29 +974,29 @@ static int translate_expr(ASTree *tree, SymbolTable *table,
       break;
     /* miscellaneous */
     case TOK_ADDROF:
-      status = translate_addrof(tree, table, out, flags);
+      status = translate_addrof(tree, state, out, flags);
       break;
     case TOK_INDIRECTION:
-      status = translate_indirection(tree, table, out, flags);
+      status = translate_indirection(tree, state, out, flags);
       break;
     case TOK_IDENT:
-      status = translate_ident(tree, table, out, flags);
+      status = translate_ident(tree, state, out, flags);
       break;
     case '=':
-      status = translate_assignment(tree, table, out, flags);
+      status = translate_assignment(tree, state, out, flags);
       break;
     case TOK_CAST:
-      status = translate_conversion(tree, table, out, flags);
+      status = translate_conversion(tree, state, out, flags);
       break;
     case TOK_CALL:
-      status = translate_call(tree, table, out, flags);
+      status = translate_call(tree, state, out, flags);
       break;
     case TOK_SUBSCRIPT:
-      status = translate_subscript(tree, table, out, flags);
+      status = translate_subscript(tree, state, out, flags);
       break;
     case '.':
     case TOK_ARROW:
-      status = translate_reference(tree, table, out, flags);
+      status = translate_reference(tree, state, out, flags);
       break;
     default:
       fprintf(stderr, "ERROR: Unimplemented token: %s, lexinfo: %s\n",
@@ -1001,11 +1007,11 @@ static int translate_expr(ASTree *tree, SymbolTable *table,
   return status;
 }
 
-static int translate_ifelse(ASTree *ifelse, SymbolTable *table) {
+static int translate_ifelse(ASTree *ifelse, CompilerState *state) {
   size_t current_branch = branch_count++;
   /* translate conditional expression */
   InstructionData *cond_data = calloc(1, sizeof(*cond_data));
-  int status = translate_expr(astree_first(ifelse), table, cond_data, USE_REG);
+  int status = translate_expr(astree_first(ifelse), state, cond_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, cond_data);
   /* check if condition is zero and jump if it is */
@@ -1020,7 +1026,7 @@ static int translate_ifelse(ASTree *ifelse, SymbolTable *table) {
   sprintf(test_jmp_data->dest_operand, END_FMT, current_branch);
   llist_push_back(text_section, test_jmp_data);
   /* translate if body */
-  status = translate_stmt(astree_second(ifelse), table);
+  status = translate_stmt(astree_second(ifelse), state);
   if (status) return status;
   /* emit label at end of statement */
   InstructionData *end_label = calloc(1, sizeof(*end_label));
@@ -1028,12 +1034,12 @@ static int translate_ifelse(ASTree *ifelse, SymbolTable *table) {
   llist_push_back(text_section, end_label);
   /* translate else body if present */
   if (astree_count(ifelse) == 3) {
-    translate_stmt(astree_third(ifelse), table);
+    translate_stmt(astree_third(ifelse), state);
   }
   return 0;
 }
 
-static int translate_while(ASTree *while_, SymbolTable *table) {
+static int translate_while(ASTree *while_, CompilerState *state) {
   size_t current_branch = branch_count++;
   /* emit label at beginning of condition */
   InstructionData *cond_label = calloc(1, sizeof(*cond_label));
@@ -1041,7 +1047,7 @@ static int translate_while(ASTree *while_, SymbolTable *table) {
   llist_push_back(text_section, cond_label);
   /* translate conditional expression */
   InstructionData *cond_data = calloc(1, sizeof(*cond_data));
-  int status = translate_expr(astree_first(while_), table, cond_data, USE_REG);
+  int status = translate_expr(astree_first(while_), state, cond_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, cond_data);
   /* check if condition is zero and jump if it is */
@@ -1056,7 +1062,7 @@ static int translate_while(ASTree *while_, SymbolTable *table) {
   sprintf(test_jmp_data->dest_operand, END_FMT, current_branch);
   llist_push_back(text_section, test_jmp_data);
   /* translate while body */
-  status = translate_stmt(astree_second(while_), table);
+  status = translate_stmt(astree_second(while_), state);
   if (status) return status;
   /* emit jump to condition */
   InstructionData *cond_jmp_data = calloc(1, sizeof(*cond_jmp_data));
@@ -1070,14 +1076,14 @@ static int translate_while(ASTree *while_, SymbolTable *table) {
   return 0;
 }
 
-static int translate_for(ASTree *for_, SymbolTable *table) {
+static int translate_for(ASTree *for_, CompilerState *state) {
   size_t current_branch = branch_count++;
   ASTree *for_exprs = astree_first(for_);
   /* translate initialization expression, if present */
   ASTree *init_expr = astree_first(for_exprs);
   if (init_expr->symbol != ';') {
     InstructionData *init_data = calloc(1, sizeof(*init_data));
-    int status = translate_expr(init_expr, table, init_data, NO_INSTR_FLAGS);
+    int status = translate_expr(init_expr, state, init_data, NO_INSTR_FLAGS);
     if (status) return status;
     llist_push_back(text_section, init_data);
   }
@@ -1091,7 +1097,7 @@ static int translate_for(ASTree *for_, SymbolTable *table) {
   if (cond_expr->symbol != ';') {
     /* translate conditional expression */
     InstructionData *cond_data = calloc(1, sizeof(*cond_data));
-    int status = translate_expr(cond_expr, table, cond_data, USE_REG);
+    int status = translate_expr(cond_expr, state, cond_data, USE_REG);
     if (status) return status;
     llist_push_back(text_section, cond_data);
     /* check if condition is zero and jump if it is */
@@ -1108,14 +1114,14 @@ static int translate_for(ASTree *for_, SymbolTable *table) {
   }
 
   /* translate for body */
-  int status = translate_stmt(astree_second(for_), table);
+  int status = translate_stmt(astree_second(for_), state);
   if (status) return status;
   /* translate re-initialization, if present */
   ASTree *reinit_expr = astree_third(for_exprs);
   if (reinit_expr->symbol != ';' && reinit_expr->symbol != ')') {
     InstructionData *reinit_data = calloc(1, sizeof(*reinit_data));
     int status =
-        translate_expr(reinit_expr, table, reinit_data, NO_INSTR_FLAGS);
+        translate_expr(reinit_expr, state, reinit_data, NO_INSTR_FLAGS);
     if (status) return status;
     llist_push_back(text_section, reinit_data);
   }
@@ -1132,18 +1138,18 @@ static int translate_for(ASTree *for_, SymbolTable *table) {
   return 0;
 }
 
-static int translate_do(ASTree *do_, SymbolTable *table) {
+static int translate_do(ASTree *do_, CompilerState *state) {
   size_t current_branch = branch_count++;
   /* emit label at beginning of body */
   InstructionData *body_label = calloc(1, sizeof(*body_label));
   sprintf(body_label->label, COND_FMT, current_branch);
   llist_push_back(text_section, body_label);
   /* translate body */
-  int status = translate_stmt(astree_first(do_), table);
+  int status = translate_stmt(astree_first(do_), state);
   if (status) return status;
   /* translate conditional expression */
   InstructionData *cond_data = calloc(1, sizeof(*cond_data));
-  status = translate_expr(astree_second(do_), table, cond_data, USE_REG);
+  status = translate_expr(astree_second(do_), state, cond_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, cond_data);
   /* check if condition is one and jump if it is */
@@ -1160,25 +1166,27 @@ static int translate_do(ASTree *do_, SymbolTable *table) {
   return 0;
 }
 
-static int translate_block(ASTree *block, SymbolTable *table) {
+static int translate_block(ASTree *block, CompilerState *state) {
   DEBUGS('g', "Translating compound statement");
   LinkedList *block_contents = &block->children;
+  int status = state_push_table(state, block->symbol_table);
+  if (status) return status;
   size_t i;
   for (i = 0; i < block_contents->size; ++i) {
     ASTree *stmt = llist_get(block_contents, i);
-    int status = translate_stmt(stmt, block->symbol_table);
+    int status = translate_stmt(stmt, state);
     if (status) return status;
   }
-  return 0;
+  return state_pop_table(state);
 }
 
-int translate_return(ASTree *ret, SymbolTable *table, InstructionData *data) {
+int translate_return(ASTree *ret, CompilerState *state, InstructionData *data) {
   DEBUGS('g', "Translating return statement");
 
   if (astree_count(ret) > 0) {
     InstructionData *value_data = calloc(1, sizeof(*value_data));
     int status =
-        translate_expr(astree_first(ret), table, value_data, NO_INSTR_FLAGS);
+        translate_expr(astree_first(ret), state, value_data, NO_INSTR_FLAGS);
     if (status) return status;
     llist_push_back(text_section, value_data);
 
@@ -1186,7 +1194,7 @@ int translate_return(ASTree *ret, SymbolTable *table, InstructionData *data) {
     mov_data->instruction = instructions[INSTR_MOV];
     strcpy(mov_data->src_operand, value_data->dest_operand);
 
-    SymbolValue *function_symval = symbol_table_get_function(table);
+    SymbolValue *function_symval = state_get_function(state);
     const TypeSpec *function_spec = &function_symval->type;
     /* strip function */
     TypeSpec return_spec = SPEC_EMPTY;
@@ -1208,7 +1216,7 @@ int translate_return(ASTree *ret, SymbolTable *table, InstructionData *data) {
   return 0;
 }
 
-static int translate_stmt(ASTree *stmt, SymbolTable *table) {
+static int translate_stmt(ASTree *stmt, CompilerState *state) {
   InstructionData *data;
   int status = 0;
 
@@ -1217,35 +1225,35 @@ static int translate_stmt(ASTree *stmt, SymbolTable *table) {
    */
   switch (stmt->symbol) {
     case TOK_BLOCK:
-      status = translate_block(stmt, table);
+      status = translate_block(stmt, state);
       break;
     case TOK_RETURN:
       data = calloc(1, sizeof(*data));
-      status = translate_return(stmt, table, data);
+      status = translate_return(stmt, state, data);
       if (status) break;
       llist_push_back(text_section, data);
       break;
     case TOK_WHILE:
-      status = translate_while(stmt, table);
+      status = translate_while(stmt, state);
       break;
     case TOK_DO:
-      status = translate_do(stmt, table);
+      status = translate_do(stmt, state);
       break;
     case TOK_FOR:
-      status = translate_for(stmt, table);
+      status = translate_for(stmt, state);
       break;
     case TOK_IF:
-      status = translate_ifelse(stmt, table);
+      status = translate_ifelse(stmt, state);
       break;
     case TOK_DECLARATION:
       data = calloc(1, sizeof(*data));
-      status = translate_local_decl(stmt, table, data);
+      status = translate_local_decl(stmt, state, data);
       if (status) break;
       llist_push_back(text_section, data);
       break;
     default:
       data = calloc(1, sizeof(*data));
-      status = translate_expr(stmt, table, data, 0);
+      status = translate_expr(stmt, state, data, 0);
       if (status) break;
       llist_push_back(text_section, data);
       break;
@@ -1331,7 +1339,7 @@ int translate_global_decl(ASTree *declaration, InstructionData *data) {
   return 0;
 }
 
-int translate_function(ASTree *function, SymbolTable *table,
+int translate_function(ASTree *function, CompilerState *state,
                        InstructionData *data) {
   DEBUGS('g', "Translating function definition");
   ASTree *declarator = astree_second(function);
@@ -1339,7 +1347,7 @@ int translate_function(ASTree *function, SymbolTable *table,
   strcpy(data->label, name_node->lexinfo);
 
   SymbolValue *function_symval = NULL;
-  symbol_table_get(table, name_node->lexinfo, strlen(name_node->lexinfo),
+  state_get_symbol(state, name_node->lexinfo, strlen(name_node->lexinfo),
                    &function_symval);
   strcpy(function_symval->obj_loc, name_node->lexinfo);
 
@@ -1354,23 +1362,27 @@ int translate_function(ASTree *function, SymbolTable *table,
   /* remember to use function symbol table to translate parameters */
   ASTree *function_block = astree_third(function);
   SymbolTable *function_table = function_block->symbol_table;
+  status = state_push_table(state, function_table);
+  if (status) return status;
   /* last direct declarator should be parent of parameter nodes */
   ASTree *function_dirdecl =
       astree_get(declarator, astree_count(declarator) - 1);
   for (i = 0; i < astree_count(function_dirdecl); ++i) {
     ASTree *param = astree_get(function_dirdecl, i);
     InstructionData *param_data = calloc(1, sizeof(*param_data));
-    int status = translate_param(param, function_table, param_data);
+    int status = translate_param(param, state, param_data);
     if (status) return status;
     llist_push_back(text_section, param_data);
   }
+  status = state_pop_table(state);
+  if (status) return status;
 
   /* start vreg counter outside of numbers which can be automatically mapped
    * to real registers to eliminate duplicates and clobbered values when
    * saving and restoring registers
    */
   vreg_count = VOLATILE_COUNT + NONVOLATILE_COUNT;
-  status = translate_stmt(astree_third(function), table);
+  status = translate_stmt(astree_third(function), state);
   if (status) return status;
   status = restore_registers(NONVOLATILE_START, NONVOLATILE_COUNT);
   if (status) return status;
@@ -1383,6 +1395,9 @@ int translate_function(ASTree *function, SymbolTable *table,
 }
 
 int translate_file(ASTree *root) {
+  CompilerState *state = state_init();
+  int status = state_push_table(state, root->symbol_table);
+  if (status) return status;
   size_t i;
   for (i = 0; i < astree_count(root); ++i) {
     ASTree *topdecl = astree_get(root, i);
@@ -1395,8 +1410,7 @@ int translate_file(ASTree *root) {
             InstructionData *label_data = calloc(1, sizeof(*label_data));
             /* put label before function body */
             llist_push_back(text_section, label_data);
-            int status =
-                translate_function(topdecl, root->symbol_table, label_data);
+            int status = translate_function(topdecl, state, label_data);
             if (status) return status;
           }
         } else {
@@ -1416,7 +1430,9 @@ int translate_file(ASTree *root) {
         return -1;
     }
   }
-  return 0;
+  status = state_pop_table(state);
+  if (status) return status;
+  return state_destroy(state);
 }
 
 int write_instruction(InstructionData *data, FILE *out) {
