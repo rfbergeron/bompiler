@@ -1,5 +1,6 @@
-#include "stdlib.h"
 #include "state.h"
+
+#include "stdlib.h"
 
 CompilerState *state_init(void) {
   CompilerState *state = malloc(sizeof(*state));
@@ -54,7 +55,8 @@ int state_pop_jump(CompilerState *state) {
   }
 }
 
-int state_get_symbol(CompilerState *state, const char *ident, const size_t ident_len, SymbolValue **out) {
+int state_get_symbol(CompilerState *state, const char *ident,
+                     const size_t ident_len, SymbolValue **out) {
   size_t i;
   for (i = 0; i < llist_size(&state->table_stack); ++i) {
     SymbolTable *current = llist_get(&state->table_stack, i);
@@ -75,7 +77,8 @@ int state_get_symbol(CompilerState *state, const char *ident, const size_t ident
   return i == 0;
 }
 
-int state_insert_symbol(CompilerState *state, const char*ident, const size_t ident_len, SymbolValue *symval) {
+int state_insert_symbol(CompilerState *state, const char *ident,
+                        const size_t ident_len, SymbolValue *symval) {
   SymbolTable *top_scope = llist_front(&state->table_stack);
   /* TODO(Robert): rewrite symbol table functions */
   SymbolValue *exists = symbol_table_get(top_scope, ident, ident_len);
@@ -87,7 +90,12 @@ int state_insert_symbol(CompilerState *state, const char*ident, const size_t ide
   }
 }
 
-int state_get_tag(CompilerState *state, const char *ident, const size_t ident_len, TagValue **out) {
+size_t state_get_sequence(CompilerState *state) {
+  return map_size(llist_front(&state->table_stack));
+}
+
+int state_get_tag(CompilerState *state, const char *ident,
+                  const size_t ident_len, TagValue **out) {
   size_t i;
   for (i = 0; i < llist_size(&state->table_stack); ++i) {
     SymbolTable *current = llist_get(&state->table_stack, i);
@@ -107,7 +115,8 @@ int state_get_tag(CompilerState *state, const char *ident, const size_t ident_le
   return i == 0;
 }
 
-int state_insert_tag(CompilerState *state, const char *ident, const size_t ident_len, TagValue *tagval) {
+int state_insert_tag(CompilerState *state, const char *ident,
+                     const size_t ident_len, TagValue *tagval) {
   SymbolTable *top_scope = llist_front(&state->table_stack);
   TagValue *exists = symbol_table_get_tag(top_scope, ident, ident_len);
   if (exists) {
@@ -119,9 +128,10 @@ int state_insert_tag(CompilerState *state, const char *ident, const size_t ident
   }
 }
 
-LabelValue *state_get_label(CompilerState *state, const char *ident, const size_t ident_len) {
-  SymbolTable *function_table = llist_get(&state->table_stack,
-          llist_size(&state->table_stack) - 1);
+LabelValue *state_get_label(CompilerState *state, const char *ident,
+                            const size_t ident_len) {
+  SymbolTable *function_table =
+      llist_get(&state->table_stack, llist_size(&state->table_stack) - 1);
   if (function_table == NULL) {
     fprintf(stderr, "ERROR: attempt to get label at top level.\n");
     return NULL;
@@ -129,9 +139,10 @@ LabelValue *state_get_label(CompilerState *state, const char *ident, const size_
   return symbol_table_get_label(function_table, ident, ident_len);
 }
 
-int state_insert_label(CompilerState *state, const char *ident, const size_t ident_len, LabelValue *labval) {
-  SymbolTable *function_table = llist_get(&state->table_stack,
-          llist_size(&state->table_stack) - 1);
+int state_insert_label(CompilerState *state, const char *ident,
+                       const size_t ident_len, LabelValue *labval) {
+  SymbolTable *function_table =
+      llist_get(&state->table_stack, llist_size(&state->table_stack) - 1);
   if (function_table == NULL) {
     fprintf(stderr, "ERROR: attempt to insert label at top level.\n");
     return -1;
@@ -141,8 +152,9 @@ int state_insert_label(CompilerState *state, const char *ident, const size_t ide
 
 int state_set_function(CompilerState *state, SymbolValue *function_symval) {
   if (state->enclosing_function != NULL) {
-    fprintf(stderr, "ERROR: attempt to set enclosing function while inside "
-                    "another function.\n");
+    fprintf(stderr,
+            "ERROR: attempt to set enclosing function while inside "
+            "another function.\n");
     return -1;
   }
   state->enclosing_function = function_symval;
@@ -155,8 +167,9 @@ SymbolValue *state_get_function(CompilerState *state) {
 
 int state_unset_function(CompilerState *state) {
   if (state->enclosing_function == NULL) {
-    fprintf(stderr, "ERROR: attempt to unset enclosing function while at file "
-                    "scope.\n");
+    fprintf(stderr,
+            "ERROR: attempt to unset enclosing function while at file "
+            "scope.\n");
     return -1;
   } else {
     state->enclosing_function = NULL;

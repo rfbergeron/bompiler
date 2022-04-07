@@ -200,8 +200,8 @@ int symbol_table_insert(SymbolTable *table, const char *ident,
 }
 
 SymbolValue *symbol_table_get(SymbolTable *table, const char *ident,
-                     const size_t ident_len) {
-  return map_get(&table->primary_namespace, (char*)ident, ident_len);
+                              const size_t ident_len) {
+  return map_get(&table->primary_namespace, (char *)ident, ident_len);
 }
 
 int symbol_table_insert_tag(SymbolTable *table, const char *ident,
@@ -218,15 +218,15 @@ int symbol_table_insert_tag(SymbolTable *table, const char *ident,
 
 TagValue *symbol_table_get_tag(SymbolTable *table, const char *ident,
                                const size_t ident_len) {
-  return map_get(table->tag_namespace, (char*)ident, ident_len);
+  return map_get(table->tag_namespace, (char *)ident, ident_len);
 }
 
 int symbol_table_insert_label(SymbolTable *table, const char *ident,
                               const size_t ident_len, LabelValue *labval) {
   if (table->label_namespace == NULL) {
     table->label_namespace = malloc(sizeof(Map));
-    int status = map_init(table->label_namespace, DEFAULT_MAP_SIZE, NULL,
-                          free, strncmp_wrapper);
+    int status = map_init(table->label_namespace, DEFAULT_MAP_SIZE, NULL, free,
+                          strncmp_wrapper);
     if (status) return status;
   }
   return map_insert(table->label_namespace, (char *)ident, ident_len, labval);
