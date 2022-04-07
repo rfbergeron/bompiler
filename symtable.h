@@ -58,7 +58,7 @@ int symbol_table_destroy(SymbolTable *table);
 int symbol_table_insert(SymbolTable *table, const char *ident,
                         const size_t ident_len, SymbolValue *symval);
 SymbolValue *symbol_table_get(SymbolTable *table, const char *ident,
-                     const size_t ident_len);
+                              const size_t ident_len);
 int symbol_table_insert_tag(SymbolTable *table, const char *ident,
                             const size_t ident_len, TagValue *tagval);
 TagValue *symbol_table_get_tag(SymbolTable *table, const char *ident,
