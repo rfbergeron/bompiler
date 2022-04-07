@@ -12,9 +12,6 @@ typedef struct symbol_table {
   Map primary_namespace;
   Map *tag_namespace;
   Map *label_namespace;
-  SymbolValue *function;
-  struct symbol_table *parent;
-  LinkedList *children;
 } SymbolTable;
 
 typedef struct symbol_value {
@@ -52,16 +49,16 @@ int symbol_value_destroy(SymbolValue *symbol_value);
 int symbol_value_print(const SymbolValue *symbol, char *buffer, size_t size);
 
 /* TagValue functions */
-TagValue *tag_value_init(TagType tag, SymbolTable *parent_table);
+TagValue *tag_value_init(TagType tag);
 int tag_value_destroy(TagValue *tagval);
 
 /* symbol table functions */
-SymbolTable *symbol_table_init(SymbolTable *parent);
+SymbolTable *symbol_table_init();
 int symbol_table_destroy(SymbolTable *table);
 int symbol_table_insert(SymbolTable *table, const char *ident,
                         const size_t ident_len, SymbolValue *symval);
-int symbol_table_get(SymbolTable *table, const char *ident,
-                     const size_t ident_len, SymbolValue **out);
+SymbolValue *symbol_table_get(SymbolTable *table, const char *ident,
+                     const size_t ident_len);
 int symbol_table_insert_tag(SymbolTable *table, const char *ident,
                             const size_t ident_len, TagValue *tagval);
 TagValue *symbol_table_get_tag(SymbolTable *table, const char *ident,
@@ -70,5 +67,4 @@ int symbol_table_insert_label(SymbolTable *table, const char *ident,
                               const size_t ident_len, LabelValue *labval);
 LabelValue *symbol_table_get_label(SymbolTable *table, const char *ident,
                                    const size_t ident_len);
-SymbolValue *symbol_table_get_function(SymbolTable *table);
 #endif
