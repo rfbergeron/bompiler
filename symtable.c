@@ -70,14 +70,14 @@ int symbol_value_print(const SymbolValue *symbol, char *buffer, size_t size) {
 /*
  * TagValue functions
  */
-TagValue *tag_value_init(TagType tag, SymbolTable *parent_table) {
+TagValue *tag_value_init(TagType tag) {
   TagValue *tagval = malloc(sizeof(*tagval));
   tagval->tag = tag;
   tagval->width = 0;
   tagval->alignment = 0;
   tagval->is_defined = 0;
   if (tag == TAG_STRUCT || tag == TAG_UNION) {
-    tagval->data.members.by_name = symbol_table_init(parent_table);
+    tagval->data.members.by_name = symbol_table_init();
     if (tagval->data.members.by_name == NULL)
       /* TODO(Robert): cleanup data on error */
       return NULL;
@@ -161,11 +161,9 @@ int tag_value_print(const TagValue *tagval, char *buffer, size_t size) {
 /*
  * SymbolTable functions
  */
-SymbolTable *symbol_table_init(SymbolTable *parent) {
+SymbolTable *symbol_table_init() {
   SymbolTable *table = malloc(sizeof(*table));
   table->tag_namespace = table->label_namespace = NULL;
-  table->children = NULL;
-  table->function = NULL;
   int status =
       map_init(&table->primary_namespace, DEFAULT_MAP_SIZE, NULL,
                (void (*)(void *))symbol_value_destroy, strncmp_wrapper);
@@ -174,21 +172,6 @@ SymbolTable *symbol_table_init(SymbolTable *parent) {
     abort();
   }
 
-  if (parent != NULL) {
-    if (parent->children == NULL) {
-      /* initialize current table's child list */
-      parent->children = malloc(sizeof(LinkedList));
-      int status = llist_init(parent->children,
-                              (void (*)(void *))symbol_table_destroy, NULL);
-      /* TODO(Robert): cleanup on failure */
-      if (status) return NULL;
-    }
-
-    int status = llist_push_back(parent->children, table);
-    if (status) return NULL;
-  }
-
-  table->parent = parent;
   return table;
 }
 
@@ -206,11 +189,6 @@ int symbol_table_destroy(SymbolTable *table) {
     if (status) return status;
     free(table->label_namespace);
   }
-  if (table->children != NULL) {
-    int status = llist_destroy(table->children);
-    if (status) return status;
-    free(table->children);
-  }
   free(table);
   return 0;
 }
@@ -221,16 +199,9 @@ int symbol_table_insert(SymbolTable *table, const char *ident,
                     symval);
 }
 
-int symbol_table_get(SymbolTable *table, const char *ident,
-                     const size_t ident_len, SymbolValue **out) {
-  SymbolTable *current_table = table;
-  while (current_table != NULL) {
-    *out = map_get(&current_table->primary_namespace, (char *)ident, ident_len);
-    if (*out) break;
-    current_table = current_table->parent;
-  }
-  /* return whether or not the symbol is located in the current scope */
-  return table == current_table;
+SymbolValue *symbol_table_get(SymbolTable *table, const char *ident,
+                     const size_t ident_len) {
+  return map_get(&table->primary_namespace, (char*)ident, ident_len);
 }
 
 int symbol_table_insert_tag(SymbolTable *table, const char *ident,
@@ -239,7 +210,6 @@ int symbol_table_insert_tag(SymbolTable *table, const char *ident,
     return -1;
   } else if (table->tag_namespace == NULL) {
     table->tag_namespace = malloc(sizeof(Map));
-    /* TODO(Robert): init and destroy functions for tag values */
     int status = map_init(table->tag_namespace, DEFAULT_MAP_SIZE, NULL,
                           (void (*)(void *))tag_value_destroy, strncmp_wrapper);
   }
@@ -248,62 +218,21 @@ int symbol_table_insert_tag(SymbolTable *table, const char *ident,
 
 TagValue *symbol_table_get_tag(SymbolTable *table, const char *ident,
                                const size_t ident_len) {
-  SymbolTable *current_table = table;
-  while (current_table != NULL) {
-    if (current_table->tag_namespace != NULL) {
-      TagValue *tagval =
-          map_get(current_table->tag_namespace, (char *)ident, ident_len);
-      if (tagval != NULL) return tagval;
-    }
-    current_table = current_table->parent;
-  }
-  return NULL;
+  return map_get(table->tag_namespace, (char*)ident, ident_len);
 }
 
 int symbol_table_insert_label(SymbolTable *table, const char *ident,
                               const size_t ident_len, LabelValue *labval) {
-  if (table == NULL) {
-    return -1;
-  } else if (table->parent == NULL) {
-    /* labels are not allowed at global scope */
-    /* the parser should catch this but just to be sure... */
-    fprintf(stderr, "ERROR: labels may not be created at file scope.");
-    return -1;
-  } else {
-    /* navigate to function scope */
-    while (table->parent->parent != NULL) {
-      table = table->parent;
-    }
-    if (table->label_namespace == NULL) {
-      table->label_namespace = malloc(sizeof(Map));
-      /* TODO(Robert): init and destroy functions for label values */
-      int status = map_init(table->label_namespace, DEFAULT_MAP_SIZE, NULL,
-                            free, strncmp_wrapper);
-      if (status) return status;
-    }
-    return map_insert(table->label_namespace, (char *)ident, ident_len, labval);
+  if (table->label_namespace == NULL) {
+    table->label_namespace = malloc(sizeof(Map));
+    int status = map_init(table->label_namespace, DEFAULT_MAP_SIZE, NULL,
+                          free, strncmp_wrapper);
+    if (status) return status;
   }
+  return map_insert(table->label_namespace, (char *)ident, ident_len, labval);
 }
 
 LabelValue *symbol_table_get_label(SymbolTable *table, const char *ident,
                                    const size_t ident_len) {
-  if (table == NULL || table->parent == NULL) {
-    return NULL;
-  } else {
-    while (table->parent->parent != NULL) {
-      table = table->parent;
-    }
-    return map_get(table->label_namespace, (char *)ident, ident_len);
-  }
-}
-
-SymbolValue *symbol_table_get_function(SymbolTable *table) {
-  if (table == NULL || table->parent == NULL) {
-    return NULL;
-  } else {
-    while (table->parent->parent != NULL) {
-      table = table->parent;
-    }
-    return table->function;
-  }
+  return map_get(table->label_namespace, (char *)ident, ident_len);
 }
