@@ -1382,7 +1382,11 @@ int translate_function(ASTree *function, CompilerState *state,
    * saving and restoring registers
    */
   vreg_count = VOLATILE_COUNT + NONVOLATILE_COUNT;
+  status = state_set_function(state, function_symval);
+  if (status) return status;
   status = translate_stmt(astree_third(function), state);
+  if (status) return status;
+  status = state_unset_function(state);
   if (status) return status;
   status = restore_registers(NONVOLATILE_START, NONVOLATILE_COUNT);
   if (status) return status;

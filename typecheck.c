@@ -1796,7 +1796,7 @@ int validate_block(ASTree *block, CompilerState *state) {
     int status = validate_stmt(statement, state);
     if (status) return status;
   }
-  return 0;
+  return state_pop_table(state);
 }
 
 int validate_stmt(ASTree *statement, CompilerState *state) {
