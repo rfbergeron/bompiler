@@ -1147,6 +1147,10 @@ static int translate_do(ASTree *do_, CompilerState *state) {
   /* translate body */
   int status = translate_stmt(astree_first(do_), state);
   if (status) return status;
+  /* emit label at beginning of condition */
+  InstructionData *cond_label = calloc(1, sizeof(*cond_label));
+  sprintf(cond_label->label, COND_FMT, current_branch);
+  llist_push_back(text_section, cond_label);
   /* translate conditional expression */
   InstructionData *cond_data = calloc(1, sizeof(*cond_data));
   status = translate_expr(astree_second(do_), state, cond_data, USE_REG);
@@ -1163,6 +1167,10 @@ static int translate_do(ASTree *do_, CompilerState *state) {
   test_jmp_data->instruction = instructions[INSTR_JNZ];
   sprintf(test_jmp_data->dest_operand, COND_FMT, current_branch);
   llist_push_back(text_section, test_jmp_data);
+  /* emit label at end of statement */
+  InstructionData *end_label = calloc(1, sizeof(*end_label));
+  sprintf(end_label->label, END_FMT, current_branch);
+  llist_push_back(text_section, end_label);
   return 0;
 }
 
