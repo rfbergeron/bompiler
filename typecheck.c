@@ -1784,6 +1784,33 @@ int validate_for(ASTree *for_, CompilerState *state) {
   return validate_stmt(for_stmt, state);
 }
 
+/* TODO(Robert): decide whether or not to create empty labels for goto
+ * statements whose label has not been defined yet.
+ */
+int validate_label(ASTree *label, CompilerState *state) {
+  ASTree *ident = astree_first(label);
+  const char *ident_str = ident->lexinfo;
+  size_t ident_str_len = strlen(ident_str);
+  LabelValue *existing_entry = state_get_label(state, ident_str, ident_str_len);
+  if (existing_entry) {
+    if (existing_entry->is_defined) {
+      fprintf(stderr, "ERROR: redefinition of label %s.\n", ident_str);
+      return -1;
+    } else {
+      existing_entry->loc = &ident->loc;
+      existing_entry->is_defined = 1;
+      return validate_stmt(astree_second(label), state);
+    }
+  } else {
+    LabelValue *labval = malloc(sizeof(*labval));
+    labval->loc = &ident->loc;
+    labval->is_defined = 1;
+    int status = state_insert_label(state, ident_str, ident_str_len, labval);
+    if (status) return status;
+    return validate_stmt(astree_second(label), state);
+  }
+}
+
 int validate_block(ASTree *block, CompilerState *state) {
   size_t i;
   /* don't overwrite scope if this block belongs to a function */
@@ -1821,6 +1848,9 @@ int validate_stmt(ASTree *statement, CompilerState *state) {
       break;
     case TOK_FOR:
       status = validate_for(statement, state);
+      break;
+    case TOK_LABEL:
+      status = validate_label(statement, state);
       break;
     case TOK_CONTINUE:
     case TOK_BREAK:

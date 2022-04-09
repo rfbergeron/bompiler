@@ -32,7 +32,7 @@
 %token PREC_PREFIX PREC_POSTFIX
 %token PREC_TERNARY PREC_COMMA
 /* constructed tokens */
-%token TOK_TYPE_ID TOK_SPEC TOK_DECLARATION TOK_DECLARATOR TOK_ROOT TOK_CAST TOK_FUNCTION
+%token TOK_TYPE_ID TOK_SPEC TOK_DECLARATION TOK_DECLARATOR TOK_ROOT TOK_CAST TOK_FUNCTION TOK_LABEL
 /* tokens assigned to exsting nodes */
 %token TOK_POS TOK_NEG TOK_POST_INC TOK_POST_DEC TOK_INDIRECTION TOK_ADDROF TOK_CALL TOK_SUBSCRIPT
 %token TOK_BLOCK TOK_PARAM TOK_POINTER TOK_ARRAY TOK_INIT_LIST
@@ -176,6 +176,7 @@ stmt          : block                                                           
               | for                                                               { $$ = $1; }
               | ifelse                                                            { $$ = $1; }
               | return                                                            { $$ = $1; }
+              | TOK_IDENT ':' stmt                                                { $$ = parser_make_label($1, $3); astree_destroy ($2); }
               | expr ';'                                                          { $$ = $1; parser_cleanup (1, $2); }
               | TOK_CONTINUE ';'                                                  { $$ = $1; astree_destroy($2); }
               | TOK_BREAK ';'                                                     { $$ = $1; astree_destroy($2); }
@@ -321,6 +322,11 @@ ASTree *parser_make_cast(ASTree *spec_list, ASTree *abstract_declaration,
                          ASTree *expr) {
   ASTree *cast = astree_init(TOK_CAST, spec_list->loc, "_cast");
   return astree_adopt(cast, spec_list, abstract_declaration, expr);
+}
+
+ASTree *parser_make_label(ASTree *ident, ASTree *stmt) {
+  ASTree *label = astree_init(TOK_LABEL, ident->loc, "_label");
+  return astree_adopt(label, ident, stmt, NULL);
 }
 
 void parser_cleanup(size_t count, ...) {
