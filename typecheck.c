@@ -1822,6 +1822,12 @@ int validate_stmt(ASTree *statement, CompilerState *state) {
     case TOK_FOR:
       status = validate_for(statement, state);
       break;
+    case TOK_CONTINUE:
+    case TOK_BREAK:
+    case TOK_GOTO:
+      /* handle this during assembly generation */
+      status = 0;
+      break;
     default:
       /* parser will catch anything that we don't want, so at this point the
        * only thing left that this could be is an expression-statement
