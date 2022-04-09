@@ -140,6 +140,7 @@ static const char NULLOP_FMT[] = "%8s%8s\n";
 static const char LABEL_FMT[] = "%s: \n";
 static const char COND_FMT[] = ".C%zu";
 static const char END_FMT[] = ".E%zu";
+static const char STMT_FMT[] = ".S%zu";
 static const char LOOP_FMT[] = ".L%zu";
 static const char BOOL_FMT[] = ".B%zu";
 static const char SECTION_FMT[] = ".section %s\n";
@@ -1050,17 +1051,21 @@ static int translate_while(ASTree *while_, CompilerState *state) {
   int status = translate_expr(astree_first(while_), state, cond_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, cond_data);
-  /* check if condition is zero and jump if it is */
+  /* check if condition is zero */
   InstructionData *test_data = calloc(1, sizeof(*test_data));
   test_data->instruction = instructions[INSTR_TEST];
   strcpy(test_data->dest_operand, cond_data->dest_operand);
   strcpy(test_data->src_operand, cond_data->dest_operand);
   llist_push_back(text_section, test_data);
-
+  /* emit jump to end of loop */
   InstructionData *test_jmp_data = calloc(1, sizeof(*test_jmp_data));
   test_jmp_data->instruction = instructions[INSTR_JZ];
   sprintf(test_jmp_data->dest_operand, END_FMT, current_branch);
   llist_push_back(text_section, test_jmp_data);
+  /* emit label at beginning of body */
+  InstructionData *body_label = calloc(1, sizeof(*body_label));
+  sprintf(body_label->label, STMT_FMT, current_branch);
+  llist_push_back(text_section, body_label);
   /* translate while body */
   status = translate_stmt(astree_second(while_), state);
   if (status) return status;
@@ -1100,19 +1105,23 @@ static int translate_for(ASTree *for_, CompilerState *state) {
     int status = translate_expr(cond_expr, state, cond_data, USE_REG);
     if (status) return status;
     llist_push_back(text_section, cond_data);
-    /* check if condition is zero and jump if it is */
+    /* check if condition is zero */
     InstructionData *test_data = calloc(1, sizeof(*test_data));
     test_data->instruction = instructions[INSTR_TEST];
     strcpy(test_data->dest_operand, cond_data->dest_operand);
     strcpy(test_data->src_operand, cond_data->dest_operand);
     llist_push_back(text_section, test_data);
-
+    /* emit jump to end of loop */
     InstructionData *test_jmp_data = calloc(1, sizeof(*test_jmp_data));
     test_jmp_data->instruction = instructions[INSTR_JZ];
     sprintf(test_jmp_data->dest_operand, END_FMT, current_branch);
     llist_push_back(text_section, test_jmp_data);
   }
 
+  /* emit label at beginning of body */
+  InstructionData *body_label = calloc(1, sizeof(*body_label));
+  sprintf(body_label->label, STMT_FMT, current_branch);
+  llist_push_back(text_section, body_label);
   /* translate for body */
   int status = translate_stmt(astree_second(for_), state);
   if (status) return status;
@@ -1142,7 +1151,7 @@ static int translate_do(ASTree *do_, CompilerState *state) {
   size_t current_branch = branch_count++;
   /* emit label at beginning of body */
   InstructionData *body_label = calloc(1, sizeof(*body_label));
-  sprintf(body_label->label, COND_FMT, current_branch);
+  sprintf(body_label->label, STMT_FMT, current_branch);
   llist_push_back(text_section, body_label);
   /* translate body */
   int status = translate_stmt(astree_first(do_), state);
@@ -1156,13 +1165,13 @@ static int translate_do(ASTree *do_, CompilerState *state) {
   status = translate_expr(astree_second(do_), state, cond_data, USE_REG);
   if (status) return status;
   llist_push_back(text_section, cond_data);
-  /* check if condition is one and jump if it is */
+  /* check if condition is one */
   InstructionData *test_data = calloc(1, sizeof(*test_data));
   test_data->instruction = instructions[INSTR_TEST];
   strcpy(test_data->dest_operand, cond_data->dest_operand);
   strcpy(test_data->src_operand, cond_data->dest_operand);
   llist_push_back(text_section, test_data);
-
+  /* emit jump to beginning of body */
   InstructionData *test_jmp_data = calloc(1, sizeof(*test_jmp_data));
   test_jmp_data->instruction = instructions[INSTR_JNZ];
   sprintf(test_jmp_data->dest_operand, COND_FMT, current_branch);
