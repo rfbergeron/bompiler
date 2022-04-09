@@ -1201,7 +1201,7 @@ static int translate_do(ASTree *do_, CompilerState *state) {
   /* emit jump to beginning of body */
   InstructionData *test_jmp_data = calloc(1, sizeof(*test_jmp_data));
   test_jmp_data->instruction = instructions[INSTR_JNZ];
-  sprintf(test_jmp_data->dest_operand, COND_FMT, current_branch);
+  sprintf(test_jmp_data->dest_operand, STMT_FMT, current_branch);
   llist_push_back(text_section, test_jmp_data);
   /* emit label at end of statement */
   InstructionData *end_label = calloc(1, sizeof(*end_label));
@@ -1312,6 +1312,15 @@ static int translate_goto(ASTree *goto_, CompilerState *state) {
   }
 }
 
+static int translate_label(ASTree *label, CompilerState *state) {
+  ASTree *ident = astree_first(label);
+  const char *ident_str = ident->lexinfo;
+  InstructionData *label_data = calloc(1, sizeof(*label_data));
+  strcpy(label_data->label, ident_str);
+  llist_push_back(text_section, label_data);
+  return translate_stmt(astree_second(label), state);
+}
+
 static int translate_stmt(ASTree *stmt, CompilerState *state) {
   InstructionData *data;
   int status = 0;
@@ -1349,6 +1358,9 @@ static int translate_stmt(ASTree *stmt, CompilerState *state) {
       break;
     case TOK_GOTO:
       status = translate_goto(stmt, state);
+      break;
+    case TOK_LABEL:
+      status = translate_label(stmt, state);
       break;
     case TOK_DECLARATION:
       data = calloc(1, sizeof(*data));
