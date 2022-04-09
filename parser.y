@@ -176,12 +176,14 @@ stmt          : block                                                           
               | for                                                               { $$ = $1; }
               | ifelse                                                            { $$ = $1; }
               | return                                                            { $$ = $1; }
-              | TOK_IDENT ':' stmt                                                { $$ = parser_make_label($1, $3); astree_destroy ($2); }
+              | labelled_stmt                                                     { $$ = $1; }
               | expr ';'                                                          { $$ = $1; parser_cleanup (1, $2); }
               | TOK_CONTINUE ';'                                                  { $$ = $1; astree_destroy($2); }
               | TOK_BREAK ';'                                                     { $$ = $1; astree_destroy($2); }
               | TOK_GOTO TOK_IDENT ';'                                            { $$ = astree_adopt($1, $2, NULL, NULL); astree_destroy($3); }
               | ';'                                                               { $$ = NULL; astree_destroy($1); }
+              ;
+labelled_stmt : TOK_IDENT ':' stmt                                                { $$ = parser_make_label($1, $3); astree_destroy ($2); }
               ;
 for           : TOK_FOR for_exprs stmt                                            { $$ = astree_adopt($1, $2, $3, NULL); }
               ;

@@ -105,6 +105,7 @@ NOTSTRING       (\"[^"]*)
 "}"             { return lexer_token ('}'); }
 ","             { return lexer_token (','); }
 ";"             { return lexer_token (';'); }
+":"             { return lexer_token (':'); }
 "<"             { return lexer_token ('<'); }
 ">"             { return lexer_token ('>'); }
 "|"             { return lexer_token ('|'); }
