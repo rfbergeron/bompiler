@@ -1299,7 +1299,7 @@ static int translate_goto(ASTree *goto_, CompilerState *state) {
   const char *ident_str = ident->lexinfo;
   size_t ident_str_len = strlen(ident->lexinfo);
   LabelValue *labval = state_get_label(state, ident_str, ident_str_len);
-  if (labval == NULL) {
+  if (labval == NULL || !labval->is_defined) {
     fprintf(stderr, "ERROR: unable to resolve label %s.\n", ident_str);
     return -1;
   } else {

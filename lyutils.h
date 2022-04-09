@@ -57,6 +57,7 @@ ASTree *parser_make_cast(ASTree *spec_list, ASTree *abstract_declaration,
                          ASTree *expr);
 ASTree *parser_make_spec(ASTree *list);
 ASTree *parser_make_array(ASTree *direct_decl, ASTree *bracket, ASTree *length);
+ASTree *parser_make_label(ASTree *ident, ASTree *stmt);
 void parser_cleanup(size_t count, ...);
 
 #define YYSTYPE_IS_DECLARED
