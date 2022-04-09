@@ -36,12 +36,12 @@ int state_pop_table(CompilerState *state) {
   }
 }
 
-int state_push_jump(CompilerState *state, LabelValue *labval) {
-  if (llist_front(&state->jump_stack) == labval) {
+int state_push_jump(CompilerState *state, JumpEntry *jump_entry) {
+  if (llist_front(&state->jump_stack) == jump_entry) {
     fprintf(stderr, "ERROR: attempted to push same jump target twice.\n");
     return -1;
   } else {
-    return llist_push_front(&state->jump_stack, labval);
+    return llist_push_front(&state->jump_stack, jump_entry);
   }
 }
 
