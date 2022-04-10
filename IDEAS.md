@@ -274,6 +274,40 @@ This is still a little clunky, since symbol table information is needed in so
 few contexts in the assembly generator, but I cannot think of a better way to
 track where symbols live on the stack.
 
+## Switch statements and case/default labels:
+Validity checks for case and default labels will be deferred until assembly
+generation, just like continue and break statements. More data will have to be
+added to jump stack entries, though. It will be implemented as a union of two
+kinds of entries: an iteration entry and a switch entry, differentiated by an
+enum field. Instead of just checking for the presence of any entries in the
+stack, there will instead be two resolution functions: one for continues, which
+searches for iteration entries, one for case and default statements, which
+searches for switch entries, and one for break statements, which returns the
+entry on the top of the stack.
+
+Jump entries for switch statements will have a dynamically resizable array, so
+that they can store an arbitrary number of case labels. They will also have a
+member for the default label, and the label past the end of the switch
+statement.
+
+```
+typedef struct jump_entry {
+  union {
+    struct {
+      char cond_label[MAX_LABEL_LENGTH];
+      char stmt_label[MAX_LABEL_LENGTH];
+      char end_label[MAX_LABEL_LENGTH];
+    } iteration;
+    struct {
+      LinkedList *case_labels;
+      char default_label[MAX_LABEL_LENGTH];
+      char end_label[MAX_LABEL_LENGTH];
+    } switch;
+  } data;
+  JumpType type;
+} JumpEntry;
+```
+
 ## Struct and union member tables
 The current method for storing struct and union members is no longer adequate.
 While it would be convenient to reuse the scoping functions, scopes are
