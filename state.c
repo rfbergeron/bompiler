@@ -150,6 +150,43 @@ int state_insert_label(CompilerState *state, const char *ident,
   return symbol_table_insert_label(function_table, ident, ident_len, labval);
 }
 
+JumpEntry *state_get_iteration(CompilerState *state) {
+  if (!llist_empty(&state->jump_stack)) {
+    size_t i;
+    for (i = 0; i < llist_size(&state->jump_stack); ++i) {
+      JumpEntry *entry = llist_get(&state->jump_stack, i);
+      if (entry->type == JUMP_ITERATION) {
+        return entry;
+      }
+    }
+  }
+  fprintf(stderr, "ERROR: no valid iteration context.\n");
+  return NULL;
+}
+
+JumpEntry *state_get_switch(CompilerState *state) {
+  if (!llist_empty(&state->jump_stack)) {
+    size_t i;
+    for (i = 0; i < llist_size(&state->jump_stack); ++i) {
+      JumpEntry *entry = llist_get(&state->jump_stack, i);
+      if (entry->type == JUMP_SWITCH) {
+        return entry;
+      }
+    }
+  }
+  fprintf(stderr, "ERROR: no valid switch context.\n");
+  return NULL;
+}
+
+JumpEntry *state_get_jump(CompilerState *state) {
+  if (llist_empty(&state->jump_stack)) {
+    fprintf(stderr, "ERROR: no valid jump context.\n");
+    return NULL;
+  } else {
+    return llist_front(&state->jump_stack);
+  }
+}
+
 int state_set_function(CompilerState *state, SymbolValue *function_symval) {
   if (state->enclosing_function != NULL) {
     fprintf(stderr,
