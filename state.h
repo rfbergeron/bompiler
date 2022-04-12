@@ -9,9 +9,20 @@ typedef struct compiler_state {
   SymbolValue *enclosing_function;
 } CompilerState;
 
+typedef enum jump_type { JUMP_ITERATION, JUMP_SWITCH } JumpType;
+
 typedef struct jump_entry {
-  char cond_label[MAX_LABEL_LENGTH];
-  char body_label[MAX_LABEL_LENGTH];
+  union {
+    struct {
+      char cond_label[MAX_LABEL_LENGTH];
+      char stmt_label[MAX_LABEL_LENGTH];
+    } iteration;
+    struct {
+      LinkedList *case_labels;
+      char default_label[MAX_LABEL_LENGTH];
+    } switch_;
+  } data;
+  JumpType type;
   char end_label[MAX_LABEL_LENGTH];
 } JumpEntry;
 
