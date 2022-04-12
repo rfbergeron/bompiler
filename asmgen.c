@@ -1068,8 +1068,9 @@ static int translate_while(ASTree *while_, CompilerState *state) {
   llist_push_back(text_section, body_label);
   /* create and push jump stack entry */
   JumpEntry jump_entry;
-  sprintf(jump_entry.cond_label, COND_FMT, current_branch);
-  sprintf(jump_entry.body_label, STMT_FMT, current_branch);
+  jump_entry.type = JUMP_ITERATION;
+  sprintf(jump_entry.data.iteration.cond_label, COND_FMT, current_branch);
+  sprintf(jump_entry.data.iteration.stmt_label, STMT_FMT, current_branch);
   sprintf(jump_entry.end_label, END_FMT, current_branch);
   status = state_push_jump(state, &jump_entry);
   /* translate while body */
@@ -1133,8 +1134,9 @@ static int translate_for(ASTree *for_, CompilerState *state) {
   llist_push_back(text_section, body_label);
   /* create and push jump stack entry */
   JumpEntry jump_entry;
-  sprintf(jump_entry.cond_label, COND_FMT, current_branch);
-  sprintf(jump_entry.body_label, STMT_FMT, current_branch);
+  jump_entry.type = JUMP_ITERATION;
+  sprintf(jump_entry.data.iteration.cond_label, COND_FMT, current_branch);
+  sprintf(jump_entry.data.iteration.stmt_label, STMT_FMT, current_branch);
   sprintf(jump_entry.end_label, END_FMT, current_branch);
   int status = state_push_jump(state, &jump_entry);
   /* translate for body */
@@ -1173,8 +1175,9 @@ static int translate_do(ASTree *do_, CompilerState *state) {
   llist_push_back(text_section, body_label);
   /* create and push jump stack entry */
   JumpEntry jump_entry;
-  sprintf(jump_entry.cond_label, COND_FMT, current_branch);
-  sprintf(jump_entry.body_label, STMT_FMT, current_branch);
+  jump_entry.type = JUMP_ITERATION;
+  sprintf(jump_entry.data.iteration.cond_label, COND_FMT, current_branch);
+  sprintf(jump_entry.data.iteration.stmt_label, STMT_FMT, current_branch);
   sprintf(jump_entry.end_label, END_FMT, current_branch);
   int status = state_push_jump(state, &jump_entry);
   /* translate body */
@@ -1270,8 +1273,10 @@ static int translate_continue(ASTree *continue_, CompilerState *state) {
     /* emit jump to condition */
     InstructionData *cond_jmp_data = calloc(1, sizeof(*cond_jmp_data));
     cond_jmp_data->instruction = instructions[INSTR_JMP];
-    JumpEntry *current_entry = llist_front(&state->jump_stack);
-    strcpy(cond_jmp_data->dest_operand, current_entry->cond_label);
+    JumpEntry *current_entry = state_get_iteration(state);
+    if (current_entry == NULL) return -1;
+    strcpy(cond_jmp_data->dest_operand,
+           current_entry->data.iteration.cond_label);
     llist_push_back(text_section, cond_jmp_data);
     return 0;
   }
@@ -1287,7 +1292,8 @@ static int translate_break(ASTree *break_, CompilerState *state) {
     /* emit jump to end of loop */
     InstructionData *end_jmp_data = calloc(1, sizeof(*end_jmp_data));
     end_jmp_data->instruction = instructions[INSTR_JMP];
-    JumpEntry *current_entry = llist_front(&state->jump_stack);
+    JumpEntry *current_entry = state_get_jump(state);
+    if (current_entry == NULL) return -1;
     strcpy(end_jmp_data->dest_operand, current_entry->end_label);
     llist_push_back(text_section, end_jmp_data);
     return 0;
