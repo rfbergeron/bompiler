@@ -45,6 +45,9 @@ LabelValue *state_get_label(CompilerState *state, const char *ident,
                             const size_t ident_len);
 int state_insert_label(CompilerState *state, const char *ident,
                        const size_t ident_len, LabelValue *labval);
+JumpEntry *state_get_iteration(CompilerState *state);
+JumpEntry *state_get_switch(CompilerState *state);
+JumpEntry *state_get_jump(CompilerState *state);
 int state_set_function(CompilerState *state, SymbolValue *function_symval);
 SymbolValue *state_get_function(CompilerState *state);
 int state_unset_function(CompilerState *state);
