@@ -1737,6 +1737,21 @@ int validate_ifelse(ASTree *ifelse, CompilerState *state) {
   return 0;
 }
 
+int validate_switch(ASTree *switch_, CompilerState *state) {
+  ASTree *expr = astree_first(switch_);
+  ASTree *stmt = astree_second(switch_);
+
+  int status = validate_expr(expr, state);
+  if (status) return status;
+  if (!typespec_is_integer(extract_type(expr))) {
+    fprintf(stderr,
+            "switch statement control expression must be of integral type.\n");
+    return -1;
+  }
+
+  return validate_stmt(stmt, state);
+}
+
 int validate_while(ASTree *while_, CompilerState *state) {
   ASTree *expr = while_->symbol == TOK_WHILE ? astree_first(while_)
                                              : astree_second(while_);
@@ -1811,6 +1826,20 @@ int validate_label(ASTree *label, CompilerState *state) {
   }
 }
 
+int validate_case(ASTree *case_, CompilerState *state) {
+  ASTree *constexpr = astree_first(case_);
+  int status = validate_expr(constexpr, state);
+  if (status) return status;
+  if (!typespec_is_integer(extract_type(constexpr))) {
+    fprintf(stderr,
+            "ERROR: case value must be an integral constant expression.\n");
+    return -1;
+  }
+
+  ASTree *statement = astree_second(case_);
+  return validate_stmt(statement, state);
+}
+
 int validate_block(ASTree *block, CompilerState *state) {
   size_t i;
   /* don't overwrite scope if this block belongs to a function */
@@ -1836,6 +1865,9 @@ int validate_stmt(ASTree *statement, CompilerState *state) {
     case TOK_IF:
       status = validate_ifelse(statement, state);
       break;
+    case TOK_SWITCH:
+      status = validate_switch(statement, state);
+      break;
     case TOK_DO:
     case TOK_WHILE:
       status = validate_while(statement, state);
@@ -1851,6 +1883,12 @@ int validate_stmt(ASTree *statement, CompilerState *state) {
       break;
     case TOK_LABEL:
       status = validate_label(statement, state);
+      break;
+    case TOK_CASE:
+      status = validate_case(statement, state);
+      break;
+    case TOK_DEFAULT:
+      status = validate_stmt(astree_first(statement), state);
       break;
     case TOK_CONTINUE:
     case TOK_BREAK:
