@@ -1830,7 +1830,9 @@ int validate_case(ASTree *case_, CompilerState *state) {
   ASTree *constexpr = astree_first(case_);
   int status = validate_expr(constexpr, state);
   if (status) return status;
-  if (!typespec_is_integer(extract_type(constexpr))) {
+  const TypeSpec *case_const_spec = extract_type(constexpr);
+  if (!typespec_is_integer(case_const_spec) ||
+      !(constexpr->attributes | ATTR_EXPR_ARITHCONST)) {
     fprintf(stderr,
             "ERROR: case value must be an integral constant expression.\n");
     return -1;
