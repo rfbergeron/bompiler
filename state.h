@@ -3,6 +3,7 @@
 #include "badlib/badllist.h"
 #include "symtable.h"
 #define MAX_LABEL_LENGTH 32
+#define MAX_OP_LENGTH 32
 typedef struct compiler_state {
   LinkedList table_stack;
   LinkedList jump_stack;
@@ -19,7 +20,8 @@ typedef struct jump_entry {
     } iteration;
     struct {
       LinkedList *case_labels;
-      char default_label[MAX_LABEL_LENGTH];
+      size_t next_case;
+      char control_register[MAX_OP_LENGTH];
     } switch_;
   } data;
   JumpType type;
