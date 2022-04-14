@@ -1040,6 +1040,38 @@ static int translate_ifelse(ASTree *ifelse, CompilerState *state) {
   return 0;
 }
 
+static int translate_switch(ASTree *switch_, CompilerState *state) {
+  InstructionData *cond_data = calloc(1, sizeof(*cond_data));
+  int status = translate_expr(astree_first(switch_), state, cond_data, USE_REG);
+  if (status) return status;
+
+  size_t current_branch = branch_count++;
+  JumpEntry jump_entry;
+  jump_entry.type = JUMP_SWITCH;
+  jump_entry.data.switch_.next_case = current_branch;
+  strcpy(jump_entry.data.switch_.control_register, cond_data->dest_operand);
+  jump_entry.data.switch_.case_labels = malloc(sizeof(LinkedList));
+  status = llist_init(jump_entry.data.switch_.case_labels, NULL, NULL);
+  if (status) return status;
+  sprintf(jump_entry.end_label, END_FMT, current_branch);
+  status = state_push_jump(state, &jump_entry);
+
+  status = translate_stmt(astree_second(switch_), state);
+  if (status) return status;
+
+  status = state_pop_jump(state);
+  if (status) return status;
+
+  InstructionData *default_label = calloc(1, sizeof(*default_label));
+  sprintf(default_label->label, COND_FMT, jump_entry.data.switch_.next_case);
+  llist_push_back(text_section, default_label);
+
+  InstructionData *end_label = calloc(1, sizeof(*end_label));
+  sprintf(end_label->label, END_FMT, current_branch);
+  llist_push_back(text_section, end_label);
+  return 0;
+}
+
 static int translate_while(ASTree *while_, CompilerState *state) {
   size_t current_branch = branch_count++;
   /* emit label at beginning of condition */
@@ -1327,6 +1359,63 @@ static int translate_label(ASTree *label, CompilerState *state) {
   return translate_stmt(astree_second(label), state);
 }
 
+static int translate_case(ASTree *case_, CompilerState *state) {
+  /* get location of control value and case number */
+  JumpEntry *switch_entry = state_get_switch(state);
+  if (switch_entry == NULL) {
+    fprintf(stderr,
+            "ERROR: case statements must be enclosed in a switch statement.\n");
+    return -1;
+  }
+  /* reserve new case number for next case/default statement */
+  size_t current_branch = switch_entry->data.switch_.next_case;
+  switch_entry->data.switch_.next_case = branch_count++;
+  /* emit case label */
+  InstructionData *case_label = calloc(1, sizeof(*case_label));
+  sprintf(case_label->label, COND_FMT, current_branch);
+  llist_push_back(text_section, case_label);
+  /* evaluate case constant (should be optimized away later) */
+  InstructionData *data = calloc(1, sizeof(*data));
+  int status = translate_expr(astree_first(case_), state, data, USE_REG);
+  if (status) return status;
+  /* compare constant to control value */
+  InstructionData *cmp_data = calloc(1, sizeof(*cmp_data));
+  cmp_data->instruction = instructions[INSTR_CMP];
+  strcpy(cmp_data->dest_operand, data->dest_operand);
+  strcpy(cmp_data->src_operand, switch_entry->data.switch_.control_register);
+  llist_push_back(text_section, cmp_data);
+  /* jump to next case statement if not equal */
+  InstructionData *jmp_data = calloc(1, sizeof(*jmp_data));
+  jmp_data->instruction = instructions[INSTR_JNE];
+  sprintf(jmp_data->dest_operand, COND_FMT,
+          switch_entry->data.switch_.next_case);
+  llist_push_back(text_section, jmp_data);
+  /* emit statement belonging to this case label */
+  return translate_stmt(astree_second(case_), state);
+}
+
+static int translate_default(ASTree *default_, CompilerState *state) {
+  /* get location of case number */
+  JumpEntry *switch_entry = state_get_switch(state);
+  if (switch_entry == NULL) {
+    fprintf(
+        stderr,
+        "ERROR: default statements must be enclosed in a switch statement.\n");
+    return -1;
+  }
+  /* reserve new case number for the default label that is always emitted by the
+   * switch translation routine, which is equivalent to the end label
+   */
+  size_t current_branch = switch_entry->data.switch_.next_case;
+  switch_entry->data.switch_.next_case = branch_count++;
+  /* emit case label */
+  InstructionData *case_label = calloc(1, sizeof(*case_label));
+  sprintf(case_label->label, COND_FMT, current_branch);
+  llist_push_back(text_section, case_label);
+  /* emit statement belonging to this case label */
+  return translate_stmt(astree_first(default_), state);
+}
+
 static int translate_stmt(ASTree *stmt, CompilerState *state) {
   InstructionData *data;
   int status = 0;
@@ -1356,6 +1445,9 @@ static int translate_stmt(ASTree *stmt, CompilerState *state) {
     case TOK_IF:
       status = translate_ifelse(stmt, state);
       break;
+    case TOK_SWITCH:
+      status = translate_switch(stmt, state);
+      break;
     case TOK_CONTINUE:
       status = translate_continue(stmt, state);
       break;
@@ -1367,6 +1459,12 @@ static int translate_stmt(ASTree *stmt, CompilerState *state) {
       break;
     case TOK_LABEL:
       status = translate_label(stmt, state);
+      break;
+    case TOK_CASE:
+      status = translate_case(stmt, state);
+      break;
+    case TOK_DEFAULT:
+      status = translate_default(stmt, state);
       break;
     case TOK_DECLARATION:
       data = calloc(1, sizeof(*data));

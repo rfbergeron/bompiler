@@ -175,6 +175,7 @@ stmt          : block                                                           
               | while                                                             { $$ = $1; }
               | for                                                               { $$ = $1; }
               | ifelse                                                            { $$ = $1; }
+              | switch                                                            { $$ = $1; }
               | return                                                            { $$ = $1; }
               | labelled_stmt                                                     { $$ = $1; }
               | expr ';'                                                          { $$ = $1; parser_cleanup (1, $2); }
@@ -185,7 +186,7 @@ stmt          : block                                                           
               ;
 labelled_stmt : TOK_IDENT ':' stmt                                                { $$ = parser_make_label($1, $3); astree_destroy ($2); }
               | TOK_DEFAULT ':' stmt                                              { $$ = astree_adopt($1, $3, NULL, NULL); astree_destroy ($2); }
-              | TOK_CASE expr ':' stmt                                            { $$ = astree_adopt($1, $2, $4, NULL); astree_destroy ($2); }
+              | TOK_CASE expr ':' stmt                                            { $$ = astree_adopt($1, $2, $4, NULL); astree_destroy ($3); }
               ;
 for           : TOK_FOR for_exprs stmt                                            { $$ = astree_adopt($1, $2, $3, NULL); }
               ;
@@ -205,7 +206,7 @@ while         : TOK_WHILE '(' expr ')' stmt                                     
 ifelse        : TOK_IF '(' expr ')' stmt TOK_ELSE stmt                            { $$ = astree_adopt($1, $3, $5, $7); parser_cleanup (3, $2, $4, $6); }
               | TOK_IF '(' expr ')' stmt %prec TOK_ELSE                           { $$ = astree_adopt($1, $3, $5, NULL); parser_cleanup (2, $2, $4); }
               ;
-switch        : TOK_SWITCH '(' expr ')' stmt                                      { $$ = astree_adopt($1, $3, $5); astree_destroy($2); astree_destroy($4); }
+switch        : TOK_SWITCH '(' expr ')' stmt                                      { $$ = astree_adopt($1, $3, $5, NULL); astree_destroy($2); astree_destroy($4); }
               ;
 return        : TOK_RETURN expr ';'                                               { $$ = astree_adopt($1, $2, NULL, NULL); parser_cleanup (1, $3); }
               | TOK_RETURN ';'                                                    { $$ = $1; parser_cleanup (1, $2); }
