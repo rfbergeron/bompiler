@@ -38,7 +38,7 @@
 %token TOK_BLOCK TOK_PARAM TOK_POINTER TOK_ARRAY TOK_INIT_LIST
 /* tokens constructed by lexer */
 %token TOK_VOID TOK_INT TOK_SHORT TOK_LONG TOK_CHAR TOK_UNSIGNED TOK_SIGNED
-%token TOK_CONST TOK_VOLATILE TOK_RESTRICT
+%token TOK_CONST TOK_VOLATILE TOK_RESTRICT TOK_TYPEDEF
 %token TOK_IF TOK_ELSE TOK_SWITCH TOK_DO TOK_WHILE TOK_FOR TOK_STRUCT TOK_UNION TOK_ENUM
 %token TOK_RETURN TOK_CONTINUE TOK_BREAK TOK_GOTO TOK_CASE TOK_DEFAULT
 %token TOK_ARROW TOK_EQ TOK_NE TOK_LE TOK_GE TOK_SHL TOK_SHR TOK_AND TOK_OR TOK_INC TOK_DEC
@@ -115,6 +115,7 @@ typespec      : TOK_LONG                                                        
               | TOK_INT                                                           { $$ = $1; }
               | TOK_CHAR                                                          { $$ = $1; }
               | TOK_VOID                                                          { $$ = $1; }
+              | TOK_TYPEDEF                                                       { $$ = $1; }
               | TOK_STRUCT TOK_IDENT                                              { $$ = astree_adopt($1, $2, NULL, NULL); }
               | TOK_UNION TOK_IDENT                                               { $$ = astree_adopt($1, $2, NULL, NULL); }
               | TOK_ENUM TOK_IDENT                                                { $$ = astree_adopt($1, $2, NULL, NULL); }
