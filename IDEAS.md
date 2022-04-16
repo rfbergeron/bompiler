@@ -179,6 +179,24 @@ the same struct/union tag. Nesting is possible when declaring the members of a
 struct or union, since struct, union, and enum tags may be declared within a
 struct or union tag definition.
 
+## Typedefs
+Typedefs can be redeclared at inner scopes, but objects already declared do not
+change type when this happens, so the full type must be resolved when the object
+is declared and copied into the object's type. This will make comparing types
+easier, since the type checker can just go about its buisiness as usual when
+comparing objects declared using a typedef.
+
+Typedefs declared at inner scopes that do not have any type information are not
+an actual redeclaration, and can be ignored if the type name being declared has
+already been declared. The same goes for typedefs at the same level with no
+information.
+
+Typedefs at the same level without any type information and without any prior
+declaration are treated as incomplete types, and are valid so long as they are
+not used in any context where the size or other information about the type are
+required; ie they may only be used to declare pointers to the type, but not
+plain objects of the type or arrays of the type.
+
 ## Struct and label information
 Struct/union definitions and labels do not need to have the same information as
 symbols, so they should have their own structures used to track them.
