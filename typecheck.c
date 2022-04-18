@@ -26,6 +26,7 @@
    TYPESPEC_FLAG_ENUM)
 #define TYPESPEC_FLAGS_SIGNEDNESS \
   (TYPESPEC_FLAG_SIGNED | TYPESPEC_FLAG_UNSIGNED)
+#define TYPESPEC_FLAGS_STORAGE_CLASS (TYPESPEC_FLAG_TYPEDEF)
 
 /* TODO(Robert): Implement "long long" integer type. For now, the type checker
  * should report an error if "long" is specified twice.
@@ -486,6 +487,67 @@ int validate_tag_typespec(ASTree *type, CompilerState *state, TypeSpec *out) {
   }
 }
 
+int validate_typedef_typespec(TypeSpec *out) {
+  if (out->flags & TYPESPEC_FLAGS_STORAGE_CLASS) {
+    char buf[1024];
+    flags_to_string(TYPESPEC_FLAG_TYPEDEF, buf, 1024);
+    char buf2[1024];
+    flags_to_string(out->flags, buf2, 1024);
+    fprintf(stderr,
+            "ERROR: typespec flag \"%s\" incompatible with flagset \"%s\"\n",
+            buf, buf2);
+    return -1;
+  } else {
+    out->flags |= TYPESPEC_FLAG_TYPEDEF;
+    return 0;
+  }
+}
+
+int validate_type_id_typespec(ASTree *type, CompilerState *state,
+                              TypeSpec *out) {
+  ASTree *type_id = astree_first(type);
+  const char *type_id_name = type_id->lexinfo;
+  size_t type_id_name_len = strlen(type_id_name);
+  SymbolValue *symval = NULL;
+  state_get_symbol(state, type_id_name, type_id_name_len, &symval);
+  if (!symval) {
+    fprintf(stderr, "ERROR: unable to resolve typedef name %s.\n",
+            type_id_name);
+    return -1;
+  } else if ((symval->type.flags & TYPESPEC_FLAG_TYPEDEF) == 0) {
+    fprintf(stderr, "ERROR: symbol name %s does not refer to a type.\n",
+            type_id_name);
+    return -1;
+  } else if (symval->flags & SYMFLAG_TYPEDEF_DEFINED) {
+    out->base = symval->type.base;
+    out->width = symval->type.width;
+    out->alignment = symval->type.alignment;
+    out->flags = symval->type.flags;
+
+    if (out->auxspecs.anchor == NULL) {
+      typespec_init(out);
+    }
+
+    int status = typespec_append_auxspecs(out, &symval->type);
+    if (status) return status;
+    return 0;
+  } else {
+    out->base = TYPE_INCOMPLETE;
+    out->width = 0;
+    out->alignment = 0;
+
+    if (out->auxspecs.anchor == NULL) {
+      typespec_init(out);
+    }
+
+    AuxSpec *aux_incomplete = calloc(1, sizeof(*aux_incomplete));
+    aux_incomplete->aux = AUX_INCOMPLETE;
+    aux_incomplete->data.incomplete.name = type_id_name;
+    llist_push_back(&out->auxspecs, aux_incomplete);
+    return 0;
+  }
+}
+
 int validate_typespec_list(ASTree *spec_list, CompilerState *state,
                            TypeSpec *out) {
   int status = 0;
@@ -532,6 +594,10 @@ int validate_typespec_list(ASTree *spec_list, CompilerState *state,
       case TOK_VOLATILE:
         break;
       case TOK_IDENT:
+        status = validate_type_id_typespec(type, state, out);
+        break;
+      case TOK_TYPEDEF:
+        status = validate_typedef_typespec(out);
         break;
       default:
         fprintf(stderr, "ERROR: unimplemented type: %s\n",
@@ -1468,7 +1534,7 @@ int define_function(ASTree *function, CompilerState *state) {
         TCHK_INCOMPATIBLE) {
       fprintf(stderr, "ERROR: redeclaration of function: %s\n", function_ident);
       return -1;
-    } else if (existing_entry->flag) {
+    } else if (existing_entry->flags & SYMFLAG_FUNCTION_DEFINED) {
       fprintf(stderr, "ERROR: redefinition of function: %s\n", function_ident);
       return -1;
     } else if (astree_count(function) == 3) {
@@ -1485,7 +1551,7 @@ int define_function(ASTree *function, CompilerState *state) {
       status = state_unset_function(state);
       if (status) return status;
       /* mark function as defined */
-      existing_entry->flag = 1;
+      existing_entry->flags |= SYMFLAG_FUNCTION_DEFINED;
     }
     /* TODO(Robert): keep declaration location of function prototype but use
      * the parameter names from the definition
@@ -1510,7 +1576,7 @@ int define_function(ASTree *function, CompilerState *state) {
       status = state_unset_function(state);
       if (status) return status;
       /* mark function as defined */
-      symbol->flag = 1;
+      symbol->flags |= SYMFLAG_FUNCTION_DEFINED;
     }
     return assign_type(identifier, state);
   }
@@ -1597,7 +1663,7 @@ int define_enumerators(ASTree *enum_, TagValue *tagval, CompilerState *state) {
     symval->type.width = X64_SIZEOF_INT;
     symval->type.base = TYPE_ENUM;
     /* mark as enumeration consntant */
-    symval->flag = 1;
+    symval->flags |= SYMFLAG_ENUM_CONST;
 
     AuxSpec *enum_aux = calloc(1, sizeof(*enum_aux));
     enum_aux->aux = AUX_ENUM;

@@ -39,7 +39,7 @@ SymbolValue *symbol_value_init(const Location *loc, const size_t sequence) {
   ret->type = SPEC_EMPTY;
   ret->loc = *loc;
   ret->sequence = sequence;
-  ret->flag = 0;
+  ret->flags = SYMFLAG_NONE;
   ret->obj_loc[0] = 0;
   typespec_init(&ret->type);
   return ret;
