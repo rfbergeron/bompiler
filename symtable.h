@@ -14,11 +14,19 @@ typedef struct symbol_table {
   Map *label_namespace;
 } SymbolTable;
 
+typedef enum symbol_flag {
+  SYMFLAG_NONE = 0,
+  SYMFLAG_FUNCTION_DEFINED,
+  SYMFLAG_ENUM_CONST,
+  SYMFLAG_TYPEDEF_DEFINED,
+  SYMFLAG_INCOMPLETE,
+} SymbolFlag;
+
 typedef struct symbol_value {
   size_t sequence;  /* used to order declarations in a given block */
   Location loc;     /* declaration location */
   TypeSpec type;    /* type of symbol */
-  int flag;         /* context dependent flag */
+  int flags;        /* flags, as enumerated above */
   char obj_loc[64]; /* location, represented as a string */
 } SymbolValue;
 

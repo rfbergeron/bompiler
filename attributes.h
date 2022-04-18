@@ -45,6 +45,7 @@ typedef enum base_type {
   TYPE_STRUCT,
   TYPE_UNION,
   TYPE_ENUM,
+  TYPE_INCOMPLETE,
 } BaseType;
 
 typedef enum aux_type {
@@ -56,6 +57,7 @@ typedef enum aux_type {
   AUX_ENUM,
   AUX_FUNCTION,
   AUX_TYPEDEF,
+  AUX_INCOMPLETE,
 } AuxType;
 
 /*
@@ -88,6 +90,7 @@ enum typespec_index {
   TYPESPEC_INDEX_STATIC,
   TYPESPEC_INDEX_EXTERN,
   TYPESPEC_INDEX_AUTO,
+  TYPESPEC_INDEX_TYPEDEF,
   /* qualifiers */
   TYPESPEC_INDEX_CONST,
   TYPESPEC_INDEX_VOLATILE,
@@ -115,6 +118,7 @@ enum typespec_flag {
   TYPESPEC_FLAG_STATIC = 1 << TYPESPEC_INDEX_STATIC,
   TYPESPEC_FLAG_EXTERN = 1 << TYPESPEC_INDEX_EXTERN,
   TYPESPEC_FLAG_AUTO = 1 << TYPESPEC_INDEX_AUTO,
+  TYPESPEC_FLAG_TYPEDEF = 1 << TYPESPEC_INDEX_TYPEDEF,
   /* qualifiers */
   TYPESPEC_FLAG_CONST = 1 << TYPESPEC_INDEX_CONST,
   TYPESPEC_FLAG_VOLATILE = 1 << TYPESPEC_INDEX_VOLATILE,
@@ -123,9 +127,12 @@ enum typespec_flag {
 };
 
 typedef struct symbol_table SymbolTable;
+typedef struct symbol_value SymbolValue;
 typedef struct auxspec {
   union {
-    const char *type_id;
+    struct {
+      const char *name;
+    } incomplete; /* for incomplete typedefs */
     struct {
       const char *name;
       struct {
@@ -191,6 +198,7 @@ int auxspec_copy(AuxSpec *dest, const AuxSpec *src);
 int typespec_init(TypeSpec *spec);
 int typespec_destroy(TypeSpec *spec);
 int typespec_copy(TypeSpec *dst, const TypeSpec *src);
+int typespec_append_auxspecs(TypeSpec *dest, TypeSpec *src);
 int strip_aux_type(TypeSpec *dest, const TypeSpec *src);
 
 int typespec_is_arithmetic(const TypeSpec *type);

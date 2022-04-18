@@ -195,7 +195,25 @@ Typedefs at the same level without any type information and without any prior
 declaration are treated as incomplete types, and are valid so long as they are
 not used in any context where the size or other information about the type are
 required; ie they may only be used to declare pointers to the type, but not
-plain objects of the type or arrays of the type.
+plain objects of the type or arrays of the type, struct and union member
+access may not be performed on them, and the memory where objects of this type
+are stored may not be dereferenced.
+
+Objects and functions whose type includes a typedef'ed name can resolve this
+name at declaration time by either copying the whole type or by storing an
+`AuxSpec *` containing the name of the typedef and the symbol value associated
+with it.
+
+The former approach makes type checking objects and functions using typedefs
+easier, since the typedef becomes invisible to the type checker once delared.
+However, it makes incomplete typedefs harder to deal with, since the base type
+information would need to be replaced with a placeholder indicating that the
+type has yet to be fully defined. This placeholder would also have to be
+replaced if, later on, at the same scope, the typedef received a full
+definition.
+
+The latter approach means the type checker has to do more work when handling
+typedef'ed types, and opens the possibility for more bugs in the implementation.
 
 ## Struct and label information
 Struct/union definitions and labels do not need to have the same information as

@@ -263,6 +263,7 @@ int auxspec_destroy(AuxSpec *auxspec) {
     case AUX_STRUCT:
     case AUX_UNION:
     case AUX_TYPEDEF:
+    case AUX_INCOMPLETE:
       break;
     case AUX_FUNCTION:
       llist_destroy(auxspec->data.params);
@@ -316,6 +317,16 @@ int typespec_copy(TypeSpec *dest, const TypeSpec *src) {
   *dest = *src;
   memset(&dest->auxspecs, 0, sizeof(dest->auxspecs));
   llist_copy(&dest->auxspecs, (LinkedList *)&src->auxspecs);
+  return 0;
+}
+
+int typespec_append_auxspecs(TypeSpec *dest, TypeSpec *src) {
+  size_t i;
+  for (i = 0; i < llist_size(&src->auxspecs); ++i) {
+    AuxSpec *aux_copy = calloc(1, sizeof(*aux_copy));
+    auxspec_copy(aux_copy, llist_get(&src->auxspecs, i));
+    llist_push_back(&dest->auxspecs, aux_copy);
+  }
   return 0;
 }
 
