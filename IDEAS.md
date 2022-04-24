@@ -179,6 +179,53 @@ the same struct/union tag. Nesting is possible when declaring the members of a
 struct or union, since struct, union, and enum tags may be declared within a
 struct or union tag definition.
 
+## Typedefs
+Typedefs can be redeclared at inner scopes, but objects already declared do not
+change type when this happens, so the full type must be resolved when the object
+is declared and copied into the object's type. This will make comparing types
+easier, since the type checker can just go about its buisiness as usual when
+comparing objects declared using a typedef.
+
+Typedefs declared at inner scopes that do not have any type information are not
+an actual redeclaration, and can be ignored if the type name being declared has
+already been declared. The same goes for typedefs at the same level with no
+information.
+
+Typedefs at the same level without any type information and without any prior
+declaration are treated as incomplete types, and are valid so long as they are
+not used in any context where the size or other information about the type are
+required; ie they may only be used to declare pointers to the type, but not
+plain objects of the type or arrays of the type, struct and union member
+access may not be performed on them, and the memory where objects of this type
+are stored may not be dereferenced.
+
+Objects and functions whose type includes a typedef'ed name can resolve this
+name at declaration time by either copying the whole type or by storing an
+`AuxSpec *` containing the name of the typedef and the symbol value associated
+with it.
+
+The former approach makes type checking objects and functions using typedefs
+easier, since the typedef becomes invisible to the type checker once delared.
+However, it makes incomplete typedefs harder to deal with, since the base type
+information would need to be replaced with a placeholder indicating that the
+type has yet to be fully defined. This placeholder would also have to be
+replaced if, later on, at the same scope, the typedef received a full
+definition.
+
+The latter approach means the type checker has to do more work when handling
+typedef'ed types, and opens the possibility for more bugs in the implementation.
+
+## Incomplete types
+In ANSI C, there are two ways to end up with incomplete types: tags and typedefs.
+The mechanism I use to record that an object has incomplete type needs to be
+able to handle both of these.
+
+This will be handled with a `BaseType` and `AuxType` enumeration constant.
+Incomplete tags will have the `BaseType` corresponding to their tag, but an
+`AuxType` that is incomplete, with the name of the incomplete tag. Incomplete
+typedefs will have an incomplete `BaseType` and an incomplete `AuxType` with the
+name of the incomplete typedef.
+
 ## Struct and label information
 Struct/union definitions and labels do not need to have the same information as
 symbols, so they should have their own structures used to track them.

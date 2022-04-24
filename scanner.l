@@ -60,6 +60,7 @@ NOTSTRING       (\"[^"]*)
 "struct"        { return lexer_token (TOK_STRUCT); }
 "union"         { return lexer_token (TOK_UNION); }
 "enum"          { return lexer_token (TOK_ENUM); }
+"typedef"       { return lexer_token (TOK_TYPEDEF); }
 {IDENT}         { return lexer_token (TOK_IDENT); }
 {STRINGCON}     { return lexer_token (TOK_STRINGCON); }
 {INTCON}        { return lexer_token (TOK_INTCON); }

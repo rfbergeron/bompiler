@@ -69,6 +69,7 @@ int validate_declaration(ASTree *statement,
 int types_compatible(
     const TypeSpec *type1,
     const TypeSpec *type2); /* required to check param and member types */
+int resolve_tag(ASTree *tag, CompilerState *state);
 
 int assign_type(ASTree *tree, CompilerState *state) {
   DEBUGS('t', "Attempting to assign a type");
@@ -448,42 +449,31 @@ AuxType aux_from_tag(TagType tag) {
 }
 
 int validate_tag_typespec(ASTree *type, CompilerState *state, TypeSpec *out) {
-  ASTree *tag = astree_first(type);
-  const char *tag_name = tag->lexinfo;
+  int status = resolve_tag(type, state);
+  if (status) return status;
+  /* TODO(Robert): get unique tag name/info somehow */
+  const char *tag_name = astree_first(type)->lexinfo;
   size_t tag_name_len = strlen(tag_name);
   TagValue *tagval = NULL;
-  state_get_tag(state, tag_name, tag_name_len, &tagval);
-  if (!tagval) {
-    fprintf(stderr, "ERROR: structure type %s is not defined\n", tag_name);
-    return -1;
-  } else if (type->symbol == TOK_STRUCT && tagval->tag != TAG_STRUCT) {
-    fprintf(stderr, "ERROR: type %s is not a struct\n", tag_name);
-    return -1;
-  } else if (type->symbol == TOK_UNION && tagval->tag != TAG_UNION) {
-    fprintf(stderr, "ERROR: type %s is not a union\n", tag_name);
-    return -1;
-  } else if (type->symbol == TOK_ENUM && tagval->tag != TAG_ENUM) {
-    fprintf(stderr, "ERROR: type %s is not an enum\n", tag_name);
-    return -1;
-  } else {
-    out->base = type_from_tag(tagval->tag);
-    out->width = tagval->width;
-    out->alignment = tagval->alignment;
+  status = state_get_tag(state, tag_name, tag_name_len, &tagval);
+  if (status) return status;
+  out->base = type_from_tag(tagval->tag);
+  out->width = tagval->width;
+  out->alignment = tagval->alignment;
 
-    if (out->auxspecs.anchor == NULL) {
-      typespec_init(out);
-    }
-
-    AuxSpec *tag_aux = calloc(1, sizeof(*tag_aux));
-    tag_aux->aux = aux_from_tag(tagval->tag);
-    tag_aux->data.tag.name = tag_name;
-    if (tagval->tag == TAG_STRUCT || tagval->tag == TAG_UNION) {
-      tag_aux->data.tag.members.by_name = tagval->data.members.by_name;
-      tag_aux->data.tag.members.in_order = &tagval->data.members.in_order;
-    }
-    llist_push_back(&out->auxspecs, tag_aux);
-    return 0;
+  if (out->auxspecs.anchor == NULL) {
+    typespec_init(out);
   }
+
+  AuxSpec *tag_aux = calloc(1, sizeof(*tag_aux));
+  tag_aux->aux = aux_from_tag(tagval->tag);
+  tag_aux->data.tag.name = tag_name;
+  if (tagval->tag == TAG_STRUCT || tagval->tag == TAG_UNION) {
+    tag_aux->data.tag.members.by_name = tagval->data.members.by_name;
+    tag_aux->data.tag.members.in_order = &tagval->data.members.in_order;
+  }
+  llist_push_back(&out->auxspecs, tag_aux);
+  return 0;
 }
 
 int validate_typespec_list(ASTree *spec_list, CompilerState *state,
@@ -1642,32 +1632,153 @@ TagType tag_from_symbol(int symbol) {
   }
 }
 
-int define_tag(ASTree *tag, CompilerState *state) {
-  const char *tag_name = extract_ident(tag)->lexinfo;
-  const size_t tag_name_len = strnlen(tag_name, MAX_IDENT_LEN);
-  DEBUGS('t', "Defining tag: %s", tag_name);
+/* Tag declaration/definition steps:
+ * 1. Declarations that only declare a tag and no associated object receive
+ *    special treatement.
+ * 2. Declarations that specify unique tags are reported as errors, for now,
+ *    but will need special treatment in that they create a unique name for
+ *    the tag and return the tag information to the call site somehow.
+ */
+
+int declare_tag(ASTree *tag, CompilerState *state, TagValue **out) {
+  ASTree *first_child = astree_first(tag);
+  if (first_child->symbol != TOK_IDENT) {
+    /* TODO(Robert): allow unique tags */
+    fprintf(stderr, "ERROR: unique tags not yet supported.\n");
+    return -1;
+  }
   TagValue *exists = NULL;
+  const char *tag_name = first_child->lexinfo;
+  size_t tag_name_len = strlen(tag_name);
   int is_redefinition = state_get_tag(state, tag_name, tag_name_len, &exists);
+  if (exists && is_redefinition) {
+    fprintf(stderr, "ERROR: redeclaration of tag %s.\n", tag_name);
+    return -1;
+  }
   TagValue *tagval = tag_value_init(tag_from_symbol(tag->symbol));
   if (tagval == NULL) return -1;
+  int status = state_insert_tag(state, tag_name, tag_name_len, tagval);
+  if (status) return status;
+  *out = tagval;
+  return 0;
+}
 
-  if (astree_count(tag) < 2 && !is_redefinition) {
-    return state_insert_tag(state, tag_name, tag_name_len, tagval);
-  } else if (is_redefinition) {
+int complete_tag(ASTree *tag, CompilerState *state, TagValue *tagval) {
+  if (tagval->tag == TAG_ENUM)
+    return define_enumerators(tag, tagval, state);
+  else
+    return define_members(tag, tagval, state);
+}
+
+int define_tag(ASTree *tag, CompilerState *state) {
+  TagValue *tagval = NULL;
+  int status = declare_tag(tag, state, &tagval);
+  if (status) return status;
+  return complete_tag(tag, state, tagval);
+}
+
+int illegal_tag_redefinition(ASTree *tag, CompilerState *state,
+                             TagValue *existing) {
+  ASTree *first_child = extract_ident(tag);
+  const char *tag_name = first_child->lexinfo;
+  int tag_declares_members =
+      astree_count(tag) > 1 || first_child->symbol != TOK_IDENT;
+  if (tag->symbol == TOK_STRUCT && existing->tag != TAG_STRUCT) {
+    fprintf(stderr, "ERROR: tag %s is not a struct\n", tag_name);
+    return -1;
+  } else if (tag->symbol == TOK_UNION && existing->tag != TAG_UNION) {
+    fprintf(stderr, "ERROR: tag %s is not a union\n", tag_name);
+    return -1;
+  } else if (tag->symbol == TOK_ENUM && existing->tag != TAG_ENUM) {
+    fprintf(stderr, "ERROR: tag %s is not an enum\n", tag_name);
+    return -1;
+  } else if (tag_declares_members && existing->is_defined) {
     /* TODO(Robert): allow identical redefinitions */
-    fprintf(stderr, "ERROR: redefinition of tag %s\n", tag_name);
+    fprintf(stderr, "ERROR: redefinition of tag %s\n.", tag_name);
     return -1;
   } else {
-    int status = state_insert_tag(state, tag_name, tag_name_len, tagval);
-    if (status) return status;
-    if (tagval->tag == TAG_ENUM)
-      return define_enumerators(tag, tagval, state);
-    else
-      return define_members(tag, tagval, state);
+    return 0;
+  }
+}
+
+int resolve_tag(ASTree *tag, CompilerState *state) {
+  ASTree *first_child = extract_ident(tag);
+  if (first_child->symbol != TOK_IDENT) {
+    /* TODO(Robert): allow unique tags */
+    fprintf(stderr, "ERROR: unnamed tags are not yet supported.\n");
+    return -1;
+  }
+  const char *tag_name = first_child->lexinfo;
+  const size_t tag_name_len = strnlen(tag_name, MAX_IDENT_LEN);
+  TagValue *exists = NULL;
+  int is_redefinition = state_get_tag(state, tag_name, tag_name_len, &exists);
+  int tag_declares_members =
+      astree_count(tag) > 1 || first_child->symbol != TOK_IDENT;
+  if (exists) {
+    if (is_redefinition) {
+      if (illegal_tag_redefinition(tag, state, exists)) {
+        return -1;
+      } else if (tag_declares_members) {
+        return complete_tag(tag, state, exists);
+      } else {
+        return 0;
+      }
+    } else if (tag_declares_members) {
+      int status = define_tag(tag, state);
+      if (status) return status;
+      return 0;
+    } else if (illegal_tag_redefinition(tag, state, exists)) {
+      return -1;
+    } else {
+      return 0;
+    }
+  } else {
+    return define_tag(tag, state);
   }
 }
 
 int validate_declaration(ASTree *declaration, CompilerState *state) {
+  if (astree_count(declaration) == 1) {
+    /* no declarators; attempt to define tag */
+    ASTree *spec_list = astree_first(declaration);
+    ASTree *tag = astree_first(spec_list);
+    if (tag->symbol != TOK_STRUCT && tag->symbol != TOK_UNION &&
+        tag->symbol != TOK_ENUM) {
+      /* declaration declares nothing, so do nothing */
+      return 0;
+    }
+    ASTree *first_child = astree_first(tag);
+    if (first_child->symbol != TOK_IDENT) {
+      /* TODO(Robert): support unique tags */
+      fprintf(stderr, "ERROR: unique tags are not yet supported.\n");
+      return -1;
+    }
+    const char *tag_name = first_child->lexinfo;
+    size_t tag_name_len = strlen(tag_name);
+    TagValue *exists = NULL;
+    int is_redefinition = state_get_tag(state, tag_name, tag_name_len, &exists);
+    int tag_declares_members =
+        astree_count(tag) > 1 || first_child->symbol != TOK_IDENT;
+    if (exists) {
+      if (is_redefinition) {
+        if (illegal_tag_redefinition(tag, state, exists)) {
+          return -1;
+        } else if (tag_declares_members) {
+          return define_tag(tag, state);
+        } else {
+          /* tag exists at the current level, and has a matching definition.
+           * do nothing.
+           * */
+          return 0;
+        }
+      } else {
+        return define_tag(tag, state);
+      }
+    } else {
+      return define_tag(tag, state);
+    }
+  }
+
   size_t i;
   for (i = 1; i < astree_count(declaration); ++i) {
     ASTree *current = astree_get(declaration, i);
@@ -1844,25 +1955,13 @@ int type_checker_make_table(ASTree *root) {
   size_t i;
   for (i = 0; i < astree_count(root); ++i) {
     ASTree *child = astree_get(root, i);
-    int status;
-    switch (child->symbol) {
-      /* only way to distinguish between a function definition and other
-       * declarations is the symbol of the third child
-       */
-      case TOK_DECLARATION:
-        status = validate_declaration(child, state);
-        if (status) return status;
-        break;
-      case TOK_STRUCT:
-      case TOK_UNION:
-      case TOK_ENUM:
-        status = define_tag(child, state);
-        if (status) return status;
-        break;
-      default:
-        fprintf(stderr, "ERROR: Unexpected symbol at top level: %s\n",
-                parser_get_tname(child->symbol));
-        return -1;
+    if (child->symbol == TOK_DECLARATION) {
+      int status = validate_declaration(child, state);
+      if (status) return status;
+    } else {
+      fprintf(stderr, "ERROR: Unexpected symbol at top level: %s\n",
+              parser_get_tname(child->symbol));
+      return -1;
     }
   }
   int status = state_pop_table(state);
