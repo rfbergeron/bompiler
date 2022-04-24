@@ -215,6 +215,17 @@ definition.
 The latter approach means the type checker has to do more work when handling
 typedef'ed types, and opens the possibility for more bugs in the implementation.
 
+## Incomplete types
+In ANSI C, there are two ways to end up with incomplete types: tags and typedefs.
+The mechanism I use to record that an object has incomplete type needs to be
+able to handle both of these.
+
+This will be handled with a `BaseType` and `AuxType` enumeration constant.
+Incomplete tags will have the `BaseType` corresponding to their tag, but an
+`AuxType` that is incomplete, with the name of the incomplete tag. Incomplete
+typedefs will have an incomplete `BaseType` and an incomplete `AuxType` with the
+name of the incomplete typedef.
+
 ## Struct and label information
 Struct/union definitions and labels do not need to have the same information as
 symbols, so they should have their own structures used to track them.
