@@ -39,7 +39,7 @@
 /* tokens constructed by lexer */
 %token TOK_VOID TOK_INT TOK_SHORT TOK_LONG TOK_CHAR TOK_UNSIGNED TOK_SIGNED
 %token TOK_CONST TOK_VOLATILE TOK_RESTRICT
-%token TOK_IF TOK_ELSE TOK_DO TOK_WHILE TOK_FOR TOK_RETURN TOK_STRUCT TOK_UNION TOK_ENUM
+%token TOK_IF TOK_ELSE TOK_DO TOK_WHILE TOK_FOR TOK_RETURN TOK_STRUCT TOK_UNION TOK_ENUM TOK_TYPEDEF
 %token TOK_ARROW TOK_EQ TOK_NE TOK_LE TOK_GE TOK_SHL TOK_SHR TOK_AND TOK_OR TOK_INC TOK_DEC
 %token TOK_SUBEQ TOK_ADDEQ TOK_MULEQ TOK_DIVEQ TOK_REMEQ TOK_ANDEQ TOK_OREQ TOK_XOREQ TOK_SHREQ TOK_SHLEQ
 %token TOK_IDENT TOK_INTCON TOK_CHARCON TOK_STRINGCON
@@ -72,20 +72,39 @@ program       : topdecl                                                         
               | program error ';'                                                 { $$ = $1; astree_destroy($3); }
               ;
 topdecl       : declaration ';'                                                   { $$ = $1; astree_destroy($2); }
-              | struct_spec ';'                                                   { $$ = $1; astree_destroy($2); }
-              | union_spec ';'                                                    { $$ = $1; astree_destroy($2); }
-              | enum_spec ';'                                                     { $$ = $1; astree_destroy($2); }
               | typespec_list declarator block                                    { $$ = astree_adopt(parser_make_declaration($1, $2), $3, NULL, NULL); }
               | ';'                                                               { $$ = NULL; astree_destroy($1); }
               ;
+declaration   : typespec_list init_decls                                          { $$ = parser_make_declaration($1, $2); }
+              | typespec_list                                                     { $$ = parser_make_declaration($1, NULL); }
+              ;
+typespec_list : typespec_list typespec                                            { $$ = astree_adopt($1, $2, NULL, NULL); }
+              | typespec                                                          { $$ = parser_make_spec($1); }
+              ;
+typespec      : TOK_LONG                                                          { $$ = $1; }
+              | TOK_SIGNED                                                        { $$ = $1; }
+              | TOK_UNSIGNED                                                      { $$ = $1; }
+              | TOK_SHORT                                                         { $$ = $1; }
+              | TOK_INT                                                           { $$ = $1; }
+              | TOK_CHAR                                                          { $$ = $1; }
+              | TOK_VOID                                                          { $$ = $1; }
+              | TOK_TYPEDEF                                                       { $$ = $1; }
+              | struct_spec                                                       { $$ = $1; }
+              | union_spec                                                        { $$ = $1; }
+              | enum_spec                                                         { $$ = $1; }
+              ;
 struct_spec   : TOK_STRUCT TOK_IDENT '{' struct_decl_list '}'                     { $$ = astree_adopt($1, $2, $4, NULL); astree_destroy($3); astree_destroy($5); }
+              | TOK_STRUCT '{' struct_decl_list '}'                               { $$ = astree_adopt($1, $3, NULL, NULL); astree_destroy($2); astree_destroy($4); }
               | TOK_STRUCT TOK_IDENT                                              { $$ = astree_adopt($1, $2, NULL, NULL); }
               ;
 union_spec    : TOK_UNION TOK_IDENT '{' struct_decl_list '}'                      { $$ = astree_adopt($1, $2, $4, NULL); astree_destroy($3); astree_destroy($5); }
+              | TOK_UNION '{' struct_decl_list '}'                                { $$ = astree_adopt($1, $3, NULL, NULL); astree_destroy($2); astree_destroy($4); }
               | TOK_UNION TOK_IDENT                                               { $$ = astree_adopt($1, $2, NULL, NULL); }
               ;
 enum_spec     : TOK_ENUM TOK_IDENT '{' enum_list '}'                              { $$ = astree_adopt($1, $2, $4, NULL); astree_destroy($3); astree_destroy($5); }
               | TOK_ENUM TOK_IDENT '{' enum_list ',' '}'                          { $$ = astree_adopt($1, $2, $4, NULL); astree_destroy($3); astree_destroy($5); astree_destroy($6); }
+              | TOK_ENUM '{' enum_list '}'                                        { $$ = astree_adopt($1, $3, NULL, NULL); astree_destroy($2); astree_destroy($4); }
+              | TOK_ENUM '{' enum_list ',' '}'                                    { $$ = astree_adopt($1, $3, NULL, NULL); astree_destroy($2); astree_destroy($4); astree_destroy($5); }
               | TOK_ENUM TOK_IDENT                                                { $$ = astree_adopt($1, $2, NULL, NULL); }
               ;
 struct_decl_list
@@ -100,23 +119,6 @@ enum_list     : enum_list ',' enumerator                                        
               ;
 enumerator    : TOK_IDENT                                                         { $$ = $1; }
               | TOK_IDENT '=' expr                                                { $$ = astree_adopt($2, $1, $3, NULL); }
-              ;
-declaration   : typespec_list init_decls                                          { $$ = parser_make_declaration($1, $2); }
-              | typespec_list                                                     { $$ = NULL; astree_destroy($1); }
-              ;
-typespec_list : typespec_list typespec                                            { $$ = astree_adopt($1, $2, NULL, NULL); }
-              | typespec                                                          { $$ = parser_make_spec($1); }
-              ;
-typespec      : TOK_LONG                                                          { $$ = $1; }
-              | TOK_SIGNED                                                        { $$ = $1; }
-              | TOK_UNSIGNED                                                      { $$ = $1; }
-              | TOK_SHORT                                                         { $$ = $1; }
-              | TOK_INT                                                           { $$ = $1; }
-              | TOK_CHAR                                                          { $$ = $1; }
-              | TOK_VOID                                                          { $$ = $1; }
-              | TOK_STRUCT TOK_IDENT                                              { $$ = astree_adopt($1, $2, NULL, NULL); }
-              | TOK_UNION TOK_IDENT                                               { $$ = astree_adopt($1, $2, NULL, NULL); }
-              | TOK_ENUM TOK_IDENT                                                { $$ = astree_adopt($1, $2, NULL, NULL); }
               ;
 init_decls    : init_decls ',' init_decl                                          { $$ = astree_twin($1, $3); astree_destroy($2); }
               | init_decl                                                         { $$ = $1; }
