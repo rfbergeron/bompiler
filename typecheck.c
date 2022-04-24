@@ -455,8 +455,10 @@ int validate_tag_typespec(ASTree *type, CompilerState *state, TypeSpec *out) {
   const char *tag_name = astree_first(type)->lexinfo;
   size_t tag_name_len = strlen(tag_name);
   TagValue *tagval = NULL;
-  status = state_get_tag(state, tag_name, tag_name_len, &tagval);
-  if (status) return status;
+  state_get_tag(state, tag_name, tag_name_len, &tagval);
+  if (tagval == NULL) {
+    fprintf(stderr, "ERROR: unable to locate tag %s.\n", tag_name);
+  }
   out->base = type_from_tag(tagval->tag);
   out->width = tagval->width;
   out->alignment = tagval->alignment;
@@ -1115,15 +1117,8 @@ int validate_reference(ASTree *reference, CompilerState *state) {
   const char *member_name = member->lexinfo;
   const size_t member_name_len = strlen(member_name);
   AuxSpec *strunion_aux = llist_front(&strunion_type->auxspecs);
-  const char *tag_name = strunion_aux->data.tag.name;
-  TagValue *tagval = NULL;
-  state_get_tag(state, tag_name, strlen(tag_name), &tagval);
-  if (tagval == NULL) {
-    fprintf(stderr, "ERROR: unable to locate struct/union tag %s\n.", tag_name);
-    return -1;
-  }
-
-  SymbolTable *member_table = tagval->data.members.by_name;
+  SymbolTable *member_table =
+      (SymbolTable *)strunion_aux->data.tag.members.by_name;
   SymbolValue *symval =
       symbol_table_get(member_table, (char *)member_name, member_name_len);
 
@@ -1158,15 +1153,8 @@ int validate_arrow(ASTree *arrow, CompilerState *state) {
   const size_t member_name_len = strlen(member_name);
   /* first auxtype is pointer; second is struct/union */
   AuxSpec *strunion_aux = llist_get(&strunion_type->auxspecs, 1);
-  const char *tag_name = strunion_aux->data.tag.name;
-  TagValue *tagval = NULL;
-  state_get_tag(state, tag_name, strlen(tag_name), &tagval);
-  if (tagval == NULL) {
-    fprintf(stderr, "ERROR: unable to locate struct/union tag %s\n.", tag_name);
-    return -1;
-  }
-
-  SymbolTable *member_table = tagval->data.members.by_name;
+  SymbolTable *member_table =
+      (SymbolTable *)strunion_aux->data.tag.members.by_name;
   SymbolValue *symval =
       symbol_table_get(member_table, (char *)member_name, member_name_len);
 
