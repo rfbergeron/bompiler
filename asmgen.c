@@ -671,11 +671,8 @@ int translate_reference(ASTree *reference, CompilerState *state,
       data->instruction = instructions[INSTR_LEA];
     else
       data->instruction = instructions[INSTR_MOV];
-    const char *tag_name = struct_aux->data.tag.name;
-    size_t tag_name_len = strlen(tag_name);
-    TagValue *tagval = NULL;
-    state_get_tag(state, tag_name, tag_name_len, &tagval);
-    SymbolTable *member_table = tagval->data.members.by_name;
+    SymbolTable *member_table =
+        (SymbolTable *)struct_aux->data.tag.members.by_name;
     const char *member_name = astree_second(reference)->lexinfo;
     size_t member_name_len = strlen(member_name);
     SymbolValue *member_symbol =
