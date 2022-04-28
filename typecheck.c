@@ -1318,6 +1318,29 @@ int validate_expr(ASTree *expression, CompilerState *state) {
   return status;
 }
 
+int spec_list_includes_type(ASTree *spec_list) {
+  size_t i;
+  for (i = 0; i < astree_count(spec_list); ++i) {
+    ASTree *decl_spec = astree_get(spec_list, i);
+    switch (decl_spec->symbol) {
+      case TOK_INT:
+      case TOK_SHORT:
+      case TOK_LONG:
+      case TOK_CHAR:
+      case TOK_STRUCT:
+      case TOK_UNION:
+      case TOK_ENUM:
+      case TOK_SIGNED:
+      case TOK_UNSIGNED:
+      case TOK_VOID:
+        return 1;
+      default:
+        continue;
+    }
+  }
+  return 0;
+}
+
 int declare_symbol(ASTree *declaration, ASTree *declarator,
                    CompilerState *state) {
   ASTree *identifier = extract_ident(declarator);
@@ -1340,21 +1363,37 @@ int declare_symbol(ASTree *declaration, ASTree *declarator,
   SymbolValue *exists = NULL;
   int is_redefinition =
       state_get_symbol(state, identifier->lexinfo, identifier_len, &exists);
-  if (exists && is_redefinition) {
-    if (typespec_is_function(&exists->type) &&
-        typespec_is_function(&symbol->type)) {
-      int compatibility = types_compatible(&exists->type, &symbol->type);
-      if (compatibility != TCHK_COMPATIBLE) {
+  if (exists) {
+    if (is_redefinition) {
+      if ((typespec_is_function(&exists->type) &&
+           typespec_is_function(&symbol->type)) ||
+          (typespec_is_typedef(&exists->type) &&
+           typespec_is_typedef(&symbol->type))) {
+        int compatibility = types_compatible(&exists->type, &symbol->type);
+        if (compatibility != TCHK_COMPATIBLE) {
+          fprintf(stderr, "ERROR: redefinition of symbol %s\n",
+                  identifier->lexinfo);
+          return -1;
+        }
+      } else {
+        /* TODO(Robert): allow redefinition of extern symbols so long as types
+         * are compatible */
         fprintf(stderr, "ERROR: redefinition of symbol %s\n",
                 identifier->lexinfo);
         return -1;
       }
+    } else if ((exists->type.flags & TYPESPEC_FLAG_TYPEDEF) &&
+               !spec_list_includes_type(astree_first(declaration))) {
+      /* don't redeclare typedefs if type was not specified in declaration */
+      int status = symbol_value_destroy(symbol);
+      if (status) return status;
     } else {
-      /* TODO(Robert): allow redefinition of extern symbols so long as types are
-       * compatible */
-      fprintf(stderr, "ERROR: redefinition of symbol %s\n",
-              identifier->lexinfo);
-      return -1;
+      int status = state_insert_symbol(state, identifier->lexinfo,
+                                       identifier_len, symbol);
+      if (status) {
+        fprintf(stderr, "ERROR: your data structure library sucks.\n");
+        abort();
+      }
     }
   } else {
     int status =
@@ -1364,7 +1403,6 @@ int declare_symbol(ASTree *declaration, ASTree *declarator,
       abort();
     }
   }
-
   return assign_type(identifier, state);
 }
 

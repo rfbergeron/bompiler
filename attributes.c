@@ -399,3 +399,8 @@ int typespec_is_unionptr(const TypeSpec *type) {
 int typespec_is_enum(const TypeSpec *type) {
   return typespec_is_aux(type, AUX_ENUM, 0);
 }
+
+int typespec_is_typedef(const TypeSpec *type) {
+  return typespec_is_aux(type, AUX_TYPEDEF, 0) ||
+         typespec_is_aux(type, AUX_INCOMPLETE, 0);
+}
