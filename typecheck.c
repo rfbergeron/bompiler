@@ -510,7 +510,7 @@ int validate_type_id_typespec(ASTree *type, CompilerState *state,
     fprintf(stderr, "ERROR: symbol name %s does not refer to a type.\n",
             type_id_name);
     return -1;
-  } else if (symval->flags & SYMFLAG_TYPEDEF_DEFINED) {
+  } else {
     out->base = symval->type.base;
     out->width = symval->type.width;
     out->alignment = symval->type.alignment;
@@ -522,20 +522,6 @@ int validate_type_id_typespec(ASTree *type, CompilerState *state,
 
     int status = typespec_append_auxspecs(out, &symval->type);
     if (status) return status;
-    return 0;
-  } else {
-    out->base = TYPE_INCOMPLETE;
-    out->width = 0;
-    out->alignment = 0;
-
-    if (out->auxspecs.anchor == NULL) {
-      typespec_init(out);
-    }
-
-    AuxSpec *aux_incomplete = calloc(1, sizeof(*aux_incomplete));
-    aux_incomplete->aux = AUX_INCOMPLETE;
-    aux_incomplete->data.incomplete.name = type_id_name;
-    llist_push_back(&out->auxspecs, aux_incomplete);
     return 0;
   }
 }
@@ -1367,8 +1353,8 @@ int declare_symbol(ASTree *declaration, ASTree *declarator,
     if (is_redefinition) {
       if ((typespec_is_function(&exists->type) &&
            typespec_is_function(&symbol->type)) ||
-          (typespec_is_typedef(&exists->type) &&
-           typespec_is_typedef(&symbol->type))) {
+          ((exists->type.flags & TYPESPEC_FLAG_TYPEDEF) &&
+           (symbol->type.flags & TYPESPEC_FLAG_TYPEDEF))) {
         int compatibility = types_compatible(&exists->type, &symbol->type);
         if (compatibility != TCHK_COMPATIBLE) {
           fprintf(stderr, "ERROR: redefinition of symbol %s\n",
