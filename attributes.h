@@ -45,7 +45,6 @@ typedef enum base_type {
   TYPE_STRUCT,
   TYPE_UNION,
   TYPE_ENUM,
-  TYPE_INCOMPLETE,
 } BaseType;
 
 typedef enum aux_type {
@@ -56,8 +55,6 @@ typedef enum aux_type {
   AUX_UNION,
   AUX_ENUM,
   AUX_FUNCTION,
-  AUX_TYPEDEF,
-  AUX_INCOMPLETE,
 } AuxType;
 
 /*
@@ -130,9 +127,6 @@ typedef struct symbol_table SymbolTable;
 typedef struct symbol_value SymbolValue;
 typedef struct auxspec {
   union {
-    struct {
-      const char *name;
-    } incomplete; /* for incomplete typedefs */
     struct {
       const char *name;
       struct {
@@ -214,5 +208,4 @@ int typespec_is_structptr(const TypeSpec *type);
 int typespec_is_union(const TypeSpec *type);
 int typespec_is_unionptr(const TypeSpec *type);
 int typespec_is_enum(const TypeSpec *type);
-int typespec_is_typedef(const TypeSpec *type);
 #endif
