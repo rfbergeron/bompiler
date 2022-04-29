@@ -730,14 +730,17 @@ int define_params(ASTree *params, ASTree *ident, CompilerState *state,
   return llist_push_back(&out->auxspecs, aux_function);
 }
 
-int define_array(ASTree *array, TypeSpec *spec) {
+int define_array(ASTree *array, CompilerState *state, TypeSpec *spec) {
   AuxSpec *aux_array = calloc(1, sizeof(*aux_array));
   aux_array->aux = AUX_ARRAY;
+  /* TODO(Robert): evaluate array size during three address code generation */
   if (astree_count(array) > 0) {
-    aux_array->data.memory_loc.length =
-        strtoumax(astree_first(array)->lexinfo, NULL, 0);
-    if (aux_array->data.memory_loc.length == ULONG_MAX) {
-      fprintf(stderr, "ERROR: array size too large\n");
+    ASTree *array_dim = astree_first(array);
+    int status = validate_expr(array_dim, state);
+    if (status) return status;
+    if ((array_dim->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST)) ==
+        0) {
+      fprintf(stderr, "ERROR: array dimensions must be arithmetic constants.");
       return -1;
     }
   }
@@ -794,7 +797,7 @@ int validate_dirdecl(ASTree *dirdecl, ASTree *ident, CompilerState *state,
       return 0;
       break;
     case TOK_ARRAY:
-      return define_array(dirdecl, out);
+      return define_array(dirdecl, state, out);
       break;
     case TOK_POINTER:
       return define_pointer(dirdecl, out);
@@ -1394,28 +1397,22 @@ int declare_symbol(ASTree *declaration, ASTree *declarator,
 
 int typecheck_array_initializer(ASTree *declarator, ASTree *init_list,
                                 CompilerState *state) {
+  /* TODO(Robert): evaluate array size when generating three address code */
   const TypeSpec *array_type = extract_type(declarator);
-  AuxSpec *array_aux = llist_front((LinkedList *)&array_type->auxspecs);
-  if (array_aux->data.memory_loc.length > 0 &&
-      array_aux->data.memory_loc.length < astree_count(init_list)) {
-    fprintf(stderr, "ERROR: too many elements in array initializer.\n");
-    return -1;
-  } else {
-    TypeSpec element_type = SPEC_EMPTY;
-    int status = strip_aux_type(&element_type, array_type);
+  TypeSpec element_type = SPEC_EMPTY;
+  int status = strip_aux_type(&element_type, array_type);
+  if (status) return status;
+  size_t i;
+  for (i = 0; i < astree_count(init_list); ++i) {
+    ASTree *initializer = astree_get(init_list, i);
+    int status = validate_expr(initializer, state);
     if (status) return status;
-    size_t i;
-    for (i = 0; i < astree_count(init_list); ++i) {
-      ASTree *initializer = astree_get(init_list, i);
-      int status = validate_expr(initializer, state);
-      if (status) return status;
-      status = perform_pointer_conv(initializer);
-      if (status) return status;
-      status = convert_type(initializer, &element_type);
-      if (status) return status;
-    }
-    return 0;
+    status = perform_pointer_conv(initializer);
+    if (status) return status;
+    status = convert_type(initializer, &element_type);
+    if (status) return status;
   }
+  return 0;
 }
 
 int typecheck_union_initializer(ASTree *declarator, ASTree *init_list,
