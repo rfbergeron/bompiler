@@ -216,15 +216,21 @@ The latter approach means the type checker has to do more work when handling
 typedef'ed types, and opens the possibility for more bugs in the implementation.
 
 ## Incomplete types
-In ANSI C, there are two ways to end up with incomplete types: tags and typedefs.
-The mechanism I use to record that an object has incomplete type needs to be
-able to handle both of these.
+There are three ways to create an incomplete type: tags, arrays, and void. Tags
+are incomplete if their members or enumerators have not been specified, arrays
+are incomplete if their dimensions haven't been specified, and the void type is
+always incomplete.
 
-This will be handled with a `BaseType` and `AuxType` enumeration constant.
-Incomplete tags will have the `BaseType` corresponding to their tag, but an
-`AuxType` that is incomplete, with the name of the incomplete tag. Incomplete
-typedefs will have an incomplete `BaseType` and an incomplete `AuxType` with the
-name of the incomplete typedef.
+Contrary to what I previously believed, handling of incomplete types can be
+handled using existing fields of the type system:
+- tags already have a flag field that indicates whether or not they have been
+  completed
+- arrays of dimension zero may not be explicitly defined, so we can take that to
+  mean that the array has complete type
+- void is always incomplete, so we have no need to explicitly mark it
+
+Typedefs cannot, on their own, be incomplete; their declaration specifiers must
+include one of the incomplete types listed above.
 
 ## Struct and label information
 Struct/union definitions and labels do not need to have the same information as
@@ -717,6 +723,26 @@ It may additionally be required that adding/subtracting a void pointer from any
 other pointer not be allowed (no implicit conversions and the fact that the
 object underlying the pointer has no specified width), but I am not certain of
 this.
+
+## Type checker error handling
+Currently, type checker errors result in an message printed to standard error,
+and a nonzero integer return value, which is usually -1, though the caller
+just checks whether or not it is zero.
+
+I would like to reduce the number of bare calls to printf floating about in my
+code, so that it is more compact and readable. This would also later allow the
+caller to handle errors, if it is capable of doing so, instead of just passing
+it on.
+
+Type checker errors will not be printed out unless they reach the top level, in
+which case, for now, the compiler will exit, reporting the failure.
+
+I would also like to add error handling without having to add another parameter
+to every function to hold the output or error information. Instead, I think I
+will add error info to the `CompilerState`, and have each function return a real
+status code instead of just -1.
+
+Error codes will be stored as an enum and will be shared across the compiler.
 
 ## Pointer conversions
 According to the standard, expressions with array type decay to pointer type
