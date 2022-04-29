@@ -140,7 +140,7 @@ declarator    : pointer direct_decl                                             
 direct_decl   : TOK_IDENT                                                         { $$ = $1; }
               | '(' declarator ')'                                                { $$ = $2; astree_destroy($1); astree_destroy($3); }
               | direct_decl '[' ']'                                               { $$ = parser_make_array($1, $2, NULL); astree_destroy($3); }
-              | direct_decl '[' TOK_INTCON ']'                                    { $$ = parser_make_array($1, $2, $3); astree_destroy($4); }
+              | direct_decl '[' expr ']'                                          { $$ = parser_make_array($1, $2, $3); astree_destroy($4); }
               | direct_decl '(' param_list ')'                                    { $$ = parser_make_function($1, $2, $3); astree_destroy($4); }
               | direct_decl '(' ')'                                               { $$ = parser_make_function($1, $2, NULL); astree_destroy($3); }
               | direct_decl '(' TOK_VOID ')'                                      { $$ = parser_make_function($1, $2, NULL); astree_destroy($3); astree_destroy($4); }
@@ -151,12 +151,12 @@ abstract_decl : pointer dir_abs_decl                                            
               ;
 dir_abs_decl  : '(' abstract_decl ')'                                             { $$ = $2; astree_destroy($1); astree_destroy($3); }
               | dir_abs_decl '[' ']'                                              { $$ = parser_make_array($1, $2, NULL); astree_destroy($3); }
-              | dir_abs_decl '[' TOK_INTCON ']'                                   { $$ = parser_make_array($1, $2, $3); astree_destroy($4); }
+              | dir_abs_decl '[' expr ']'                                         { $$ = parser_make_array($1, $2, $3); astree_destroy($4); }
               | dir_abs_decl '(' param_list ')'                                   { $$ = parser_make_function($1, $2, $3); astree_destroy($4); }
               | dir_abs_decl '(' ')'                                              { $$ = parser_make_function($1, $2, NULL); astree_destroy($3); }
               | dir_abs_decl '(' TOK_VOID ')'                                     { $$ = parser_make_function($1, $2, NULL); astree_destroy($3); astree_destroy($4); }
               | '[' ']'                                                           { $$ = parser_make_array(NULL, $1, NULL); astree_destroy($2); }
-              | '[' TOK_INTCON ']'                                                { $$ = parser_make_array(NULL, $1, $2); astree_destroy($3); }
+              | '[' expr ']'                                                      { $$ = parser_make_array(NULL, $1, $2); astree_destroy($3); }
               ;
 pointer       : pointer '*'                                                       { $$ = astree_twin($1, astree_adopt_sym($2, TOK_POINTER, NULL, NULL)); }
               | '*'                                                               { $$ = astree_adopt_sym($1, TOK_POINTER, NULL, NULL);; }
