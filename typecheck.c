@@ -471,10 +471,7 @@ int validate_tag_typespec(ASTree *type, CompilerState *state, TypeSpec *out) {
   AuxSpec *tag_aux = calloc(1, sizeof(*tag_aux));
   tag_aux->aux = aux_from_tag(tagval->tag);
   tag_aux->data.tag.name = tag_name;
-  if (tagval->tag == TAG_STRUCT || tagval->tag == TAG_UNION) {
-    tag_aux->data.tag.members.by_name = tagval->data.members.by_name;
-    tag_aux->data.tag.members.in_order = &tagval->data.members.in_order;
-  }
+  tag_aux->data.tag.val = tagval;
   llist_push_back(&out->auxspecs, tag_aux);
   return 0;
 }
@@ -1172,8 +1169,7 @@ int validate_reference(ASTree *reference, CompilerState *state) {
   const char *member_name = member->lexinfo;
   const size_t member_name_len = strlen(member_name);
   AuxSpec *strunion_aux = llist_front(&strunion_type->auxspecs);
-  SymbolTable *member_table =
-      (SymbolTable *)strunion_aux->data.tag.members.by_name;
+  SymbolTable *member_table = strunion_aux->data.tag.val->data.members.by_name;
   SymbolValue *symval =
       symbol_table_get(member_table, (char *)member_name, member_name_len);
 
@@ -1208,8 +1204,7 @@ int validate_arrow(ASTree *arrow, CompilerState *state) {
   const size_t member_name_len = strlen(member_name);
   /* first auxtype is pointer; second is struct/union */
   AuxSpec *strunion_aux = llist_get(&strunion_type->auxspecs, 1);
-  SymbolTable *member_table =
-      (SymbolTable *)strunion_aux->data.tag.members.by_name;
+  SymbolTable *member_table = strunion_aux->data.tag.val->data.members.by_name;
   SymbolValue *symval =
       symbol_table_get(member_table, (char *)member_name, member_name_len);
 

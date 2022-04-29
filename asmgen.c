@@ -671,8 +671,7 @@ int translate_reference(ASTree *reference, CompilerState *state,
       data->instruction = instructions[INSTR_LEA];
     else
       data->instruction = instructions[INSTR_MOV];
-    SymbolTable *member_table =
-        (SymbolTable *)struct_aux->data.tag.members.by_name;
+    SymbolTable *member_table = struct_aux->data.tag.val->data.members.by_name;
     const char *member_name = astree_second(reference)->lexinfo;
     size_t member_name_len = strlen(member_name);
     SymbolValue *member_symbol =
@@ -794,7 +793,8 @@ int translate_list_initialization(ASTree *declarator, ASTree *init_list,
   llist_push_back(text_section, struct_data);
 
   AuxSpec *struct_aux = llist_back(&struct_type->auxspecs);
-  const LinkedList *member_symbols = struct_aux->data.tag.members.in_order;
+  const LinkedList *member_symbols =
+      &struct_aux->data.tag.val->data.members.in_order;
   size_t i;
   for (i = 0; i < llist_size(member_symbols); ++i) {
     if (i < astree_count(init_list)) {

@@ -123,16 +123,12 @@ enum typespec_flag {
   TYPESPEC_FLAG_INLINE = 1 << TYPESPEC_INDEX_INLINE
 };
 
-typedef struct symbol_table SymbolTable;
-typedef struct symbol_value SymbolValue;
+typedef struct tag_value TagValue;
 typedef struct auxspec {
   union {
     struct {
       const char *name;
-      struct {
-        const SymbolTable *by_name;
-        const LinkedList *in_order;
-      } members;
+      TagValue *val;
     } tag;
     LinkedList *params;
     struct {
