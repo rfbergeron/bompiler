@@ -90,6 +90,7 @@ typespec      : TOK_LONG                                                        
               | TOK_CHAR                                                          { $$ = $1; }
               | TOK_VOID                                                          { $$ = $1; }
               | TOK_TYPEDEF                                                       { $$ = $1; }
+              | TOK_IDENT                                                         { $$ = $1; }
               | struct_spec                                                       { $$ = $1; }
               | union_spec                                                        { $$ = $1; }
               | enum_spec                                                         { $$ = $1; }

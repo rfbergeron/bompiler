@@ -191,6 +191,7 @@ int typespec_copy(TypeSpec *dst, const TypeSpec *src);
 int typespec_append_auxspecs(TypeSpec *dest, TypeSpec *src);
 int strip_aux_type(TypeSpec *dest, const TypeSpec *src);
 
+int typespec_is_incomplete(const TypeSpec *type);
 int typespec_is_arithmetic(const TypeSpec *type);
 int typespec_is_integer(const TypeSpec *type);
 int typespec_is_pointer(const TypeSpec *type);

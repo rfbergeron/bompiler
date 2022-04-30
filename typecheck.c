@@ -494,18 +494,16 @@ int validate_typedef_typespec(TypeSpec *out) {
 
 int validate_type_id_typespec(ASTree *type, CompilerState *state,
                               TypeSpec *out) {
-  ASTree *type_id = astree_first(type);
-  const char *type_id_name = type_id->lexinfo;
-  size_t type_id_name_len = strlen(type_id_name);
+  const char *type_name = type->lexinfo;
+  size_t type_name_len = strlen(type_name);
   SymbolValue *symval = NULL;
-  state_get_symbol(state, type_id_name, type_id_name_len, &symval);
+  state_get_symbol(state, type_name, type_name_len, &symval);
   if (!symval) {
-    fprintf(stderr, "ERROR: unable to resolve typedef name %s.\n",
-            type_id_name);
+    fprintf(stderr, "ERROR: unable to resolve typedef name %s.\n", type_name);
     return -1;
   } else if ((symval->type.flags & TYPESPEC_FLAG_TYPEDEF) == 0) {
     fprintf(stderr, "ERROR: symbol name %s does not refer to a type.\n",
-            type_id_name);
+            type_name);
     return -1;
   } else {
     out->base = symval->type.base;
@@ -728,6 +726,10 @@ int define_params(ASTree *params, ASTree *ident, CompilerState *state,
 }
 
 int define_array(ASTree *array, CompilerState *state, TypeSpec *spec) {
+  if (typespec_is_incomplete(spec)) {
+    fprintf(stderr, "ERROR: attempt to define array with incomplete type.\n");
+    return -1;
+  }
   AuxSpec *aux_array = calloc(1, sizeof(*aux_array));
   aux_array->aux = AUX_ARRAY;
   /* TODO(Robert): evaluate array size during three address code generation */
@@ -740,6 +742,8 @@ int define_array(ASTree *array, CompilerState *state, TypeSpec *spec) {
       fprintf(stderr, "ERROR: array dimensions must be arithmetic constants.");
       return -1;
     }
+    /* set array size to any nonzero value, for now */
+    aux_array->data.memory_loc.length = -1;
   }
   return llist_push_back(&spec->auxspecs, aux_array);
 }
@@ -1372,6 +1376,20 @@ int declare_symbol(ASTree *declaration, ASTree *declarator,
       int status = symbol_value_destroy(symbol);
       if (status) return status;
     } else {
+      if (typespec_is_incomplete(&symbol->type) &&
+          (symbol->type.flags & TYPESPEC_FLAG_TYPEDEF) == 0) {
+        /* TODO(Robert): this is an ugly way to do this; need return codes to
+         * communicate incomplete types
+         */
+        /* allow incomplete type if this is an array with an initializer */
+        ASTree *initializer = declarator->next_sibling;
+        if (initializer == NULL || initializer->symbol != TOK_INIT_LIST ||
+            !typespec_is_array(&symbol->type)) {
+          fprintf(stderr, "ERROR: object %s has incomplete type.\n",
+                  identifier->lexinfo);
+          return -1;
+        }
+      }
       int status = state_insert_symbol(state, identifier->lexinfo,
                                        identifier_len, symbol);
       if (status) {
@@ -1380,6 +1398,20 @@ int declare_symbol(ASTree *declaration, ASTree *declarator,
       }
     }
   } else {
+    if (typespec_is_incomplete(&symbol->type) &&
+        (symbol->type.flags & TYPESPEC_FLAG_TYPEDEF) == 0) {
+      /* TODO(Robert): this is an ugly way to do this; need return codes to
+       * communicate incomplete types
+       */
+      /* allow incomplete type if this is an array with an initializer */
+      ASTree *initializer = declarator->next_sibling;
+      if (initializer == NULL || initializer->symbol != TOK_INIT_LIST ||
+          !typespec_is_array(&symbol->type)) {
+        fprintf(stderr, "ERROR: object %s has incomplete type.\n",
+                identifier->lexinfo);
+        return -1;
+      }
+    }
     int status =
         state_insert_symbol(state, identifier->lexinfo, identifier_len, symbol);
     if (status) {

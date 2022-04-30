@@ -161,7 +161,9 @@ int type_to_string(const TypeSpec *type, char *buf, size_t size) {
     size_t j;
     switch (auxspec->aux) {
       case AUX_ARRAY:
-        if (auxspec->data.memory_loc.length > 0) {
+        /* TODO(Robert): no special case for -1 >:( */
+        if (auxspec->data.memory_loc.length > 0 &&
+            auxspec->data.memory_loc.length != -1) {
           ret += sprintf((buf + ret), "array of size %zu of ",
                          auxspec->data.memory_loc.length);
         } else {
@@ -337,6 +339,19 @@ int strip_aux_type(TypeSpec *dest, const TypeSpec *src) {
     return -1;
   }
   return 0;
+}
+
+int typespec_is_incomplete(const TypeSpec *type) {
+  int is_void = type->base == TYPE_VOID && llist_size(&type->auxspecs) == 0;
+  int is_struct =
+      (type->base == TYPE_STRUCT || type->base == TYPE_UNION) &&
+      llist_size(&type->auxspecs) == 1 &&
+      ((AuxSpec *)llist_front(&type->auxspecs))->data.tag.val->is_defined == 0;
+  int is_array =
+      llist_size(&type->auxspecs) >= 1 &&
+      ((AuxSpec *)llist_front(&type->auxspecs))->aux == AUX_ARRAY &&
+      ((AuxSpec *)llist_front(&type->auxspecs))->data.memory_loc.length == 0;
+  return is_void || is_struct || is_array;
 }
 
 int typespec_is_arithmetic(const TypeSpec *type) {
