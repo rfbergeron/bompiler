@@ -52,6 +52,25 @@ that has does not do most of the things that I thought:
 - You can only implicitly convert between `void*` and other pointer types, not
   any other kind of void pointer (for example `void**`).
 
+## The lexer hack
+I did not realize until now that identifiers are context sensitive. I had
+assumed that it was some cognitive deficiency of my own that the parser that I
+have written gets confused when dealing with typedefs, but it actually is a
+problem.
+
+In order to fix this, I must have a backchannel into the lexer from the type
+checker. This means that the type checker must run in parallel with the lexer
+and parser, and can no longer be run after the syntax tree has been built. This
+means another major rewrite is in order.
+
+Having the type checker run in parallel will open the door for a couple of other
+nice features:
+- labels could (potentially) be checked for validity using a stack which is
+  examined at the end of the parser directive for functions; the same goes for
+  case and default labels
+- additional tree nodes can be inserted more freely during type checking, namely
+  for implicit conversions
+
 ## Labels
 Based on the language definition, it looks like labels are attached to the
 statement immediately following them. They are not a valid statement all on
