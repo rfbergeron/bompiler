@@ -217,6 +217,16 @@ expr          : assign_expr                                                     
               | expr ',' assign_expr                                              { $$ = astree_adopt($2, $1, $3, NULL); }
               ;
 assign_expr   : assign_expr '=' binary_expr                                       { $$ = astree_adopt($2, $1, $3, NULL); }
+              | assign_expr TOK_ADDEQ binary_expr                                 { $$ = astree_adopt($2, $1, $3, NULL); }
+              | assign_expr TOK_SUBEQ binary_expr                                 { $$ = astree_adopt($2, $1, $3, NULL); }
+              | assign_expr TOK_MULEQ binary_expr                                 { $$ = astree_adopt($2, $1, $3, NULL); }
+              | assign_expr TOK_DIVEQ binary_expr                                 { $$ = astree_adopt($2, $1, $3, NULL); }
+              | assign_expr TOK_REMEQ binary_expr                                 { $$ = astree_adopt($2, $1, $3, NULL); }
+              | assign_expr TOK_ANDEQ binary_expr                                 { $$ = astree_adopt($2, $1, $3, NULL); }
+              | assign_expr TOK_OREQ binary_expr                                  { $$ = astree_adopt($2, $1, $3, NULL); }
+              | assign_expr TOK_XOREQ binary_expr                                 { $$ = astree_adopt($2, $1, $3, NULL); }
+              | assign_expr TOK_SHREQ binary_expr                                 { $$ = astree_adopt($2, $1, $3, NULL); }
+              | assign_expr TOK_SHLEQ binary_expr                                 { $$ = astree_adopt($2, $1, $3, NULL); }
               | binary_expr                                                       { $$ = $1; }
               ;
 binary_expr   : binary_expr '+' binary_expr                                       { $$ = astree_adopt($2, $1, $3, NULL); }
