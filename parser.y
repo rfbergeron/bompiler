@@ -90,7 +90,6 @@ typespec      : TOK_LONG                                                        
               | TOK_CHAR                                                          { $$ = $1; }
               | TOK_VOID                                                          { $$ = $1; }
               | TOK_TYPEDEF                                                       { $$ = $1; }
-              | TOK_IDENT                                                         { $$ = $1; }
               | struct_spec                                                       { $$ = $1; }
               | union_spec                                                        { $$ = $1; }
               | enum_spec                                                         { $$ = $1; }
@@ -120,7 +119,7 @@ enum_list     : enum_list ',' enumerator                                        
               | enumerator                                                        { $$ = $1; }
               ;
 enumerator    : TOK_IDENT                                                         { $$ = $1; }
-              | TOK_IDENT '=' expr                                                { $$ = astree_adopt($2, $1, $3, NULL); }
+              | TOK_IDENT '=' binary_expr                                         { $$ = astree_adopt($2, $1, $3, NULL); }
               ;
 init_decls    : init_decls ',' init_decl                                          { $$ = astree_twin($1, $3); astree_destroy($2); }
               | init_decl                                                         { $$ = $1; }
@@ -128,7 +127,7 @@ init_decls    : init_decls ',' init_decl                                        
 init_decl     : declarator '=' initializer                                        { $$ = astree_twin($1, $3); astree_destroy($2); }
               | declarator                                                        { $$ = $1; }
               ;
-initializer   : expr                                                              { $$ = $1; }
+initializer   : assign_expr                                                       { $$ = $1; }
               | '{' init_list '}'                                                 { $$ = astree_adopt_sym($1, TOK_INIT_LIST, $2, NULL); astree_destroy($3); }
               | '{' init_list ',' '}'                                             { $$ = astree_adopt_sym($1, TOK_INIT_LIST, $2, NULL); astree_destroy($3); astree_destroy($4); }
               ;
@@ -141,7 +140,7 @@ declarator    : pointer direct_decl                                             
 direct_decl   : TOK_IDENT                                                         { $$ = $1; }
               | '(' declarator ')'                                                { $$ = $2; astree_destroy($1); astree_destroy($3); }
               | direct_decl '[' ']'                                               { $$ = parser_make_array($1, $2, NULL); astree_destroy($3); }
-              | direct_decl '[' expr ']'                                          { $$ = parser_make_array($1, $2, $3); astree_destroy($4); }
+              | direct_decl '[' binary_expr ']'                                   { $$ = parser_make_array($1, $2, $3); astree_destroy($4); }
               | direct_decl '(' param_list ')'                                    { $$ = parser_make_function($1, $2, $3); astree_destroy($4); }
               | direct_decl '(' ')'                                               { $$ = parser_make_function($1, $2, NULL); astree_destroy($3); }
               | direct_decl '(' TOK_VOID ')'                                      { $$ = parser_make_function($1, $2, NULL); astree_destroy($3); astree_destroy($4); }
@@ -152,12 +151,12 @@ abstract_decl : pointer dir_abs_decl                                            
               ;
 dir_abs_decl  : '(' abstract_decl ')'                                             { $$ = $2; astree_destroy($1); astree_destroy($3); }
               | dir_abs_decl '[' ']'                                              { $$ = parser_make_array($1, $2, NULL); astree_destroy($3); }
-              | dir_abs_decl '[' expr ']'                                         { $$ = parser_make_array($1, $2, $3); astree_destroy($4); }
+              | dir_abs_decl '[' binary_expr ']'                                  { $$ = parser_make_array($1, $2, $3); astree_destroy($4); }
               | dir_abs_decl '(' param_list ')'                                   { $$ = parser_make_function($1, $2, $3); astree_destroy($4); }
               | dir_abs_decl '(' ')'                                              { $$ = parser_make_function($1, $2, NULL); astree_destroy($3); }
               | dir_abs_decl '(' TOK_VOID ')'                                     { $$ = parser_make_function($1, $2, NULL); astree_destroy($3); astree_destroy($4); }
               | '[' ']'                                                           { $$ = parser_make_array(NULL, $1, NULL); astree_destroy($2); }
-              | '[' expr ']'                                                      { $$ = parser_make_array(NULL, $1, $2); astree_destroy($3); }
+              | '[' binary_expr ']'                                               { $$ = parser_make_array(NULL, $1, $2); astree_destroy($3); }
               ;
 pointer       : pointer '*'                                                       { $$ = astree_twin($1, astree_adopt_sym($2, TOK_POINTER, NULL, NULL)); }
               | '*'                                                               { $$ = astree_adopt_sym($1, TOK_POINTER, NULL, NULL);; }
@@ -189,7 +188,7 @@ stmt          : block                                                           
               ;
 labelled_stmt : TOK_IDENT ':' stmt                                                { $$ = parser_make_label($1, $3); astree_destroy ($2); }
               | TOK_DEFAULT ':' stmt                                              { $$ = astree_adopt($1, $3, NULL, NULL); astree_destroy ($2); }
-              | TOK_CASE expr ':' stmt                                            { $$ = astree_adopt($1, $2, $4, NULL); astree_destroy ($3); }
+              | TOK_CASE binary_expr ':' stmt                                     { $$ = astree_adopt($1, $2, $4, NULL); astree_destroy ($3); }
               ;
 for           : TOK_FOR for_exprs stmt                                            { $$ = astree_adopt($1, $2, $3, NULL); }
               ;
@@ -214,25 +213,30 @@ switch        : TOK_SWITCH '(' expr ')' stmt                                    
 return        : TOK_RETURN expr ';'                                               { $$ = astree_adopt($1, $2, NULL, NULL); parser_cleanup (1, $3); }
               | TOK_RETURN ';'                                                    { $$ = $1; parser_cleanup (1, $2); }
               ;
-expr          : expr '+' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
-              | expr '-' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
-              | expr '/' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
-              | expr '*' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
-              | expr '%' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
-              | expr '>' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
-              | expr '<' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
-              | expr TOK_LE expr                                                  { $$ = astree_adopt($2, $1, $3, NULL); }
-              | expr TOK_GE expr                                                  { $$ = astree_adopt($2, $1, $3, NULL); }
-              | expr TOK_EQ expr                                                  { $$ = astree_adopt($2, $1, $3, NULL); }
-              | expr TOK_NE expr                                                  { $$ = astree_adopt($2, $1, $3, NULL); }
-              | expr TOK_OR expr                                                  { $$ = astree_adopt($2, $1, $3, NULL); }
-              | expr TOK_AND expr                                                 { $$ = astree_adopt($2, $1, $3, NULL); }
-              | expr '|' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
-              | expr '&' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
-              | expr '^' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
-              | expr TOK_SHR expr                                                 { $$ = astree_adopt($2, $1, $3, NULL); }
-              | expr TOK_SHL expr                                                 { $$ = astree_adopt($2, $1, $3, NULL); }
-              | expr '=' expr                                                     { $$ = astree_adopt($2, $1, $3, NULL); }
+expr          : assign_expr                                                       { $$ = $1; }
+              | expr ',' assign_expr                                              { $$ = astree_adopt($2, $1, $3, NULL); }
+              ;
+assign_expr   : assign_expr '=' binary_expr                                       { $$ = astree_adopt($2, $1, $3, NULL); }
+              | binary_expr                                                       { $$ = $1; }
+              ;
+binary_expr   : binary_expr '+' binary_expr                                       { $$ = astree_adopt($2, $1, $3, NULL); }
+              | binary_expr '-' binary_expr                                       { $$ = astree_adopt($2, $1, $3, NULL); }
+              | binary_expr '/' binary_expr                                       { $$ = astree_adopt($2, $1, $3, NULL); }
+              | binary_expr '*' binary_expr                                       { $$ = astree_adopt($2, $1, $3, NULL); }
+              | binary_expr '%' binary_expr                                       { $$ = astree_adopt($2, $1, $3, NULL); }
+              | binary_expr '>' binary_expr                                       { $$ = astree_adopt($2, $1, $3, NULL); }
+              | binary_expr '<' binary_expr                                       { $$ = astree_adopt($2, $1, $3, NULL); }
+              | binary_expr TOK_LE binary_expr                                    { $$ = astree_adopt($2, $1, $3, NULL); }
+              | binary_expr TOK_GE binary_expr                                    { $$ = astree_adopt($2, $1, $3, NULL); }
+              | binary_expr TOK_EQ binary_expr                                    { $$ = astree_adopt($2, $1, $3, NULL); }
+              | binary_expr TOK_NE binary_expr                                    { $$ = astree_adopt($2, $1, $3, NULL); }
+              | binary_expr TOK_OR binary_expr                                    { $$ = astree_adopt($2, $1, $3, NULL); }
+              | binary_expr TOK_AND binary_expr                                   { $$ = astree_adopt($2, $1, $3, NULL); }
+              | binary_expr '|' binary_expr                                       { $$ = astree_adopt($2, $1, $3, NULL); }
+              | binary_expr '&' binary_expr                                       { $$ = astree_adopt($2, $1, $3, NULL); }
+              | binary_expr '^' binary_expr                                       { $$ = astree_adopt($2, $1, $3, NULL); }
+              | binary_expr TOK_SHR binary_expr                                   { $$ = astree_adopt($2, $1, $3, NULL); }
+              | binary_expr TOK_SHL binary_expr                                   { $$ = astree_adopt($2, $1, $3, NULL); }
               | cast_expr                                                         { $$ = $1; }
               ;
 cast_expr     : '(' typespec_list ')' unary_expr %prec TOK_CAST                   { $$ = parser_make_cast($2, NULL, $4); parser_cleanup(2, $1, $3); }
@@ -258,8 +262,8 @@ postfix_expr  : primary_expr                                                    
               | postfix_expr TOK_ARROW TOK_IDENT                                  { $$ = astree_adopt($2, $1, $3, NULL); }
               ;
 arg_list      : %empty                                                            { $$ = NULL; }
-              | arg_list ',' expr                                                 { $$ = astree_twin($1, $3); astree_destroy($2); }
-              | expr                                                              { $$ = $1; }
+              | arg_list ',' assign_expr                                          { $$ = astree_twin($1, $3); astree_destroy($2); }
+              | assign_expr                                                       { $$ = $1; }
               ;
 primary_expr  : TOK_IDENT                                                         { $$ = $1; }
               | constant                                                          { $$ = $1; }
