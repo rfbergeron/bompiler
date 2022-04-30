@@ -668,6 +668,38 @@ int validate_call(ASTree *call, CompilerState *state) {
   return 0;
 }
 
+int validate_conditional(ASTree *conditional, CompilerState *state) {
+  ASTree *condition = astree_first(conditional);
+  int status = validate_expr(condition, state);
+  if (status) return status;
+  status = perform_pointer_conv(condition);
+  if (status) return status;
+
+  if (!typespec_is_scalar(extract_type(condition))) {
+    fprintf(stderr,
+            "ERROR: condition for ternary expression must have scalar type.\n");
+    return -1;
+  }
+
+  ASTree *left = astree_second(conditional);
+  status = validate_expr(left, state);
+  if (status) return status;
+  status = perform_pointer_conv(left);
+  if (status) return status;
+
+  ASTree *right = astree_third(conditional);
+  status = validate_expr(right, state);
+  if (status) return status;
+  status = perform_pointer_conv(right);
+  if (status) return status;
+
+  /* TODO(Robert): the rules for conversion on the output of the ternary
+   * operator are different from usual conversions and compatibility rules, and
+   * should have their own function
+   */
+  return determine_conversion(left->type, right->type, &conditional->type);
+}
+
 int validate_comma(ASTree *comma, CompilerState *state) {
   ASTree *left = astree_first(comma);
   int status = validate_expr(left, state);
@@ -1247,6 +1279,9 @@ int validate_expr(ASTree *expression, CompilerState *state) {
 
   DEBUGS('t', "Validating next expression");
   switch (expression->symbol) {
+    case '?':
+      status = validate_conditional(expression, state);
+      break;
     case ',':
       status = validate_comma(expression, state);
       break;

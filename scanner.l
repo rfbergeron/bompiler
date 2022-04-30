@@ -116,6 +116,7 @@ NOTSTRING       (\"[^"]*)
 "&"             { return lexer_token ('&'); }
 "~"             { return lexer_token ('~'); }
 "!"             { return lexer_token ('!'); }
+"?"             { return lexer_token ('?'); }
 
 {NOTNUMBER}     { return lexer_bad_token (TOK_INTCON); }
 {NOTCHAR}       { return lexer_bad_token (TOK_CHARCON); }
