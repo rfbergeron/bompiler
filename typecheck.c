@@ -668,6 +668,23 @@ int validate_call(ASTree *call, CompilerState *state) {
   return 0;
 }
 
+int validate_comma(ASTree *comma, CompilerState *state) {
+  ASTree *left = astree_first(comma);
+  int status = validate_expr(left, state);
+  if (status) return status;
+
+  ASTree *right = astree_second(comma);
+  status = validate_expr(right, state);
+  if (status) return status;
+  status = perform_pointer_conv(right);
+  if (status) return status;
+  comma->attributes |=
+      right->attributes & (ATTR_EXPR_ARITHCONST | ATTR_EXPR_CONST);
+
+  comma->type = right->type;
+  return 0;
+}
+
 int validate_assignment(ASTree *assignment, CompilerState *state) {
   ASTree *dest = astree_first(assignment);
   int status = validate_expr(dest, state);
@@ -1230,6 +1247,9 @@ int validate_expr(ASTree *expression, CompilerState *state) {
 
   DEBUGS('t', "Validating next expression");
   switch (expression->symbol) {
+    case ',':
+      status = validate_comma(expression, state);
+      break;
     case '=':
       status = validate_assignment(expression, state);
       break;
