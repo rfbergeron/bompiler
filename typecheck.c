@@ -1251,6 +1251,16 @@ int validate_expr(ASTree *expression, CompilerState *state) {
       status = validate_comma(expression, state);
       break;
     case '=':
+    case TOK_ADDEQ:
+    case TOK_SUBEQ:
+    case TOK_MULEQ:
+    case TOK_DIVEQ:
+    case TOK_REMEQ:
+    case TOK_ANDEQ:
+    case TOK_OREQ:
+    case TOK_XOREQ:
+    case TOK_SHREQ:
+    case TOK_SHLEQ:
       status = validate_assignment(expression, state);
       break;
     case TOK_EQ:
