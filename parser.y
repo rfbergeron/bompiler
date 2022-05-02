@@ -38,7 +38,7 @@
 %token TOK_BLOCK TOK_PARAM TOK_POINTER TOK_ARRAY TOK_INIT_LIST
 /* tokens constructed by lexer */
 %token TOK_VOID TOK_INT TOK_SHORT TOK_LONG TOK_CHAR TOK_UNSIGNED TOK_SIGNED
-%token TOK_CONST TOK_VOLATILE TOK_RESTRICT TOK_TYPEDEF
+%token TOK_CONST TOK_VOLATILE TOK_RESTRICT TOK_TYPEDEF TOK_SIZEOF
 %token TOK_IF TOK_ELSE TOK_SWITCH TOK_DO TOK_WHILE TOK_FOR TOK_STRUCT TOK_UNION TOK_ENUM
 %token TOK_RETURN TOK_CONTINUE TOK_BREAK TOK_GOTO TOK_CASE TOK_DEFAULT
 %token TOK_ARROW TOK_EQ TOK_NE TOK_LE TOK_GE TOK_SHL TOK_SHR TOK_AND TOK_OR TOK_INC TOK_DEC
@@ -265,6 +265,9 @@ unary_expr    : postfix_expr                                                    
               | '-' unary_expr                                                    { $$ = astree_adopt_sym($1, TOK_NEG, $2, NULL); }
               | '*' unary_expr                                                    { $$ = astree_adopt_sym($1, TOK_INDIRECTION, $2, NULL); }
               | '&' unary_expr                                                    { $$ = astree_adopt_sym($1, TOK_ADDROF, $2, NULL); }
+              | TOK_SIZEOF unary_expr                                             { $$ = astree_adopt($1, $2, NULL, NULL); }
+              | TOK_SIZEOF '(' typespec_list ')'                                  { $$ = astree_adopt($1, $3, NULL, NULL); astree_destroy($2); astree_destroy($4); }
+              | TOK_SIZEOF '(' typespec_list abstract_decl ')'                    { $$ = astree_adopt($1, $3, $4, NULL); astree_destroy($2); astree_destroy($5); }
               ;
 postfix_expr  : primary_expr                                                      { $$ = $1; }
               | postfix_expr TOK_INC                                              { $$ = astree_adopt_sym($2, TOK_POST_INC, $1, NULL); }
