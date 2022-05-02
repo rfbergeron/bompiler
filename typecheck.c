@@ -1177,6 +1177,49 @@ int validate_addrof(ASTree *addrof, CompilerState *state) {
   return 0;
 }
 
+int validate_sizeof(ASTree *sizeof_, CompilerState *state) {
+  if (astree_first(sizeof_)->symbol == TOK_SPEC) {
+    ASTree *spec_list = astree_first(sizeof_);
+    TypeSpec *spec = calloc(1, sizeof(*sizeof_->type));
+    /* TODO(Robert): find a place to store the type information since we don't
+     * have an identifier and the type of sizeof is always size_t
+     */
+    /* sizeof_->type = spec; */
+
+    if (astree_count(sizeof_) == 2) {
+      ASTree *abstract_decl = astree_second(sizeof_);
+      size_t i;
+      for (i = 0; i < astree_count(abstract_decl); ++i) {
+        int status = validate_dirdecl(astree_get(abstract_decl, i), sizeof_,
+                                      state, spec);
+        if (status) return status;
+      }
+    }
+
+    int status = validate_typespec_list(spec_list, state, spec);
+    if (status) return status;
+    if (typespec_is_incomplete(spec)) {
+      fprintf(stderr, "ERROR: cannot take sizeof incomplete type.\n");
+      return -1;
+    }
+  } else {
+    ASTree *expr = astree_first(sizeof_);
+    int status = validate_expr(expr, state);
+    if (status) return status;
+    if (typespec_is_incomplete(extract_type(expr))) {
+      fprintf(stderr, "ERROR: cannot take sizeof incomplete type.\n");
+      return -1;
+    }
+  }
+  /* TODO(Robert): compute actual size and also probably make sure that this
+   * is actually the correct type name for the output of sizeof on this
+   * platform
+   */
+  sizeof_->type = &SPEC_ULONG;
+  sizeof_->attributes |= (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST);
+  return 0;
+}
+
 int validate_subscript(ASTree *subscript, CompilerState *state) {
   ASTree *composite_object = astree_first(subscript);
   int status = validate_expr(composite_object, state);
@@ -1333,6 +1376,9 @@ int validate_expr(ASTree *expression, CompilerState *state) {
       break;
     case TOK_ADDROF:
       status = validate_addrof(expression, state);
+      break;
+    case TOK_SIZEOF:
+      status = validate_sizeof(expression, state);
       break;
     case TOK_CALL:
       /* expression->attributes |= ATTR_EXPR_VREG; */
