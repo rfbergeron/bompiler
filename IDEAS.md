@@ -71,6 +71,92 @@ nice features:
 - additional tree nodes can be inserted more freely during type checking, namely
   for implicit conversions
 
+## Concurrent type check
+For concurrent type checking, my current idea is to have the parser directives
+call type checking functions, or to have initialization functions for each type
+of expression.
+
+### Smarter errors
+Something that I think might be feasible is communicating type checking errors
+by inserting new nodes into the syntax tree whose entire purpose is to propogate
+error information. I would need to add a new token code for type checker errors,
+and would need to use one of the members (probably one of the type members) to
+communicate detailed error information.
+
+These errors should also be tracked in a list in the global state.
+
+Handling errors like this would allow the type checker to detect when an error
+has occurred, but keep going in spite of it, so long as the error is not
+catastrophic. Then, the error can be reported once type checking has been
+completed, allowing for the type checker to produce output on valid code.
+
+However, when nothing can be done with an error and a function cannot continue
+because the node contains important information, the error node should "float"
+up the syntax tree
+
+### Type checker constructed nodes
+The lexer (obviously) creates syntax tree nodes, but the parser does so as well
+in a handful of cases, like for type specifiers, declarations, declarators, etc.
+With the concurrent type checker it may be intuitive to have the type checker
+itself introduce nodes to the syntax tree. The first would be the the error
+nodes mentioned above, but also nodes for automatic conversions and promotions.
+The type checker already does this, but it could be done in a cleaner and more
+regular manner.
+
+### Parser constructed nodes
+Instead of the `parser_make_XX` functions currently in the parser, I will
+instead call `astree_init` with whatever arguments necessary, and pass the
+result as an argument to the appropriate type checking functions.
+
+### Minimal mutability in the syntax tree
+The main issue I'm having is the following: I would like to not have to use
+`astree_extract` or `astree_inject` to insert automatic conversions into the
+syntax tree.
+
+`astree_extract` was originally used to replace nodes in the tree
+with conversion nodes, but I deemed it ugly because it needed the index of the
+node to replace, and its parent, as an argument. Also, updating the nodes
+surrounding the node being extracted was clunky: the `next_sibling` member of
+the prior sibling needs to be updated, and all of the node's siblings need to
+be updated if it is the `firstborn` node. (I could, I believe, do without these
+two members if I reworked the parser rules. This would reduce the complexity of
+the "tree" but would also be time consuming and probably not as good as just
+finding another way to shuffle tree nodes around.)
+
+`astree_inject` is, internally, even less elegant: while it only needs the only
+node and the node to replace it with as arguments, it just swaps the values of
+all of the members, which is much goofier than twiddling around with some
+pointers. (Well, it would be if the child nodes weren't stored as a linked list,
+which is dumb and means that removing the old node and inserting the new one are
+both O(n) operations.)
+
+There are a couple ways to solve this:
+1. Have the type checking functions for expressions take the expression and its
+   sub-expressions as separate arguments, perform promotions and conversions, and
+   only then have the expression adopt its sub-expressions.
+2. Add an additional member to `ASTree` that holds the promoted type. This could
+   also be used for casts, making the syntax tree for casts look simpler.
+3. Encode the cast as part of the type information itself: the base type or one
+   of the auxiliary types would contain a pointer to the original type info,
+   while the rest of the type would represent the promoted/casted type.
+
+I think I will be going with number 2. I already have the `extract_type`
+function, which could be modified to return the promoted type if it is non-null.
+There are still a handful of places where `extract_type` is not used to retrieve
+the type of a node, so those may have to be fixed if this change breaks the
+behavior of those locations in the code.
+
+### Passing state
+Since the the type checker will be run in parallel with the parser, it will also
+need to take a different approach: bottom-up instead of top-down. With this
+approach, state cannot be communicated using a single instance as a parameter to
+each function call. Instead, it must be moved back into a global variable, or
+composed from the arguments that build the tree.
+
+The state for the type checker will be moved back into a global. It will,
+however, be a single global structure, to make keeping track of it and replacing
+it at a later date easier.
+
 ## Labels
 Based on the language definition, it looks like labels are attached to the
 statement immediately following them. They are not a valid statement all on
