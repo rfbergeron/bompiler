@@ -31,7 +31,9 @@
 /* dummy tokens used for precedence */
 /* %token PREC_PREFIX PREC_POSTFIX */
 /* %token PREC_TERNARY PREC_COMMA */
-/* constructed tokens */
+/* tokens constructed by checker */
+%token TOK_TYPE_ERROR TOK_AUTO_CONV TOK_AUTO_PROM
+/* tokens constructed by parser */
 %token TOK_TYPE_ID TOK_SPEC TOK_DECLARATION TOK_DECLARATOR TOK_ROOT TOK_CAST TOK_FUNCTION TOK_LABEL
 /* tokens assigned to exsting nodes */
 %token TOK_POS TOK_NEG TOK_POST_INC TOK_POST_DEC TOK_INDIRECTION TOK_ADDROF TOK_CALL TOK_SUBSCRIPT
@@ -368,8 +370,6 @@ void parser_cleanup(size_t count, ...) {
     ASTree *tree = va_arg(args, ASTree *);
 
     if (tree != NULL) {
-      DEBUGS('t', "  ANNIHILATING: %d, %s", tree->symbol,
-             parser_get_tname(tree->symbol));
       astree_destroy(tree);
     }
   }

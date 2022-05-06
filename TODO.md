@@ -1,3 +1,12 @@
+# Parser and syntax tree changes
+I will be paring down the syntax tree data structure and rewriting some parser
+rules to accomodate for this. There is some unnecessary complexity and
+connectivity in the syntax tree that I would like to eliminate, namely:
+- the `astree_twin`, `astree_descend`, and `astree_inject` functions
+- the `firstborn` and `next_sibling` fields
+- the `astree_first`, etc. functions
+- the linked list adoption behavior of `astree_adopt`
+
 # When to use pointers
 Currently, some fields of syntax tree nodes are pointers, even though they could
 instead be nested structures. This includes the child lists and symbol tables.
