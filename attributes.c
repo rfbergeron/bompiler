@@ -77,8 +77,6 @@ const TypeSpec SPEC_SHRT = SPECIFY_INT(SIGNED, SHORT);
 const TypeSpec SPEC_UCHAR = SPECIFY_INT(UNSIGNED, CHAR);
 const TypeSpec SPEC_SCHAR = SPECIFY_INT(SIGNED, CHAR);
 
-const Location LOC_EMPTY = {0, 0, 0, 0};
-
 const char type_map[][16] = {"void", "int", "float", "struct"};
 
 const char attr_map[][16] = {"REG",        "LVAL", "CONST",

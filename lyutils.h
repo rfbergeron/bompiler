@@ -48,15 +48,15 @@ void lexer_free_globals();
 
 const char *parser_get_tname(int symbol);
 ASTree *parser_make_root();
-ASTree *parser_make_type_id(ASTree *type, ASTree *id);
-ASTree *parser_make_function(ASTree *type_id, ASTree *paren, ASTree *params);
-ASTree *parser_make_declaration(ASTree *spec, ASTree *decls);
-ASTree *parser_make_declarator(ASTree *pointer, ASTree *direct_decl);
-ASTree *parser_make_struct(ASTree *keyword, ASTree *ident, ASTree *body);
-ASTree *parser_make_cast(ASTree *spec_list, ASTree *abstract_declaration,
-                         ASTree *expr);
-ASTree *parser_make_spec(ASTree *list);
-ASTree *parser_make_array(ASTree *direct_decl, ASTree *bracket, ASTree *length);
+ASTree *parser_new_sym(ASTree *tree, int new_symbol);
+ASTree *parser_make_spec_list(ASTree *first_specifier);
+ASTree *parser_make_declaration(ASTree *spec_list, ASTree *declarator);
+ASTree *parser_make_pointer_list(ASTree *first_pointer);
+ASTree *parser_make_param_list(ASTree *left_paren, ASTree *spec_list,
+                               ASTree *declarator);
+ASTree *parser_make_type_name(ASTree *first_child);
+ASTree *parser_make_cast(ASTree *left_paren, ASTree *spec_list,
+                         ASTree *abs_decl, ASTree *expr);
 ASTree *parser_make_label(ASTree *ident, ASTree *stmt);
 void parser_cleanup(size_t count, ...);
 

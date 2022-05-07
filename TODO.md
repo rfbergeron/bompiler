@@ -7,6 +7,18 @@ connectivity in the syntax tree that I would like to eliminate, namely:
 - the `astree_first`, etc. functions
 - the linked list adoption behavior of `astree_adopt`
 
+# Type checker fixes
+- handle new forms for the abstract declarators featured in casts and sizeof
+- handle new list storage for pointer declarators
+- handle new flat structure for declarators and make sure that the type can be
+  read easily be iterating over the list
+- handle '=' top level symbol for simultaneous declarations and definitions
+- handle or at least implement stopgap for the lack of `astree_inject` and
+  similar functions until the type checker runs in tandem with the lexer and
+  parser
+- see if the syntax tree has been simplified enough to remove the
+  `extract_ident`, `extract_type`, and `extract_loc` functions from astree
+
 # When to use pointers
 Currently, some fields of syntax tree nodes are pointers, even though they could
 instead be nested structures. This includes the child lists and symbol tables.
