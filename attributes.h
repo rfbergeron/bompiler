@@ -175,7 +175,7 @@ extern const TypeSpec SPEC_SHRT;
 extern const TypeSpec SPEC_UCHAR;
 extern const TypeSpec SPEC_SCHAR;
 
-extern const Location LOC_EMPTY;
+#define LOC_EMPTY ((Location){0, 0, 0, 0})
 
 int attributes_to_string(const unsigned int attributes, char *buf, size_t size);
 int location_to_string(const Location *loc, char *buf, size_t size);

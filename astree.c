@@ -18,14 +18,8 @@
 
 extern int skip_type_check;
 
-ASTree *astree_first(ASTree *parent) { return llist_get(&parent->children, 0); }
-
-ASTree *astree_second(ASTree *parent) {
-  return llist_get(&parent->children, 1);
-}
-
-ASTree *astree_third(ASTree *parent) { return llist_get(&parent->children, 2); }
-
+const ASTree EMPTY_STATEMENT = {&SPEC_EMPTY,      NULL, NULL, LOC_EMPTY,
+                                BLIB_LLIST_EMPTY, 0,    0};
 ASTree *astree_get(ASTree *parent, const size_t index) {
   return llist_get(&parent->children, index);
 }
@@ -44,8 +38,6 @@ ASTree *astree_init(int symbol, const Location location, const char *info) {
    * compiler implementations make it work, and here we're just changing the
    * type of a pointer argument */
   llist_init(&tree->children, (void (*)(void *))(astree_destroy), NULL);
-  tree->next_sibling = NULL;
-  tree->firstborn = tree;
   tree->symbol_table = NULL;
 
   /* remember, attributes for nodes which adopt a different symbol
@@ -91,9 +83,13 @@ ASTree *astree_init(int symbol, const Location location, const char *info) {
 }
 
 int astree_destroy(ASTree *tree) {
-  if (tree == NULL) return 1;
-  DEBUGS('t', "Freeing an astree with sym %d, %s.", tree->symbol,
-         parser_get_tname(tree->symbol));
+  if (tree == NULL) {
+    fprintf(stderr, "WARNING: null pointer supplied to astree_destroy.\n");
+    return 1;
+  }
+
+  DEBUGS('t', "Freeing an astree with symbol: %s, lexinfo: %s",
+         parser_get_tname(tree->symbol), tree->lexinfo);
   if (yydebug) {
     /* print tree contents to stderr */
   }
@@ -121,89 +117,25 @@ int astree_destroy(ASTree *tree) {
   return 0;
 }
 
-ASTree *astree_adopt(ASTree *parent, ASTree *child1, ASTree *child2,
-                     ASTree *child3) {
-  if (child1 != NULL) {
-    ASTree *current_sibling = child1->firstborn;
-
-    do {
-      DEBUGS('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
-             parser_get_tname(current_sibling->symbol));
-      llist_push_back(&parent->children, current_sibling);
-      current_sibling = current_sibling->next_sibling;
-    } while (current_sibling != NULL);
+ASTree *astree_adopt(ASTree *parent, const size_t count, ...) {
+  va_list args;
+  va_start(args, count);
+  size_t i;
+  for (i = 0; i < count; ++i) {
+    ASTree *child = va_arg(args, ASTree *);
+    if (child == &EMPTY_STATEMENT) {
+      continue;
+    }
+    DEBUGS('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
+           parser_get_tname(child->symbol));
+    int status = llist_push_back(&parent->children, child);
+    if (status) {
+      fprintf(stderr, "ERROR: your data structures library sucks.\n");
+      abort();
+    }
   }
-  if (child2 != NULL) {
-    ASTree *current_sibling = child2->firstborn;
-
-    do {
-      DEBUGS('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
-             parser_get_tname(current_sibling->symbol));
-      llist_push_back(&parent->children, current_sibling);
-      current_sibling = current_sibling->next_sibling;
-    } while (current_sibling != NULL);
-  }
-  if (child3 != NULL) {
-    ASTree *current_sibling = child3->firstborn;
-
-    do {
-      DEBUGS('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
-             parser_get_tname(current_sibling->symbol));
-      llist_push_back(&parent->children, current_sibling);
-      current_sibling = current_sibling->next_sibling;
-    } while (current_sibling != NULL);
-  }
+  va_end(args);
   return parent;
-}
-
-ASTree *astree_adopt_sym(ASTree *parent, int symbol_, ASTree *child1,
-                         ASTree *child2) {
-  parent->symbol = symbol_;
-  if (symbol_ == '<' || symbol_ == '>') {
-    /* attributes.set((size_t)attr::INT); */
-    /* attributes.set((size_t)attr::VREG); */
-  } else if (symbol_ == TOK_SUBSCRIPT) {
-    /* attributes.set((size_t)attr::VADDR); */
-    /* attributes.set((size_t)attr::LVAL); */
-  } else if (symbol_ == TOK_CALL) {
-    /* attributes.set((size_t)attr::VREG); */
-  }
-  return astree_adopt(parent, child1, child2, NULL);
-}
-
-ASTree *astree_twin(ASTree *sibling1, ASTree *sibling2) {
-  assert(sibling1 != NULL || sibling2 != NULL);
-  /* if sib is null don't bother doing anything */
-  if (sibling1 == NULL) return sibling2;
-  if (sibling2 == NULL) return sibling1;
-  /* if it is the head of the list, this node points to itself */
-  sibling2->firstborn = sibling1->firstborn;
-  /* want to append to the end of the "list" */
-  ASTree *current = sibling1;
-  while (current->next_sibling) current = current->next_sibling;
-  current->next_sibling = sibling2;
-  /* return the head of the list */
-  return sibling1;
-}
-
-ASTree *astree_descend(ASTree *parent, ASTree *descendant) {
-  ASTree *current = parent;
-  while (astree_first(current)) {
-    current = astree_first(current);
-  }
-  astree_adopt(current, descendant, NULL, NULL);
-  return parent;
-}
-
-ASTree *astree_inject(ASTree *old_node, ASTree *new_node) {
-  ASTree temp = *old_node;
-  *old_node = *new_node;
-  *new_node = temp;
-  new_node->firstborn = old_node->firstborn;
-  new_node->next_sibling = old_node->next_sibling;
-  old_node->firstborn = temp.firstborn;
-  old_node->next_sibling = temp.next_sibling;
-  return astree_adopt(old_node, new_node, NULL, NULL);
 }
 
 size_t astree_count(ASTree *parent) { return llist_size(&parent->children); }
@@ -309,24 +241,29 @@ ASTree *extract_ident(ASTree *tree) {
     case TOK_UNION:
     case TOK_ENUM:
     case TOK_CALL:
-      return astree_first(tree);
+      return astree_get(tree, 0);
     case TOK_IDENT:
     case TOK_INTCON:
     case TOK_CHARCON:
     case TOK_STRINGCON:
       return tree;
-    case TOK_DECLARATOR:
-      if (astree_first(tree)->symbol == TOK_DECLARATOR) {
-        return extract_ident(astree_first(tree));
-      } else {
-        size_t i;
-        for (i = 0; i < astree_count(tree); ++i) {
-          ASTree *direct_decl = astree_get(tree, i);
-          if (direct_decl->symbol == TOK_IDENT) {
-            return direct_decl;
+      /* TODO(Robert): handle parenthesized declarators now that there is no
+       * unique declarator token
+       */
+      /*
+      case TOK_DECLARATOR:
+        if (astree_get(tree, 0)->symbol == TOK_DECLARATOR) {
+          return extract_ident(astree_get(tree, 0));
+        } else {
+          size_t i;
+          for (i = 0; i < astree_count(tree); ++i) {
+            ASTree *direct_decl = astree_get(tree, i);
+            if (direct_decl->symbol == TOK_IDENT) {
+              return direct_decl;
+            }
           }
         }
-      }
+      */
       /* do not break; fall through and return error when no ident */
     case TOK_DECLARATION:
     default:
@@ -340,8 +277,7 @@ const TypeSpec *extract_type(ASTree *tree) {
   switch (tree->symbol) {
     case TOK_STRUCT:
     case TOK_UNION:
-    case TOK_FUNCTION:
-    case TOK_DECLARATOR:
+    case TOK_PARAM_LIST:
     case TOK_CALL:
       return extract_ident(tree)->type;
     case TOK_IDENT:
@@ -354,8 +290,7 @@ const Location *extract_loc(ASTree *tree) {
   switch (tree->symbol) {
     case TOK_STRUCT:
     case TOK_UNION:
-    case TOK_FUNCTION:
-    case TOK_DECLARATOR:
+    case TOK_PARAM_LIST:
     case TOK_CALL:
       return &extract_ident(tree)->loc;
     case TOK_IDENT:
