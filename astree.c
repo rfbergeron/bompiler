@@ -103,7 +103,6 @@ int astree_destroy(ASTree *tree) {
       case TOK_ADDROF:
         /* free pointer auxspec that was added */
         auxspec_destroy(llist_pop_front((LinkedList *)&tree->type->auxspecs));
-      case TOK_CAST:
       case TOK_SUBSCRIPT:
       case TOK_INDIRECTION:
       case TOK_CALL:
@@ -242,59 +241,22 @@ ASTree *extract_ident(ASTree *tree) {
     case TOK_ENUM:
     case TOK_CALL:
       return astree_get(tree, 0);
+    case TOK_DECLARATION:
+      /* TODO(Robert): this is ambiguous, do not do it */
+      return astree_get(tree, 1);
     case TOK_IDENT:
     case TOK_INTCON:
     case TOK_CHARCON:
     case TOK_STRINGCON:
-      return tree;
-      /* TODO(Robert): handle parenthesized declarators now that there is no
-       * unique declarator token
+    case TOK_TYPE_NAME:
+    default:
+      /* TODO(Robert): make sure that there are no other nodes that need special
+       * treatment
        */
-      /*
-      case TOK_DECLARATOR:
-        if (astree_get(tree, 0)->symbol == TOK_DECLARATOR) {
-          return extract_ident(astree_get(tree, 0));
-        } else {
-          size_t i;
-          for (i = 0; i < astree_count(tree); ++i) {
-            ASTree *direct_decl = astree_get(tree, i);
-            if (direct_decl->symbol == TOK_IDENT) {
-              return direct_decl;
-            }
-          }
-        }
-      */
-      /* do not break; fall through and return error when no ident */
-    case TOK_DECLARATION:
-    default:
-      fprintf(stderr, "ERROR: unable to get identifier for tree node %s\n",
-              parser_get_tname(tree->symbol));
-      return NULL;
+      return tree;
   }
 }
 
-const TypeSpec *extract_type(ASTree *tree) {
-  switch (tree->symbol) {
-    case TOK_STRUCT:
-    case TOK_UNION:
-    case TOK_PARAM_LIST:
-    case TOK_CALL:
-      return extract_ident(tree)->type;
-    case TOK_IDENT:
-    default:
-      return tree->type;
-  }
-}
+const TypeSpec *extract_type(ASTree *tree) { return extract_ident(tree)->type; }
 
-const Location *extract_loc(ASTree *tree) {
-  switch (tree->symbol) {
-    case TOK_STRUCT:
-    case TOK_UNION:
-    case TOK_PARAM_LIST:
-    case TOK_CALL:
-      return &extract_ident(tree)->loc;
-    case TOK_IDENT:
-    default:
-      return &tree->loc;
-  }
-}
+const Location *extract_loc(ASTree *tree) { return &extract_ident(tree)->loc; }
