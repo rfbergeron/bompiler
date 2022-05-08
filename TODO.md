@@ -9,15 +9,20 @@ connectivity in the syntax tree that I would like to eliminate, namely:
 
 # Type checker fixes
 - handle new forms for the abstract declarators featured in casts and sizeof
-- handle new list storage for pointer declarators
 - handle new flat structure for declarators and make sure that the type can be
   read easily be iterating over the list
+- handle new tag structure, which groups members and enumerators under the brace
+  instead of directly under the identifier
+- in a call expression, the subtree that identifies the function to be called is
+  now actually the LAST subtree, not the first
 - handle '=' top level symbol for simultaneous declarations and definitions
 - handle or at least implement stopgap for the lack of `astree_inject` and
   similar functions until the type checker runs in tandem with the lexer and
   parser
 - see if the syntax tree has been simplified enough to remove the
   `extract_ident`, `extract_type`, and `extract_loc` functions from astree
+- try to reuse more code from `declare_symbol` and `define_symbol` in
+  `define_function`, or merge `define_function` into the other two completely.
 
 # When to use pointers
 Currently, some fields of syntax tree nodes are pointers, even though they could
