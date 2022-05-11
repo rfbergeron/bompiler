@@ -1024,7 +1024,6 @@ int validate_binop(ASTree *operator, CompilerState * state) {
     case TOK_SHR:
       status = typecheck_shfop(operator, left, right);
       break;
-    case '%':
     case '&':
     case '|':
     case '^':
@@ -1032,6 +1031,7 @@ int validate_binop(ASTree *operator, CompilerState * state) {
       break;
     case '*':
     case '/':
+    case '%':
       status = typecheck_mulop(operator, left, right);
       break;
     case '+':
@@ -1056,7 +1056,7 @@ int validate_binop(ASTree *operator, CompilerState * state) {
       status = -1;
   }
 
-  unsigned int result_attrs = left->attributes | right->attributes;
+  unsigned int result_attrs = left->attributes & right->attributes;
   operator->attributes |=
       result_attrs &(ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST);
   return status;
@@ -2068,15 +2068,14 @@ int validate_while(ASTree *while_, CompilerState *state) {
 }
 
 int validate_for(ASTree *for_, CompilerState *state) {
-  ASTree *for_exprs = astree_get(for_, 0);
-  ASTree *first_expr = astree_get(for_exprs, 0);
-  if (first_expr->symbol != ';') {
+  ASTree *first_expr = astree_get(for_, 0);
+  if (first_expr != &EMPTY_EXPR) {
     int status = validate_expr(first_expr, state);
     if (status) return status;
   }
 
-  ASTree *second_expr = astree_get(for_exprs, 1);
-  if (second_expr->symbol != ';') {
+  ASTree *second_expr = astree_get(for_, 1);
+  if (second_expr != &EMPTY_EXPR) {
     int status = validate_expr(second_expr, state);
     if (status) return status;
     if (!typespec_is_scalar(extract_type(second_expr))) {
@@ -2087,13 +2086,13 @@ int validate_for(ASTree *for_, CompilerState *state) {
     }
   }
 
-  ASTree *third_expr = astree_get(for_exprs, 2);
-  if (third_expr->symbol != ';' && third_expr->symbol != ')') {
+  ASTree *third_expr = astree_get(for_, 2);
+  if (third_expr != &EMPTY_EXPR) {
     int status = validate_expr(third_expr, state);
     if (status) return status;
   }
 
-  ASTree *for_stmt = astree_get(for_, 1);
+  ASTree *for_stmt = astree_get(for_, 3);
   return validate_stmt(for_stmt, state);
 }
 
@@ -2156,6 +2155,7 @@ int validate_block(ASTree *block, CompilerState *state) {
 }
 
 int validate_stmt(ASTree *statement, CompilerState *state) {
+  if (statement == &EMPTY_EXPR) return 0;
   int status;
   DEBUGS('t', "Validating next statement");
   switch (statement->symbol) {
@@ -2218,7 +2218,9 @@ int type_checker_make_table(ASTree *root) {
   size_t i;
   for (i = 0; i < astree_count(root); ++i) {
     ASTree *child = astree_get(root, i);
-    if (child->symbol == TOK_DECLARATION) {
+    if (child == &EMPTY_EXPR) {
+      continue;
+    } else if (child->symbol == TOK_DECLARATION) {
       int status = validate_declaration(child, state);
       if (status) return status;
     } else {
