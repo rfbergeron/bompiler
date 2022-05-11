@@ -1616,80 +1616,44 @@ int define_symbol(ASTree *declaration, ASTree *assignment,
   }
 }
 
-int define_function(ASTree *function, CompilerState *state) {
-  ASTree *declaration = function;
-  ASTree *declarator = astree_get(function, 1);
+int define_function(ASTree *declaration, CompilerState *state) {
+  ASTree *declarator = astree_get(declaration, 1);
   ASTree *identifier = extract_ident(declarator);
-
-  SymbolValue *symbol =
-      symbol_value_init(extract_loc(declarator), state_get_sequence(state));
-
-  size_t i;
-  for (i = 0; i < astree_count(declarator); ++i) {
-    int status = validate_dirdecl(astree_get(declarator, i), identifier, state,
-                                  &symbol->type);
-    if (status) return status;
-  }
-
-  int status =
-      validate_typespec_list(astree_get(function, 0), state, &symbol->type);
+  ASTree *block = astree_get(declaration, 2);
+  /* TODO(Robert): make sure that the declaration location is that of the
+   * earliest forward declaration, but that the names of the parameters are
+   * from the actual definition of the function.
+   */
+  int status = declare_symbol(declaration, declarator, state);
   if (status) return status;
-
-  const char *function_ident = extract_ident(declarator)->lexinfo;
-  size_t function_ident_len = strnlen(function_ident, MAX_IDENT_LEN);
-  SymbolValue *existing_entry = NULL;
-  state_get_symbol(state, function_ident, function_ident_len, &existing_entry);
-  if (existing_entry) {
-    if (types_compatible(&existing_entry->type, &symbol->type) ==
-        TCHK_INCOMPATIBLE) {
-      fprintf(stderr, "ERROR: redeclaration of function: %s\n", function_ident);
-      return -1;
-    } else if (existing_entry->flags & SYMFLAG_FUNCTION_DEFINED) {
-      fprintf(stderr, "ERROR: redefinition of function: %s\n", function_ident);
-      return -1;
-    } else if (astree_count(function) == 3) {
-      /* TODO(Robert): set function table's function type in define_params so
-       * that all of the function table setup is done in a single location
-       */
-      int status = state_set_function(state, existing_entry);
-      if (status) return status;
-      ASTree *body = astree_get(function, 2);
-      body->symbol_table = identifier->symbol_table;
-      status = validate_stmt(body, state);
-      /* TODO(Robert): reset state on failure */
-      if (status) return status;
-      status = state_unset_function(state);
-      if (status) return status;
-      /* mark function as defined */
-      existing_entry->flags |= SYMFLAG_FUNCTION_DEFINED;
-    }
-    /* TODO(Robert): keep declaration location of function prototype but use
-     * the parameter names from the definition
-     */
-    symbol_value_destroy(symbol);
-    return assign_type(identifier, state);
-  } else {
-    /* TODO(Robert): set function table's function type in define_params so that
-     * all of the function table setup is done in a single location
-     */
-    status =
-        state_insert_symbol(state, function_ident, function_ident_len, symbol);
-    if (status) return status;
-    if (astree_count(function) == 3) {
-      int status = state_set_function(state, symbol);
-      if (status) return status;
-      ASTree *body = astree_get(function, 2);
-      body->symbol_table = identifier->symbol_table;
-      status = validate_stmt(body, state);
-      /* TODO(Robert): reset state on failure */
-      if (status) return status;
-      status = state_unset_function(state);
-      if (status) return status;
-      /* mark function as defined */
-      symbol->flags |= SYMFLAG_FUNCTION_DEFINED;
-    }
-    return assign_type(identifier, state);
+  SymbolValue *symval = NULL;
+  state_get_symbol(state, identifier->lexinfo, strlen(identifier->lexinfo),
+                   &symval);
+  if (symval == NULL) {
+    fprintf(stderr, "ERROR: unable to define function: declaration failed.\n");
+    return -1;
+  } else if (!typespec_is_function(&symval->type)) {
+    fprintf(stderr, "ERROR: cannot define body for non-function %s.\n",
+            identifier->lexinfo);
+    return -1;
+  } else if (symval->flags & SYMFLAG_FUNCTION_DEFINED) {
+    fprintf(stderr, "ERROR: redefinition of function %s.\n",
+            identifier->lexinfo);
+    return -1;
   }
+
+  status = state_set_function(state, symval);
+  if (status) return status;
+  ASTree *body = astree_get(declaration, 2);
+  body->symbol_table = identifier->symbol_table;
+  status = validate_stmt(body, state);
+  /* TODO(Robert): reset state on failure */
+  if (status) return status;
+  status = state_unset_function(state);
+  if (status) return status;
+  /* mark function as defined */
+  symval->flags |= SYMFLAG_FUNCTION_DEFINED;
+  return 0;
 }
 
 /* TODO(Robert): in the interest of code reuse I used the existing functions
