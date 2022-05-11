@@ -18,8 +18,8 @@
 
 extern int skip_type_check;
 
-const ASTree EMPTY_STATEMENT = {&SPEC_EMPTY,      NULL, NULL, LOC_EMPTY,
-                                BLIB_LLIST_EMPTY, 0,    0};
+ASTree EMPTY_EXPR = {&SPEC_EMPTY,      ";", NULL,     LOC_EMPTY,
+                     BLIB_LLIST_EMPTY, ';', ATTR_NONE};
 ASTree *astree_get(ASTree *parent, const size_t index) {
   return llist_get(&parent->children, index);
 }
@@ -39,46 +39,6 @@ ASTree *astree_init(int symbol, const Location location, const char *info) {
    * type of a pointer argument */
   llist_init(&tree->children, (void (*)(void *))(astree_destroy), NULL);
   tree->symbol_table = NULL;
-
-  /* remember, attributes for nodes which adopt a different symbol
-   * must have the appropriate attributes set in adopt_symbol
-   */
-  switch (symbol) {
-    case '+':
-    case '-':
-    case '/':
-    case '*':
-    case '%':
-    case '<':
-    case '>':
-    case TOK_EQ:
-    case TOK_NE:
-    case TOK_LE:
-    case TOK_GE:
-    case '!':
-    case TOK_POS:
-    case TOK_NEG:
-      /* tree->attributes[ATTR_INT] = 1; */
-    case '=':
-    case TOK_CALL:
-      /* tree->attributes[ATTR_VREG] = 1; */
-      break;
-    case TOK_ARROW:
-    case TOK_SUBSCRIPT:
-      /* tree->attributes[ATTR_LVAL] = 1; */
-      /* tree->attributes[ATTR_VADDR] = 1; */
-      break;
-    case TOK_INTCON:
-    case TOK_CHARCON:
-      /* tree->attributes[ATTR_CONST] = 1; */
-      /* tree->attributes[ATTR_INT] = 1; */
-      break;
-    case TOK_STRINGCON:
-      /* tree->attributes[ATTR_CONST] = 1; */
-      /* tree->attributes[ATTR_STRING] = 1; */
-      break;
-  }
-
   return tree;
 }
 
@@ -86,6 +46,8 @@ int astree_destroy(ASTree *tree) {
   if (tree == NULL) {
     fprintf(stderr, "WARNING: null pointer supplied to astree_destroy.\n");
     return 1;
+  } else if (tree == &EMPTY_EXPR) {
+    return 0;
   }
 
   DEBUGS('t', "Freeing an astree with symbol: %s, lexinfo: %s",
@@ -122,9 +84,6 @@ ASTree *astree_adopt(ASTree *parent, const size_t count, ...) {
   size_t i;
   for (i = 0; i < count; ++i) {
     ASTree *child = va_arg(args, ASTree *);
-    if (child == &EMPTY_STATEMENT) {
-      continue;
-    }
     DEBUGS('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
            parser_get_tname(child->symbol));
     int status = llist_push_back(&parent->children, child);

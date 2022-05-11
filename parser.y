@@ -24,10 +24,6 @@
   fprintf(yyoutput, "%p->%s", $$, nodestr);
 } <>
 
-/* TODO(Robert): postfix increment/decrement should get
- * their own token codes to make assembly generation easier.
- */
-
 /* dummy tokens used for precedence */
 /* %token PREC_PREFIX PREC_POSTFIX */
 /* %token PREC_TERNARY PREC_COMMA */
@@ -81,7 +77,7 @@ program             : topdecl                                           { $$ = a
                     ;
 topdecl             : declaration ';'                                   { $$ = $1; astree_destroy($2); }
                     | typespec_list declarator block                    { $$ = astree_adopt(parser_make_declaration($1, $2), 1, $3); }
-                    | ';'                                               { $$ = (ASTree*)&EMPTY_STATEMENT; astree_destroy($1); }
+                    | ';'                                               { $$ = &EMPTY_EXPR; astree_destroy($1); }
                     ;
 declaration         : typespec_list                                     { $$ = parser_make_declaration($1, NULL); }
                     | declarations                                      { $$ = $1; }
@@ -176,22 +172,22 @@ stmt                : block                                             { $$ = $
                     | TOK_CONTINUE ';'                                  { $$ = $1; astree_destroy($2); }
                     | TOK_BREAK ';'                                     { $$ = $1; astree_destroy($2); }
                     | TOK_GOTO TOK_IDENT ';'                            { $$ = astree_adopt($1, 1, $2); astree_destroy($3); }
-                    | ';'                                               { $$ = (ASTree*)&EMPTY_STATEMENT; astree_destroy($1); }
+                    | ';'                                               { $$ = &EMPTY_EXPR; astree_destroy($1); }
                     ;
 labelled_stmt       : TOK_IDENT ':' stmt                                { $$ = parser_make_label($1, $3); astree_destroy ($2); }
                     | TOK_DEFAULT ':' stmt                              { $$ = astree_adopt($1, 1, $3); astree_destroy ($2); }
                     | TOK_CASE cond_expr   ':' stmt                     { $$ = astree_adopt($1, 2, $2, $4); astree_destroy ($3); }
                     ;
-for                 : TOK_FOR for_exprs stmt                            { $$ = astree_adopt($1, 2, $2, $3); }
+for                 : for_exprs stmt                                    { $$ = astree_adopt($1, 1, $2); }
                     ;
-for_exprs           : '(' ';' ';' ')'                                   { $$ = astree_adopt($1, 3, $2, $3, $4); }
-                    | '(' expr ';' ';' ')'                              { $$ = astree_adopt($1, 3, $2, $3, $4); astree_destroy($5); }
-                    | '(' ';' expr ';' ')'                              { $$ = astree_adopt($1, 3, $2, $3, $4); astree_destroy($5); }
-                    | '(' ';' ';' expr ')'                              { $$ = astree_adopt($1, 3, $2, $3, $4); astree_destroy($5); }
-                    | '(' expr ';' expr ';' ')'                         { $$ = astree_adopt($1, 3, $2, $4, $5); astree_destroy($3); astree_destroy($6); }
-                    | '(' expr ';' ';' expr ')'                         { $$ = astree_adopt($1, 3, $2, $4, $5); astree_destroy($3); astree_destroy($6); }
-                    | '(' ';' expr ';' expr ')'                         { $$ = astree_adopt($1, 3, $2, $3, $5); astree_destroy($4); astree_destroy($6); }
-                    | '(' expr ';' expr ';' expr ')'                    { $$ = astree_adopt($1, 3, $2, $4, $6); astree_destroy($3); astree_destroy($5); astree_destroy($7); }
+for_exprs           : TOK_FOR '(' ';' ';' ')'                           { $$ = astree_adopt($1, 3, &EMPTY_EXPR, &EMPTY_EXPR, &EMPTY_EXPR); parser_cleanup(4, $2, $3, $4, $5); }
+                    | TOK_FOR '(' expr ';' ';' ')'                      { $$ = astree_adopt($1, 3, $3, &EMPTY_EXPR, &EMPTY_EXPR); parser_cleanup(4, $2, $4, $5, $6); }
+                    | TOK_FOR '(' ';' expr ';' ')'                      { $$ = astree_adopt($1, 3, &EMPTY_EXPR, $4, &EMPTY_EXPR); parser_cleanup(4, $2, $3, $5, $6); }
+                    | TOK_FOR '(' ';' ';' expr ')'                      { $$ = astree_adopt($1, 3, &EMPTY_EXPR, &EMPTY_EXPR, $5); parser_cleanup(4, $2, $3, $4, $6); }
+                    | TOK_FOR '(' expr ';' expr ';' ')'                 { $$ = astree_adopt($1, 3, $3, $5, &EMPTY_EXPR); parser_cleanup(4, $2, $4, $6, $7); }
+                    | TOK_FOR '(' expr ';' ';' expr ')'                 { $$ = astree_adopt($1, 3, $3, &EMPTY_EXPR, $6); parser_cleanup(4, $2, $4, $5, $7); }
+                    | TOK_FOR '(' ';' expr ';' expr ')'                 { $$ = astree_adopt($1, 3, &EMPTY_EXPR, $4, $6); parser_cleanup(4, $2, $3, $5, $7); }
+                    | TOK_FOR '(' expr ';' expr ';' expr ')'            { $$ = astree_adopt($1, 3, $3, $5, $7); parser_cleanup(4, $2, $4, $6, $8); }
                     ;
 dowhile             : TOK_DO stmt TOK_WHILE '(' expr ')' ';'            { $$ = astree_adopt($1, 2, $2, $5); parser_cleanup (4, $3, $4, $6, $7); }
                     ;
