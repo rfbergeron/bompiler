@@ -55,6 +55,15 @@ int state_pop_jump(CompilerState *state) {
   }
 }
 
+int state_push_type_error(CompilerState *state, TypeSpec *errtype) {
+  if (llist_front(&state->error_stack) == errtype) {
+    fprintf(stderr, "ERROR: attempted to push same type error twice.\n");
+    return -1;
+  } else {
+    return llist_push_front(&state->error_stack, errtype);
+  }
+}
+
 int state_get_symbol(CompilerState *state, const char *ident,
                      const size_t ident_len, SymbolValue **out) {
   size_t i;

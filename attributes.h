@@ -45,6 +45,7 @@ typedef enum base_type {
   TYPE_STRUCT,
   TYPE_UNION,
   TYPE_ENUM,
+  TYPE_ERROR,
 } BaseType;
 
 typedef enum aux_type {
@@ -121,6 +122,12 @@ enum typespec_flag {
   TYPESPEC_FLAG_VOLATILE = 1 << TYPESPEC_INDEX_VOLATILE,
   /* function only */
   TYPESPEC_FLAG_INLINE = 1 << TYPESPEC_INDEX_INLINE
+};
+
+/* TODO(Robert): actual real return codes with actual information */
+enum {
+  TERR_SUCESS = 0,
+  TERR_FAILURE,
 };
 
 typedef struct tag_value TagValue;

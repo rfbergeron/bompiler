@@ -92,7 +92,9 @@ completed, allowing for the type checker to produce output on valid code.
 
 However, when nothing can be done with an error and a function cannot continue
 because the node contains important information, the error node should "float"
-up the syntax tree
+up the syntax tree. This will need its own function. Doing this will be a little
+less hacky than the way promotions and automatic conversions are inserted, since
+error nodes should have exactly one child.
 
 ### Type checker constructed nodes
 The lexer (obviously) creates syntax tree nodes, but the parser does so as well
