@@ -62,17 +62,34 @@ enum type_checker_action {
   TCHK_E_NO_FLAGS
 };
 
+CompilerState *state; /* back to global state... */
+
 /* forward declarations for mutual recursion */
-int validate_expr(ASTree *expression, CompilerState *state);
-int validate_stmt(ASTree *statement, CompilerState *state);
-int validate_declaration(ASTree *statement,
-                         CompilerState *state); /* required to process params */
+int validate_expr(ASTree *expression);
+int validate_stmt(ASTree *statement);
+int validate_declaration(ASTree *statement); /* required to process params */
 int types_compatible(
     const TypeSpec *type1,
     const TypeSpec *type2); /* required to check param and member types */
-int resolve_tag(ASTree *tag, CompilerState *state);
+int resolve_tag(ASTree *tag);
 
-int assign_type(ASTree *tree, CompilerState *state) {
+ASTree *create_type_error(ASTree *child) {
+  ASTree *errnode = astree_init(TOK_TYPE_ERROR, child->loc, "_terr");
+  TypeSpec *errtype = calloc(1, sizeof(TypeSpec));
+  errtype->base = TYPE_ERROR;
+  errtype->flags = TERR_FAILURE;
+  errnode->type = errtype;
+  int status = state_push_type_error(state, errtype);
+  if (status) return NULL;
+  return astree_adopt(errnode, 1, child);
+}
+
+ASTree *propogate_type_error(ASTree *parent, ASTree *errnode) {
+  ASTree *realnode = llist_extract(&errnode->children, 0);
+  return astree_adopt(errnode, 1, astree_adopt(parent, 1, realnode));
+}
+
+int assign_type(ASTree *tree) {
   DEBUGS('t', "Attempting to assign a type");
   ASTree *identifier = tree;
   if (identifier == NULL) return -1;
@@ -456,8 +473,8 @@ AuxType aux_from_tag(TagType tag) {
   }
 }
 
-int validate_tag_typespec(ASTree *type, CompilerState *state, TypeSpec *out) {
-  int status = resolve_tag(type, state);
+int validate_tag_typespec(ASTree *type, TypeSpec *out) {
+  int status = resolve_tag(type);
   if (status) return status;
   /* TODO(Robert): get unique tag name/info somehow */
   const char *tag_name = astree_get(type, 0)->lexinfo;
@@ -499,8 +516,7 @@ int validate_typedef_typespec(TypeSpec *out) {
   }
 }
 
-int validate_type_id_typespec(ASTree *type, CompilerState *state,
-                              TypeSpec *out) {
+int validate_type_id_typespec(ASTree *type, TypeSpec *out) {
   const char *type_name = type->lexinfo;
   size_t type_name_len = strlen(type_name);
   SymbolValue *symval = NULL;
@@ -528,8 +544,7 @@ int validate_type_id_typespec(ASTree *type, CompilerState *state,
   }
 }
 
-int validate_typespec_list(ASTree *spec_list, CompilerState *state,
-                           TypeSpec *out) {
+int validate_typespec_list(ASTree *spec_list, TypeSpec *out) {
   int status = 0;
   size_t i;
   for (i = 0; i < astree_count(spec_list); ++i) {
@@ -567,14 +582,14 @@ int validate_typespec_list(ASTree *spec_list, CompilerState *state,
       case TOK_UNION:
       case TOK_STRUCT:
       case TOK_ENUM:
-        status = validate_tag_typespec(type, state, out);
+        status = validate_tag_typespec(type, out);
         break;
       case TOK_CONST:
         break;
       case TOK_VOLATILE:
         break;
       case TOK_IDENT:
-        status = validate_type_id_typespec(type, state, out);
+        status = validate_type_id_typespec(type, out);
         break;
       case TOK_TYPEDEF:
         status = validate_typedef_typespec(out);
@@ -603,14 +618,12 @@ int validate_typespec_list(ASTree *spec_list, CompilerState *state,
   return status;
 }
 
-int validate_ident(ASTree *ident, CompilerState *state) {
-  return assign_type(ident, state);
-}
+int validate_ident(ASTree *ident) { return assign_type(ident); }
 
-int validate_call(ASTree *call, CompilerState *state) {
+int validate_call(ASTree *call) {
   /* functon subtree is the last child of the call node */
   ASTree *function = astree_get(call, astree_count(call) - 1);
-  int status = validate_expr(function, state);
+  int status = validate_expr(function);
   if (status) return status;
   status = perform_pointer_conv(call, &function);
   if (status) return status;
@@ -642,7 +655,7 @@ int validate_call(ASTree *call, CompilerState *state) {
   for (i = 0; i < llist_size(param_list); ++i) {
     DEBUGS('t', "Validating argument %d", i);
     ASTree *call_param = astree_get(call, i);
-    int status = validate_expr(call_param, state);
+    int status = validate_expr(call_param);
     if (status != 0) return status;
     status = perform_pointer_conv(call, &call_param);
     if (status) return status;
@@ -672,9 +685,9 @@ int validate_call(ASTree *call, CompilerState *state) {
   return 0;
 }
 
-int validate_conditional(ASTree *conditional, CompilerState *state) {
+int validate_conditional(ASTree *conditional) {
   ASTree *condition = astree_get(conditional, 0);
-  int status = validate_expr(condition, state);
+  int status = validate_expr(condition);
   if (status) return status;
   status = perform_pointer_conv(conditional, &condition);
   if (status) return status;
@@ -686,13 +699,13 @@ int validate_conditional(ASTree *conditional, CompilerState *state) {
   }
 
   ASTree *left = astree_get(conditional, 1);
-  status = validate_expr(left, state);
+  status = validate_expr(left);
   if (status) return status;
   status = perform_pointer_conv(conditional, &left);
   if (status) return status;
 
   ASTree *right = astree_get(conditional, 2);
-  status = validate_expr(right, state);
+  status = validate_expr(right);
   if (status) return status;
   status = perform_pointer_conv(conditional, &right);
   if (status) return status;
@@ -704,13 +717,13 @@ int validate_conditional(ASTree *conditional, CompilerState *state) {
   return determine_conversion(left->type, right->type, &conditional->type);
 }
 
-int validate_comma(ASTree *comma, CompilerState *state) {
+int validate_comma(ASTree *comma) {
   ASTree *left = astree_get(comma, 0);
-  int status = validate_expr(left, state);
+  int status = validate_expr(left);
   if (status) return status;
 
   ASTree *right = astree_get(comma, 1);
-  status = validate_expr(right, state);
+  status = validate_expr(right);
   if (status) return status;
   status = perform_pointer_conv(comma, &right);
   if (status) return status;
@@ -721,13 +734,13 @@ int validate_comma(ASTree *comma, CompilerState *state) {
   return 0;
 }
 
-int validate_assignment(ASTree *assignment, CompilerState *state) {
+int validate_assignment(ASTree *assignment) {
   ASTree *dest = astree_get(assignment, 0);
-  int status = validate_expr(dest, state);
+  int status = validate_expr(dest);
   if (status) return status;
 
   ASTree *src = astree_get(assignment, 1);
-  status = validate_expr(src, state);
+  status = validate_expr(src);
   if (status) return status;
   status = perform_pointer_conv(assignment, &src);
   if (status) return status;
@@ -738,8 +751,7 @@ int validate_assignment(ASTree *assignment, CompilerState *state) {
   return convert_type(assignment, &src, dest->type);
 }
 
-int define_params(ASTree *params, ASTree *ident, CompilerState *state,
-                  TypeSpec *out) {
+int define_params(ASTree *params, ASTree *ident, TypeSpec *out) {
   AuxSpec *aux_function = calloc(1, sizeof(*aux_function));
   aux_function->aux = AUX_FUNCTION;
   aux_function->data.params = malloc(sizeof(*aux_function->data.params));
@@ -758,7 +770,7 @@ int define_params(ASTree *params, ASTree *ident, CompilerState *state,
     ASTree *declarator = astree_get(param, 1);
     const char *param_id_str = declarator->lexinfo;
     DEBUGS('t', "Defining function parameter %s", param_id_str);
-    int status = validate_declaration(param, state);
+    int status = validate_declaration(param);
     /* TODO(Robert): reset compiler state on failure */
     if (status) return status;
     size_t param_id_str_len = strnlen(param_id_str, MAX_IDENT_LEN);
@@ -778,7 +790,7 @@ int define_params(ASTree *params, ASTree *ident, CompilerState *state,
   return llist_push_back(&out->auxspecs, aux_function);
 }
 
-int define_array(ASTree *array, CompilerState *state, TypeSpec *spec) {
+int define_array(ASTree *array, TypeSpec *spec) {
   if (typespec_is_incomplete(spec)) {
     fprintf(stderr, "ERROR: attempt to define array with incomplete type.\n");
     return -1;
@@ -788,7 +800,7 @@ int define_array(ASTree *array, CompilerState *state, TypeSpec *spec) {
   /* TODO(Robert): evaluate array size during three address code generation */
   if (astree_count(array) > 0) {
     ASTree *array_dim = astree_get(array, 0);
-    int status = validate_expr(array_dim, state);
+    int status = validate_expr(array_dim);
     if (status) return status;
     if ((array_dim->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST)) ==
         0) {
@@ -807,8 +819,7 @@ int define_pointer(ASTree *pointer, TypeSpec *spec) {
   return llist_push_back(&spec->auxspecs, aux_pointer);
 }
 
-int validate_dirdecl(ASTree *dirdecl, ASTree *ident, CompilerState *state,
-                     TypeSpec *out) {
+int validate_dirdecl(ASTree *dirdecl, ASTree *ident, TypeSpec *out) {
   /* TODO(Robert): do not allow multiple function dirdecls to occur, and do not
    * allow functions to return array types
    */
@@ -824,13 +835,13 @@ int validate_dirdecl(ASTree *dirdecl, ASTree *ident, CompilerState *state,
 
   switch (dirdecl->symbol) {
     case TOK_ARRAY:
-      return define_array(dirdecl, state, out);
+      return define_array(dirdecl, out);
       break;
     case TOK_POINTER:
       return define_pointer(dirdecl, out);
       break;
     case TOK_PARAM_LIST:
-      return define_params(dirdecl, ident, state, out);
+      return define_params(dirdecl, ident, out);
       break;
     default:
       fprintf(stderr, "ERROR: invalid direct declarator: %s\n",
@@ -840,13 +851,13 @@ int validate_dirdecl(ASTree *dirdecl, ASTree *ident, CompilerState *state,
   }
 }
 
-int validate_cast(ASTree *cast, CompilerState *state) {
+int validate_cast(ASTree *cast) {
   ASTree *declaration = astree_get(cast, 0);
-  int status = validate_declaration(declaration, state);
+  int status = validate_declaration(declaration);
   if (status) return status;
   ASTree *expr = astree_get(cast, 1);
 
-  status = validate_expr(expr, state);
+  status = validate_expr(expr);
   if (status) return status;
   status = perform_pointer_conv(cast, &expr);
   if (status) return status;
@@ -995,17 +1006,17 @@ int typecheck_bitop(ASTree *operator, ASTree * left, ASTree *right) {
   }
 }
 
-int validate_binop(ASTree *operator, CompilerState * state) {
+int validate_binop(ASTree *operator) {
   DEBUGS('t', "Validating binary operator %c", operator->symbol);
 
   ASTree *left = astree_get(operator, 0);
-  int status = validate_expr(left, state);
+  int status = validate_expr(left);
   if (status) return status;
   status = perform_pointer_conv(operator, & left);
   if (status) return status;
 
   ASTree *right = astree_get(operator, 1);
-  status = validate_expr(right, state);
+  status = validate_expr(right);
   if (status) return status;
   status = perform_pointer_conv(operator, & right);
   if (status) return status;
@@ -1058,10 +1069,10 @@ int is_increment(const int symbol) {
          symbol == TOK_POST_DEC;
 }
 
-int validate_unop(ASTree *operator, CompilerState * state) {
+int validate_unop(ASTree *operator) {
   DEBUGS('t', "Validating unary operator %c", operator->symbol);
   ASTree *operand = astree_get(operator, 0);
-  int status = validate_expr(operand, state);
+  int status = validate_expr(operand);
   if (status != 0) return status;
   const TypeSpec *operand_type = operand->type;
 
@@ -1101,9 +1112,9 @@ int validate_unop(ASTree *operator, CompilerState * state) {
   }
 }
 
-int validate_indirection(ASTree *indirection, CompilerState *state) {
+int validate_indirection(ASTree *indirection) {
   ASTree *subexpr = astree_get(indirection, 0);
-  int status = validate_expr(subexpr, state);
+  int status = validate_expr(subexpr);
   if (status) return status;
   status = perform_pointer_conv(indirection, &subexpr);
   if (status) return status;
@@ -1120,9 +1131,9 @@ int validate_indirection(ASTree *indirection, CompilerState *state) {
   }
 }
 
-int validate_addrof(ASTree *addrof, CompilerState *state) {
+int validate_addrof(ASTree *addrof) {
   ASTree *subexpr = astree_get(addrof, 0);
-  int status = validate_expr(subexpr, state);
+  int status = validate_expr(subexpr);
   if (status) return status;
   /* TODO(Robert): check that operand is an lval */
   /* TODO(Robert): set constexpr attribute if operand is static/extern */
@@ -1136,10 +1147,10 @@ int validate_addrof(ASTree *addrof, CompilerState *state) {
   return 0;
 }
 
-int validate_sizeof(ASTree *sizeof_, CompilerState *state) {
+int validate_sizeof(ASTree *sizeof_) {
   if (astree_get(sizeof_, 0)->symbol == TOK_DECLARATION) {
     ASTree *declaration = astree_get(sizeof_, 0);
-    int status = validate_declaration(declaration, state);
+    int status = validate_declaration(declaration);
     if (status) return status;
     ASTree *type_name = astree_get(declaration, 1);
     if (typespec_is_incomplete(type_name->type)) {
@@ -1148,7 +1159,7 @@ int validate_sizeof(ASTree *sizeof_, CompilerState *state) {
     }
   } else {
     ASTree *expr = astree_get(sizeof_, 0);
-    int status = validate_expr(expr, state);
+    int status = validate_expr(expr);
     if (status) return status;
     if (typespec_is_incomplete(expr->type)) {
       fprintf(stderr, "ERROR: cannot take sizeof incomplete type.\n");
@@ -1164,15 +1175,15 @@ int validate_sizeof(ASTree *sizeof_, CompilerState *state) {
   return 0;
 }
 
-int validate_subscript(ASTree *subscript, CompilerState *state) {
+int validate_subscript(ASTree *subscript) {
   ASTree *composite_object = astree_get(subscript, 0);
-  int status = validate_expr(composite_object, state);
+  int status = validate_expr(composite_object);
   if (status) return status;
   status = perform_pointer_conv(subscript, &composite_object);
   if (status) return status;
 
   ASTree *index = astree_get(subscript, 1);
-  status = validate_expr(index, state);
+  status = validate_expr(index);
   if (status) return status;
   status = perform_pointer_conv(subscript, &index);
   if (status) return status;
@@ -1192,9 +1203,9 @@ int validate_subscript(ASTree *subscript, CompilerState *state) {
   }
 }
 
-int validate_reference(ASTree *reference, CompilerState *state) {
+int validate_reference(ASTree *reference) {
   ASTree *strunion = astree_get(reference, 0);
-  int status = validate_expr(strunion, state);
+  int status = validate_expr(strunion);
   if (status) return status;
   const TypeSpec *strunion_type = strunion->type;
   if (!typespec_is_struct(strunion_type) && !typespec_is_union(strunion_type)) {
@@ -1223,9 +1234,9 @@ int validate_reference(ASTree *reference, CompilerState *state) {
   }
 }
 
-int validate_arrow(ASTree *arrow, CompilerState *state) {
+int validate_arrow(ASTree *arrow) {
   ASTree *strunion = astree_get(arrow, 0);
-  int status = validate_expr(strunion, state);
+  int status = validate_expr(strunion);
   if (status) return status;
   status = perform_pointer_conv(arrow, &strunion);
   if (status) return status;
@@ -1258,7 +1269,7 @@ int validate_arrow(ASTree *arrow, CompilerState *state) {
   }
 }
 
-int validate_expr(ASTree *expression, CompilerState *state) {
+int validate_expr(ASTree *expression) {
   int status;
   const char *ident;
   ASTree *left;
@@ -1267,10 +1278,10 @@ int validate_expr(ASTree *expression, CompilerState *state) {
   DEBUGS('t', "Validating next expression");
   switch (expression->symbol) {
     case '?':
-      status = validate_conditional(expression, state);
+      status = validate_conditional(expression);
       break;
     case ',':
-      status = validate_comma(expression, state);
+      status = validate_comma(expression);
       break;
     case '=':
     case TOK_ADDEQ:
@@ -1283,7 +1294,7 @@ int validate_expr(ASTree *expression, CompilerState *state) {
     case TOK_XOREQ:
     case TOK_SHREQ:
     case TOK_SHLEQ:
-      status = validate_assignment(expression, state);
+      status = validate_assignment(expression);
       break;
     case TOK_EQ:
     case TOK_NE:
@@ -1303,7 +1314,7 @@ int validate_expr(ASTree *expression, CompilerState *state) {
     case '&':
     case TOK_SHL:
     case TOK_SHR:
-      status = validate_binop(expression, state);
+      status = validate_binop(expression);
       break;
     case '!':
     case TOK_POS: /* promotion operator */
@@ -1313,29 +1324,29 @@ int validate_expr(ASTree *expression, CompilerState *state) {
     case TOK_DEC:
     case TOK_POST_INC:
     case TOK_POST_DEC:
-      status = validate_unop(expression, state);
+      status = validate_unop(expression);
       break;
     case TOK_INDIRECTION:
-      status = validate_indirection(expression, state);
+      status = validate_indirection(expression);
       break;
     case TOK_ADDROF:
-      status = validate_addrof(expression, state);
+      status = validate_addrof(expression);
       break;
     case TOK_SIZEOF:
-      status = validate_sizeof(expression, state);
+      status = validate_sizeof(expression);
       break;
     case TOK_CALL:
       /* expression->attributes |= ATTR_EXPR_VREG; */
-      status = validate_call(expression, state);
+      status = validate_call(expression);
       break;
     case TOK_SUBSCRIPT:
-      status = validate_subscript(expression, state);
+      status = validate_subscript(expression);
       break;
     case '.':
-      status = validate_reference(expression, state);
+      status = validate_reference(expression);
       break;
     case TOK_ARROW:
-      status = validate_arrow(expression, state);
+      status = validate_arrow(expression);
       break;
     case TOK_INTCON:
       status = validate_intcon(expression);
@@ -1348,10 +1359,10 @@ int validate_expr(ASTree *expression, CompilerState *state) {
       break;
     case TOK_IDENT:
       DEBUGS('t', "bonk");
-      status = assign_type(expression, state);
+      status = assign_type(expression);
       break;
     case TOK_CAST:
-      status = validate_cast(expression, state);
+      status = validate_cast(expression);
       break;
     default:
       fprintf(stderr, "ERROR: UNEXPECTED TOKEN IN EXPRESSION: %s\n",
@@ -1384,8 +1395,16 @@ int spec_list_includes_type(ASTree *spec_list) {
   return 0;
 }
 
-int declare_symbol(ASTree *declaration, ASTree *declarator,
-                   CompilerState *state) {
+/* This function should insert the symbol declared by "declarator" into the
+ * symbol table, add the declarator to the declaration's list of children, and
+ * return the declaration node.
+ *
+ * If there is an error, the error node will be inserted above the declaration,
+ * and not above the declarator. In the future, the latter may be preferable, or
+ * it may be necessary to add a function to relocate errors to be lower in the
+ * tree, so that type checking may be continued if errors are non-fatal.
+ */
+int declare_symbol(ASTree *declaration, ASTree *declarator) {
   ASTree *identifier = declarator;
   DEBUGS('t', "Making object entry for value %s", identifier->lexinfo);
   SymbolValue *symbol =
@@ -1393,13 +1412,13 @@ int declare_symbol(ASTree *declaration, ASTree *declarator,
 
   size_t j;
   for (j = 0; j < astree_count(declarator); ++j) {
-    int status = validate_dirdecl(astree_get(declarator, j), identifier, state,
-                                  &symbol->type);
+    int status =
+        validate_dirdecl(astree_get(declarator, j), identifier, &symbol->type);
     if (status) return status;
   }
 
   int status =
-      validate_typespec_list(astree_get(declaration, 0), state, &symbol->type);
+      validate_typespec_list(astree_get(declaration, 0), &symbol->type);
   if (status) return status;
 
   size_t identifier_len = strnlen(identifier->lexinfo, MAX_IDENT_LEN);
@@ -1496,8 +1515,7 @@ int declare_symbol(ASTree *declaration, ASTree *declarator,
   }
 }
 
-int typecheck_array_initializer(ASTree *declarator, ASTree *init_list,
-                                CompilerState *state) {
+int typecheck_array_initializer(ASTree *declarator, ASTree *init_list) {
   /* TODO(Robert): evaluate array size when generating three address code */
   const TypeSpec *array_type = declarator->type;
   TypeSpec element_type = SPEC_EMPTY;
@@ -1506,7 +1524,7 @@ int typecheck_array_initializer(ASTree *declarator, ASTree *init_list,
   size_t i;
   for (i = 0; i < astree_count(init_list); ++i) {
     ASTree *initializer = astree_get(init_list, i);
-    int status = validate_expr(initializer, state);
+    int status = validate_expr(initializer);
     if (status) return status;
     status = perform_pointer_conv(init_list, &initializer);
     if (status) return status;
@@ -1516,8 +1534,7 @@ int typecheck_array_initializer(ASTree *declarator, ASTree *init_list,
   return 0;
 }
 
-int typecheck_union_initializer(ASTree *declarator, ASTree *init_list,
-                                CompilerState *state) {
+int typecheck_union_initializer(ASTree *declarator, ASTree *init_list) {
   ASTree *identifier = declarator;
   AuxSpec *union_aux = llist_front((LinkedList *)&identifier->type->auxspecs);
   const char *tag_name = union_aux->data.tag.name;
@@ -1537,7 +1554,7 @@ int typecheck_union_initializer(ASTree *declarator, ASTree *init_list,
      * first member of the union
      */
     ASTree *initializer = astree_get(init_list, 0);
-    int status = validate_expr(initializer, state);
+    int status = validate_expr(initializer);
     if (status) return status;
     status = perform_pointer_conv(init_list, &initializer);
     if (status) return status;
@@ -1546,8 +1563,7 @@ int typecheck_union_initializer(ASTree *declarator, ASTree *init_list,
   }
 }
 
-int typecheck_struct_initializer(ASTree *declarator, ASTree *init_list,
-                                 CompilerState *state) {
+int typecheck_struct_initializer(ASTree *declarator, ASTree *init_list) {
   ASTree *identifier = declarator;
   AuxSpec *struct_aux = llist_front((LinkedList *)&identifier->type->auxspecs);
   const char *tag_name = struct_aux->data.tag.name;
@@ -1569,7 +1585,7 @@ int typecheck_struct_initializer(ASTree *declarator, ASTree *init_list,
     size_t i;
     for (i = 0; i < astree_count(init_list); ++i) {
       ASTree *initializer = astree_get(init_list, i);
-      int status = validate_expr(initializer, state);
+      int status = validate_expr(initializer);
       if (status) return status;
       status = perform_pointer_conv(init_list, &initializer);
       if (status) return status;
@@ -1581,26 +1597,25 @@ int typecheck_struct_initializer(ASTree *declarator, ASTree *init_list,
   }
 }
 
-int define_symbol(ASTree *declaration, ASTree *assignment,
-                  CompilerState *state) {
+int define_symbol(ASTree *declaration, ASTree *assignment) {
   ASTree *declarator = astree_get(assignment, 0);
   ASTree *initializer = astree_get(assignment, 1);
-  int status = declare_symbol(declaration, declarator, state);
+  int status = declare_symbol(declaration, declarator);
   if (status) return status;
   if (initializer->symbol == TOK_INIT_LIST) {
     const TypeSpec *decl_type = declarator->type;
     if (typespec_is_array(decl_type)) {
-      return typecheck_array_initializer(declarator, initializer, state);
+      return typecheck_array_initializer(declarator, initializer);
     } else if (decl_type->base == TYPE_UNION) {
-      return typecheck_union_initializer(declarator, initializer, state);
+      return typecheck_union_initializer(declarator, initializer);
     } else if (decl_type->base == TYPE_STRUCT) {
-      return typecheck_struct_initializer(declarator, initializer, state);
+      return typecheck_struct_initializer(declarator, initializer);
     } else {
       fprintf(stderr, "ERROR: type cannot be initialized by list.\n");
       return -1;
     }
   } else {
-    status = validate_expr(initializer, state);
+    status = validate_expr(initializer);
     if (status) return status;
     status = perform_pointer_conv(assignment, &initializer);
     if (status) return status;
@@ -1608,7 +1623,7 @@ int define_symbol(ASTree *declaration, ASTree *assignment,
   }
 }
 
-int define_function(ASTree *declaration, CompilerState *state) {
+int define_function(ASTree *declaration) {
   ASTree *declarator = astree_get(declaration, 1);
   ASTree *identifier = declarator;
   ASTree *block = astree_get(declaration, 2);
@@ -1616,7 +1631,7 @@ int define_function(ASTree *declaration, CompilerState *state) {
    * earliest forward declaration, but that the names of the parameters are
    * from the actual definition of the function.
    */
-  int status = declare_symbol(declaration, declarator, state);
+  int status = declare_symbol(declaration, declarator);
   if (status) return status;
   SymbolValue *symval = NULL;
   state_get_symbol(state, identifier->lexinfo, strlen(identifier->lexinfo),
@@ -1638,7 +1653,7 @@ int define_function(ASTree *declaration, CompilerState *state) {
   if (status) return status;
   ASTree *body = astree_get(declaration, 2);
   body->symbol_table = identifier->symbol_table;
-  status = validate_stmt(body, state);
+  status = validate_stmt(body);
   /* TODO(Robert): reset state on failure */
   if (status) return status;
   status = state_unset_function(state);
@@ -1654,8 +1669,7 @@ int define_function(ASTree *declaration, CompilerState *state) {
  * don't work quite the same way. check to make sure everything is doing
  * okay later on
  */
-int define_members(ASTree *composite_type, TagValue *tagval,
-                   CompilerState *state) {
+int define_members(ASTree *composite_type, TagValue *tagval) {
   SymbolTable *member_table = tagval->data.members.by_name;
   int status = state_push_table(state, member_table);
   if (status) return status;
@@ -1669,7 +1683,7 @@ int define_members(ASTree *composite_type, TagValue *tagval,
     const char *member_id_str = declarator->lexinfo;
     size_t member_id_str_len = strnlen(member_id_str, MAX_IDENT_LEN);
     DEBUGS('t', "Found composite type member: %s", member_id_str);
-    int status = validate_declaration(member, state);
+    int status = validate_declaration(member);
     if (status != 0) return status;
     SymbolValue *member_entry =
         symbol_table_get(member_table, member_id_str, member_id_str_len);
@@ -1698,7 +1712,7 @@ int define_members(ASTree *composite_type, TagValue *tagval,
  * which are either a TOK_IDENT or an '=', with two children, those being the
  * TOK_IDENT for the enumeration consntant and the value it represents.
  */
-int define_enumerators(ASTree *enum_, TagValue *tagval, CompilerState *state) {
+int define_enumerators(ASTree *enum_, TagValue *tagval) {
   /* TODO(Robert): Enumerators are compile time constants. Figure them out
    * at compile time for real, like all other compile time consntants.
    */
@@ -1745,7 +1759,7 @@ int define_enumerators(ASTree *enum_, TagValue *tagval, CompilerState *state) {
 
     if (value_node != NULL) {
       /* TODO(Robert): evaluate enumeration constants */
-      int status = validate_expr(value_node, state);
+      int status = validate_expr(value_node);
       if (status) return status;
       if ((value_node->attributes & ATTR_EXPR_ARITHCONST) == 0) {
         fprintf(stderr,
@@ -1784,7 +1798,7 @@ TagType tag_from_symbol(int symbol) {
  *    the tag and return the tag information to the call site somehow.
  */
 
-int declare_tag(ASTree *tag, CompilerState *state, TagValue **out) {
+int declare_tag(ASTree *tag, TagValue **out) {
   ASTree *first_child = astree_get(tag, 0);
   if (first_child->symbol != TOK_IDENT) {
     /* TODO(Robert): allow unique tags */
@@ -1807,22 +1821,21 @@ int declare_tag(ASTree *tag, CompilerState *state, TagValue **out) {
   return 0;
 }
 
-int complete_tag(ASTree *tag, CompilerState *state, TagValue *tagval) {
+int complete_tag(ASTree *tag, TagValue *tagval) {
   if (tagval->tag == TAG_ENUM)
-    return define_enumerators(tag, tagval, state);
+    return define_enumerators(tag, tagval);
   else
-    return define_members(tag, tagval, state);
+    return define_members(tag, tagval);
 }
 
-int define_tag(ASTree *tag, CompilerState *state) {
+int define_tag(ASTree *tag) {
   TagValue *tagval = NULL;
-  int status = declare_tag(tag, state, &tagval);
+  int status = declare_tag(tag, &tagval);
   if (status) return status;
-  return complete_tag(tag, state, tagval);
+  return complete_tag(tag, tagval);
 }
 
-int illegal_tag_redefinition(ASTree *tag, CompilerState *state,
-                             TagValue *existing) {
+int illegal_tag_redefinition(ASTree *tag, TagValue *existing) {
   ASTree *first_child = astree_get(tag, 0);
   const char *tag_name = first_child->lexinfo;
   int tag_declares_members =
@@ -1845,7 +1858,7 @@ int illegal_tag_redefinition(ASTree *tag, CompilerState *state,
   }
 }
 
-int resolve_tag(ASTree *tag, CompilerState *state) {
+int resolve_tag(ASTree *tag) {
   ASTree *first_child = astree_get(tag, 0);
   if (first_child->symbol != TOK_IDENT) {
     /* TODO(Robert): allow unique tags */
@@ -1860,28 +1873,28 @@ int resolve_tag(ASTree *tag, CompilerState *state) {
       astree_count(tag) > 1 || first_child->symbol != TOK_IDENT;
   if (exists) {
     if (is_redefinition) {
-      if (illegal_tag_redefinition(tag, state, exists)) {
+      if (illegal_tag_redefinition(tag, exists)) {
         return -1;
       } else if (tag_declares_members) {
-        return complete_tag(tag, state, exists);
+        return complete_tag(tag, exists);
       } else {
         return 0;
       }
     } else if (tag_declares_members) {
-      int status = define_tag(tag, state);
+      int status = define_tag(tag);
       if (status) return status;
       return 0;
-    } else if (illegal_tag_redefinition(tag, state, exists)) {
+    } else if (illegal_tag_redefinition(tag, exists)) {
       return -1;
     } else {
       return 0;
     }
   } else {
-    return define_tag(tag, state);
+    return define_tag(tag);
   }
 }
 
-int validate_declaration(ASTree *declaration, CompilerState *state) {
+int validate_declaration(ASTree *declaration) {
   if (astree_count(declaration) == 1) {
     /* no declarators; attempt to define tag */
     ASTree *spec_list = astree_get(declaration, 0);
@@ -1905,10 +1918,10 @@ int validate_declaration(ASTree *declaration, CompilerState *state) {
         astree_count(tag) > 1 || first_child->symbol != TOK_IDENT;
     if (exists) {
       if (is_redefinition) {
-        if (illegal_tag_redefinition(tag, state, exists)) {
+        if (illegal_tag_redefinition(tag, exists)) {
           return -1;
         } else if (tag_declares_members) {
-          return define_tag(tag, state);
+          return define_tag(tag);
         } else {
           /* tag exists at the current level, and has a matching definition.
            * do nothing.
@@ -1916,23 +1929,23 @@ int validate_declaration(ASTree *declaration, CompilerState *state) {
           return 0;
         }
       } else {
-        return define_tag(tag, state);
+        return define_tag(tag);
       }
     } else {
-      return define_tag(tag, state);
+      return define_tag(tag);
     }
   } else if (astree_count(declaration) == 3 &&
              astree_get(declaration, 2)->symbol == TOK_BLOCK) {
-    return define_function(declaration, state);
+    return define_function(declaration);
   } else {
     size_t i;
     for (i = 1; i < astree_count(declaration); ++i) {
       ASTree *current = astree_get(declaration, i);
       if (current->symbol == '=') {
-        int status = define_symbol(declaration, current, state);
+        int status = define_symbol(declaration, current);
         if (status) return status;
       } else {
-        int status = declare_symbol(declaration, current, state);
+        int status = declare_symbol(declaration, current);
         if (status) return status;
       }
     }
@@ -1940,7 +1953,7 @@ int validate_declaration(ASTree *declaration, CompilerState *state) {
   }
 }
 
-int validate_return(ASTree *ret, CompilerState *state) {
+int validate_return(ASTree *ret) {
   TypeSpec ret_spec = SPEC_EMPTY;
   /* strip function type */
   SymbolValue *function_symval = state_get_function(state);
@@ -1948,7 +1961,7 @@ int validate_return(ASTree *ret, CompilerState *state) {
   if (status) return status;
   if (astree_count(ret) > 0) {
     ASTree *expr = astree_get(ret, 0);
-    int status = validate_expr(expr, state);
+    int status = validate_expr(expr);
     if (status) return status;
     status = perform_pointer_conv(ret, &expr);
     if (status) return status;
@@ -1966,9 +1979,9 @@ int validate_return(ASTree *ret, CompilerState *state) {
   return status;
 }
 
-int validate_ifelse(ASTree *ifelse, CompilerState *state) {
+int validate_ifelse(ASTree *ifelse) {
   ASTree *expr = astree_get(ifelse, 0);
-  int status = validate_expr(expr, state);
+  int status = validate_expr(expr);
   if (status) return status;
   status = perform_pointer_conv(ifelse, &expr);
   if (status) return status;
@@ -1980,22 +1993,22 @@ int validate_ifelse(ASTree *ifelse, CompilerState *state) {
   }
 
   ASTree *if_body = astree_get(ifelse, 1);
-  status = validate_stmt(if_body, state);
+  status = validate_stmt(if_body);
   if (status) return status;
 
   if (astree_count(ifelse) == 3) {
     ASTree *else_body = astree_get(ifelse, 2);
-    status = validate_stmt(else_body, state);
+    status = validate_stmt(else_body);
     if (status) return status;
   }
   return 0;
 }
 
-int validate_switch(ASTree *switch_, CompilerState *state) {
+int validate_switch(ASTree *switch_) {
   ASTree *expr = astree_get(switch_, 0);
   ASTree *stmt = astree_get(switch_, 1);
 
-  int status = validate_expr(expr, state);
+  int status = validate_expr(expr);
   if (status) return status;
   if (!typespec_is_integer(expr->type)) {
     fprintf(stderr,
@@ -2003,13 +2016,13 @@ int validate_switch(ASTree *switch_, CompilerState *state) {
     return -1;
   }
 
-  return validate_stmt(stmt, state);
+  return validate_stmt(stmt);
 }
 
-int validate_while(ASTree *while_, CompilerState *state) {
+int validate_while(ASTree *while_) {
   ASTree *expr = while_->symbol == TOK_WHILE ? astree_get(while_, 0)
                                              : astree_get(while_, 1);
-  int status = validate_expr(expr, state);
+  int status = validate_expr(expr);
   if (status) return status;
   status = perform_pointer_conv(while_, &expr);
   if (status) return status;
@@ -2020,19 +2033,19 @@ int validate_while(ASTree *while_, CompilerState *state) {
   }
   ASTree *while_body = while_->symbol == TOK_WHILE ? astree_get(while_, 1)
                                                    : astree_get(while_, 0);
-  return validate_stmt(while_body, state);
+  return validate_stmt(while_body);
 }
 
-int validate_for(ASTree *for_, CompilerState *state) {
+int validate_for(ASTree *for_) {
   ASTree *first_expr = astree_get(for_, 0);
   if (first_expr != &EMPTY_EXPR) {
-    int status = validate_expr(first_expr, state);
+    int status = validate_expr(first_expr);
     if (status) return status;
   }
 
   ASTree *second_expr = astree_get(for_, 1);
   if (second_expr != &EMPTY_EXPR) {
-    int status = validate_expr(second_expr, state);
+    int status = validate_expr(second_expr);
     if (status) return status;
     if (!typespec_is_scalar(second_expr->type)) {
       fprintf(stderr,
@@ -2044,18 +2057,18 @@ int validate_for(ASTree *for_, CompilerState *state) {
 
   ASTree *third_expr = astree_get(for_, 2);
   if (third_expr != &EMPTY_EXPR) {
-    int status = validate_expr(third_expr, state);
+    int status = validate_expr(third_expr);
     if (status) return status;
   }
 
   ASTree *for_stmt = astree_get(for_, 3);
-  return validate_stmt(for_stmt, state);
+  return validate_stmt(for_stmt);
 }
 
 /* TODO(Robert): decide whether or not to create empty labels for goto
  * statements whose label has not been defined yet.
  */
-int validate_label(ASTree *label, CompilerState *state) {
+int validate_label(ASTree *label) {
   ASTree *ident = astree_get(label, 0);
   const char *ident_str = ident->lexinfo;
   size_t ident_str_len = strlen(ident_str);
@@ -2067,7 +2080,7 @@ int validate_label(ASTree *label, CompilerState *state) {
     } else {
       existing_entry->loc = &ident->loc;
       existing_entry->is_defined = 1;
-      return validate_stmt(astree_get(label, 1), state);
+      return validate_stmt(astree_get(label, 1));
     }
   } else {
     LabelValue *labval = malloc(sizeof(*labval));
@@ -2075,13 +2088,13 @@ int validate_label(ASTree *label, CompilerState *state) {
     labval->is_defined = 1;
     int status = state_insert_label(state, ident_str, ident_str_len, labval);
     if (status) return status;
-    return validate_stmt(astree_get(label, 1), state);
+    return validate_stmt(astree_get(label, 1));
   }
 }
 
-int validate_case(ASTree *case_, CompilerState *state) {
+int validate_case(ASTree *case_) {
   ASTree *constexpr = astree_get(case_, 0);
-  int status = validate_expr(constexpr, state);
+  int status = validate_expr(constexpr);
   if (status) return status;
   const TypeSpec *case_const_spec = constexpr->type;
   if (!typespec_is_integer(case_const_spec) ||
@@ -2092,10 +2105,10 @@ int validate_case(ASTree *case_, CompilerState *state) {
   }
 
   ASTree *statement = astree_get(case_, 1);
-  return validate_stmt(statement, state);
+  return validate_stmt(statement);
 }
 
-int validate_block(ASTree *block, CompilerState *state) {
+int validate_block(ASTree *block) {
   size_t i;
   /* don't overwrite scope if this block belongs to a function */
   if (block->symbol_table == NULL)
@@ -2104,47 +2117,47 @@ int validate_block(ASTree *block, CompilerState *state) {
   if (status) return status;
   for (i = 0; i < astree_count(block); ++i) {
     ASTree *statement = astree_get(block, i);
-    int status = validate_stmt(statement, state);
+    int status = validate_stmt(statement);
     if (status) return status;
   }
   return state_pop_table(state);
 }
 
-int validate_stmt(ASTree *statement, CompilerState *state) {
+int validate_stmt(ASTree *statement) {
   if (statement == &EMPTY_EXPR) return 0;
   int status;
   DEBUGS('t', "Validating next statement");
   switch (statement->symbol) {
     case TOK_RETURN:
-      status = validate_return(statement, state);
+      status = validate_return(statement);
       break;
     case TOK_IF:
-      status = validate_ifelse(statement, state);
+      status = validate_ifelse(statement);
       break;
     case TOK_SWITCH:
-      status = validate_switch(statement, state);
+      status = validate_switch(statement);
       break;
     case TOK_DO:
     case TOK_WHILE:
-      status = validate_while(statement, state);
+      status = validate_while(statement);
       break;
     case TOK_BLOCK:
-      status = validate_block(statement, state);
+      status = validate_block(statement);
       break;
     case TOK_DECLARATION:
-      status = validate_declaration(statement, state);
+      status = validate_declaration(statement);
       break;
     case TOK_FOR:
-      status = validate_for(statement, state);
+      status = validate_for(statement);
       break;
     case TOK_LABEL:
-      status = validate_label(statement, state);
+      status = validate_label(statement);
       break;
     case TOK_CASE:
-      status = validate_case(statement, state);
+      status = validate_case(statement);
       break;
     case TOK_DEFAULT:
-      status = validate_stmt(astree_get(statement, 0), state);
+      status = validate_stmt(astree_get(statement, 0));
       break;
     case TOK_CONTINUE:
     case TOK_BREAK:
@@ -2156,7 +2169,7 @@ int validate_stmt(ASTree *statement, CompilerState *state) {
       /* parser will catch anything that we don't want, so at this point the
        * only thing left that this could be is an expression-statement
        */
-      status = validate_expr(statement, state);
+      status = validate_expr(statement);
       break;
   }
   return status;
@@ -2168,7 +2181,7 @@ int validate_stmt(ASTree *statement, CompilerState *state) {
 
 int type_checker_make_table(ASTree *root) {
   DEBUGS('t', "Making symbol table");
-  CompilerState *state = state_init();
+  state = state_init();
   root->symbol_table = symbol_table_init();
   state_push_table(state, root->symbol_table);
   size_t i;
@@ -2177,7 +2190,7 @@ int type_checker_make_table(ASTree *root) {
     if (child == &EMPTY_EXPR) {
       continue;
     } else if (child->symbol == TOK_DECLARATION) {
-      int status = validate_declaration(child, state);
+      int status = validate_declaration(child);
       if (status) return status;
     } else {
       fprintf(stderr, "ERROR: Unexpected symbol at top level: %s\n",
