@@ -192,30 +192,3 @@ int astree_print_symbols(ASTree *tree, FILE *out) {
   }
   return 0;
 }
-
-ASTree *extract_ident(ASTree *tree) {
-  switch (tree->symbol) {
-    case TOK_STRUCT:
-    case TOK_UNION:
-    case TOK_ENUM:
-    case TOK_CALL:
-      return astree_get(tree, 0);
-    case TOK_DECLARATION:
-      /* TODO(Robert): this is ambiguous, do not do it */
-      return astree_get(tree, 1);
-    case TOK_IDENT:
-    case TOK_INTCON:
-    case TOK_CHARCON:
-    case TOK_STRINGCON:
-    case TOK_TYPE_NAME:
-    default:
-      /* TODO(Robert): make sure that there are no other nodes that need special
-       * treatment
-       */
-      return tree;
-  }
-}
-
-const TypeSpec *extract_type(ASTree *tree) { return extract_ident(tree)->type; }
-
-const Location *extract_loc(ASTree *tree) { return &extract_ident(tree)->loc; }

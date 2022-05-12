@@ -268,7 +268,7 @@ int translate_ident(ASTree *ident, CompilerState *state, InstructionData *data,
   int status =
       resolve_object(state, ident->lexinfo, data->src_operand, INDIRECT_FMT);
   if (status) return status;
-  const TypeSpec *ident_type = extract_type(ident);
+  const TypeSpec *ident_type = ident->type;
   AuxSpec *ident_aux = llist_back(&ident_type->auxspecs);
   if (flags & WANT_ADDR || (ident_aux && (ident_aux->aux == AUX_FUNCTION ||
                                           ident_aux->aux == AUX_ARRAY))) {
@@ -321,8 +321,8 @@ int translate_conversion(ASTree *operator, CompilerState * state,
   status = assign_vreg(operator->type, data->dest_operand, vreg_count++);
   if (status) return status;
 
-  const TypeSpec *target_type = extract_type(operator);
-  const TypeSpec *source_type = extract_type(converted_expr);
+  const TypeSpec *target_type = operator->type;
+  const TypeSpec *source_type = converted_expr->type;
   AuxSpec *source_aux = llist_back(&source_type->auxspecs);
 
   if (source_aux &&
@@ -755,7 +755,7 @@ int translate_param(ASTree *param, CompilerState *state,
                     InstructionData *data) {
   DEBUGS('g', "Translating parameter");
   ASTree *declarator = astree_get(param, 1);
-  ASTree *param_ident = extract_ident(declarator);
+  ASTree *param_ident = declarator;
   int status = assign_vreg(param_ident->type, data->src_operand, vreg_count++);
   if (status) return status;
   SymbolValue *symval = NULL;
@@ -783,11 +783,11 @@ int translate_list_initialization(ASTree *declarator, ASTree *init_list,
   DEBUGS('g', "Transating struct initiazation by initializer list");
   InstructionData *struct_data = calloc(1, sizeof(InstructionData));
   struct_data->instruction = instructions[INSTR_LEA];
-  ASTree *struct_ident = extract_ident(declarator);
+  ASTree *struct_ident = declarator;
   int status = resolve_object(state, struct_ident->lexinfo,
                               struct_data->dest_operand, INDIRECT_FMT);
   if (status) return status;
-  const TypeSpec *struct_type = extract_type(declarator);
+  const TypeSpec *struct_type = declarator->type;
   status = assign_vreg(&SPEC_ULONG, struct_data->dest_operand, vreg_count++);
   if (status) return status;
   llist_push_back(text_section, struct_data);
@@ -833,7 +833,7 @@ int translate_local_decl(ASTree *declaration, CompilerState *state,
   /* skip typespec list */
   for (i = 1; i < astree_count(declaration); ++i) {
     ASTree *declarator = astree_get(declaration, i);
-    ASTree *ident = extract_ident(declarator);
+    ASTree *ident = declarator;
     SymbolValue *symval = NULL;
     state_get_symbol(state, (char *)ident->lexinfo, strlen(ident->lexinfo),
                      &symval);
@@ -1489,7 +1489,7 @@ int translate_global_decl(ASTree *declaration, InstructionData *data) {
   /* skip typespec list */
   for (i = 1; i < astree_count(declaration); ++i) {
     ASTree *declarator = astree_get(declaration, i);
-    ASTree *ident = extract_ident(declarator);
+    ASTree *ident = declarator;
     sprintf(data->label, "%s:", ident->lexinfo);
 
     /* TODO(Robert): indicate somehow in the tree or symbol table that this
@@ -1565,7 +1565,7 @@ int translate_function(ASTree *function, CompilerState *state,
                        InstructionData *data) {
   DEBUGS('g', "Translating function definition");
   ASTree *declarator = astree_get(function, 1);
-  ASTree *name_node = extract_ident(declarator);
+  ASTree *name_node = declarator;
   strcpy(data->label, name_node->lexinfo);
 
   SymbolValue *function_symval = NULL;
@@ -1636,7 +1636,7 @@ int translate_file(ASTree *root) {
       continue;
     } else {
       ASTree *declarator = astree_get(topdecl, 1);
-      if (typespec_is_function(extract_type(declarator))) {
+      if (typespec_is_function(declarator->type)) {
         /* skip if this is a function declaration, not definition */
         if (astree_count(topdecl) == 3) {
           InstructionData *label_data = calloc(1, sizeof(*label_data));
