@@ -62,6 +62,13 @@ enum type_checker_action {
   TCHK_E_NO_FLAGS
 };
 
+typedef struct bcc_status {
+  const char *string1;
+  const char *string2;
+  const char *string3;
+  int code;
+} BCCStatus;
+
 CompilerState *state; /* back to global state... */
 
 /* forward declarations for mutual recursion */
@@ -73,11 +80,11 @@ int types_compatible(
     const TypeSpec *type2); /* required to check param and member types */
 int resolve_tag(ASTree *tag);
 
-ASTree *create_type_error(ASTree *child) {
+ASTree *create_type_error(ASTree *child, int errcode) {
   ASTree *errnode = astree_init(TOK_TYPE_ERROR, child->loc, "_terr");
   TypeSpec *errtype = calloc(1, sizeof(TypeSpec));
   errtype->base = TYPE_ERROR;
-  errtype->flags = TERR_FAILURE;
+  errtype->flags = errcode;
   errnode->type = errtype;
   int status = state_push_type_error(state, errtype);
   if (status) return NULL;
@@ -88,6 +95,8 @@ ASTree *propogate_type_error(ASTree *parent, ASTree *errnode) {
   ASTree *realnode = llist_extract(&errnode->children, 0);
   return astree_adopt(errnode, 1, astree_adopt(parent, 1, realnode));
 }
+
+void create_error_symbol(SymbolValue *symval, int errcode) {}
 
 int assign_type(ASTree *tree) {
   DEBUGS('t', "Attempting to assign a type");
@@ -1404,114 +1413,89 @@ int spec_list_includes_type(ASTree *spec_list) {
  * it may be necessary to add a function to relocate errors to be lower in the
  * tree, so that type checking may be continued if errors are non-fatal.
  */
+/* New strategy: currently, inserting nodes into the tree when declaring and
+ * defining symbols doesn't work very well because all of the tree structure
+ * required to reuse code for declarations and function/object definitions.
+ *
+ * Instead, code here should return an error structure that contains the same
+ * information that we would expect to be encoded by the tree. This will be done
+ * at a later date; for now, these functions will still just return error codes,
+ * and failure will result in program termination.
+ */
 int declare_symbol(ASTree *declaration, ASTree *declarator) {
-  ASTree *identifier = declarator;
-  DEBUGS('t', "Making object entry for value %s", identifier->lexinfo);
+  DEBUGS('t', "Making object entry for value %s", declarator->lexinfo);
   SymbolValue *symbol =
       symbol_value_init(&declarator->loc, state_get_sequence(state));
 
-  size_t j;
-  for (j = 0; j < astree_count(declarator); ++j) {
+  size_t i;
+  for (i = 0; i < astree_count(declarator); ++i) {
     int status =
-        validate_dirdecl(astree_get(declarator, j), identifier, &symbol->type);
-    if (status) return status;
+        validate_dirdecl(astree_get(declarator, i), declarator, &symbol->type);
+    if (status) {
+      /* TODO(Robert): allow for error recovery */
+      symbol_value_destroy(symbol);
+      return status;
+    }
   }
 
+  /* TODO(Robert): only do this once per declaration */
   int status =
       validate_typespec_list(astree_get(declaration, 0), &symbol->type);
-  if (status) return status;
+  if (status) {
+    /* TODO(Robert): allow for error recovery */
+    symbol_value_destroy(symbol);
+    return status;
+  }
 
-  size_t identifier_len = strnlen(identifier->lexinfo, MAX_IDENT_LEN);
+  const char *identifier = declarator->lexinfo;
+  size_t identifier_len = strnlen(identifier, MAX_IDENT_LEN);
   SymbolValue *exists = NULL;
   int is_redefinition =
-      state_get_symbol(state, identifier->lexinfo, identifier_len, &exists);
-  if (exists) {
-    if (is_redefinition) {
-      if ((typespec_is_function(&exists->type) &&
-           typespec_is_function(&symbol->type)) ||
-          ((exists->type.flags & TYPESPEC_FLAG_TYPEDEF) &&
-           (symbol->type.flags & TYPESPEC_FLAG_TYPEDEF))) {
-        int compatibility = types_compatible(&exists->type, &symbol->type);
-        if (compatibility != TCHK_COMPATIBLE) {
-          fprintf(stderr, "ERROR: redefinition of symbol %s\n",
-                  identifier->lexinfo);
-          return -1;
-        } else {
-          return 0;
-        }
-      } else {
-        /* TODO(Robert): allow redefinition of extern symbols so long as types
-         * are compatible */
-        fprintf(stderr, "ERROR: redefinition of symbol %s\n",
-                identifier->lexinfo);
-        return -1;
-      }
-    } else if ((exists->type.flags & TYPESPEC_FLAG_TYPEDEF) &&
-               !spec_list_includes_type(astree_get(declaration, 0))) {
+      state_get_symbol(state, identifier, identifier_len, &exists);
+  if (!is_redefinition) {
+    if (exists && (exists->type.flags & TYPESPEC_FLAG_TYPEDEF) &&
+        !spec_list_includes_type(astree_get(declaration, 0))) {
       /* don't redeclare typedefs if type was not specified in declaration */
-      int status = symbol_value_destroy(symbol);
-      if (status) return status;
-      return 0;
-    } else {
-      if (typespec_is_incomplete(&symbol->type) &&
-          (symbol->type.flags & TYPESPEC_FLAG_TYPEDEF) == 0) {
-        /* TODO(Robert): this is an ugly way to do this; need return codes to
-         * communicate incomplete types
-         */
-        /* allow incomplete type if this is an array with an initializer */
-        size_t declarator_index =
-            llist_find(&declaration->children, declarator);
-        ASTree *initializer = astree_get(declaration, declarator_index + 1);
-        if (initializer == NULL || initializer->symbol != TOK_INIT_LIST ||
-            !typespec_is_array(&symbol->type)) {
-          fprintf(stderr, "ERROR: object %s has incomplete type.\n",
-                  identifier->lexinfo);
-          return -1;
-        }
-      }
-      int status = state_insert_symbol(state, identifier->lexinfo,
-                                       identifier_len, symbol);
-      if (status) {
-        fprintf(stderr, "ERROR: your data structure library sucks.\n");
-        abort();
-      }
-      identifier->type = &symbol->type;
-      return 0;
-    }
-  } else {
-    if (typespec_is_incomplete(&symbol->type) &&
-        (symbol->type.flags & TYPESPEC_FLAG_TYPEDEF) == 0) {
-      /* TODO(Robert): this is an ugly way to do this; need return codes to
-       * communicate incomplete types
-       */
-      /* allow incomplete type if this is an array with an initializer */
-      size_t declarator_index = llist_find(&declaration->children, declarator);
-      ASTree *initializer = astree_get(declaration, declarator_index + 1);
-      if (initializer == NULL || initializer->symbol != TOK_INIT_LIST ||
-          !typespec_is_array(&symbol->type)) {
-        fprintf(stderr, "ERROR: object %s has incomplete type.\n",
-                identifier->lexinfo);
-        return -1;
-      }
-    }
-
-    if (declarator->symbol != TOK_TYPE_NAME) {
-      int status = state_insert_symbol(state, identifier->lexinfo,
-                                       identifier_len, symbol);
-      if (status) {
-        fprintf(stderr, "ERROR: your data structure library sucks.\n");
-        abort();
-      }
-    } else {
+      symbol_value_destroy(symbol);
+      declarator->type = &exists->type;
+      return BCC_TERR_SUCCESS;
+    } else if (declarator->symbol == TOK_TYPE_NAME) {
+      /* type name in cast or sizeof; do not insert symbol */
       /* TODO(Robert): copy and free the information in the symbol we just
        * created so that the syntax tree node can free it later, or use fancy
        * pointer math to get back the address in the heap of the SymbolValue
        * that the type information is embedded in.
        */
+      declarator->type = &symbol->type;
+      return BCC_TERR_SUCCESS;
+    } else {
+      /* TODO(Robert): check for incomplete type */
+      int status =
+          state_insert_symbol(state, identifier, identifier_len, symbol);
+      if (status) {
+        fprintf(stderr, "ERROR: your data structure library sucks.\n");
+        return BCC_TERR_LIBRARY_FAILURE;
+      }
+      declarator->type = &symbol->type;
+      return BCC_TERR_SUCCESS;
     }
-    /* assign the type we just built to the node */
-    identifier->type = &symbol->type;
-    return 0;
+  } else if ((typespec_is_function(&exists->type) &&
+              typespec_is_function(&symbol->type)) ||
+             ((exists->type.flags & TYPESPEC_FLAG_TYPEDEF) &&
+              (symbol->type.flags & TYPESPEC_FLAG_TYPEDEF))) {
+    int compatibility = types_compatible(&exists->type, &symbol->type);
+    symbol_value_destroy(symbol);
+    if (compatibility != TCHK_COMPATIBLE) {
+      return BCC_TERR_REDEFINITION;
+    } else {
+      return BCC_TERR_SUCCESS;
+    }
+  } else {
+    /* TODO(Robert): allow redefinition of extern symbols so long as types
+     * are compatible
+     */
+    symbol_value_destroy(symbol);
+    return BCC_TERR_REDEFINITION;
   }
 }
 
@@ -1531,7 +1515,7 @@ int typecheck_array_initializer(ASTree *declarator, ASTree *init_list) {
     status = convert_type(init_list, &initializer, &element_type);
     if (status) return status;
   }
-  return 0;
+  return BCC_TERR_SUCCESS;
 }
 
 int typecheck_union_initializer(ASTree *declarator, ASTree *init_list) {
@@ -1541,14 +1525,12 @@ int typecheck_union_initializer(ASTree *declarator, ASTree *init_list) {
   TagValue *tagval = NULL;
   state_get_tag(state, tag_name, strlen(tag_name), &tagval);
   if (tagval == NULL) {
-    fprintf(stderr, "ERROR: unable to locate struct/union tag %s\n.", tag_name);
-    return -1;
+    return BCC_TERR_TAG_NOT_FOUND;
   }
 
   const LinkedList *members = &tagval->data.members.in_order;
   if (astree_count(init_list) > 1) {
-    fprintf(stderr, "ERROR: too many initializers provided for union type\n");
-    return -1;
+    return BCC_TERR_EXCESS_INITIALIZERS;
   } else {
     /* there should be one initializer of a type compatible with the type of the
      * first member of the union
@@ -1570,17 +1552,12 @@ int typecheck_struct_initializer(ASTree *declarator, ASTree *init_list) {
   TagValue *tagval = NULL;
   state_get_tag(state, tag_name, strlen(tag_name), &tagval);
   if (tagval == NULL) {
-    fprintf(stderr, "ERROR: unable to locate struct/union tag %s\n.", tag_name);
-    return -1;
+    return BCC_TERR_TAG_NOT_FOUND;
   }
 
   const LinkedList *members = &tagval->data.members.in_order;
   if (members->size < astree_count(init_list)) {
-    fprintf(stderr,
-            "ERROR: struct has %zu members, but %zu were provided, "
-            "which is too many.\n",
-            llist_size(members), astree_count(init_list));
-    return -1;
+    return BCC_TERR_EXCESS_INITIALIZERS;
   } else {
     size_t i;
     for (i = 0; i < astree_count(init_list); ++i) {
@@ -1611,8 +1588,7 @@ int define_symbol(ASTree *declaration, ASTree *assignment) {
     } else if (decl_type->base == TYPE_STRUCT) {
       return typecheck_struct_initializer(declarator, initializer);
     } else {
-      fprintf(stderr, "ERROR: type cannot be initialized by list.\n");
-      return -1;
+      return BCC_TERR_UNEXPECTED_LIST;
     }
   } else {
     status = validate_expr(initializer);
@@ -1637,16 +1613,11 @@ int define_function(ASTree *declaration) {
   state_get_symbol(state, identifier->lexinfo, strlen(identifier->lexinfo),
                    &symval);
   if (symval == NULL) {
-    fprintf(stderr, "ERROR: unable to define function: declaration failed.\n");
-    return -1;
+    return BCC_TERR_FAILURE;
   } else if (!typespec_is_function(&symval->type)) {
-    fprintf(stderr, "ERROR: cannot define body for non-function %s.\n",
-            identifier->lexinfo);
-    return -1;
+    return BCC_TERR_EXPECTED_FUNCTION;
   } else if (symval->flags & SYMFLAG_FUNCTION_DEFINED) {
-    fprintf(stderr, "ERROR: redefinition of function %s.\n",
-            identifier->lexinfo);
-    return -1;
+    return BCC_TERR_REDEFINITION;
   }
 
   status = state_set_function(state, symval);
@@ -1654,8 +1625,10 @@ int define_function(ASTree *declaration) {
   ASTree *body = astree_get(declaration, 2);
   body->symbol_table = identifier->symbol_table;
   status = validate_stmt(body);
-  /* TODO(Robert): reset state on failure */
-  if (status) return status;
+  if (status) {
+    state_unset_function(state);
+    return status;
+  }
   status = state_unset_function(state);
   if (status) return status;
   /* mark function as defined */
@@ -1704,7 +1677,7 @@ int define_members(ASTree *composite_type, TagValue *tagval) {
   status = state_pop_table(state);
   if (status) return status;
   tagval->is_defined = 1;
-  return 0;
+  return BCC_TERR_SUCCESS;
 }
 
 /* Enumerations are structured as follows: the enum keyword, with an optional
@@ -1732,9 +1705,7 @@ int define_enumerators(ASTree *enum_, TagValue *tagval) {
     int is_redefinition =
         state_get_symbol(state, enum_ident, enum_ident_len, &exists);
     if (is_redefinition) {
-      fprintf(stderr, "ERROR: redefinition of enumeration constant %s\n",
-              enum_ident);
-      return -1;
+      return BCC_TERR_REDEFINITION;
     }
 
     SymbolValue *symval =
@@ -1762,10 +1733,7 @@ int define_enumerators(ASTree *enum_, TagValue *tagval) {
       int status = validate_expr(value_node);
       if (status) return status;
       if ((value_node->attributes & ATTR_EXPR_ARITHCONST) == 0) {
-        fprintf(stderr,
-                "ERROR: enumerator value must evaluate to an arithmetic"
-                " constant\n");
-        return -1;
+        return BCC_TERR_EXPECTED_ARITHCONST;
       }
     }
   }
@@ -1774,7 +1742,7 @@ int define_enumerators(ASTree *enum_, TagValue *tagval) {
   tagval->width = X64_SIZEOF_INT;
   tagval->alignment = X64_ALIGNOF_INT;
   tagval->is_defined = 1;
-  return 0;
+  return BCC_TERR_SUCCESS;
 }
 
 TagType tag_from_symbol(int symbol) {
@@ -1802,23 +1770,21 @@ int declare_tag(ASTree *tag, TagValue **out) {
   ASTree *first_child = astree_get(tag, 0);
   if (first_child->symbol != TOK_IDENT) {
     /* TODO(Robert): allow unique tags */
-    fprintf(stderr, "ERROR: unique tags not yet supported.\n");
-    return -1;
+    return BCC_TERR_FAILURE;
   }
   TagValue *exists = NULL;
   const char *tag_name = first_child->lexinfo;
   size_t tag_name_len = strlen(tag_name);
   int is_redefinition = state_get_tag(state, tag_name, tag_name_len, &exists);
-  if (exists && is_redefinition) {
-    fprintf(stderr, "ERROR: redeclaration of tag %s.\n", tag_name);
-    return -1;
+  if (is_redefinition) {
+    return BCC_TERR_REDEFINITION;
   }
   TagValue *tagval = tag_value_init(tag_from_symbol(tag->symbol));
-  if (tagval == NULL) return -1;
+  if (tagval == NULL) return BCC_TERR_FAILURE;
   int status = state_insert_tag(state, tag_name, tag_name_len, tagval);
   if (status) return status;
   *out = tagval;
-  return 0;
+  return BCC_TERR_SUCCESS;
 }
 
 int complete_tag(ASTree *tag, TagValue *tagval) {
@@ -1841,20 +1807,16 @@ int illegal_tag_redefinition(ASTree *tag, TagValue *existing) {
   int tag_declares_members =
       astree_count(tag) > 1 || first_child->symbol != TOK_IDENT;
   if (tag->symbol == TOK_STRUCT && existing->tag != TAG_STRUCT) {
-    fprintf(stderr, "ERROR: tag %s is not a struct\n", tag_name);
-    return -1;
+    return BCC_TERR_EXPECTED_STRUCT;
   } else if (tag->symbol == TOK_UNION && existing->tag != TAG_UNION) {
-    fprintf(stderr, "ERROR: tag %s is not a union\n", tag_name);
-    return -1;
+    return BCC_TERR_EXPECTED_UNION;
   } else if (tag->symbol == TOK_ENUM && existing->tag != TAG_ENUM) {
-    fprintf(stderr, "ERROR: tag %s is not an enum\n", tag_name);
-    return -1;
+    return BCC_TERR_EXPECTED_ENUM;
   } else if (tag_declares_members && existing->is_defined) {
     /* TODO(Robert): allow identical redefinitions */
-    fprintf(stderr, "ERROR: redefinition of tag %s\n.", tag_name);
-    return -1;
+    return BCC_TERR_REDEFINITION;
   } else {
-    return 0;
+    return BCC_TERR_SUCCESS;
   }
 }
 
@@ -1862,8 +1824,7 @@ int resolve_tag(ASTree *tag) {
   ASTree *first_child = astree_get(tag, 0);
   if (first_child->symbol != TOK_IDENT) {
     /* TODO(Robert): allow unique tags */
-    fprintf(stderr, "ERROR: unnamed tags are not yet supported.\n");
-    return -1;
+    return BCC_TERR_FAILURE;
   }
   const char *tag_name = first_child->lexinfo;
   const size_t tag_name_len = strnlen(tag_name, MAX_IDENT_LEN);
@@ -1874,20 +1835,18 @@ int resolve_tag(ASTree *tag) {
   if (exists) {
     if (is_redefinition) {
       if (illegal_tag_redefinition(tag, exists)) {
-        return -1;
+        return BCC_TERR_REDEFINITION;
       } else if (tag_declares_members) {
         return complete_tag(tag, exists);
       } else {
-        return 0;
+        return BCC_TERR_SUCCESS;
       }
     } else if (tag_declares_members) {
-      int status = define_tag(tag);
-      if (status) return status;
-      return 0;
+      return define_tag(tag);
     } else if (illegal_tag_redefinition(tag, exists)) {
-      return -1;
+      return BCC_TERR_REDEFINITION;
     } else {
-      return 0;
+      return BCC_TERR_SUCCESS;
     }
   } else {
     return define_tag(tag);
@@ -1902,13 +1861,12 @@ int validate_declaration(ASTree *declaration) {
     if (tag->symbol != TOK_STRUCT && tag->symbol != TOK_UNION &&
         tag->symbol != TOK_ENUM) {
       /* declaration declares nothing, so do nothing */
-      return 0;
+      return BCC_TERR_SUCCESS;
     }
     ASTree *first_child = astree_get(tag, 0);
     if (first_child->symbol != TOK_IDENT) {
       /* TODO(Robert): support unique tags */
-      fprintf(stderr, "ERROR: unique tags are not yet supported.\n");
-      return -1;
+      return BCC_TERR_FAILURE;
     }
     const char *tag_name = first_child->lexinfo;
     size_t tag_name_len = strlen(tag_name);
@@ -1916,23 +1874,19 @@ int validate_declaration(ASTree *declaration) {
     int is_redefinition = state_get_tag(state, tag_name, tag_name_len, &exists);
     int tag_declares_members =
         astree_count(tag) > 1 || first_child->symbol != TOK_IDENT;
-    if (exists) {
-      if (is_redefinition) {
-        if (illegal_tag_redefinition(tag, exists)) {
-          return -1;
-        } else if (tag_declares_members) {
-          return define_tag(tag);
-        } else {
-          /* tag exists at the current level, and has a matching definition.
-           * do nothing.
-           * */
-          return 0;
-        }
-      } else {
+    if (!is_redefinition) {
+      if (tag_declares_members) {
         return define_tag(tag);
+      } else {
+        TagValue *dummy = NULL;
+        return declare_tag(tag, &dummy);
       }
-    } else {
+    } else if (illegal_tag_redefinition(tag, exists)) {
+      return BCC_TERR_REDEFINITION;
+    } else if (tag_declares_members) {
       return define_tag(tag);
+    } else {
+      return BCC_TERR_SUCCESS;
     }
   } else if (astree_count(declaration) == 3 &&
              astree_get(declaration, 2)->symbol == TOK_BLOCK) {
@@ -1949,7 +1903,8 @@ int validate_declaration(ASTree *declaration) {
         if (status) return status;
       }
     }
-    return 0;
+    return BCC_TERR_SUCCESS;
+    ;
   }
 }
 
