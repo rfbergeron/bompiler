@@ -159,6 +159,13 @@ The state for the type checker will be moved back into a global. It will,
 however, be a single global structure, to make keeping track of it and replacing
 it at a later date easier.
 
+## Location of error nodes
+If I encode error information as syntax tree nodes, the location of these nodes
+in the tree is important when considering the behavior of the program. For
+example, if a declarator contains errors, should the declarator be adopted by
+the error node, or should the declaration which it is a part of be adopted by
+the error node? The other declarations may be fine, after all.
+
 ## Labels
 Based on the language definition, it looks like labels are attached to the
 statement immediately following them. They are not a valid statement all on
