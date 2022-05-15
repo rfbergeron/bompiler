@@ -892,8 +892,6 @@ int typecheck_relop(ASTree *operator, ASTree * left, ASTree *right) {
              (operator->symbol == TOK_EQ || operator->symbol == TOK_NE)) {
     return BCC_TERR_SUCCESS;
   } else {
-    fprintf(stderr, "ERROR: uncomparable types for operator \"%s\".\n",
-            parser_get_tname(operator->symbol));
     return BCC_TERR_INCOMPATIBLE_TYPES;
   }
 }
@@ -1365,7 +1363,6 @@ int declare_symbol(ASTree *declaration, ASTree *declarator) {
       int status =
           state_insert_symbol(state, identifier, identifier_len, symbol);
       if (status) {
-        fprintf(stderr, "ERROR: your data structure library sucks.\n");
         return BCC_TERR_LIBRARY_FAILURE;
       }
       declarator->type = &symbol->type;
