@@ -1374,9 +1374,7 @@ int validate_expr(ASTree *expression) {
       status = validate_cast(expression);
       break;
     default:
-      fprintf(stderr, "ERROR: UNEXPECTED TOKEN IN EXPRESSION: %s\n",
-              expression->lexinfo);
-      status = -1;
+      status = BCC_TERR_UNEXPECTED_TOKEN;
   }
   return status;
 }
@@ -1924,8 +1922,7 @@ int validate_return(ASTree *ret) {
   } else {
     int compatibility = types_compatible(&ret_spec, &SPEC_VOID);
     if (compatibility != TCHK_COMPATIBLE) {
-      fprintf(stderr, "ERROR: non-void function should return a value.\n");
-      status = -1;
+      return BCC_TERR_EXPECTED_RETVAL;
     }
   }
 
@@ -1942,9 +1939,7 @@ int validate_ifelse(ASTree *ifelse) {
   if (status) return status;
 
   if (!typespec_is_scalar(expr->type)) {
-    /* error: conditional expression must be of type int */
-    status = -1;
-    return status;
+    return BCC_TERR_EXPECTED_SCALAR;
   }
 
   ASTree *if_body = astree_get(ifelse, 1);
@@ -1966,9 +1961,7 @@ int validate_switch(ASTree *switch_) {
   int status = validate_expr(expr);
   if (status) return status;
   if (!typespec_is_integer(expr->type)) {
-    fprintf(stderr,
-            "switch statement control expression must be of integral type.\n");
-    return -1;
+    return BCC_TERR_EXPECTED_INTEGER;
   }
 
   return validate_stmt(stmt);
@@ -1982,9 +1975,7 @@ int validate_while(ASTree *while_) {
   status = perform_pointer_conv(while_, &expr);
   if (status) return status;
   if (!typespec_is_scalar(expr->type)) {
-    /* error: conditional expression must be of type int */
-    status = -1;
-    return status;
+    return BCC_TERR_EXPECTED_INTEGER;
   }
   ASTree *while_body = while_->symbol == TOK_WHILE ? astree_get(while_, 1)
                                                    : astree_get(while_, 0);
@@ -2003,10 +1994,7 @@ int validate_for(ASTree *for_) {
     int status = validate_expr(second_expr);
     if (status) return status;
     if (!typespec_is_scalar(second_expr->type)) {
-      fprintf(stderr,
-              "ERROR: for loop condition must be of arithmetic or "
-              "pointer type.\n");
-      return -1;
+      return BCC_TERR_EXPECTED_SCALCONST;
     }
   }
 
@@ -2030,8 +2018,7 @@ int validate_label(ASTree *label) {
   LabelValue *existing_entry = state_get_label(state, ident_str, ident_str_len);
   if (existing_entry) {
     if (existing_entry->is_defined) {
-      fprintf(stderr, "ERROR: redefinition of label %s.\n", ident_str);
-      return -1;
+      return BCC_TERR_EXPECTED_CONST;
     } else {
       existing_entry->loc = &ident->loc;
       existing_entry->is_defined = 1;
@@ -2054,9 +2041,7 @@ int validate_case(ASTree *case_) {
   const TypeSpec *case_const_spec = constexpr->type;
   if (!typespec_is_integer(case_const_spec) ||
       !(constexpr->attributes | ATTR_EXPR_ARITHCONST)) {
-    fprintf(stderr,
-            "ERROR: case value must be an integral constant expression.\n");
-    return -1;
+    return BCC_TERR_EXPECTED_INTCONST;
   }
 
   ASTree *statement = astree_get(case_, 1);
@@ -2118,7 +2103,7 @@ int validate_stmt(ASTree *statement) {
     case TOK_BREAK:
     case TOK_GOTO:
       /* handle this during assembly generation */
-      status = 0;
+      status = BCC_TERR_SUCCESS;
       break;
     default:
       /* parser will catch anything that we don't want, so at this point the
@@ -2148,9 +2133,7 @@ int type_checker_make_table(ASTree *root) {
       int status = validate_declaration(child);
       if (status) return status;
     } else {
-      fprintf(stderr, "ERROR: Unexpected symbol at top level: %s\n",
-              parser_get_tname(child->symbol));
-      return -1;
+      return BCC_TERR_UNEXPECTED_TOKEN;
     }
   }
   int status = state_pop_table(state);
