@@ -98,25 +98,6 @@ ASTree *propogate_type_error(ASTree *parent, ASTree *errnode) {
 
 void create_error_symbol(SymbolValue *symval, int errcode) {}
 
-int assign_type(ASTree *tree) {
-  DEBUGS('t', "Attempting to assign a type");
-  ASTree *identifier = tree;
-  if (identifier == NULL) return -1;
-  const char *id_str = identifier->lexinfo;
-  size_t id_str_len = strnlen(id_str, MAX_IDENT_LEN);
-  SymbolValue *symval = NULL;
-  int in_current_scope = state_get_symbol(state, id_str, id_str_len, &symval);
-  if (symval) {
-    DEBUGS('t', "Assigning %s a symbol", id_str);
-    identifier->type = &(symval->type);
-    return 0;
-  } else {
-    fprintf(stderr, "ERROR: could not resolve symbol: %s %s\n", (tree->lexinfo),
-            parser_get_tname(tree->symbol));
-    return -1;
-  }
-}
-
 /*
  * TODO(Robert): recursively setting the block number no longer works because
  * of nested scoping; instead block numbers should be set during the validation
@@ -127,10 +108,9 @@ int convert_type(ASTree *parent, ASTree **out, const TypeSpec *type) {
   size_t index = llist_find(&parent->children, *out);
   int compatibility = types_compatible(type, (*out)->type);
   if (compatibility == TCHK_COMPATIBLE) {
-    return 0;
+    return BCC_TERR_SUCCESS;
   } else if (compatibility == TCHK_INCOMPATIBLE) {
-    fprintf(stderr, "ERROR: attempt to convert between incompatible types.\n");
-    return -1;
+    return BCC_TERR_INCOMPATIBLE_TYPES;
   }
   TypeSpec *cast_spec = malloc(sizeof(*cast_spec));
   int status = typespec_copy(cast_spec, type);
@@ -144,14 +124,14 @@ int convert_type(ASTree *parent, ASTree **out, const TypeSpec *type) {
   status = llist_insert(&parent->children, astree_adopt(cast, 1, *out), index);
   if (status) return status;
   *out = cast;
-  return 0;
+  return BCC_TERR_SUCCESS;
 }
 
 int perform_pointer_conv(ASTree *parent, ASTree **out) {
   size_t index = llist_find(&parent->children, *out);
   const TypeSpec *child_spec = (*out)->type;
   if (!typespec_is_array(child_spec) && !typespec_is_function(child_spec)) {
-    return 0;
+    return BCC_TERR_SUCCESS;
   } else {
     TypeSpec *pointer_spec = malloc(sizeof(*pointer_spec));
     if (typespec_is_array(child_spec)) {
@@ -175,7 +155,7 @@ int perform_pointer_conv(ASTree *parent, ASTree **out) {
         llist_insert(&parent->children, astree_adopt(cast, 1, *out), index);
     if (status) return status;
     *out = cast;
-    return 0;
+    return BCC_TERR_SUCCESS;
   }
 }
 
@@ -313,22 +293,14 @@ int types_compatible(const TypeSpec *type1, const TypeSpec *type2) {
  */
 int determine_conversion(const TypeSpec *type1, const TypeSpec *type2,
                          const TypeSpec **out) {
-  if (type1 == NULL) {
-    fprintf(stderr, "First argument not provided to promotion routine\n");
-    return -1;
-  } else if (type2 == NULL) {
-    fprintf(stderr, "Second argument not provided to promotion routine\n");
-    return -1;
-  } else if (typespec_is_pointer(type1)) {
+  if (typespec_is_pointer(type1)) {
     *out = type1;
   } else if (typespec_is_pointer(type2)) {
     *out = type2;
   } else if (type1->base == TYPE_STRUCT || type1->base == TYPE_UNION) {
     *out = type1;
   } else if (type2->base == TYPE_STRUCT || type2->base == TYPE_UNION) {
-    fprintf(stderr,
-            "ERROR: unable to promote struct or union type to other type\n");
-    return -1;
+    return BCC_TERR_INCOMPATIBLE_TYPES;
   } else if (type1->width < X64_SIZEOF_INT && type2->width < X64_SIZEOF_INT) {
     /* promote to signed int if both operands could be represented as one */
     *out = &SPEC_INT;
@@ -348,11 +320,9 @@ int determine_conversion(const TypeSpec *type1, const TypeSpec *type2,
     /* both are signed integers, so just pick the left-hand type */
     *out = type1;
   } else {
-    /* some invalid type was passed */
-    fprintf(stderr, "ERORR: unable to determine promotion for types\n");
-    return -1;
+    return BCC_TERR_INCOMPATIBLE_TYPES;
   }
-  return 0;
+  return BCC_TERR_SUCCESS;
 }
 
 int validate_intcon(ASTree *intcon) {
@@ -364,15 +334,11 @@ int validate_intcon(ASTree *intcon) {
    * architecture with different sizes of integer types.
    */
   if (signed_value == LONG_MIN) {
-    /* error: constant too small */
-    fprintf(stderr, "ERROR: constant too small.\n");
-    return -1;
+    return BCC_TERR_CONST_TOO_SMALL;
   } else if (signed_value == LONG_MAX) {
     unsigned long unsigned_value = strtoul(intcon->lexinfo, NULL, 10);
     if (unsigned_value == UINT64_MAX) {
-      /* error: constant too large */
-      fprintf(stderr, "ERROR: constant too large.\n");
-      return -1;
+      return BCC_TERR_CONST_TOO_LARGE;
     } else {
       intcon->type = &SPEC_ULONG;
     }
@@ -409,7 +375,7 @@ int validate_charcon(ASTree *charcon) {
   }
   charcon->type = &SPEC_CHAR;
   charcon->attributes |= ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST;
-  return 0;
+  return BCC_TERR_SUCCESS;
 }
 
 int validate_stringcon(ASTree *stringcon) {
@@ -428,20 +394,13 @@ int validate_stringcon(ASTree *stringcon) {
 
   stringcon->type = stringcon_type;
   stringcon->attributes |= ATTR_EXPR_CONST;
-  return 0;
+  return BCC_TERR_SUCCESS;
 }
 
 int validate_integer_typespec(TypeSpec *out, enum typespec_index i,
                               enum typespec_flag f, size_t bytes) {
   if (out->flags & INCOMPATIBLE_FLAGSETS[i]) {
-    char buf[1024];
-    flags_to_string(f, buf, 1024);
-    char buf2[1024];
-    flags_to_string(out->flags, buf2, 1024);
-    fprintf(stderr,
-            "ERROR: typespec flag \"%s\" incompatible with flagset \"%s\"\n",
-            buf, buf2);
-    return -1;
+    return BCC_TERR_INCOMPATIBLE_SPEC;
   } else {
     out->flags |= f;
     if (bytes > 0) {
@@ -452,7 +411,7 @@ int validate_integer_typespec(TypeSpec *out, enum typespec_index i,
     } else {
       out->base = TYPE_UNSIGNED;
     }
-    return 0;
+    return BCC_TERR_SUCCESS;
   }
 }
 
@@ -491,7 +450,7 @@ int validate_tag_typespec(ASTree *type, TypeSpec *out) {
   TagValue *tagval = NULL;
   state_get_tag(state, tag_name, tag_name_len, &tagval);
   if (tagval == NULL) {
-    fprintf(stderr, "ERROR: unable to locate tag %s.\n", tag_name);
+    return BCC_TERR_TAG_NOT_FOUND;
   }
   out->base = type_from_tag(tagval->tag);
   out->width = tagval->width;
@@ -506,22 +465,15 @@ int validate_tag_typespec(ASTree *type, TypeSpec *out) {
   tag_aux->data.tag.name = tag_name;
   tag_aux->data.tag.val = tagval;
   llist_push_back(&out->auxspecs, tag_aux);
-  return 0;
+  return BCC_TERR_SUCCESS;
 }
 
 int validate_typedef_typespec(TypeSpec *out) {
   if (out->flags & TYPESPEC_FLAGS_STORAGE_CLASS) {
-    char buf[1024];
-    flags_to_string(TYPESPEC_FLAG_TYPEDEF, buf, 1024);
-    char buf2[1024];
-    flags_to_string(out->flags, buf2, 1024);
-    fprintf(stderr,
-            "ERROR: typespec flag \"%s\" incompatible with flagset \"%s\"\n",
-            buf, buf2);
-    return -1;
+    return BCC_TERR_INCOMPATIBLE_SPEC;
   } else {
     out->flags |= TYPESPEC_FLAG_TYPEDEF;
-    return 0;
+    return BCC_TERR_SUCCESS;
   }
 }
 
@@ -531,12 +483,9 @@ int validate_type_id_typespec(ASTree *type, TypeSpec *out) {
   SymbolValue *symval = NULL;
   state_get_symbol(state, type_name, type_name_len, &symval);
   if (!symval) {
-    fprintf(stderr, "ERROR: unable to resolve typedef name %s.\n", type_name);
-    return -1;
+    return BCC_TERR_TYPEID_NOT_FOUND;
   } else if ((symval->type.flags & TYPESPEC_FLAG_TYPEDEF) == 0) {
-    fprintf(stderr, "ERROR: symbol name %s does not refer to a type.\n",
-            type_name);
-    return -1;
+    return BCC_TERR_EXPECTED_TYPEID;
   } else {
     out->base = symval->type.base;
     out->width = symval->type.width;
@@ -549,12 +498,12 @@ int validate_type_id_typespec(ASTree *type, TypeSpec *out) {
 
     int status = typespec_append_auxspecs(out, &symval->type);
     if (status) return status;
-    return 0;
+    return BCC_TERR_SUCCESS;
   }
 }
 
 int validate_typespec_list(ASTree *spec_list, TypeSpec *out) {
-  int status = 0;
+  int status = BCC_TERR_SUCCESS;
   size_t i;
   for (i = 0; i < astree_count(spec_list); ++i) {
     ASTree *type = astree_get(spec_list, i);
@@ -604,9 +553,7 @@ int validate_typespec_list(ASTree *spec_list, TypeSpec *out) {
         status = validate_typedef_typespec(out);
         break;
       default:
-        fprintf(stderr, "ERROR: unimplemented type: %s\n",
-                parser_get_tname(type->symbol));
-        status = -1;
+        status = BCC_TERR_FAILURE;
         break;
     }
   }
@@ -627,7 +574,20 @@ int validate_typespec_list(ASTree *spec_list, TypeSpec *out) {
   return status;
 }
 
-int validate_ident(ASTree *ident) { return assign_type(ident); }
+int validate_ident(ASTree *ident) {
+  DEBUGS('t', "Attempting to assign a type");
+  const char *id_str = ident->lexinfo;
+  size_t id_str_len = strnlen(id_str, MAX_IDENT_LEN);
+  SymbolValue *symval = NULL;
+  int in_current_scope = state_get_symbol(state, id_str, id_str_len, &symval);
+  if (symval) {
+    DEBUGS('t', "Assigning %s a symbol", id_str);
+    ident->type = &(symval->type);
+    return BCC_TERR_SUCCESS;
+  } else {
+    return BCC_TERR_SYM_NOT_FOUND;
+  }
+}
 
 int validate_call(ASTree *call) {
   /* functon subtree is the last child of the call node */
@@ -639,23 +599,17 @@ int validate_call(ASTree *call) {
 
   TypeSpec *function_spec = (TypeSpec *)function->type;
   if (!typespec_is_fnptr(function_spec)) {
-    char buf[4096];
-    int chars_written = type_to_string(function_spec, buf, 4096);
-    if (chars_written > 4096) {
-      abort();
-    }
-
-    fprintf(stderr, "ERROR: cannot call non-function type \"%s\"\n", buf);
-    return -1;
+    return BCC_TERR_EXPECTED_FUNCTION;
   }
 
   /* second auxspec will be the function; first is pointer */
   AuxSpec *param_spec = llist_get(&function_spec->auxspecs, 1);
   LinkedList *param_list = param_spec->data.params;
   /* subtract one since function expression is also a child */
-  if (astree_count(call) - 1 != llist_size(param_list)) {
-    fprintf(stderr, "ERROR: incorrect number of arguments for function call\n");
-    return -1;
+  if (astree_count(call) <= llist_size(param_list)) {
+    return BCC_TERR_EXCESS_PARAMS;
+  } else if (astree_count(call) - 1 > llist_size(param_list)) {
+    return BCC_TERR_INSUFF_PARAMS;
   }
 
   DEBUGS('t', "Validating %d arguments for function call",
@@ -665,7 +619,7 @@ int validate_call(ASTree *call) {
     DEBUGS('t', "Validating argument %d", i);
     ASTree *call_param = astree_get(call, i);
     int status = validate_expr(call_param);
-    if (status != 0) return status;
+    if (status) return status;
     status = perform_pointer_conv(call, &call_param);
     if (status) return status;
 
@@ -674,9 +628,7 @@ int validate_call(ASTree *call) {
     int compatibility = types_compatible(&param_symval->type, call_param->type);
     if (compatibility == TCHK_INCOMPATIBLE ||
         compatibility == TCHK_EXPLICIT_CAST) {
-      fprintf(stderr, "ERROR: incompatible type for argument: %s\n",
-              call_param->lexinfo);
-      return -1;
+      return BCC_TERR_INCOMPATIBLE_TYPES;
     }
   }
 
@@ -691,7 +643,7 @@ int validate_call(ASTree *call) {
   /* free temporaries created by stripping */
   typespec_destroy(&temp_spec);
   call->type = return_spec;
-  return 0;
+  return BCC_TERR_SUCCESS;
 }
 
 int validate_conditional(ASTree *conditional) {
@@ -702,9 +654,7 @@ int validate_conditional(ASTree *conditional) {
   if (status) return status;
 
   if (!typespec_is_scalar(condition->type)) {
-    fprintf(stderr,
-            "ERROR: condition for ternary expression must have scalar type.\n");
-    return -1;
+    return BCC_TERR_EXPECTED_SCALAR;
   }
 
   ASTree *left = astree_get(conditional, 1);
@@ -740,7 +690,7 @@ int validate_comma(ASTree *comma) {
       right->attributes & (ATTR_EXPR_ARITHCONST | ATTR_EXPR_CONST);
 
   comma->type = right->type;
-  return 0;
+  return BCC_TERR_SUCCESS;
 }
 
 int validate_assignment(ASTree *assignment) {
@@ -787,9 +737,7 @@ int define_params(ASTree *params, ASTree *ident, TypeSpec *out) {
     int param_defined =
         state_get_symbol(state, param_id_str, param_id_str_len, &param_entry);
     if (param_entry == NULL || !param_defined) {
-      fprintf(stderr,
-              "ERROR: parameter symbol was not inserted into function table\n");
-      return -1;
+      return BCC_TERR_FAILURE;
     }
     status = llist_push_back(param_entries, param_entry);
     if (status) return status;
@@ -801,8 +749,7 @@ int define_params(ASTree *params, ASTree *ident, TypeSpec *out) {
 
 int define_array(ASTree *array, TypeSpec *spec) {
   if (typespec_is_incomplete(spec)) {
-    fprintf(stderr, "ERROR: attempt to define array with incomplete type.\n");
-    return -1;
+    return BCC_TERR_INCOMPLETE_TYPE;
   }
   AuxSpec *aux_array = calloc(1, sizeof(*aux_array));
   aux_array->aux = AUX_ARRAY;
@@ -813,8 +760,7 @@ int define_array(ASTree *array, TypeSpec *spec) {
     if (status) return status;
     if ((array_dim->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST)) ==
         0) {
-      fprintf(stderr, "ERROR: array dimensions must be arithmetic constants.");
-      return -1;
+      return BCC_TERR_EXPECTED_INTCONST;
     }
     /* set array size to any nonzero value, for now */
     aux_array->data.memory_loc.length = -1;
@@ -845,18 +791,12 @@ int validate_dirdecl(ASTree *dirdecl, ASTree *ident, TypeSpec *out) {
   switch (dirdecl->symbol) {
     case TOK_ARRAY:
       return define_array(dirdecl, out);
-      break;
     case TOK_POINTER:
       return define_pointer(dirdecl, out);
-      break;
     case TOK_PARAM_LIST:
       return define_params(dirdecl, ident, out);
-      break;
     default:
-      fprintf(stderr, "ERROR: invalid direct declarator: %s\n",
-              parser_get_tname(dirdecl->symbol));
-      return -1;
-      break;
+      return BCC_TERR_UNEXPECTED_TOKEN;
   }
 }
 
@@ -874,13 +814,13 @@ int validate_cast(ASTree *cast) {
   ASTree *type_name = astree_get(declaration, 1);
   int compatibility = types_compatible(type_name->type, expr->type);
   if (compatibility == TCHK_INCOMPATIBLE) {
-    fprintf(stderr, "ERROR: attempt to cast incompatible types.\n");
-    return -1;
+    return BCC_TERR_INCOMPATIBLE_TYPES;
   } else {
     cast->type = type_name->type;
     cast->attributes |=
         expr->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST);
-    return 0;
+    return BCC_TERR_SUCCESS;
+    ;
   }
 }
 
@@ -897,37 +837,32 @@ int typecheck_addop(ASTree *operator, ASTree * left, ASTree *right) {
   } else if (typespec_is_pointer(left_type) &&
              typespec_is_integer(right_type)) {
     operator->type = left_type;
-    return 0;
+    return BCC_TERR_SUCCESS;
   } else if (typespec_is_integer(left_type) &&
              typespec_is_pointer(right_type)) {
     operator->type = right_type;
-    return 0;
+    return BCC_TERR_SUCCESS;
   } else if (typespec_is_pointer(left_type) &&
              typespec_is_pointer(right_type) && operator->symbol == '-') {
     int compatibility = types_compatible(left_type, right_type);
     if (compatibility == TCHK_COMPATIBLE) {
       /* types should be the same; just pick the left one */
       operator->type = left_type;
-      return 0;
+      return BCC_TERR_SUCCESS;
     } else {
-      fprintf(stderr, "ERROR: Cannot subtract incompatible pointer types.\n");
-      return -1;
+      return BCC_TERR_INCOMPATIBLE_TYPES;
     }
   } else {
-    fprintf(stderr, "ERROR: Incompatible operands for operator \"%s\".\n",
-            parser_get_tname(operator->symbol));
-    return -1;
+    return BCC_TERR_INCOMPATIBLE_TYPES;
   }
 }
 
 int typecheck_logop(ASTree *operator, ASTree * left, ASTree *right) {
   if (typespec_is_scalar(left->type) && typespec_is_scalar(right->type)) {
     operator->type = & SPEC_INT;
-    return 0;
+    return BCC_TERR_SUCCESS;
   } else {
-    fprintf(stderr,
-            "ERROR: cannot evaluate a non-scalar type as boolean value.\n");
-    return -1;
+    return BCC_TERR_EXPECTED_SCALAR;
   }
 }
 
@@ -948,21 +883,18 @@ int typecheck_relop(ASTree *operator, ASTree * left, ASTree *right) {
     int compatibility = types_compatible(left_type, right_type);
     if (compatibility == TCHK_COMPATIBLE || typespec_is_voidptr(left_type) ||
         typespec_is_voidptr(right_type)) {
-      return 0;
+      return BCC_TERR_SUCCESS;
     } else {
-      fprintf(stderr,
-              "ERROR: incompatible pointer types for operator \"%s\".\n",
-              parser_get_tname(operator->symbol));
-      return -1;
+      return BCC_TERR_INCOMPATIBLE_TYPES;
     }
   } else if (((typespec_is_pointer(left_type) && is_const_zero(right)) ||
               (is_const_zero(left) && typespec_is_pointer(right_type))) &&
              (operator->symbol == TOK_EQ || operator->symbol == TOK_NE)) {
-    return 0;
+    return BCC_TERR_SUCCESS;
   } else {
     fprintf(stderr, "ERROR: uncomparable types for operator \"%s\".\n",
             parser_get_tname(operator->symbol));
-    return -1;
+    return BCC_TERR_INCOMPATIBLE_TYPES;
   }
 }
 
@@ -975,10 +907,7 @@ int typecheck_mulop(ASTree *operator, ASTree * left, ASTree *right) {
     if (status) return status;
     return convert_type(operator, & right, operator->type);
   } else {
-    fprintf(stderr,
-            "ERROR: operator \"%s\" must have arguments of integral type.\n",
-            parser_get_tname(operator->symbol));
-    return -1;
+    return BCC_TERR_EXPECTED_ARITHMETIC;
   }
 }
 
@@ -993,10 +922,7 @@ int typecheck_shfop(ASTree *operator, ASTree * left, ASTree *right) {
     if (status) return status;
     return convert_type(operator, & right, operator->type);
   } else {
-    fprintf(stderr,
-            "ERROR: operator \"%s\" must have arguments of integral type.\n",
-            parser_get_tname(operator->symbol));
-    return -1;
+    return BCC_TERR_EXPECTED_INTEGER;
   }
 }
 
@@ -1008,10 +934,7 @@ int typecheck_bitop(ASTree *operator, ASTree * left, ASTree *right) {
     if (status) return status;
     return convert_type(operator, & right, operator->type);
   } else {
-    fprintf(stderr,
-            "ERROR: operator \"%s\" must have arguments of integral type.\n",
-            parser_get_tname(operator->symbol));
-    return -1;
+    return BCC_TERR_EXPECTED_INTEGER;
   }
 }
 
@@ -1062,9 +985,7 @@ int validate_binop(ASTree *operator) {
       status = typecheck_logop(operator, left, right);
       break;
     default:
-      fprintf(stderr, "ERROR: unimplemented binary operator \"%s\"\n.",
-              parser_get_tname(operator->symbol));
-      status = -1;
+      return BCC_TERR_FAILURE;
   }
 
   unsigned int result_attrs = left->attributes & right->attributes;
@@ -1086,29 +1007,19 @@ int validate_unop(ASTree *operator) {
   const TypeSpec *operand_type = operand->type;
 
   if (is_increment(operator->symbol) && !typespec_is_scalar(operand_type)) {
-    fprintf(
-        stderr,
-        "ERROR: '%s' argument must be of scalar type.\n", operator->lexinfo);
-    return -1;
+    return BCC_TERR_EXPECTED_SCALAR;
   } else if ((operator->symbol == TOK_NEG || operator->symbol == TOK_POS) &&
              !typespec_is_arithmetic(operand_type)) {
-    fprintf(stderr, "ERROR: '%s' argument must be of arithmetic type.\n",
-                    operator->lexinfo);
-    return -1;
+    return BCC_TERR_EXPECTED_ARITHMETIC;
   } else if (operator->symbol == '~' && !typespec_is_integer(operand_type)) {
-    fprintf(
-        stderr,
-        "ERROR: '%s' argument must be of integral type.\n", operator->lexinfo);
-    return -1;
+    return BCC_TERR_EXPECTED_INTEGER;
   } else if (operator->symbol == '!') {
     if (typespec_is_scalar(operand_type)) {
       operator->type = & SPEC_INT;
-      return 0;
+      return BCC_TERR_SUCCESS;
+      ;
     } else {
-      fprintf(
-          stderr,
-          "ERROR: '%s' argument must be of scalar type.\n", operator->lexinfo);
-      return -1;
+      return BCC_TERR_EXPECTED_SCALAR;
     }
   } else {
     if (!is_increment(operator->symbol)) {
@@ -1133,10 +1044,9 @@ int validate_indirection(ASTree *indirection) {
     int status = strip_aux_type(indirection_spec, subexpr->type);
     if (status) return status;
     indirection->type = indirection_spec;
-    return 0;
+    return BCC_TERR_SUCCESS;
   } else {
-    /* error; indirection can only be used on pointers and arrays */
-    return -1;
+    return BCC_TERR_EXPECTED_POINTER;
   }
 }
 
@@ -1153,7 +1063,7 @@ int validate_addrof(ASTree *addrof) {
   ptr_aux->aux = AUX_POINTER;
   llist_push_front(&addrof_spec->auxspecs, ptr_aux);
   addrof->type = addrof_spec;
-  return 0;
+  return BCC_TERR_SUCCESS;
 }
 
 int validate_sizeof(ASTree *sizeof_) {
@@ -1163,16 +1073,14 @@ int validate_sizeof(ASTree *sizeof_) {
     if (status) return status;
     ASTree *type_name = astree_get(declaration, 1);
     if (typespec_is_incomplete(type_name->type)) {
-      fprintf(stderr, "ERROR: cannot take sizeof incomplete type.\n");
-      return -1;
+      return BCC_TERR_INCOMPLETE_TYPE;
     }
   } else {
     ASTree *expr = astree_get(sizeof_, 0);
     int status = validate_expr(expr);
     if (status) return status;
     if (typespec_is_incomplete(expr->type)) {
-      fprintf(stderr, "ERROR: cannot take sizeof incomplete type.\n");
-      return -1;
+      return BCC_TERR_INCOMPLETE_TYPE;
     }
   }
   /* TODO(Robert): compute actual size and also probably make sure that this
@@ -1181,7 +1089,7 @@ int validate_sizeof(ASTree *sizeof_) {
    */
   sizeof_->type = &SPEC_ULONG;
   sizeof_->attributes |= (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST);
-  return 0;
+  return BCC_TERR_SUCCESS;
 }
 
 int validate_subscript(ASTree *subscript) {
@@ -1197,18 +1105,16 @@ int validate_subscript(ASTree *subscript) {
   status = perform_pointer_conv(subscript, &index);
   if (status) return status;
 
-  if (typespec_is_pointer(composite_object->type) &&
-      typespec_is_integer(index->type)) {
+  if (!typespec_is_pointer(composite_object->type)) {
+    return BCC_TERR_EXPECTED_POINTER;
+  } else if (!typespec_is_integer(index->type)) {
+    return BCC_TERR_EXPECTED_INTEGER;
+  } else {
     TypeSpec *subscript_spec = malloc(sizeof(*subscript_spec));
     int status = strip_aux_type(subscript_spec, composite_object->type);
     if (status) return status;
     subscript->type = subscript_spec;
-    return 0;
-  } else {
-    /* error; subscript can only be used on pointers and arrays with integer
-     * indices
-     */
-    return -1;
+    return BCC_TERR_SUCCESS;
   }
 }
 
@@ -1218,11 +1124,7 @@ int validate_reference(ASTree *reference) {
   if (status) return status;
   const TypeSpec *strunion_type = strunion->type;
   if (!typespec_is_struct(strunion_type) && !typespec_is_union(strunion_type)) {
-    /* error: cannot access member of non struct/union type */
-    fprintf(stderr,
-            "ERROR: cannot reference member of type that is not struct "
-            "or union.\n");
-    return -1;
+    return BCC_TERR_EXPECTED_TAG;
   }
 
   ASTree *member = astree_get(reference, 1);
@@ -1234,12 +1136,10 @@ int validate_reference(ASTree *reference) {
       symbol_table_get(member_table, (char *)member_name, member_name_len);
 
   if (symval == NULL) {
-    fprintf(stderr, "ERROR: structure does not have member named %s.\n",
-            member_name);
-    return -1;
+    return BCC_TERR_SYM_NOT_FOUND;
   } else {
     reference->type = &symval->type;
-    return 0;
+    return BCC_TERR_SUCCESS;
   }
 }
 
@@ -1253,11 +1153,7 @@ int validate_arrow(ASTree *arrow) {
   const TypeSpec *strunion_type = strunion->type;
   if (!typespec_is_structptr(strunion_type) &&
       !typespec_is_unionptr(strunion_type)) {
-    /* error: cannot access member of non struct/union type */
-    fprintf(stderr,
-            "ERROR: cannot reference member of type that is not struct "
-            "or union.\n");
-    return -1;
+    return BCC_TERR_EXPECTED_TAG;
   }
   ASTree *member = astree_get(arrow, 1);
   const char *member_name = member->lexinfo;
@@ -1269,12 +1165,10 @@ int validate_arrow(ASTree *arrow) {
       symbol_table_get(member_table, (char *)member_name, member_name_len);
 
   if (symval == NULL) {
-    fprintf(stderr, "ERROR: structure does not have member named %s.\n",
-            member_name);
-    return -1;
+    return BCC_TERR_SYM_NOT_FOUND;
   } else {
     arrow->type = &symval->type;
-    return 0;
+    return BCC_TERR_SUCCESS;
   }
 }
 
@@ -1368,7 +1262,7 @@ int validate_expr(ASTree *expression) {
       break;
     case TOK_IDENT:
       DEBUGS('t', "bonk");
-      status = assign_type(expression);
+      status = validate_ident(expression);
       break;
     case TOK_CAST:
       status = validate_cast(expression);
@@ -1568,7 +1462,7 @@ int typecheck_struct_initializer(ASTree *declarator, ASTree *init_list) {
       status = convert_type(init_list, &initializer, &member_symbol->type);
       if (status) return status;
     }
-    return 0;
+    return BCC_TERR_SUCCESS;
   }
 }
 
@@ -1631,7 +1525,7 @@ int define_function(ASTree *declaration) {
   if (status) return status;
   /* mark function as defined */
   symval->flags |= SYMFLAG_FUNCTION_DEFINED;
-  return 0;
+  return BCC_TERR_SUCCESS;
 }
 
 /* TODO(Robert): in the interest of code reuse I used the existing functions
@@ -1951,7 +1845,7 @@ int validate_ifelse(ASTree *ifelse) {
     status = validate_stmt(else_body);
     if (status) return status;
   }
-  return 0;
+  return BCC_TERR_SUCCESS;
 }
 
 int validate_switch(ASTree *switch_) {
@@ -2064,7 +1958,7 @@ int validate_block(ASTree *block) {
 }
 
 int validate_stmt(ASTree *statement) {
-  if (statement == &EMPTY_EXPR) return 0;
+  if (statement == &EMPTY_EXPR) return BCC_TERR_SUCCESS;
   int status;
   DEBUGS('t', "Validating next statement");
   switch (statement->symbol) {
