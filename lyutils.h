@@ -50,14 +50,14 @@ const char *parser_get_tname(int symbol);
 ASTree *parser_make_root();
 ASTree *parser_new_sym(ASTree *tree, int new_symbol);
 ASTree *parser_make_spec_list(ASTree *first_specifier);
-ASTree *parser_make_declaration(ASTree *spec_list, ASTree *declarator);
-ASTree *parser_make_pointer_list(ASTree *first_pointer);
+ASTree *parser_make_declaration(ASTree *spec_list);
 ASTree *parser_make_param_list(ASTree *left_paren, ASTree *spec_list,
                                ASTree *declarator);
 ASTree *parser_make_type_name(ASTree *first_child);
 ASTree *parser_make_cast(ASTree *left_paren, ASTree *spec_list,
-                         ASTree *abs_decl, ASTree *expr);
+                         ASTree *type_name, ASTree *expr);
 ASTree *parser_make_label(ASTree *ident, ASTree *stmt);
+ASTree *parse_sizeof(ASTree *sizeof_, ASTree *spec_list, ASTree *declarator);
 void parser_cleanup(size_t count, ...);
 
 #define YYSTYPE_IS_DECLARED

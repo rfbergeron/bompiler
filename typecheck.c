@@ -74,18 +74,10 @@ CompilerState *state; /* back to global state... */
 /* forward declarations for mutual recursion */
 int validate_expr(ASTree *expression);
 int validate_stmt(ASTree *statement);
-ASTree *validate_declaration(
-    ASTree *statement); /* required to process params */
 int types_compatible(
     const TypeSpec *type1,
     const TypeSpec *type2); /* required to check param and member types */
 int resolve_tag(ASTree *tag);
-
-const ptrdiff_t TYPE_OFFSET(void) {
-  SymbolValue temp;
-  /* struct members have addresses increasing in order of declarations */
-  return (char *)&temp.type - (char *)&temp;
-}
 
 SymbolValue *sym_from_type(TypeSpec *type) {
   SymbolValue temp;
@@ -742,59 +734,192 @@ int validate_assignment(ASTree *assignment) {
   return convert_type(assignment, &src, dest->type);
 }
 
-ASTree *define_params(ASTree *params, ASTree *ident) {
-  TypeSpec *out = (TypeSpec *)ident->type;
+int spec_list_includes_type(ASTree *spec_list) {
+  size_t i;
+  for (i = 0; i < astree_count(spec_list); ++i) {
+    ASTree *decl_spec = astree_get(spec_list, i);
+    switch (decl_spec->symbol) {
+      case TOK_INT:
+      case TOK_SHORT:
+      case TOK_LONG:
+      case TOK_CHAR:
+      case TOK_STRUCT:
+      case TOK_UNION:
+      case TOK_ENUM:
+      case TOK_SIGNED:
+      case TOK_UNSIGNED:
+      case TOK_VOID:
+        return 1;
+      default:
+        continue;
+    }
+  }
+  return 0;
+}
+
+ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
+  DEBUGS('t', "Making object entry for value %s", declarator->lexinfo);
+  if (declaration->symbol == TOK_TYPE_ERROR ||
+      declarator->symbol == TOK_TYPE_ERROR) {
+    return declarator;
+  }
+  ASTree *spec_list = astree_get(declaration, 0);
+  const TypeSpec *decl_specs = spec_list->type;
+  SymbolValue *symbol = sym_from_type((TypeSpec *)declarator->type);
+  symbol->type.base = decl_specs->base;
+  symbol->type.alignment = decl_specs->alignment;
+  symbol->type.width = decl_specs->width;
+  symbol->type.flags = decl_specs->flags;
+  int status = typespec_append_auxspecs(&symbol->type, (TypeSpec *)decl_specs);
+  if (status) {
+    return create_type_error(declarator, status);
+  }
+
+  const char *identifier = declarator->lexinfo;
+  size_t identifier_len = strnlen(identifier, MAX_IDENT_LEN);
+  SymbolValue *exists = NULL;
+  int is_redefinition =
+      state_get_symbol(state, identifier, identifier_len, &exists);
+  if (!is_redefinition) {
+    if (exists && (exists->type.flags & TYPESPEC_FLAG_TYPEDEF) &&
+        !spec_list_includes_type(astree_get(declaration, 0))) {
+      /* don't redeclare typedefs if type was not specified in declaration */
+      symbol_value_destroy(symbol);
+      declarator->type = &exists->type;
+      return declarator;
+    } else if (declarator->symbol == TOK_TYPE_NAME) {
+      /* type name in cast or sizeof; do not insert symbol */
+      /* TODO(Robert): copy and free the information in the symbol we just
+       * created so that the syntax tree node can free it later, or use fancy
+       * pointer math to get back the address in the heap of the SymbolValue
+       * that the type information is embedded in.
+       */
+      return declarator;
+    } else {
+      /* TODO(Robert): check for incomplete type */
+      int status =
+          state_insert_symbol(state, identifier, identifier_len, symbol);
+      if (status) {
+        symbol_value_destroy(symbol);
+        declarator->type = NULL;
+        return create_type_error(declarator, BCC_TERR_LIBRARY_FAILURE);
+      }
+      declarator->type = &symbol->type;
+      return declarator;
+    }
+  } else if ((typespec_is_function(&exists->type) &&
+              typespec_is_function(&symbol->type)) ||
+             ((exists->type.flags & TYPESPEC_FLAG_TYPEDEF) &&
+              (symbol->type.flags & TYPESPEC_FLAG_TYPEDEF))) {
+    int compatibility = types_compatible(&exists->type, &symbol->type);
+    symbol_value_destroy(symbol);
+    declarator->type = NULL;
+    if (compatibility != TCHK_COMPATIBLE) {
+      return create_type_error(declarator, BCC_TERR_REDEFINITION);
+    } else {
+      return declarator;
+    }
+  } else {
+    /* TODO(Robert): allow redefinition of extern symbols so long as types
+     * are compatible
+     */
+    symbol_value_destroy(symbol);
+    declarator->type = NULL;
+    return create_type_error(declarator, BCC_TERR_REDEFINITION);
+  }
+}
+
+ASTree *finalize_declaration(ASTree *declaration) {
+  if (declaration->symbol == TOK_TYPE_ERROR)
+    declaration = astree_get(declaration, 0);
+  ASTree *spec_list = astree_get(declaration, 0);
+  if (spec_list->type != NULL) {
+    free((TypeSpec *)spec_list->type);
+    spec_list->type = NULL;
+  }
+  return declaration;
+}
+
+ASTree *validate_array(ASTree *array, ASTree *expr) {
+  int status = validate_expr(expr);
+  if (status) {
+    return create_type_error(astree_adopt(array, 1, expr), status);
+  }
+  if ((expr->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST)) == 0) {
+    return create_type_error(astree_adopt(array, 1, expr),
+                             BCC_TERR_EXPECTED_INTCONST);
+  }
+  return astree_adopt(array, 1, expr);
+}
+
+ASTree *validate_param_list(ASTree *param_list) {
+  SymbolTable *param_table = symbol_table_init();
+  param_list->symbol_table = param_table;
+  int status = state_push_table(state, param_table);
+  if (status)
+    return create_type_error(param_list, status);
+  else
+    return param_list;
+}
+
+ASTree *validate_param(ASTree *param_list, ASTree *declaration,
+                       ASTree *declarator) {
+  if (param_list->symbol == TOK_TYPE_ERROR) {
+    ASTree *real_param_list = astree_get(param_list, 0);
+    astree_adopt(real_param_list, 1, astree_adopt(declaration, 1, declarator));
+    return param_list;
+  } else if (declaration->symbol == TOK_TYPE_ERROR) {
+    ASTree *real_declaration = astree_get(declaration, 0);
+    astree_adopt(real_declaration, 1, declarator);
+    return propogate_type_error(param_list, declaration);
+  } else if (declarator->symbol == TOK_TYPE_ERROR) {
+    ASTree *errnode = propogate_type_error(declaration, declarator);
+    return propogate_type_error(param_list, errnode);
+  }
+
+  ASTree *err_or_declaration = declare_symbol(declaration, declarator);
+  if (err_or_declaration->symbol == TOK_TYPE_ERROR) {
+    return propogate_type_error(param_list, err_or_declaration);
+  }
+
+  return astree_adopt(param_list, 1, astree_adopt(declaration, 1, declarator));
+}
+
+ASTree *finalize_param_list(ASTree *param_list) {
+  int status = state_pop_table(state);
+  if (status)
+    return create_type_error(param_list, status);
+  else
+    return param_list;
+}
+
+ASTree *define_params(ASTree *declarator, ASTree *param_list) {
   AuxSpec *aux_function = calloc(1, sizeof(*aux_function));
   aux_function->aux = AUX_FUNCTION;
   aux_function->data.params = malloc(sizeof(*aux_function->data.params));
-  LinkedList *param_entries = aux_function->data.params;
   /* type is not resposible for freeing symbol information */
-  llist_init(param_entries, NULL, NULL);
-  /* remember to use function_table and not file_table */
-  SymbolTable *function_table = symbol_table_init();
-  ident->symbol_table = function_table;
-  int status = state_push_table(state, function_table);
-  if (status) {
-    return create_type_error(astree_adopt(ident, 1, params), status);
-  }
+  llist_init(aux_function->data.params, NULL, NULL);
+  LinkedList *param_entries = aux_function->data.params;
   size_t i;
-  for (i = 0; i < astree_count(params); ++i) {
-    ASTree *param = astree_get(params, i);
-    ASTree *spec = astree_get(param, 0);
-    ASTree *declarator = astree_get(param, 1);
-    const char *param_id_str = declarator->lexinfo;
-    DEBUGS('t', "Defining function parameter %s", param_id_str);
-    int status = validate_declaration(param);
-    /* TODO(Robert): reset compiler state on failure */
+  for (i = 0; i < astree_count(param_list); ++i) {
+    ASTree *declaration = astree_get(param_list, i);
+    ASTree *declarator = astree_get(declaration, 1);
+    SymbolValue *symval = sym_from_type((TypeSpec *)declarator->type);
+    int status = llist_push_back(param_entries, symval);
     if (status) {
-      return create_type_error(astree_adopt(ident, 1, params), status);
-    }
-    size_t param_id_str_len = strnlen(param_id_str, MAX_IDENT_LEN);
-    SymbolValue *param_entry = NULL;
-    int param_defined =
-        state_get_symbol(state, param_id_str, param_id_str_len, &param_entry);
-    if (param_entry == NULL || !param_defined) {
-      return create_type_error(astree_adopt(ident, 1, params),
-                               BCC_TERR_FAILURE);
-    }
-    status = llist_push_back(param_entries, param_entry);
-    if (status) {
-      return create_type_error(astree_adopt(ident, 1, params), status);
+      return create_type_error(astree_adopt(declarator, 1, param_list), status);
     }
   }
-  status = state_pop_table(state);
+  TypeSpec *out = (TypeSpec *)declarator->type;
+  int status = llist_push_back(&out->auxspecs, aux_function);
   if (status) {
-    return create_type_error(astree_adopt(ident, 1, params), status);
-  }
-  status = llist_push_back(&out->auxspecs, aux_function);
-  if (status) {
-    return create_type_error(astree_adopt(ident, 1, params),
+    return create_type_error(astree_adopt(declarator, 1, param_list),
                              BCC_TERR_LIBRARY_FAILURE);
   }
-  return astree_adopt(ident, 1, params);
+  return astree_adopt(declarator, 1, param_list);
 }
 
-ASTree *define_array(ASTree *array, ASTree *declarator) {
+ASTree *define_array(ASTree *declarator, ASTree *array) {
   TypeSpec *spec = (TypeSpec *)declarator->type;
   if (typespec_is_incomplete(spec)) {
     return create_type_error(astree_adopt(declarator, 1, array),
@@ -803,21 +928,8 @@ ASTree *define_array(ASTree *array, ASTree *declarator) {
   AuxSpec *aux_array = calloc(1, sizeof(*aux_array));
   aux_array->aux = AUX_ARRAY;
   /* TODO(Robert): evaluate array size during three address code generation */
-  if (astree_count(array) > 0) {
-    ASTree *array_dim = astree_get(array, 0);
-    int status = validate_expr(array_dim);
-    if (status) {
-      return create_type_error(astree_adopt(declarator, 1, array), status);
-    }
-    if ((array_dim->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST)) ==
-        0) {
-      return create_type_error(astree_adopt(declarator, 1, array),
-                               BCC_TERR_EXPECTED_INTCONST);
-    }
-    /* set array size to any nonzero value, for now */
-    aux_array->data.memory_loc.length = -1;
-  }
-
+  /* set array size to any nonzero value, for now */
+  aux_array->data.memory_loc.length = -1;
   int status = llist_push_back(&spec->auxspecs, aux_array);
   if (status) {
     free(aux_array);
@@ -827,7 +939,7 @@ ASTree *define_array(ASTree *array, ASTree *declarator) {
   }
 }
 
-ASTree *define_pointer(ASTree *pointer, ASTree *declarator) {
+ASTree *define_pointer(ASTree *declarator, ASTree *pointer) {
   AuxSpec *aux_pointer = calloc(1, sizeof(*aux_pointer));
   aux_pointer->aux = AUX_POINTER;
   TypeSpec *spec = (TypeSpec *)declarator->type;
@@ -841,7 +953,7 @@ ASTree *define_pointer(ASTree *pointer, ASTree *declarator) {
   }
 }
 
-ASTree *validate_dirdecl(ASTree *dirdecl, ASTree *ident) {
+ASTree *define_dirdecl(ASTree *declarator, ASTree *dirdecl) {
   /* TODO(Robert): do not allow multiple function dirdecls to occur, and do not
    * allow functions to return array types
    */
@@ -851,41 +963,38 @@ ASTree *validate_dirdecl(ASTree *dirdecl, ASTree *ident) {
    * way, and rename or repurpose typespec_init to make it more clear what it
    * does
    */
-  void (*bink)(void *huh, void (*bonk)(void)) = NULL;
-  if (ident->symbol == TOK_TYPE_ERROR) {
-    ASTree *real_ident = astree_get(ident, 0);
-    astree_adopt(real_ident, 1, dirdecl);
-    return ident;
+  if (declarator->symbol == TOK_TYPE_ERROR) {
+    ASTree *real_declarator = astree_get(declarator, 0);
+    astree_adopt(real_declarator, 1, dirdecl);
+    return declarator;
   }
-  if (ident->type == NULL) {
-    ident->type = calloc(1, sizeof(TypeSpec));
-  }
-  TypeSpec *out = (TypeSpec *)ident->type;
+  TypeSpec *out = (TypeSpec *)declarator->type;
   if (out->auxspecs.anchor == NULL) {
     typespec_init(out);
   }
 
   switch (dirdecl->symbol) {
     case TOK_ARRAY:
-      return define_array(dirdecl, ident);
-    case TOK_POINTER:
-      return define_pointer(dirdecl, ident);
+      return define_array(declarator, dirdecl);
     case TOK_PARAM_LIST:
-      return define_params(dirdecl, ident);
+      return define_params(declarator, dirdecl);
+    case TOK_TYPE_ERROR:
+      return propogate_type_error(declarator, dirdecl);
     default:
-      return create_type_error(astree_adopt(ident, 1, dirdecl),
+      return create_type_error(astree_adopt(declarator, 1, dirdecl),
                                BCC_TERR_UNEXPECTED_TOKEN);
-      ;
   }
 }
 
 int validate_cast(ASTree *cast) {
   ASTree *declaration = astree_get(cast, 0);
+  /*
   int status = validate_declaration(declaration);
   if (status) return status;
+  */
   ASTree *expr = astree_get(cast, 1);
 
-  status = validate_expr(expr);
+  int status = validate_expr(expr);
   if (status) return status;
   status = perform_pointer_conv(cast, &expr);
   if (status) return status;
@@ -1146,8 +1255,10 @@ int validate_addrof(ASTree *addrof) {
 int validate_sizeof(ASTree *sizeof_) {
   if (astree_get(sizeof_, 0)->symbol == TOK_DECLARATION) {
     ASTree *declaration = astree_get(sizeof_, 0);
+    /*
     int status = validate_declaration(declaration);
     if (status) return status;
+    */
     ASTree *type_name = astree_get(declaration, 1);
     if (typespec_is_incomplete(type_name->type)) {
       return BCC_TERR_INCOMPLETE_TYPE;
@@ -1350,108 +1461,15 @@ int validate_expr(ASTree *expression) {
   return status;
 }
 
-int spec_list_includes_type(ASTree *spec_list) {
-  size_t i;
-  for (i = 0; i < astree_count(spec_list); ++i) {
-    ASTree *decl_spec = astree_get(spec_list, i);
-    switch (decl_spec->symbol) {
-      case TOK_INT:
-      case TOK_SHORT:
-      case TOK_LONG:
-      case TOK_CHAR:
-      case TOK_STRUCT:
-      case TOK_UNION:
-      case TOK_ENUM:
-      case TOK_SIGNED:
-      case TOK_UNSIGNED:
-      case TOK_VOID:
-        return 1;
-      default:
-        continue;
-    }
-  }
-  return 0;
-}
-
+/*
 ASTree *validate_initialization(ASTree *declarator, ASTree *initializer) {}
+*/
 
 /* New, new strategy: since this function (and define function, and define
  * symbol) are all routed through validate_declaration, we can have this
  * function return the declarator (or an error node), and the adoption process
  * will occur in validate_declaration.
  */
-
-ASTree *declare_symbol(ASTree *declaration, ASTree *declarator) {
-  DEBUGS('t', "Making object entry for value %s", declarator->lexinfo);
-  if (declaration->symbol == TOK_TYPE_ERROR ||
-      declarator->symbol == TOK_TYPE_ERROR) {
-    return declarator;
-  }
-  ASTree *spec_list = astree_get(declaration, 0);
-  const TypeSpec *decl_specs = spec_list->type;
-  SymbolValue *symbol = sym_from_type((TypeSpec *)declarator->type);
-  symbol->type.base = decl_specs->base;
-  symbol->type.alignment = decl_specs->alignment;
-  symbol->type.width = decl_specs->width;
-  symbol->type.flags = decl_specs->flags;
-  int status = typespec_append_auxspecs(&symbol->type, (TypeSpec *)decl_specs);
-  if (status) {
-    return create_type_error(declarator, status);
-  }
-
-  const char *identifier = declarator->lexinfo;
-  size_t identifier_len = strnlen(identifier, MAX_IDENT_LEN);
-  SymbolValue *exists = NULL;
-  int is_redefinition =
-      state_get_symbol(state, identifier, identifier_len, &exists);
-  if (!is_redefinition) {
-    if (exists && (exists->type.flags & TYPESPEC_FLAG_TYPEDEF) &&
-        !spec_list_includes_type(astree_get(declaration, 0))) {
-      /* don't redeclare typedefs if type was not specified in declaration */
-      symbol_value_destroy(symbol);
-      declarator->type = &exists->type;
-      return declarator;
-    } else if (declarator->symbol == TOK_TYPE_NAME) {
-      /* type name in cast or sizeof; do not insert symbol */
-      /* TODO(Robert): copy and free the information in the symbol we just
-       * created so that the syntax tree node can free it later, or use fancy
-       * pointer math to get back the address in the heap of the SymbolValue
-       * that the type information is embedded in.
-       */
-      return declarator;
-    } else {
-      /* TODO(Robert): check for incomplete type */
-      int status =
-          state_insert_symbol(state, identifier, identifier_len, symbol);
-      if (status) {
-        symbol_value_destroy(symbol);
-        declarator->type = NULL;
-        return create_type_error(declarator, BCC_TERR_LIBRARY_FAILURE);
-      }
-      declarator->type = &symbol->type;
-      return declarator;
-    }
-  } else if ((typespec_is_function(&exists->type) &&
-              typespec_is_function(&symbol->type)) ||
-             ((exists->type.flags & TYPESPEC_FLAG_TYPEDEF) &&
-              (symbol->type.flags & TYPESPEC_FLAG_TYPEDEF))) {
-    int compatibility = types_compatible(&exists->type, &symbol->type);
-    symbol_value_destroy(symbol);
-    declarator->type = NULL;
-    if (compatibility != TCHK_COMPATIBLE) {
-      return create_type_error(declarator, BCC_TERR_REDEFINITION);
-    } else {
-      return declarator;
-    }
-  } else {
-    /* TODO(Robert): allow redefinition of extern symbols so long as types
-     * are compatible
-     */
-    symbol_value_destroy(symbol);
-    declarator->type = NULL;
-    return create_type_error(declarator, BCC_TERR_REDEFINITION);
-  }
-}
 
 int typecheck_array_initializer(ASTree *declarator, ASTree *init_list) {
   /* TODO(Robert): evaluate array size when generating three address code */
@@ -1530,8 +1548,11 @@ int typecheck_struct_initializer(ASTree *declarator, ASTree *init_list) {
 
 ASTree *define_symbol(ASTree *declaration, ASTree *declarator,
                       ASTree *equal_sign, ASTree *initializer) {
-  ASTree *err_or_decl = declare_symbol(declaration, declarator);
+  ASTree *err_or_decl = validate_declaration(declaration, declarator);
   if (err_or_decl->symbol == TOK_TYPE_ERROR) {
+    ASTree *errnode = propogate_type_error(equal_sign, declarator);
+    astree_adopt(equal_sign, 1, initializer);
+    return propogate_type_error(declaration, errnode);
   }
   if (initializer->symbol == TOK_INIT_LIST) {
     const TypeSpec *decl_type = declarator->type;
@@ -1547,6 +1568,10 @@ ASTree *define_symbol(ASTree *declaration, ASTree *declarator,
     }
 
     if (status != BCC_TERR_SUCCESS) {
+      return create_type_error(
+          astree_adopt(declaration, 1,
+                       astree_adopt(equal_sign, 2, declarator, initializer)),
+          status);
     } else {
       return astree_adopt(declaration, 1,
                           astree_adopt(equal_sign, 2, declarator, initializer));
@@ -1554,12 +1579,24 @@ ASTree *define_symbol(ASTree *declaration, ASTree *declarator,
   } else {
     int status = validate_expr(initializer);
     if (status) {
+      return create_type_error(
+          astree_adopt(declaration, 1,
+                       astree_adopt(equal_sign, 2, declarator, initializer)),
+          status);
     }
     status = perform_pointer_conv(equal_sign, &initializer);
     if (status) {
+      return create_type_error(
+          astree_adopt(declaration, 1,
+                       astree_adopt(equal_sign, 2, declarator, initializer)),
+          status);
     }
     status = convert_type(equal_sign, &initializer, declarator->type);
     if (status) {
+      return create_type_error(
+          astree_adopt(declaration, 1,
+                       astree_adopt(equal_sign, 2, declarator, initializer)),
+          status);
     }
 
     return astree_adopt(declaration, 1,
@@ -1567,43 +1604,60 @@ ASTree *define_symbol(ASTree *declaration, ASTree *declarator,
   }
 }
 
-/* unlike define_symbol and declare_symbol, all adoption will occur here */
-
-int define_function(ASTree *declaration) {
-  ASTree *declarator = astree_get(declaration, 1);
-  ASTree *identifier = declarator;
-  ASTree *block = astree_get(declaration, 2);
+ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
   /* TODO(Robert): make sure that the declaration location is that of the
    * earliest forward declaration, but that the names of the parameters are
    * from the actual definition of the function.
    */
-  int status = declare_symbol(declaration, declarator);
-  if (status) return status;
+  if (declaration->symbol == TOK_TYPE_ERROR) {
+    ASTree *real_declaration = astree_get(declaration, 0);
+    astree_adopt(real_declaration, 2, declarator, body);
+    return declaration;
+  } else if (declarator->symbol == TOK_TYPE_ERROR) {
+    ASTree *errnode = propogate_type_error(declaration, declarator);
+    astree_adopt(declaration, 1, body);
+    return errnode;
+  }
+  ASTree *err_or_decl = validate_declaration(declaration, declarator);
+  if (err_or_decl->symbol == TOK_TYPE_ERROR) {
+    ASTree *errnode = propogate_type_error(declaration, err_or_decl);
+    astree_adopt(declaration, 1, body);
+    return errnode;
+  }
   SymbolValue *symval = NULL;
-  state_get_symbol(state, identifier->lexinfo, strlen(identifier->lexinfo),
+  state_get_symbol(state, declarator->lexinfo, strlen(declarator->lexinfo),
                    &symval);
   if (symval == NULL) {
-    return BCC_TERR_FAILURE;
+    return create_type_error(astree_adopt(declaration, 2, declarator, body),
+                             BCC_TERR_FAILURE);
   } else if (!typespec_is_function(&symval->type)) {
-    return BCC_TERR_EXPECTED_FUNCTION;
+    return create_type_error(astree_adopt(declaration, 2, declarator, body),
+                             BCC_TERR_EXPECTED_FUNCTION);
   } else if (symval->flags & SYMFLAG_FUNCTION_DEFINED) {
-    return BCC_TERR_REDEFINITION;
+    return create_type_error(astree_adopt(declaration, 2, declarator, body),
+                             BCC_TERR_REDEFINITION);
   }
 
-  status = state_set_function(state, symval);
-  if (status) return status;
-  ASTree *body = astree_get(declaration, 2);
-  body->symbol_table = identifier->symbol_table;
+  int status = state_set_function(state, symval);
+  if (status) {
+    return create_type_error(astree_adopt(declaration, 2, declarator, body),
+                             status);
+  }
+  body->symbol_table = declarator->symbol_table;
   status = validate_stmt(body);
   if (status) {
     state_unset_function(state);
-    return status;
+    return create_type_error(astree_adopt(declaration, 2, declarator, body),
+                             status);
   }
   status = state_unset_function(state);
-  if (status) return status;
+  if (status) {
+    return create_type_error(astree_adopt(declaration, 2, declarator, body),
+                             status);
+  }
   /* mark function as defined */
   symval->flags |= SYMFLAG_FUNCTION_DEFINED;
-  return BCC_TERR_SUCCESS;
+  return astree_adopt(declaration, 2, declarator, body);
 }
 
 /* TODO(Robert): in the interest of code reuse I used the existing functions
@@ -1626,8 +1680,10 @@ int define_members(ASTree *composite_type, TagValue *tagval) {
     const char *member_id_str = declarator->lexinfo;
     size_t member_id_str_len = strnlen(member_id_str, MAX_IDENT_LEN);
     DEBUGS('t', "Found composite type member: %s", member_id_str);
+    /*
     int status = validate_declaration(member);
     if (status != 0) return status;
+    */
     SymbolValue *member_entry =
         symbol_table_get(member_table, member_id_str, member_id_str_len);
     if (tagval->alignment < member_entry->type.alignment) {
@@ -1823,71 +1879,19 @@ int resolve_tag(ASTree *tag) {
   }
 }
 
-/* Actually, because we are building from the bottom up, if there is no
- * declarator we don't actually need to do anything, since the tag will have
- * already been declared.
- */
-ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
-  ASTree *err_or_decl = declare_symbol(declaration, declarator);
+ASTree *validate_declarator(ASTree *declarator) {
+  SymbolValue *symval =
+      symbol_value_init(&declarator->loc, state_get_sequence(state));
+  declarator->type = &symval->type;
+  return declarator;
+}
+
+ASTree *declare_symbol(ASTree *declaration, ASTree *declarator) {
+  ASTree *err_or_decl = validate_declaration(declaration, declarator);
   if (err_or_decl->symbol == TOK_TYPE_ERROR) {
     return propogate_type_error(declaration, err_or_decl);
   } else {
     return astree_adopt(declaration, 1, declarator);
-  }
-}
-
-int validate_declaration(ASTree *declaration) {
-  if (astree_count(declaration) == 1) {
-    /* no declarators; attempt to define tag */
-    ASTree *spec_list = astree_get(declaration, 0);
-    ASTree *tag = astree_get(spec_list, 0);
-    if (tag->symbol != TOK_STRUCT && tag->symbol != TOK_UNION &&
-        tag->symbol != TOK_ENUM) {
-      /* declaration declares nothing, so do nothing */
-      return BCC_TERR_SUCCESS;
-    }
-    ASTree *first_child = astree_get(tag, 0);
-    if (first_child->symbol != TOK_IDENT) {
-      /* TODO(Robert): support unique tags */
-      return BCC_TERR_FAILURE;
-    }
-    const char *tag_name = first_child->lexinfo;
-    size_t tag_name_len = strlen(tag_name);
-    TagValue *exists = NULL;
-    int is_redefinition = state_get_tag(state, tag_name, tag_name_len, &exists);
-    int tag_declares_members =
-        astree_count(tag) > 1 || first_child->symbol != TOK_IDENT;
-    if (!is_redefinition) {
-      if (tag_declares_members) {
-        return define_tag(tag);
-      } else {
-        TagValue *dummy = NULL;
-        return declare_tag(tag, &dummy);
-      }
-    } else if (illegal_tag_redefinition(tag, exists)) {
-      return BCC_TERR_REDEFINITION;
-    } else if (tag_declares_members) {
-      return define_tag(tag);
-    } else {
-      return BCC_TERR_SUCCESS;
-    }
-  } else if (astree_count(declaration) == 3 &&
-             astree_get(declaration, 2)->symbol == TOK_BLOCK) {
-    return define_function(declaration);
-  } else {
-    size_t i;
-    for (i = 1; i < astree_count(declaration); ++i) {
-      ASTree *current = astree_get(declaration, i);
-      if (current->symbol == '=') {
-        int status = define_symbol(declaration, current);
-        if (status) return status;
-      } else {
-        int status = declare_symbol(declaration, current);
-        if (status) return status;
-      }
-    }
-    return BCC_TERR_SUCCESS;
-    ;
   }
 }
 
@@ -2070,7 +2074,9 @@ int validate_stmt(ASTree *statement) {
       status = validate_block(statement);
       break;
     case TOK_DECLARATION:
+      /*
       status = validate_declaration(statement);
+      */
       break;
     case TOK_FOR:
       status = validate_for(statement);
@@ -2115,8 +2121,10 @@ int type_checker_make_table(ASTree *root) {
     if (child == &EMPTY_EXPR) {
       continue;
     } else if (child->symbol == TOK_DECLARATION) {
+      /*
       int status = validate_declaration(child);
       if (status) return status;
+      */
     } else {
       return BCC_TERR_UNEXPECTED_TOKEN;
     }
