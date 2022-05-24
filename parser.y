@@ -71,24 +71,24 @@
  * are meant to be read.
  */
 %%
-program             : topdecl                                           { $$ = astree_adopt(parser_make_root(), 1, $1); }
-                    | program topdecl                                   { $$ = astree_adopt($1, 1, $2); }
+program             : topdecl                                           { $$ = astree_adopt(parser_make_root(), 1, finalize_declaration($1)); }
+                    | program topdecl                                   { $$ = astree_adopt($1, 1, finalize_declaration($2)); }
                     | program error '}'                                 { $$ = $1; astree_destroy($3); }
                     | program error ';'                                 { $$ = $1; astree_destroy($3); }
                     ;
 topdecl             : declaration ';'                                   { $$ = $1; astree_destroy($2); }
-                    | typespec_list declarator block                    { $$ = astree_adopt(parser_make_declaration($1, $2), 1, $3); }
+                    | typespec_list declarator block                    { $$ = define_function(parser_make_declaration($1), $2, $3); }
                     | ';'                                               { $$ = &EMPTY_EXPR; astree_destroy($1); }
                     ;
-declaration         : typespec_list                                     { $$ = parser_make_declaration($1, NULL); } /* fine as-is */
-                    | declarations                                      { $$ = $1; } /* clean up type specifiers */
+declaration         : typespec_list                                     { $$ = parser_make_declaration($1); } /* fine as-is */
+                    | declarations                                      { $$ = $1; } /* fine as-is */
                     ;
-declarations        : typespec_list declarator                          { $$ = parser_make_declaration($1, $2); } /* make_declaration, declare_symbol */
-                    | typespec_list declarator '=' initializer          { $$ = parser_make_declaration($1, $2); } /* make_declaration, define_symbol */
-                    | declarations ',' declarator                       { $$ = astree_adopt($1, 1, $3); parser_cleanup(1, $2); } /* declare_symbol */
-                    | declarations ',' declarator '=' initializer       { $$ = astree_adopt($1, 1, $3); parser_cleanup(1, $2); } /* define_symbol */
+declarations        : typespec_list declarator                          { $$ = declare_symbol(parser_make_declaration($1), $2); } /* make_declaration, declare_symbol */
+                    | typespec_list declarator '=' initializer          { $$ = define_symbol(parser_make_declaration($1), $2, $3, $4); } /* make_declaration, define_symbol */
+                    | declarations ',' declarator                       { $$ = declare_symbol($1, $3); parser_cleanup(1, $2); } /* declare_symbol */
+                    | declarations ',' declarator '=' initializer       { $$ = define_symbol($1, $3, $4, $5); parser_cleanup(1, $2); } /* define_symbol */
                     ;
-typespec_list       : typespec_list typespec                            { $$ = astree_adopt($1, 1, $2); } /* validate_typespec */
+typespec_list       : typespec_list typespec                            { $$ = validate_typespec($1, $2); } /* validate_typespec */
                     | typespec                                          { $$ = parser_make_spec_list($1); } /* make_spec_list, validate_typespec */
                     ;
 typespec            : TOK_LONG                                          { $$ = $1; }
@@ -119,7 +119,7 @@ struct_decl_list    : '{'                                               { $$ = $
                     | struct_decl_list struct_decl ';'                  { $$ = astree_adopt($1, 1, $2); astree_destroy($3); } /* adopt */
                     ;
 struct_decl         : struct_decl ',' declarator                        { $$ = astree_adopt($1, 1, $3); astree_destroy($2); } /* define struct member */
-                    | typespec_list declarator                          { $$ = parser_make_declaration($1, $2); } /* define struct member */
+                    | typespec_list declarator                          { $$ = astree_adopt(parser_make_declaration($1), 1, $2); } /* define struct member */
                     ;
 enum_list           : '{' enumerator                                    { $$ = astree_adopt($1, 1, $2); } /* do nothing */
                     | enum_list ',' enumerator                          { $$ = astree_adopt($1, 1, $3); astree_destroy($2); } /* adopt */
@@ -127,45 +127,42 @@ enum_list           : '{' enumerator                                    { $$ = a
 enumerator          : TOK_IDENT                                         { $$ = $1; } /* do nothing; perform adoption */
                     | TOK_IDENT '=' cond_expr                           { $$ = astree_adopt($2, 2, $1, $3); } /* do nothing; perform adoption */
                     ;
-init_decl           : declarator '=' initializer                        { $$ = astree_adopt($2, 2, $1, $3); } /* do nothing; perform adoption */
-                    | declarator                                        { $$ = $1; } /* do nothing; return declarator */
-                    ;
 initializer         : assign_expr                                       { $$ = $1; } /* do nothing */
                     | init_list '}'                                     { $$ = $1; astree_destroy($2); } /* do nothing */
                     | init_list ',' '}'                                 { $$ = $1; astree_destroy($2); astree_destroy($3); } /* do nothing */
                     ;
-init_list           : init_list ',' initializer                         { $$ = astree_adopt($1, 1, $3); astree_destroy($2); } /* do nothing */
+init_list           : init_list ',' initializer                         { $$ = astree_adopt($1, 1, $3); astree_destroy($2); } /* adopt */
                     | '{' initializer                                   { $$ = astree_adopt(parser_new_sym($1, TOK_INIT_LIST), 1, $2); } /* adopt */
                     ;
-declarator          : '*' declarator                                    { $$ = astree_adopt($2, 1, parser_new_sym($1, TOK_POINTER)); } /* define_pointer */
-                    | TOK_IDENT                                         { $$ = $1; } /* declare_symbol */
+declarator          : '*' declarator                                    { $$ = define_pointer($2, parser_new_sym($1, TOK_POINTER)); } /* define_pointer */
+                    | TOK_IDENT                                         { $$ = validate_declarator($1); } /* validate_declarator */
                     | '(' declarator ')'                                { $$ = $2; parser_cleanup(2, $1, $3); } /* do nothing */
-                    | declarator direct_decl                            { $$ = astree_adopt($1, 1, $2); } /* validate_dirdecl */
+                    | declarator direct_decl                            { $$ = define_dirdecl($1, $2); } /* validate_dirdecl */
                     ;
-abs_declarator      : '*' abs_declarator                                { $$ = astree_adopt($2, 1, parser_new_sym($1, TOK_POINTER)); } /* define_pointer */
+abs_declarator      : '*' abs_declarator                                { $$ = define_pointer($2, parser_new_sym($1, TOK_POINTER)); } /* define_pointer */
                     | '*'                                               { $$ = parser_make_type_name(parser_new_sym($1, TOK_POINTER)); } /* create type name; define_pointer */
                     | direct_decl                                       { $$ = parser_make_type_name($1); } /* create type name; validate_dirdecl */
                     | '(' abs_declarator ')'                            { $$ = $2; parser_cleanup(2, $1, $3); } /* do nothing */
-                    | abs_declarator direct_decl                        { $$ = astree_adopt($1, 1, $2); } /* validate_dirdecl */
+                    | abs_declarator direct_decl                        { $$ = define_dirdecl($1, $2); } /* validate_dirdecl */
                     ;
 direct_decl         : '[' ']'                                           { $$ = parser_new_sym($1, TOK_ARRAY); astree_destroy($2); } /* do nothing */
-                    | '[' cond_expr   ']'                               { $$ = astree_adopt(parser_new_sym($1, TOK_ARRAY), 1, $2); astree_destroy($3); } /* check size */
-                    | param_list ')'                                    { $$ = $1; astree_destroy($2); } /* do nothing */
+                    | '[' cond_expr   ']'                               { $$ = validate_array($1, $2); astree_destroy($3); } /* validate_array */
+                    | param_list ')'                                    { $$ = finalize_param_list($1); astree_destroy($2); } /* exit parameter table */
                     | '(' ')'                                           { $$ = parser_new_sym($1, TOK_PARAM_LIST); astree_destroy($2); } /* create param table */
                     | '(' TOK_VOID ')'                                  { $$ = parser_new_sym($1, TOK_PARAM_LIST); parser_cleanup(2, $2, $3); } /* create param table */
                     ;
 param_list          : '(' typespec_list declarator                      { $$ = parser_make_param_list($1, $2, $3); } /* create param table; define_param */
-                    | '(' typespec_list abs_declarator                  { $$ = ;}
-                    | '(' typespec_list                                 { $$ = ;}
-                    | param_list ',' typespec_list declarator           { $$ = astree_adopt($1, 1, parser_make_declaration($3, $4)); astree_destroy($2); } /* define_param */
-                    | param_list ',' typespec_list abs_declarator       { $$ = astree_adopt($1, 1, parser_make_declaration($3, $4)); astree_destroy($2); } /* define_param */
-                    | param_list ',' typespec_list                      { $$ = astree_adopt($1, 1, parser_make_declaration($3, $4)); astree_destroy($2); } /* define_param */
+                    | '(' typespec_list abs_declarator                  { $$ = parser_make_param_list($1, $2, $3); } /* create param table; define_param */
+                    | '(' typespec_list                                 { $$ = parser_make_param_list($1, $2, parser_make_type_name($2)); } /* create param table; define_param */
+                    | param_list ',' typespec_list declarator           { $$ = validate_param($1, $3, $4); astree_destroy($2); } /* define_param */
+                    | param_list ',' typespec_list abs_declarator       { $$ = validate_param($1, $3, $4); astree_destroy($2); } /* define_param */
+                    | param_list ',' typespec_list                      { $$ = validate_param($1, $3, parser_make_type_name($3)); astree_destroy($2); } /* define_param */
                     ;
 block               : block_content '}'                                 { $$ = $1; astree_destroy($2); }
                     ;
 block_content       : '{'                                               { $$ = parser_new_sym($1, TOK_BLOCK); }
                     | block_content stmt                                { $$ = astree_adopt($1, 1, $2); }
-                    | block_content declaration ';'                     { $$ = astree_adopt($1, 1, $2); astree_destroy($3); }
+                    | block_content declaration ';'                     { $$ = astree_adopt($1, 1, finalize_declaration($2)); astree_destroy($3); }
                     ;
 stmt                : block                                             { $$ = $1; }
                     | dowhile                                           { $$ = $1; }
@@ -247,7 +244,7 @@ binary_expr         : binary_expr '+' binary_expr                       { $$ = a
                     | binary_expr TOK_SHL binary_expr                   { $$ = astree_adopt($2, 2, $1, $3); }
                     | cast_expr                                         { $$ = $1; }
                     ;
-cast_expr           : '(' typespec_list ')' unary_expr                  { $$ = parser_make_cast($1, $2, NULL, $4); parser_cleanup(1, $3); }
+cast_expr           : '(' typespec_list ')' unary_expr                  { $$ = parser_make_cast($1, $2, parser_make_type_name($2), $4); parser_cleanup(1, $3); }
                     | '(' typespec_list abs_declarator')' unary_expr    { $$ = parser_make_cast($1, $2, $3, $5); parser_cleanup(1, $4); }
                     | unary_expr                                        { $$ = $1; }
                     ;
@@ -261,8 +258,8 @@ unary_expr          : postfix_expr                                      { $$ = $
                     | '*' unary_expr                                    { $$ = astree_adopt(parser_new_sym($1, TOK_INDIRECTION), 1, $2); }
                     | '&' unary_expr                                    { $$ = astree_adopt(parser_new_sym($1, TOK_ADDROF), 1, $2); }
                     | TOK_SIZEOF unary_expr                             { $$ = astree_adopt($1, 1, $2); }
-                    | TOK_SIZEOF '(' typespec_list ')'                  { $$ = astree_adopt($1, 1, parser_make_declaration($3, parser_make_type_name($3))); parser_cleanup(2, $2, $4); }
-                    | TOK_SIZEOF '(' typespec_list abs_declarator')'    { $$ = astree_adopt($1, 1, parser_make_declaration($3, $4)); parser_cleanup(2, $2, $5); }
+                    | TOK_SIZEOF '(' typespec_list ')'                  { $$ = parse_sizeof($1, $3, parser_make_type_name($3)); parser_cleanup(2, $2, $4); }
+                    | TOK_SIZEOF '(' typespec_list abs_declarator')'    { $$ = parse_sizeof($1, $3, $4); parser_cleanup(2, $2, $5); }
                     ;
 postfix_expr        : primary_expr                                      { $$ = $1; }
                     | postfix_expr TOK_INC                              { $$ = astree_adopt(parser_new_sym($2, TOK_POST_INC), 1, $1); }
@@ -312,24 +309,22 @@ ASTree *parser_new_sym(ASTree *tree, int new_symbol) {
 ASTree *parser_make_spec_list(ASTree *first_specifier) {
   ASTree *spec_list =
       astree_init(TOK_SPEC_LIST, first_specifier->loc, "_spec_list");
-  return astree_adopt(spec_list, 1, first_specifier);
+  return validate_typespec(spec_list, first_specifier);
 }
 
-ASTree *parser_make_declaration(ASTree *spec_list, ASTree *declarator) {
+ASTree *parser_make_declaration(ASTree *spec_list) {
   ASTree *declaration =
       astree_init(TOK_DECLARATION, spec_list->loc, "_declaration");
-  if (declarator == NULL)
-    return astree_adopt(declaration, 1, spec_list);
-  else
-    return validate_declarator(declaration, declarator);
+  return astree_adopt(declaration, 1, spec_list);
 }
 
 ASTree *parser_make_param_list(ASTree *left_paren, ASTree *spec_list,
                                ASTree *declarator) {
-  ASTree *param_list = parser_new_sym(left_paren, TOK_PARAM_LIST);
+  ASTree *param_list =
+      validate_param_list(parser_new_sym(left_paren, TOK_PARAM_LIST));
   /* create temporary type object on the heap to hold the parameter auxspec */
-  ASTree *declaration = parser_make_declaration(spec_list, declarator);
-  return astree_adopt(param_list, 1, declaration);
+  ASTree *declaration = parser_make_declaration(spec_list);
+  return validate_param(param_list, declaration, declarator);
 }
 
 /* For the sake of code reusability, the tree structure of a type name is the
@@ -341,24 +336,45 @@ ASTree *parser_make_param_list(ASTree *left_paren, ASTree *spec_list,
 ASTree *parser_make_type_name(ASTree *first_child) {
   ASTree *type_name =
       astree_init(TOK_TYPE_NAME, first_child->loc, "_type_name");
-  if (first_child->symbol == TOK_SPEC_LIST)
-    return type_name;
-  else
-    return astree_adopt(type_name, 1, first_child);
+  switch (first_child->symbol) {
+    case TOK_SPEC_LIST:
+      return type_name;
+    case TOK_POINTER:
+      return define_pointer(validate_declarator(type_name), first_child);
+    case TOK_ARRAY:
+    case TOK_PARAM_LIST:
+      return define_dirdecl(validate_declarator(type_name), first_child);
+    case TOK_TYPE_ERROR:
+      ASTree *real_first_child = astree_get(first_child, 0);
+      /* type specifier errors will be dealt with in parser_make_declaration */
+      if (real_first_child->symbol == TOK_SPEC_LIST)
+        return validate_declarator(type_name);
+      else
+        return propogate_type_error(validate_declarator(type_name),
+                                    first_child);
+    default:
+      return create_type_error(
+          astree_adopt(validate_declarator(type_name), 1, first_child),
+          BCC_TERR_UNEXPECTED_TOKEN);
+  }
 }
 
 ASTree *parser_make_cast(ASTree *left_paren, ASTree *spec_list,
-                         ASTree *abs_decl, ASTree *expr) {
+                         ASTree *type_name, ASTree *expr) {
   ASTree *cast = parser_new_sym(left_paren, TOK_CAST);
-  ASTree *type_name =
-      abs_decl == NULL ? parser_make_type_name(spec_list) : abs_decl;
-  ASTree *declaration = parser_make_declaration(spec_list, type_name);
-  return astree_adopt(cast, 2, declaration, expr);
+  ASTree *declaration = parser_make_declaration(spec_list);
+  return astree_adopt(cast, 2, declare_symbol(declaration, type_name), expr);
 }
 
 ASTree *parser_make_label(ASTree *ident, ASTree *stmt) {
   ASTree *label = astree_init(TOK_LABEL, ident->loc, "_label");
   return astree_adopt(label, 2, ident, stmt);
+}
+
+ASTree *parse_sizeof(ASTree *sizeof_, ASTree *spec_list, ASTree *declarator) {
+  ASTree *declaration = parser_make_declaration(spec_list);
+  ASTree *declaration_or_err = declare_symbol(declaration, declarator);
+  return astree_adopt(sizeof_, 1, declaration_or_err);
 }
 
 void parser_cleanup(size_t count, ...) {
