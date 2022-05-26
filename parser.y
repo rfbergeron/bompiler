@@ -100,32 +100,31 @@ typespec            : TOK_LONG                                          { $$ = $
                     | TOK_VOID                                          { $$ = $1; }
                     | TOK_TYPEDEF                                       { $$ = $1; }
                     | struct_spec                                       { $$ = $1; }
-                    | union_spec                                        { $$ = $1; }
                     | enum_spec                                         { $$ = $1; }
                     ;
-struct_spec         : TOK_STRUCT TOK_IDENT struct_decl_list '}'         { $$ = astree_adopt($1, 2, $2, $3); astree_destroy($4); } /* create tag */
-                    | TOK_STRUCT struct_decl_list '}'                   { $$ = astree_adopt($1, 1, $2); astree_destroy($3); } /* TODO: create uniquue tag */
-                    | TOK_STRUCT TOK_IDENT                              { $$ = astree_adopt($1, 1, $2); } /* create incomplete tag */
+struct_spec         : struct_def '}'                                    { $$ = finalize_tag_def($1); astree_destroy($2); } /* cleanup intermediate products */
+                    | TOK_STRUCT TOK_IDENT                              { $$ = validate_tag_def($1, $2, NULL); } /* declare tag if necessary */
+                    | TOK_UNION TOK_IDENT                               { $$ = validate_tag_def($1, $2, NULL); } /* declare tag if necessary */
                     ;
-union_spec          : TOK_UNION TOK_IDENT struct_decl_list '}'          { $$ = astree_adopt($1, 2, $2, $3); astree_destroy($4); } /* create tag */
-                    | TOK_UNION struct_decl_list '}'                    { $$ = astree_adopt($1, 1, $2); astree_destroy($3); } /* TODO: create unique tag */
-                    | TOK_UNION TOK_IDENT                               { $$ = astree_adopt($1, 1, $2); } /* create incomplete tag */
+struct_def          : struct_or_union TOK_IDENT '{'                     { $$ = validate_tag_def($1, $2, $3); }
+                    | struct_or_union '{'                               { $$ = validate_tag_def($1, NULL, $2); }
+                    | struct_def struct_decl ';'                        { $$ = define_struct_member($1, $2); parser_cleanup(1, $3); } /* define struct member */
                     ;
-enum_spec           : TOK_ENUM TOK_IDENT enum_list '}'                  { $$ = astree_adopt($1, 2, $2, $3); astree_destroy($4); } /* create tag and iterate over enums */
-                    | TOK_ENUM enum_list '}'                            { $$ = astree_adopt($1, 1, $2); astree_destroy($3); } /* TODO: create unique tag */
-                    | TOK_ENUM TOK_IDENT                                { $$ = astree_adopt($1, 1, $2); } /* do nothing; no incomplete enums */
+struct_or_union     : TOK_STRUCT                                        { $$ = $1; }
+                    | TOK_UNION                                         { $$ = $1; }
                     ;
-struct_decl_list    : '{'                                               { $$ = $1; } /* initialize table */
-                    | struct_decl_list struct_decl ';'                  { $$ = astree_adopt($1, 1, $2); astree_destroy($3); } /* adopt */
+struct_decl         : struct_decl ',' declarator                        { $$ = declare_symbol($1, $3); astree_destroy($2); } /* define struct member */
+                    | typespec_list declarator                          { $$ = declare_symbol(parser_make_declaration($1), $2); } /* define struct member */
                     ;
-struct_decl         : struct_decl ',' declarator                        { $$ = astree_adopt($1, 1, $3); astree_destroy($2); } /* define struct member */
-                    | typespec_list declarator                          { $$ = astree_adopt(parser_make_declaration($1), 1, $2); } /* define struct member */
+enum_spec           : enum_def '}'                                      { $$ = finalize_tag_def($1); astree_destroy($2); } /* create tag and iterate over enums */
+                    | TOK_ENUM TOK_IDENT                                { $$ = astree_adopt($1, 1, $2); } /* do nothing */
                     ;
-enum_list           : '{' enumerator                                    { $$ = astree_adopt($1, 1, $2); } /* do nothing */
-                    | enum_list ',' enumerator                          { $$ = astree_adopt($1, 1, $3); astree_destroy($2); } /* adopt */
-                    ;
-enumerator          : TOK_IDENT                                         { $$ = $1; } /* do nothing; perform adoption */
-                    | TOK_IDENT '=' cond_expr                           { $$ = astree_adopt($2, 2, $1, $3); } /* do nothing; perform adoption */
+enum_def            : TOK_ENUM TOK_IDENT '{' TOK_IDENT                  { $$ = define_enumerator(validate_tag_def($1, $2, $3), $4, NULL, NULL); }
+                    | TOK_ENUM TOK_IDENT '{' TOK_IDENT '=' cond_expr    { $$ = define_enumerator(validate_tag_def($1, $2, $3), $4, $5, $6); }
+                    | TOK_ENUM '{' TOK_IDENT                            { $$ = define_enumerator(validate_tag_def($1, NULL, $2), $3, NULL, NULL); }
+                    | TOK_ENUM '{' TOK_IDENT '=' cond_expr              { $$ = define_enumerator(validate_tag_def($1, NULL, $2), $3, $4, $5); }
+                    | enum_def ',' TOK_IDENT                            { $$ = define_enumerator($1, $3, NULL, NULL); parser_cleanup(1, $2); }
+                    | enum_def ',' TOK_IDENT '=' cond_expr              { $$ = define_enumerator($1, $3, $4, $5); parser_cleanup(1, $2); }
                     ;
 initializer         : assign_expr                                       { $$ = $1; } /* do nothing */
                     | init_list '}'                                     { $$ = $1; astree_destroy($2); } /* do nothing */
