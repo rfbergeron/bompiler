@@ -18,11 +18,13 @@ ASTree *validate_array(ASTree *array, ASTree *expr);
 ASTree *validate_declarator(ASTree *declarator);
 ASTree *validate_typespec(ASTree *spec_list, ASTree *spec);
 ASTree *validate_typespec_list(ASTree *spec_list);
-/* need a class of functions for cleaning up intermediate products stored in the
- * tree */
+ASTree *validate_tag_def(ASTree *tag_type_node, ASTree *tag_name_node,
+                         ASTree *left_bracket);
+ASTree *define_struct_member(ASTree *struct_, ASTree *member);
+ASTree *define_enumerator(ASTree *enum_, ASTree *ident_node, ASTree *equal_sign,
+                          ASTree *expr);
+ASTree *finalize_tag_def(ASTree *tag);
 ASTree *finalize_declaration(ASTree *declaration);
-/* need a class of functions for propogating errors in lists of e.g.
- * declarations */
 ASTree *create_type_error(ASTree *child, int errcode);
 ASTree *propogate_type_error(ASTree *parent, ASTree *errnode);
 

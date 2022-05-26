@@ -447,9 +447,11 @@ AuxType aux_from_tag(TagType tag) {
   }
 }
 
+/* tags will need two passes to define their members: the first for inserting
+ * the symbols into the symbol table, and the second to swipe the symbols from
+ * the members and put them into an auxspec
+ */
 int validate_tag_typespec(ASTree *type, TypeSpec *out) {
-  int status = resolve_tag(type);
-  if (status) return status;
   /* TODO(Robert): get unique tag name/info somehow */
   const char *tag_name = astree_get(type, 0)->lexinfo;
   size_t tag_name_len = strlen(tag_name);
@@ -1660,117 +1662,6 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
   return astree_adopt(declaration, 2, declarator, body);
 }
 
-/* TODO(Robert): in the interest of code reuse I used the existing functions
- * for entering and leaving scopes and making entries within a scope that
- * are normally used for objects and functions, even though struct members
- * don't work quite the same way. check to make sure everything is doing
- * okay later on
- */
-int define_members(ASTree *composite_type, TagValue *tagval) {
-  SymbolTable *member_table = tagval->data.members.by_name;
-  int status = state_push_table(state, member_table);
-  if (status) return status;
-  LinkedList *member_list = &tagval->data.members.in_order;
-  /* TODO(Robert): handle unique tags */
-  ASTree *members = astree_get(composite_type, 1);
-  size_t i;
-  for (i = 0; i < astree_count(members); ++i) {
-    ASTree *member = astree_get(members, i);
-    ASTree *declarator = astree_get(member, 1);
-    const char *member_id_str = declarator->lexinfo;
-    size_t member_id_str_len = strnlen(member_id_str, MAX_IDENT_LEN);
-    DEBUGS('t', "Found composite type member: %s", member_id_str);
-    /*
-    int status = validate_declaration(member);
-    if (status != 0) return status;
-    */
-    SymbolValue *member_entry =
-        symbol_table_get(member_table, member_id_str, member_id_str_len);
-    if (tagval->alignment < member_entry->type.alignment) {
-      tagval->alignment = member_entry->type.alignment;
-    }
-    if (tagval->tag == TAG_STRUCT) {
-      sprintf(member_entry->obj_loc, "%%s+%zu", tagval->width);
-      size_t padding = member_entry->type.alignment -
-                       (tagval->width % member_entry->type.alignment);
-      tagval->width += padding + member_entry->type.width;
-    } else if (tagval->width < member_entry->type.width) {
-      tagval->width = member_entry->type.width;
-    }
-    llist_push_back(member_list, member_entry);
-    DEBUGS('t', "Field inserted at %s", declarator->lexinfo);
-  }
-  status = state_pop_table(state);
-  if (status) return status;
-  tagval->is_defined = 1;
-  return BCC_TERR_SUCCESS;
-}
-
-/* Enumerations are structured as follows: the enum keyword, with an optional
- * identifier (the tag) as its child. This is followed by a sequence of nodes,
- * which are either a TOK_IDENT or an '=', with two children, those being the
- * TOK_IDENT for the enumeration consntant and the value it represents.
- */
-int define_enumerators(ASTree *enum_, TagValue *tagval) {
-  /* TODO(Robert): Enumerators are compile time constants. Figure them out
-   * at compile time for real, like all other compile time consntants.
-   */
-  ASTree *enumerators = astree_get(enum_, 1);
-  size_t i;
-  for (i = 0; i < astree_count(enumerators); ++i) {
-    ASTree *enumerator = astree_get(enumerators, i);
-    ASTree *value_node = NULL;
-    if (enumerator->symbol == '=') {
-      value_node = astree_get(enumerator, 1);
-      enumerator = astree_get(enumerator, 0);
-    }
-
-    const char *enum_ident = enumerator->lexinfo;
-    size_t enum_ident_len = strlen(enum_ident);
-    SymbolValue *exists = NULL;
-    int is_redefinition =
-        state_get_symbol(state, enum_ident, enum_ident_len, &exists);
-    if (is_redefinition) {
-      return BCC_TERR_REDEFINITION;
-    }
-
-    SymbolValue *symval =
-        symbol_value_init(&enumerator->loc, state_get_sequence(state));
-    int status = typespec_init(&symval->type);
-    if (status) return status;
-    symval->type.alignment = X64_ALIGNOF_INT;
-    symval->type.width = X64_SIZEOF_INT;
-    symval->type.base = TYPE_ENUM;
-    /* mark as enumeration consntant */
-    symval->flags |= SYMFLAG_ENUM_CONST;
-
-    AuxSpec *enum_aux = calloc(1, sizeof(*enum_aux));
-    enum_aux->aux = AUX_ENUM;
-    enum_aux->data.tag.name = (astree_get(enum_, 0))->lexinfo;
-    llist_push_back(&symval->type.auxspecs, enum_aux);
-
-    status = state_insert_symbol(state, enum_ident, enum_ident_len, symval);
-    if (status) return status;
-
-    enumerator->type = &symval->type;
-
-    if (value_node != NULL) {
-      /* TODO(Robert): evaluate enumeration constants */
-      int status = validate_expr(value_node);
-      if (status) return status;
-      if ((value_node->attributes & ATTR_EXPR_ARITHCONST) == 0) {
-        return BCC_TERR_EXPECTED_ARITHCONST;
-      }
-    }
-  }
-
-  /* TODO(Robert): adjust enum size based on enumerator sizes */
-  tagval->width = X64_SIZEOF_INT;
-  tagval->alignment = X64_ALIGNOF_INT;
-  tagval->is_defined = 1;
-  return BCC_TERR_SUCCESS;
-}
-
 TagType tag_from_symbol(int symbol) {
   switch (symbol) {
     case TOK_STRUCT:
@@ -1784,99 +1675,231 @@ TagType tag_from_symbol(int symbol) {
   }
 }
 
-/* Tag declaration/definition steps:
- * 1. Declarations that only declare a tag and no associated object receive
- *    special treatement.
- * 2. Declarations that specify unique tags are reported as errors, for now,
- *    but will need special treatment in that they create a unique name for
- *    the tag and return the tag information to the call site somehow.
- */
-
-int declare_tag(ASTree *tag, TagValue **out) {
-  ASTree *first_child = astree_get(tag, 0);
-  if (first_child->symbol != TOK_IDENT) {
-    /* TODO(Robert): allow unique tags */
-    return BCC_TERR_FAILURE;
-  }
-  TagValue *exists = NULL;
-  const char *tag_name = first_child->lexinfo;
-  size_t tag_name_len = strlen(tag_name);
-  int is_redefinition = state_get_tag(state, tag_name, tag_name_len, &exists);
-  if (is_redefinition) {
-    return BCC_TERR_REDEFINITION;
-  }
-  TagValue *tagval = tag_value_init(tag_from_symbol(tag->symbol));
-  if (tagval == NULL) return BCC_TERR_FAILURE;
-  int status = state_insert_tag(state, tag_name, tag_name_len, tagval);
-  if (status) return status;
-  *out = tagval;
-  return BCC_TERR_SUCCESS;
-}
-
-int complete_tag(ASTree *tag, TagValue *tagval) {
-  if (tagval->tag == TAG_ENUM)
-    return define_enumerators(tag, tagval);
-  else
-    return define_members(tag, tagval);
-}
-
-int define_tag(ASTree *tag) {
-  TagValue *tagval = NULL;
-  int status = declare_tag(tag, &tagval);
-  if (status) return status;
-  return complete_tag(tag, tagval);
-}
-
-int illegal_tag_redefinition(ASTree *tag, TagValue *existing) {
-  ASTree *first_child = astree_get(tag, 0);
-  const char *tag_name = first_child->lexinfo;
-  int tag_declares_members =
-      astree_count(tag) > 1 || first_child->symbol != TOK_IDENT;
-  if (tag->symbol == TOK_STRUCT && existing->tag != TAG_STRUCT) {
-    return BCC_TERR_EXPECTED_STRUCT;
-  } else if (tag->symbol == TOK_UNION && existing->tag != TAG_UNION) {
-    return BCC_TERR_EXPECTED_UNION;
-  } else if (tag->symbol == TOK_ENUM && existing->tag != TAG_ENUM) {
-    return BCC_TERR_EXPECTED_ENUM;
-  } else if (tag_declares_members && existing->is_defined) {
-    /* TODO(Robert): allow identical redefinitions */
-    return BCC_TERR_REDEFINITION;
-  } else {
-    return BCC_TERR_SUCCESS;
+int errcode_from_tagtype(TagType tag_type) {
+  switch (tag_type) {
+    case TAG_STRUCT:
+      return BCC_TERR_EXPECTED_STRUCT;
+    case TAG_UNION:
+      return BCC_TERR_EXPECTED_UNION;
+    case TAG_ENUM:
+      return BCC_TERR_EXPECTED_ENUM;
+    default:
+      return BCC_TERR_FAILURE;
   }
 }
 
-int resolve_tag(ASTree *tag) {
-  ASTree *first_child = astree_get(tag, 0);
-  if (first_child->symbol != TOK_IDENT) {
-    /* TODO(Robert): allow unique tags */
-    return BCC_TERR_FAILURE;
-  }
-  const char *tag_name = first_child->lexinfo;
+ASTree *validate_tag_def(ASTree *tag_type_node, ASTree *tag_name_node,
+                         ASTree *left_brace) {
+  const char *tag_name = tag_name_node->lexinfo;
   const size_t tag_name_len = strnlen(tag_name, MAX_IDENT_LEN);
   TagValue *exists = NULL;
   int is_redefinition = state_get_tag(state, tag_name, tag_name_len, &exists);
-  int tag_declares_members =
-      astree_count(tag) > 1 || first_child->symbol != TOK_IDENT;
-  if (exists) {
-    if (is_redefinition) {
-      if (illegal_tag_redefinition(tag, exists)) {
-        return BCC_TERR_REDEFINITION;
-      } else if (tag_declares_members) {
-        return complete_tag(tag, exists);
-      } else {
-        return BCC_TERR_SUCCESS;
-      }
+  int tag_declares_members = left_brace != NULL;
+  TagType tag_type = tag_from_symbol(tag_type_node->symbol);
+  if (is_redefinition) {
+    if (tag_type != exists->tag) {
+      return create_type_error(
+          astree_adopt(tag_type_node, 2, tag_name_node, left_brace),
+          errcode_from_tagtype(exists->tag));
     } else if (tag_declares_members) {
-      return define_tag(tag);
-    } else if (illegal_tag_redefinition(tag, exists)) {
-      return BCC_TERR_REDEFINITION;
+      if (exists->is_defined) {
+        return create_type_error(
+            astree_adopt(tag_type_node, 2, tag_name_node, left_brace),
+            BCC_TERR_REDEFINITION);
+      } else {
+        /* TODO(Robert): error handling */
+        tag_type_node->type = calloc(1, sizeof(TypeSpec));
+        int status = typespec_init((TypeSpec *)tag_type_node->type);
+        AuxSpec *tag_aux = calloc(1, sizeof(AuxSpec));
+        tag_aux->aux = aux_from_tag(tag_type);
+        tag_aux->data.tag.name = tag_name;
+        tag_aux->data.tag.val = exists;
+        status = llist_push_back((LinkedList *)&tag_type_node->type->auxspecs,
+                                 tag_aux);
+        if (tag_type != TAG_ENUM) {
+          int status = state_push_table(state, exists->data.members.by_name);
+        }
+        return astree_adopt(tag_type_node, 2, tag_name_node, left_brace);
+      }
     } else {
-      return BCC_TERR_SUCCESS;
+      return astree_adopt(tag_type_node, 1, tag_name_node);
     }
+  } else if (tag_declares_members) {
+    /* TODO(Robert): error handling */
+    TagValue *tagval = tag_value_init(tag_type);
+    int status = state_insert_tag(state, tag_name, tag_name_len, tagval);
+    tag_type_node->type = calloc(1, sizeof(TypeSpec));
+    status = typespec_init((TypeSpec *)tag_type_node->type);
+    AuxSpec *tag_aux = calloc(1, sizeof(AuxSpec));
+    tag_aux->aux = aux_from_tag(tag_type);
+    tag_aux->data.tag.name = tag_name;
+    tag_aux->data.tag.val = tagval;
+    status =
+        llist_push_back((LinkedList *)&tag_type_node->type->auxspecs, tag_aux);
+    if (tag_type != TAG_ENUM) {
+      int status = state_push_table(state, tagval->data.members.by_name);
+    }
+    return astree_adopt(tag_type_node, 2, tag_name_node, left_brace);
   } else {
-    return define_tag(tag);
+    return astree_adopt(tag_type_node, 1, tag_name_node);
   }
+}
+
+ASTree *finalize_tag_def(ASTree *tag) {
+  ASTree *errnode = NULL;
+  if (tag->symbol == TOK_TYPE_ERROR) {
+    errnode = tag;
+    tag = astree_get(tag, 0);
+  }
+  if (tag->symbol != TOK_ENUM) {
+    int status = state_pop_table(state);
+  }
+  AuxSpec *struct_aux = llist_back(&tag->type->auxspecs);
+  TagValue *tagval = struct_aux->data.tag.val;
+  tagval->is_defined = 1;
+  int status = typespec_destroy((TypeSpec *)tag->type);
+  free((TypeSpec *)tag->type);
+  if (errnode != NULL)
+    return errnode;
+  else
+    return tag;
+}
+
+ASTree *define_enumerator(ASTree *enum_, ASTree *ident_node, ASTree *equal_sign,
+                          ASTree *expr) {
+  if (enum_->symbol == TOK_TYPE_ERROR) {
+    ASTree *real_enum = astree_get(enum_, 0);
+    ASTree *left_brace = astree_get(real_enum, 1);
+    if (equal_sign != NULL) {
+      astree_adopt(left_brace, 1,
+                   astree_adopt(equal_sign, 2, ident_node, expr));
+      return enum_;
+    } else {
+      astree_adopt(left_brace, 1, ident_node);
+      return enum_;
+    }
+  }
+  ASTree *left_brace = astree_get(enum_, 1);
+  const char *ident = ident_node->lexinfo;
+  const size_t ident_len = strnlen(ident, MAX_IDENT_LEN);
+
+  SymbolValue *exists = NULL;
+  int is_redefinition = state_get_symbol(state, ident, ident_len, &exists);
+  if (is_redefinition) {
+    if (equal_sign != NULL) {
+      astree_adopt(left_brace, 1,
+                   astree_adopt(equal_sign, 2, ident_node, expr));
+      return create_type_error(enum_, BCC_TERR_REDEFINITION);
+    } else {
+      astree_adopt(left_brace, 1, ident_node);
+      return create_type_error(enum_, BCC_TERR_REDEFINITION);
+    }
+  }
+
+  SymbolValue *symval =
+      symbol_value_init(&ident_node->loc, state_get_sequence(state));
+  int status = typespec_init(&symval->type);
+  if (status) {
+    if (equal_sign != NULL) {
+      astree_adopt(left_brace, 1,
+                   astree_adopt(equal_sign, 2, ident_node, expr));
+      return create_type_error(enum_, status);
+    } else {
+      astree_adopt(left_brace, 1, ident_node);
+      return create_type_error(enum_, status);
+    }
+  }
+  symval->type.alignment = X64_ALIGNOF_INT;
+  symval->type.width = X64_SIZEOF_INT;
+  symval->type.base = TYPE_ENUM;
+  /* mark as enumeration consntant */
+  symval->flags |= SYMFLAG_ENUM_CONST;
+
+  AuxSpec *enum_aux = calloc(1, sizeof(*enum_aux));
+  enum_aux->aux = AUX_ENUM;
+  enum_aux->data.tag.name = (astree_get(enum_, 0))->lexinfo;
+  llist_push_back(&symval->type.auxspecs, enum_aux);
+
+  status = state_insert_symbol(state, ident, ident_len, symval);
+  if (status) {
+    if (equal_sign != NULL) {
+      astree_adopt(left_brace, 1,
+                   astree_adopt(equal_sign, 2, ident_node, expr));
+      return create_type_error(enum_, status);
+    } else {
+      astree_adopt(left_brace, 1, ident_node);
+      return create_type_error(enum_, status);
+    }
+  }
+
+  ident_node->type = &symval->type;
+
+  if (equal_sign != NULL) {
+    /* TODO(Robert): evaluate enumeration constants */
+    int status = validate_expr(expr);
+    if (status) {
+      if (equal_sign != NULL) {
+        astree_adopt(left_brace, 1,
+                     astree_adopt(equal_sign, 2, ident_node, expr));
+        return create_type_error(enum_, status);
+      } else {
+        astree_adopt(left_brace, 1, ident_node);
+        return create_type_error(enum_, status);
+      }
+    }
+    if ((expr->attributes & ATTR_EXPR_ARITHCONST) == 0) {
+      if (equal_sign != NULL) {
+        astree_adopt(left_brace, 1,
+                     astree_adopt(equal_sign, 2, ident_node, expr));
+        return create_type_error(enum_, BCC_TERR_EXPECTED_ARITHCONST);
+      } else {
+        astree_adopt(left_brace, 1, ident_node);
+        return create_type_error(enum_, BCC_TERR_EXPECTED_ARITHCONST);
+      }
+    }
+    astree_adopt(left_brace, 1, astree_adopt(equal_sign, 2, ident_node, expr));
+    return enum_;
+  } else {
+    astree_adopt(left_brace, 1, ident_node);
+    return enum_;
+  }
+}
+
+ASTree *define_struct_member(ASTree *struct_, ASTree *member) {
+  if (struct_->symbol == TOK_TYPE_ERROR) {
+    ASTree *real_struct = astree_get(struct_, 0);
+    ASTree *left_brace = astree_get(real_struct, 1);
+    astree_adopt(left_brace, 1, member);
+    return struct_;
+  } else if (member->symbol == TOK_TYPE_ERROR) {
+    ASTree *left_brace = astree_get(struct_, 1);
+    ASTree *errnode = propogate_type_error(left_brace, member);
+    return propogate_type_error(struct_, errnode);
+  }
+  AuxSpec *struct_aux = llist_back(&struct_->type->auxspecs);
+  TagValue *tagval = struct_aux->data.tag.val;
+  LinkedList *member_list = &tagval->data.members.in_order;
+  size_t i;
+  /* skip first child, which is the typespec list */
+  for (i = 1; i < astree_count(member); ++i) {
+    ASTree *declarator = astree_get(member, i);
+    SymbolValue *symval = sym_from_type((TypeSpec *)declarator->type);
+    if (tagval->alignment < symval->type.alignment) {
+      tagval->alignment = symval->type.alignment;
+    }
+    if (tagval->tag == TAG_STRUCT) {
+      sprintf(symval->obj_loc, "%%s+%zu", tagval->width);
+      size_t padding =
+          symval->type.alignment - (tagval->width % symval->type.alignment);
+      tagval->width += padding + symval->type.width;
+    } else if (tagval->width < symval->type.width) {
+      tagval->width = symval->type.width;
+    }
+    llist_push_back(member_list, symval);
+  }
+  ASTree *left_brace = astree_get(struct_, 1);
+  astree_adopt(left_brace, 1, member);
+  return struct_;
 }
 
 ASTree *validate_declarator(ASTree *declarator) {
