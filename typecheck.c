@@ -71,14 +71,6 @@ typedef struct bcc_status {
 
 CompilerState *state; /* back to global state... */
 
-/* forward declarations for mutual recursion */
-int validate_expr(ASTree *expression);
-int validate_stmt(ASTree *statement);
-int types_compatible(
-    const TypeSpec *type1,
-    const TypeSpec *type2); /* required to check param and member types */
-int resolve_tag(ASTree *tag);
-
 SymbolValue *sym_from_type(TypeSpec *type) {
   SymbolValue temp;
   /* struct members have addresses increasing in order of declarations */
@@ -110,58 +102,38 @@ void create_error_symbol(SymbolValue *symval, int errcode) {}
  * of expressions, at which point it is not possible to further nest scopes.
  */
 
-int convert_type(ASTree *parent, ASTree **out, const TypeSpec *type) {
-  size_t index = llist_find(&parent->children, *out);
-  int compatibility = types_compatible(type, (*out)->type);
-  if (compatibility == TCHK_COMPATIBLE) {
-    return BCC_TERR_SUCCESS;
-  } else if (compatibility == TCHK_INCOMPATIBLE) {
-    return BCC_TERR_INCOMPATIBLE_TYPES;
-  }
-  TypeSpec *cast_spec = malloc(sizeof(*cast_spec));
-  int status = typespec_copy(cast_spec, type);
-  if (status) return status;
-  ASTree *cast = astree_init(TOK_CAST, (*out)->loc, "_cast");
-  cast->type = cast_spec;
-  cast->attributes |=
-      (*out)->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST);
-  /* remove child from parent's list */
-  llist_extract(&parent->children, index);
-  status = llist_insert(&parent->children, astree_adopt(cast, 1, *out), index);
-  if (status) return status;
-  *out = cast;
-  return BCC_TERR_SUCCESS;
-}
-
-int perform_pointer_conv(ASTree *parent, ASTree **out) {
-  size_t index = llist_find(&parent->children, *out);
-  const TypeSpec *child_spec = (*out)->type;
-  if (!typespec_is_array(child_spec) && !typespec_is_function(child_spec)) {
-    return BCC_TERR_SUCCESS;
+ASTree *perform_pointer_conv(ASTree *expr) {
+  const TypeSpec *spec = expr->type;
+  if (!typespec_is_array(spec) && !typespec_is_function(spec)) {
+    return expr;
   } else {
     TypeSpec *pointer_spec = malloc(sizeof(*pointer_spec));
-    if (typespec_is_array(child_spec)) {
-      int status = strip_aux_type(pointer_spec, child_spec);
-      if (status) return status;
+    if (typespec_is_array(spec)) {
+      int status = strip_aux_type(pointer_spec, spec);
+      if (status) {
+        free(pointer_spec);
+        return create_type_error(expr, status);
+      }
     } else {
-      int status = typespec_copy(pointer_spec, child_spec);
-      if (status) return status;
+      int status = typespec_copy(pointer_spec, spec);
+      if (status) {
+        free(pointer_spec);
+        return create_type_error(expr, status);
+      }
     }
     AuxSpec *pointer_aux = calloc(1, sizeof(*pointer_aux));
     pointer_aux->aux = AUX_POINTER;
     int status = llist_push_front(&pointer_spec->auxspecs, pointer_aux);
-    if (status) return status;
-    ASTree *cast = astree_init(TOK_CAST, (*out)->loc, "_cast");
+    if (status) {
+      llist_destroy(&pointer_spec->auxspecs);
+      free(pointer_spec);
+      return create_type_error(expr, status);
+    }
+    ASTree *cast = astree_init(TOK_CAST, expr->loc, "_cast");
     cast->type = pointer_spec;
     cast->attributes |=
-        (*out)->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST);
-    /* remove child from parent's list */
-    llist_extract(&parent->children, index);
-    status =
-        llist_insert(&parent->children, astree_adopt(cast, 1, *out), index);
-    if (status) return status;
-    *out = cast;
-    return BCC_TERR_SUCCESS;
+        expr->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST);
+    return astree_adopt(cast, 1, expr);
   }
 }
 
@@ -171,6 +143,28 @@ int is_const_zero(ASTree *tree) {
   } else {
     return strtol(tree->lexinfo, NULL, 0) == 0;
   }
+}
+
+int types_compatible(const TypeSpec *type1, const TypeSpec *type2);
+
+ASTree *convert_type(ASTree *expr, const TypeSpec *type) {
+  int compatibility = types_compatible(type, expr->type);
+  if (compatibility == TCHK_COMPATIBLE) {
+    return expr;
+  } else if (compatibility == TCHK_INCOMPATIBLE) {
+    return create_type_error(expr, BCC_TERR_INCOMPATIBLE_TYPES);
+  }
+  TypeSpec *cast_spec = malloc(sizeof(*cast_spec));
+  int status = typespec_copy(cast_spec, type);
+  if (status) {
+    free(cast_spec);
+    return create_type_error(expr, status);
+  }
+  ASTree *cast = astree_init(TOK_CAST, expr->loc, "_cast");
+  cast->type = cast_spec;
+  cast->attributes |=
+      expr->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST);
+  return expr;
 }
 
 int compare_params(LinkedList *dests, LinkedList *srcs) {
@@ -208,6 +202,19 @@ int compare_members(LinkedList *dests, LinkedList *srcs) {
   return TCHK_COMPATIBLE;
 }
 
+int compare_declspecs(const TypeSpec *dest, const TypeSpec *src) {
+  /* TODO(Robert): check qualifiers */
+  if (typespec_is_integer(dest) && typespec_is_integer(src)) {
+    return TCHK_COMPATIBLE;
+  } else if ((dest->base == TYPE_STRUCT && src->base == TYPE_STRUCT) ||
+             (dest->base == TYPE_UNION && src->base == TYPE_UNION) ||
+             (dest->base == TYPE_ENUM && src->base == TYPE_ENUM)) {
+    return TCHK_COMPATIBLE;
+  } else {
+    return TCHK_INCOMPATIBLE;
+  }
+}
+
 int compare_auxspecs(const LinkedList *dests, const LinkedList *srcs) {
   size_t aux_count = llist_size(dests) > llist_size(srcs) ? llist_size(dests)
                                                           : llist_size(srcs);
@@ -234,19 +241,6 @@ int compare_auxspecs(const LinkedList *dests, const LinkedList *srcs) {
   }
 
   return TCHK_COMPATIBLE;
-}
-
-int compare_declspecs(const TypeSpec *dest, const TypeSpec *src) {
-  /* TODO(Robert): check qualifiers */
-  if (typespec_is_integer(dest) && typespec_is_integer(src)) {
-    return TCHK_COMPATIBLE;
-  } else if ((dest->base == TYPE_STRUCT && src->base == TYPE_STRUCT) ||
-             (dest->base == TYPE_UNION && src->base == TYPE_UNION) ||
-             (dest->base == TYPE_ENUM && src->base == TYPE_ENUM)) {
-    return TCHK_COMPATIBLE;
-  } else {
-    return TCHK_INCOMPATIBLE;
-  }
 }
 
 /* This function determines compatibility in situations where there is a
@@ -600,7 +594,7 @@ ASTree *validate_typespec_list(ASTree *spec_list) {
   }
 }
 
-int validate_ident(ASTree *ident) {
+ASTree *validate_ident(ASTree *ident) {
   DEBUGS('t', "Attempting to assign a type");
   const char *id_str = ident->lexinfo;
   size_t id_str_len = strnlen(id_str, MAX_IDENT_LEN);
@@ -609,131 +603,145 @@ int validate_ident(ASTree *ident) {
   if (symval) {
     DEBUGS('t', "Assigning %s a symbol", id_str);
     ident->type = &(symval->type);
-    return BCC_TERR_SUCCESS;
+    return ident;
   } else {
-    return BCC_TERR_SYM_NOT_FOUND;
+    return create_type_error(ident, BCC_TERR_SYM_NOT_FOUND);
   }
 }
 
-int validate_call(ASTree *call) {
-  /* functon subtree is the last child of the call node */
-  ASTree *function = astree_get(call, astree_count(call) - 1);
-  int status = validate_expr(function);
-  if (status) return status;
-  status = perform_pointer_conv(call, &function);
-  if (status) return status;
-
-  TypeSpec *function_spec = (TypeSpec *)function->type;
-  if (!typespec_is_fnptr(function_spec)) {
-    return BCC_TERR_EXPECTED_FUNCTION;
+ASTree *finalize_call(ASTree *call) {
+  if (call->symbol == TOK_TYPE_ERROR) {
+    return call;
   }
-
+  ASTree *function = astree_get(call, 0);
+  TypeSpec *function_spec = (TypeSpec *)function->type;
   /* second auxspec will be the function; first is pointer */
   AuxSpec *param_spec = llist_get(&function_spec->auxspecs, 1);
   LinkedList *param_list = param_spec->data.params;
   /* subtract one since function expression is also a child */
-  if (astree_count(call) <= llist_size(param_list)) {
-    return BCC_TERR_EXCESS_PARAMS;
-  } else if (astree_count(call) - 1 > llist_size(param_list)) {
-    return BCC_TERR_INSUFF_PARAMS;
+  if (astree_count(call) - 1 > llist_size(param_list)) {
+    return create_type_error(call, BCC_TERR_INSUFF_PARAMS);
   }
+  return call;
+}
 
-  DEBUGS('t', "Validating %d arguments for function call",
-         astree_count(call) - 1);
-  size_t i;
-  for (i = 0; i < llist_size(param_list); ++i) {
-    DEBUGS('t', "Validating argument %d", i);
-    ASTree *call_param = astree_get(call, i);
-    int status = validate_expr(call_param);
-    if (status) return status;
-    status = perform_pointer_conv(call, &call_param);
-    if (status) return status;
+ASTree *validate_arg(ASTree *call, ASTree *arg) {
+  if (call->symbol == TOK_TYPE_ERROR) {
+    ASTree *real_call = astree_get(call, 0);
+    astree_adopt(real_call, 1, arg);
+    return call;
+  } else if (arg->symbol == TOK_TYPE_ERROR) {
+    return propogate_type_error(call, arg);
+  }
+  /* functon subtree is the first child of the call node */
+  ASTree *function = astree_get(call, 0);
+  TypeSpec *function_spec = (TypeSpec *)function->type;
+  /* second auxspec will be the function; first is pointer */
+  AuxSpec *param_spec = llist_get(&function_spec->auxspecs, 1);
+  LinkedList *param_list = param_spec->data.params;
+  /* subtract one since function expression is also a child */
+  size_t param_index = astree_count(call) - 1;
+  if (param_index >= llist_size(param_list)) {
+    return create_type_error(astree_adopt(call, 1, arg),
+                             BCC_TERR_EXCESS_PARAMS);
+  }
+  DEBUGS('t', "Validating argument %d", param_index);
+  SymbolValue *symval = llist_get(param_list, param_index);
+  DEBUGS('t', "Comparing types");
+  int compatibility = types_compatible(&symval->type, arg->type);
+  if (compatibility == TCHK_INCOMPATIBLE ||
+      compatibility == TCHK_EXPLICIT_CAST) {
+    return create_type_error(astree_adopt(call, 1, arg),
+                             BCC_TERR_INCOMPATIBLE_TYPES);
+  } else {
+    return astree_adopt(call, 1, arg);
+  }
+}
 
-    DEBUGS('t', "Comparing types");
-    SymbolValue *param_symval = llist_get(param_list, i);
-    int compatibility = types_compatible(&param_symval->type, call_param->type);
-    if (compatibility == TCHK_INCOMPATIBLE ||
-        compatibility == TCHK_EXPLICIT_CAST) {
-      return BCC_TERR_INCOMPATIBLE_TYPES;
-    }
+ASTree *validate_call(ASTree *call, ASTree *function) {
+  function = perform_pointer_conv(function);
+  if (function->symbol == TOK_TYPE_ERROR) {
+    return propogate_type_error(call, function);
+  }
+  TypeSpec *function_spec = (TypeSpec *)function->type;
+  if (!typespec_is_fnptr(function_spec)) {
+    return create_type_error(astree_adopt(call, 1, function),
+                             BCC_TERR_EXPECTED_FUNCTION);
   }
 
   /* strip pointer */
   TypeSpec temp_spec = SPEC_EMPTY;
-  status = strip_aux_type(&temp_spec, function_spec);
-  if (status) return status;
+  int status = strip_aux_type(&temp_spec, function_spec);
+  if (status) {
+    return create_type_error(astree_adopt(call, 1, function), status);
+  }
   /* strip function */
   TypeSpec *return_spec = malloc(sizeof(*return_spec));
   status = strip_aux_type(return_spec, &temp_spec);
-  if (status) return status;
+  if (status) {
+    return create_type_error(astree_adopt(call, 1, function), status);
+  }
   /* free temporaries created by stripping */
   typespec_destroy(&temp_spec);
   call->type = return_spec;
-  return BCC_TERR_SUCCESS;
+  return astree_adopt(call, 1, function);
 }
 
-int validate_conditional(ASTree *conditional) {
-  ASTree *condition = astree_get(conditional, 0);
-  int status = validate_expr(condition);
-  if (status) return status;
-  status = perform_pointer_conv(conditional, &condition);
-  if (status) return status;
-
-  if (!typespec_is_scalar(condition->type)) {
-    return BCC_TERR_EXPECTED_SCALAR;
+ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
+                             ASTree *true_expr, ASTree *false_expr) {
+  condition = perform_pointer_conv(condition);
+  if (condition->symbol == TOK_TYPE_ERROR) {
   }
 
-  ASTree *left = astree_get(conditional, 1);
-  status = validate_expr(left);
-  if (status) return status;
-  status = perform_pointer_conv(conditional, &left);
-  if (status) return status;
+  if (!typespec_is_scalar(condition->type)) {
+    return create_type_error(
+        astree_adopt(qmark, 3, condition, true_expr, false_expr),
+        BCC_TERR_EXPECTED_SCALAR);
+  }
 
-  ASTree *right = astree_get(conditional, 2);
-  status = validate_expr(right);
-  if (status) return status;
-  status = perform_pointer_conv(conditional, &right);
-  if (status) return status;
+  true_expr = perform_pointer_conv(true_expr);
+  if (true_expr->symbol == TOK_TYPE_ERROR) {
+  }
+
+  false_expr = perform_pointer_conv(false_expr);
+  if (false_expr->symbol == TOK_TYPE_ERROR) {
+  }
 
   /* TODO(Robert): the rules for conversion on the output of the ternary
    * operator are different from usual conversions and compatibility rules, and
    * should have their own function
    */
-  return determine_conversion(left->type, right->type, &conditional->type);
+  int status =
+      determine_conversion(true_expr->type, false_expr->type, &qmark->type);
+  if (status) {
+  }
+
+  return astree_adopt(qmark, 3, condition, true_expr, false_expr);
 }
 
-int validate_comma(ASTree *comma) {
-  ASTree *left = astree_get(comma, 0);
-  int status = validate_expr(left);
-  if (status) return status;
-
-  ASTree *right = astree_get(comma, 1);
-  status = validate_expr(right);
-  if (status) return status;
-  status = perform_pointer_conv(comma, &right);
-  if (status) return status;
+ASTree *validate_comma(ASTree *comma, ASTree *left_expr, ASTree *right_expr) {
+  right_expr = perform_pointer_conv(right_expr);
+  if (right_expr->symbol == TOK_TYPE_ERROR) {
+  }
   comma->attributes |=
-      right->attributes & (ATTR_EXPR_ARITHCONST | ATTR_EXPR_CONST);
+      right_expr->attributes & (ATTR_EXPR_ARITHCONST | ATTR_EXPR_CONST);
 
-  comma->type = right->type;
-  return BCC_TERR_SUCCESS;
+  comma->type = right_expr->type;
+  return astree_adopt(comma, 2, left_expr, right_expr);
 }
 
-int validate_assignment(ASTree *assignment) {
-  ASTree *dest = astree_get(assignment, 0);
-  int status = validate_expr(dest);
-  if (status) return status;
-
-  ASTree *src = astree_get(assignment, 1);
-  status = validate_expr(src);
-  if (status) return status;
-  status = perform_pointer_conv(assignment, &src);
-  if (status) return status;
+ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src) {
+  src = perform_pointer_conv(src);
+  if (src->symbol == TOK_TYPE_ERROR) {
+  };
+  src = convert_type(src, dest->type);
+  if (src->symbol == TOK_TYPE_ERROR) {
+  };
   assignment->attributes |=
       src->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST);
 
   assignment->type = dest->type;
-  return convert_type(assignment, &src, dest->type);
+  return astree_adopt(assignment, 2, dest, src);
 }
 
 int spec_list_includes_type(ASTree *spec_list) {
@@ -988,75 +996,80 @@ ASTree *define_dirdecl(ASTree *declarator, ASTree *dirdecl) {
   }
 }
 
-int validate_cast(ASTree *cast) {
-  ASTree *declaration = astree_get(cast, 0);
-  /*
-  int status = validate_declaration(declaration);
-  if (status) return status;
-  */
-  ASTree *expr = astree_get(cast, 1);
-
-  int status = validate_expr(expr);
-  if (status) return status;
-  status = perform_pointer_conv(cast, &expr);
-  if (status) return status;
+ASTree *validate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
+  expr = perform_pointer_conv(expr);
+  if (expr->symbol == TOK_TYPE_ERROR) {
+  }
 
   ASTree *type_name = astree_get(declaration, 1);
   int compatibility = types_compatible(type_name->type, expr->type);
   if (compatibility == TCHK_INCOMPATIBLE) {
-    return BCC_TERR_INCOMPATIBLE_TYPES;
+    return create_type_error(astree_adopt(cast, 2, declaration, expr),
+                             BCC_TERR_INCOMPATIBLE_TYPES);
   } else {
     cast->type = type_name->type;
     cast->attributes |=
         expr->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST);
-    return BCC_TERR_SUCCESS;
-    ;
+    return astree_adopt(cast, 2, declaration, expr);
   }
 }
 
-int typecheck_addop(ASTree *operator, ASTree * left, ASTree *right) {
+ASTree *typecheck_addop(ASTree *operator, ASTree * left, ASTree *right) {
   const TypeSpec *left_type = left->type;
   const TypeSpec *right_type = right->type;
 
   if (typespec_is_arithmetic(left_type) && typespec_is_arithmetic(right_type)) {
     int status = determine_conversion(left_type, right_type, &operator->type);
-    if (status) return status;
-    status = convert_type(operator, & left, operator->type);
-    if (status) return status;
-    return convert_type(operator, & right, operator->type);
+    if (status) {
+      return create_type_error(astree_adopt(operator, 2, left, right), status);
+    }
+    left = convert_type(left, operator->type);
+    if (left->symbol == TOK_TYPE_ERROR) {
+      ASTree *errnode = propogate_type_error(operator, left);
+      astree_adopt(operator, 1, right);
+      return errnode;
+    }
+    right = convert_type(right, operator->type);
+    if (right->symbol == TOK_TYPE_ERROR) {
+      return propogate_type_error(astree_adopt(operator, 1, left), right);
+    }
+    return astree_adopt(operator, 2, left, right);
   } else if (typespec_is_pointer(left_type) &&
              typespec_is_integer(right_type)) {
     operator->type = left_type;
-    return BCC_TERR_SUCCESS;
+    return astree_adopt(operator, 2, left, right);
   } else if (typespec_is_integer(left_type) &&
              typespec_is_pointer(right_type)) {
     operator->type = right_type;
-    return BCC_TERR_SUCCESS;
+    return astree_adopt(operator, 2, left, right);
   } else if (typespec_is_pointer(left_type) &&
              typespec_is_pointer(right_type) && operator->symbol == '-') {
     int compatibility = types_compatible(left_type, right_type);
     if (compatibility == TCHK_COMPATIBLE) {
       /* types should be the same; just pick the left one */
       operator->type = left_type;
-      return BCC_TERR_SUCCESS;
+      return astree_adopt(operator, 2, left, right);
     } else {
-      return BCC_TERR_INCOMPATIBLE_TYPES;
+      return create_type_error(astree_adopt(operator, 2, left, right),
+                               BCC_TERR_INCOMPATIBLE_TYPES);
     }
   } else {
-    return BCC_TERR_INCOMPATIBLE_TYPES;
+    return create_type_error(astree_adopt(operator, 2, left, right),
+                             BCC_TERR_INCOMPATIBLE_TYPES);
   }
 }
 
-int typecheck_logop(ASTree *operator, ASTree * left, ASTree *right) {
+ASTree *typecheck_logop(ASTree *operator, ASTree * left, ASTree *right) {
   if (typespec_is_scalar(left->type) && typespec_is_scalar(right->type)) {
     operator->type = & SPEC_INT;
-    return BCC_TERR_SUCCESS;
+    return astree_adopt(operator, 2, left, right);
   } else {
-    return BCC_TERR_EXPECTED_SCALAR;
+    return create_type_error(astree_adopt(operator, 2, left, right),
+                             BCC_TERR_EXPECTED_SCALAR);
   }
 }
 
-int typecheck_relop(ASTree *operator, ASTree * left, ASTree *right) {
+ASTree *typecheck_relop(ASTree *operator, ASTree * left, ASTree *right) {
   const TypeSpec *left_type = left->type;
   const TypeSpec *right_type = right->type;
   operator->type = & SPEC_INT;
@@ -1064,101 +1077,136 @@ int typecheck_relop(ASTree *operator, ASTree * left, ASTree *right) {
   if (typespec_is_arithmetic(left_type) && typespec_is_arithmetic(right_type)) {
     const TypeSpec *common_type;
     int status = determine_conversion(left_type, right_type, &common_type);
-    if (status) return status;
-    status = convert_type(operator, & left, common_type);
-    if (status) return status;
-    return convert_type(operator, & right, common_type);
+    if (status) {
+      return create_type_error(astree_adopt(operator, 2, left, right), status);
+    }
+    left = convert_type(left, common_type);
+    if (left->symbol == TOK_TYPE_ERROR) {
+    }
+    right = convert_type(right, common_type);
+    if (right->symbol == TOK_TYPE_ERROR) {
+    }
+    return astree_adopt(operator, 2, left, right);
   } else if (typespec_is_pointer(left_type) &&
              typespec_is_pointer(right_type)) {
     int compatibility = types_compatible(left_type, right_type);
     if (compatibility == TCHK_COMPATIBLE || typespec_is_voidptr(left_type) ||
         typespec_is_voidptr(right_type)) {
-      return BCC_TERR_SUCCESS;
+      return astree_adopt(operator, 2, left, right);
     } else {
-      return BCC_TERR_INCOMPATIBLE_TYPES;
+      return create_type_error(astree_adopt(operator, 2, left, right),
+                               BCC_TERR_INCOMPATIBLE_TYPES);
     }
   } else if (((typespec_is_pointer(left_type) && is_const_zero(right)) ||
               (is_const_zero(left) && typespec_is_pointer(right_type))) &&
              (operator->symbol == TOK_EQ || operator->symbol == TOK_NE)) {
-    return BCC_TERR_SUCCESS;
+    return astree_adopt(operator, 2, left, right);
   } else {
-    return BCC_TERR_INCOMPATIBLE_TYPES;
+    return create_type_error(astree_adopt(operator, 2, left, right),
+                             BCC_TERR_INCOMPATIBLE_TYPES);
   }
 }
 
-int typecheck_mulop(ASTree *operator, ASTree * left, ASTree *right) {
+ASTree *typecheck_mulop(ASTree *operator, ASTree * left, ASTree *right) {
   if (typespec_is_arithmetic(left->type) &&
       typespec_is_arithmetic(right->type)) {
     int status = determine_conversion(left->type, right->type, &operator->type);
-    if (status) return status;
-    status = convert_type(operator, & left, operator->type);
-    if (status) return status;
-    return convert_type(operator, & right, operator->type);
+    if (status) {
+      return create_type_error(astree_adopt(operator, 2, left, right), status);
+    }
+    left = convert_type(left, operator->type);
+    if (left->symbol == TOK_TYPE_ERROR) {
+    }
+    right = convert_type(right, operator->type);
+    if (right->symbol == TOK_TYPE_ERROR) {
+    }
+    return astree_adopt(operator, 2, left, right);
   } else {
-    return BCC_TERR_EXPECTED_ARITHMETIC;
+    return create_type_error(astree_adopt(operator, 2, left, right),
+                             BCC_TERR_EXPECTED_ARITHMETIC);
   }
 }
 
-int typecheck_shfop(ASTree *operator, ASTree * left, ASTree *right) {
+ASTree *typecheck_shfop(ASTree *operator, ASTree * left, ASTree *right) {
   if (typespec_is_integer(left->type) && typespec_is_integer(right->type)) {
     int status = determine_conversion(left->type, &SPEC_INT, &operator->type);
-    if (status) return status;
-    status = convert_type(operator, & left, operator->type);
+    if (status) {
+      return create_type_error(astree_adopt(operator, 2, left, right), status);
+    }
+    left = convert_type(left, operator->type);
+    if (left->symbol == TOK_TYPE_ERROR) {
+      ASTree *errnode = propogate_type_error(operator, left);
+      astree_adopt(operator, 1, right);
+      return errnode;
+    }
     /* promote right operand independently of left */
     const TypeSpec *dummy;
     status = determine_conversion(right->type, &SPEC_INT, &dummy);
-    if (status) return status;
-    return convert_type(operator, & right, operator->type);
+    if (status) {
+      return create_type_error(astree_adopt(operator, 2, left, right), status);
+    }
+    right = convert_type(right, operator->type);
+    if (right->symbol == TOK_TYPE_ERROR) {
+      astree_adopt(operator, 1, left);
+      return propogate_type_error(operator, right);
+    }
+    return astree_adopt(operator, 2, left, right);
   } else {
-    return BCC_TERR_EXPECTED_INTEGER;
+    return create_type_error(astree_adopt(operator, 2, left, right),
+                             BCC_TERR_EXPECTED_INTEGER);
   }
 }
 
-int typecheck_bitop(ASTree *operator, ASTree * left, ASTree *right) {
+ASTree *typecheck_bitop(ASTree *operator, ASTree * left, ASTree *right) {
   if (typespec_is_integer(left->type) && typespec_is_integer(right->type)) {
     int status = determine_conversion(left->type, right->type, &operator->type);
-    if (status) return status;
-    status = convert_type(operator, & left, operator->type);
-    if (status) return status;
-    return convert_type(operator, & right, operator->type);
+    if (status) {
+      return create_type_error(astree_adopt(operator, 2, left, right), status);
+    }
+    left = convert_type(left, operator->type);
+    if (left->symbol == TOK_TYPE_ERROR) {
+    }
+    right = convert_type(right, operator->type);
+    if (right->symbol == TOK_TYPE_ERROR) {
+    }
+    return astree_adopt(operator, 2, left, right);
   } else {
-    return BCC_TERR_EXPECTED_INTEGER;
+    return create_type_error(astree_adopt(operator, 2, left, right),
+                             BCC_TERR_EXPECTED_INTEGER);
   }
 }
 
-int validate_binop(ASTree *operator) {
+ASTree *validate_binop(ASTree *operator, ASTree * left_operand,
+                       ASTree *right_operand) {
   DEBUGS('t', "Validating binary operator %c", operator->symbol);
 
-  ASTree *left = astree_get(operator, 0);
-  int status = validate_expr(left);
-  if (status) return status;
-  status = perform_pointer_conv(operator, & left);
-  if (status) return status;
+  left_operand = perform_pointer_conv(left_operand);
+  if (left_operand->symbol == TOK_TYPE_ERROR) {
+  }
 
-  ASTree *right = astree_get(operator, 1);
-  status = validate_expr(right);
-  if (status) return status;
-  status = perform_pointer_conv(operator, & right);
-  if (status) return status;
+  right_operand = perform_pointer_conv(right_operand);
+  if (right_operand->symbol == TOK_TYPE_ERROR) {
+  }
 
+  ASTree *result = NULL;
   switch (operator->symbol) {
     case TOK_SHL:
     case TOK_SHR:
-      status = typecheck_shfop(operator, left, right);
+      result = typecheck_shfop(operator, left_operand, right_operand);
       break;
     case '&':
     case '|':
     case '^':
-      status = typecheck_bitop(operator, left, right);
+      result = typecheck_bitop(operator, left_operand, right_operand);
       break;
     case '*':
     case '/':
     case '%':
-      status = typecheck_mulop(operator, left, right);
+      result = typecheck_mulop(operator, left_operand, right_operand);
       break;
     case '+':
     case '-':
-      status = typecheck_addop(operator, left, right);
+      result = typecheck_addop(operator, left_operand, right_operand);
       break;
     case TOK_EQ:
     case TOK_NE:
@@ -1166,20 +1214,25 @@ int validate_binop(ASTree *operator) {
     case TOK_LE:
     case '>':
     case '<':
-      status = typecheck_relop(operator, left, right);
+      result = typecheck_relop(operator, left_operand, right_operand);
       break;
     case TOK_AND:
     case TOK_OR:
-      status = typecheck_logop(operator, left, right);
+      result = typecheck_logop(operator, left_operand, right_operand);
       break;
     default:
-      return BCC_TERR_FAILURE;
+      result = create_type_error(
+          astree_adopt(operator, 2, left_operand, right_operand),
+          BCC_TERR_UNEXPECTED_TOKEN);
   }
 
-  unsigned int result_attrs = left->attributes & right->attributes;
-  operator->attributes |=
-      result_attrs &(ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST);
-  return status;
+  if (result->symbol == TOK_TYPE_ERROR) {
+    return result;
+  }
+  unsigned int result_attrs =
+      left_operand->attributes & right_operand->attributes;
+  result->attributes |= result_attrs & (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST);
+  return result;
 }
 
 int is_increment(const int symbol) {
@@ -1187,91 +1240,95 @@ int is_increment(const int symbol) {
          symbol == TOK_POST_DEC;
 }
 
-int validate_unop(ASTree *operator) {
+ASTree *validate_unop(ASTree *operator, ASTree * operand) {
   DEBUGS('t', "Validating unary operator %c", operator->symbol);
-  ASTree *operand = astree_get(operator, 0);
-  int status = validate_expr(operand);
-  if (status != 0) return status;
+  if (operator->symbol == TOK_TYPE_ERROR) {
+    ASTree *real_operator = astree_get(operator, 0);
+    astree_adopt(real_operator, 1, operand);
+    return operator;
+  } else if (operand->symbol == TOK_TYPE_ERROR) {
+    return propogate_type_error(operator, operand);
+  }
   const TypeSpec *operand_type = operand->type;
 
   if (is_increment(operator->symbol) && !typespec_is_scalar(operand_type)) {
-    return BCC_TERR_EXPECTED_SCALAR;
+    return create_type_error(astree_adopt(operator, 1, operand),
+                             BCC_TERR_EXPECTED_SCALAR);
   } else if ((operator->symbol == TOK_NEG || operator->symbol == TOK_POS) &&
              !typespec_is_arithmetic(operand_type)) {
-    return BCC_TERR_EXPECTED_ARITHMETIC;
+    return create_type_error(astree_adopt(operator, 1, operand),
+                             BCC_TERR_EXPECTED_ARITHMETIC);
   } else if (operator->symbol == '~' && !typespec_is_integer(operand_type)) {
-    return BCC_TERR_EXPECTED_INTEGER;
+    return create_type_error(astree_adopt(operator, 1, operand),
+                             BCC_TERR_EXPECTED_INTEGER);
   } else if (operator->symbol == '!') {
     if (typespec_is_scalar(operand_type)) {
       operator->type = & SPEC_INT;
-      return BCC_TERR_SUCCESS;
-      ;
+      return astree_adopt(operator, 1, operand);
     } else {
-      return BCC_TERR_EXPECTED_SCALAR;
+      return create_type_error(astree_adopt(operator, 1, operand),
+                               BCC_TERR_EXPECTED_SCALAR);
     }
   } else {
     if (!is_increment(operator->symbol)) {
-      int status = perform_pointer_conv(operator, & operand);
-      if (status) return status;
+      operand = perform_pointer_conv(operand);
+      if (operand->symbol == TOK_TYPE_ERROR) {
+      }
     }
-    status = determine_conversion(operand_type, &SPEC_INT, &operator->type);
-    if (status) return status;
-    return convert_type(operator, & operand, operator->type);
+    int status = determine_conversion(operand_type, &SPEC_INT, &operator->type);
+    if (status)
+      return create_type_error(astree_adopt(operator, 1, operand), status);
+    operand = convert_type(operand, operator->type);
+    if (operand->symbol == TOK_TYPE_ERROR) {
+    }
+    return astree_adopt(operator, 1, operand);
   }
 }
 
-int validate_indirection(ASTree *indirection) {
-  ASTree *subexpr = astree_get(indirection, 0);
-  int status = validate_expr(subexpr);
-  if (status) return status;
-  status = perform_pointer_conv(indirection, &subexpr);
-  if (status) return status;
+ASTree *validate_indirection(ASTree *indirection, ASTree *operand) {
+  operand = perform_pointer_conv(operand);
+  if (operand->symbol == TOK_TYPE_ERROR) {
+  }
 
   if (typespec_is_pointer(indirection->type)) {
     TypeSpec *indirection_spec = malloc(sizeof(*indirection_spec));
-    int status = strip_aux_type(indirection_spec, subexpr->type);
-    if (status) return status;
+    int status = strip_aux_type(indirection_spec, operand->type);
+    if (status) {
+      return create_type_error(astree_adopt(indirection, 1, operand), status);
+    }
     indirection->type = indirection_spec;
-    return BCC_TERR_SUCCESS;
+    return astree_adopt(indirection, 1, operand);
   } else {
-    return BCC_TERR_EXPECTED_POINTER;
+    return create_type_error(astree_adopt(indirection, 1, operand),
+                             BCC_TERR_EXPECTED_POINTER);
   }
 }
 
-int validate_addrof(ASTree *addrof) {
-  ASTree *subexpr = astree_get(addrof, 0);
-  int status = validate_expr(subexpr);
-  if (status) return status;
+ASTree *validate_addrof(ASTree *addrof, ASTree *operand) {
   /* TODO(Robert): check that operand is an lval */
   /* TODO(Robert): set constexpr attribute if operand is static/extern */
   TypeSpec *addrof_spec = malloc(sizeof(*addrof_spec));
-  status = typespec_copy(addrof_spec, subexpr->type);
-  if (status) return status;
+  int status = typespec_copy(addrof_spec, operand->type);
+  if (status) {
+    return create_type_error(astree_adopt(addrof, 1, operand), status);
+  }
   AuxSpec *ptr_aux = calloc(1, sizeof(*ptr_aux));
   ptr_aux->aux = AUX_POINTER;
   llist_push_front(&addrof_spec->auxspecs, ptr_aux);
   addrof->type = addrof_spec;
-  return BCC_TERR_SUCCESS;
+  return astree_adopt(addrof, 1, operand);
 }
 
-int validate_sizeof(ASTree *sizeof_) {
-  if (astree_get(sizeof_, 0)->symbol == TOK_DECLARATION) {
-    ASTree *declaration = astree_get(sizeof_, 0);
-    /*
-    int status = validate_declaration(declaration);
-    if (status) return status;
-    */
-    ASTree *type_name = astree_get(declaration, 1);
-    if (typespec_is_incomplete(type_name->type)) {
-      return BCC_TERR_INCOMPLETE_TYPE;
-    }
-  } else {
-    ASTree *expr = astree_get(sizeof_, 0);
-    int status = validate_expr(expr);
-    if (status) return status;
-    if (typespec_is_incomplete(expr->type)) {
-      return BCC_TERR_INCOMPLETE_TYPE;
-    }
+ASTree *validate_sizeof(ASTree *sizeof_, ASTree *type_node) {
+  if (type_node->symbol == TOK_TYPE_ERROR) {
+    return propogate_type_error(sizeof_, type_node);
+  } else if (type_node->symbol == TOK_DECLARATION) {
+    type_node = astree_get(type_node, 1);
+  }
+
+  if (typespec_is_incomplete(type_node->type)) {
+    return create_type_error(astree_adopt(sizeof_, 1, type_node),
+                             BCC_TERR_INCOMPLETE_TYPE);
   }
   /* TODO(Robert): compute actual size and also probably make sure that this
    * is actually the correct type name for the output of sizeof on this
@@ -1279,188 +1336,88 @@ int validate_sizeof(ASTree *sizeof_) {
    */
   sizeof_->type = &SPEC_ULONG;
   sizeof_->attributes |= (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST);
-  return BCC_TERR_SUCCESS;
+  return astree_adopt(sizeof_, 1, type_node);
 }
 
-int validate_subscript(ASTree *subscript) {
-  ASTree *composite_object = astree_get(subscript, 0);
-  int status = validate_expr(composite_object);
-  if (status) return status;
-  status = perform_pointer_conv(subscript, &composite_object);
-  if (status) return status;
+ASTree *validate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
+  pointer = perform_pointer_conv(pointer);
+  if (pointer->symbol == TOK_TYPE_ERROR) {
+  }
 
-  ASTree *index = astree_get(subscript, 1);
-  status = validate_expr(index);
-  if (status) return status;
-  status = perform_pointer_conv(subscript, &index);
-  if (status) return status;
+  index = perform_pointer_conv(index);
+  if (index->symbol == TOK_TYPE_ERROR) {
+  }
 
-  if (!typespec_is_pointer(composite_object->type)) {
-    return BCC_TERR_EXPECTED_POINTER;
+  if (!typespec_is_pointer(pointer->type)) {
+    return create_type_error(astree_adopt(subscript, 2, pointer, index),
+                             BCC_TERR_EXPECTED_POINTER);
   } else if (!typespec_is_integer(index->type)) {
-    return BCC_TERR_EXPECTED_INTEGER;
+    return create_type_error(astree_adopt(subscript, 2, pointer, index),
+                             BCC_TERR_EXPECTED_INTEGER);
   } else {
     TypeSpec *subscript_spec = malloc(sizeof(*subscript_spec));
-    int status = strip_aux_type(subscript_spec, composite_object->type);
-    if (status) return status;
+    int status = strip_aux_type(subscript_spec, pointer->type);
+    if (status)
+      return create_type_error(astree_adopt(subscript, 2, pointer, index),
+                               status);
     subscript->type = subscript_spec;
-    return BCC_TERR_SUCCESS;
+    return astree_adopt(subscript, 2, pointer, index);
   }
 }
 
-int validate_reference(ASTree *reference) {
-  ASTree *strunion = astree_get(reference, 0);
-  int status = validate_expr(strunion);
-  if (status) return status;
-  const TypeSpec *strunion_type = strunion->type;
-  if (!typespec_is_struct(strunion_type) && !typespec_is_union(strunion_type)) {
-    return BCC_TERR_EXPECTED_TAG;
+ASTree *validate_reference(ASTree *reference, ASTree *struct_,
+                           ASTree *member_name_node) {
+  const TypeSpec *struct_type = struct_->type;
+  if (!typespec_is_struct(struct_type) && !typespec_is_union(struct_type)) {
+    return create_type_error(
+        astree_adopt(reference, 2, struct_, member_name_node),
+        BCC_TERR_EXPECTED_TAG);
   }
 
-  ASTree *member = astree_get(reference, 1);
-  const char *member_name = member->lexinfo;
+  const char *member_name = member_name_node->lexinfo;
   const size_t member_name_len = strlen(member_name);
-  AuxSpec *strunion_aux = llist_front(&strunion_type->auxspecs);
-  SymbolTable *member_table = strunion_aux->data.tag.val->data.members.by_name;
+  AuxSpec *struct_aux = llist_front(&struct_type->auxspecs);
+  SymbolTable *member_table = struct_aux->data.tag.val->data.members.by_name;
   SymbolValue *symval =
       symbol_table_get(member_table, (char *)member_name, member_name_len);
 
   if (symval == NULL) {
-    return BCC_TERR_SYM_NOT_FOUND;
+    return create_type_error(
+        astree_adopt(reference, 2, struct_, member_name_node),
+        BCC_TERR_SYM_NOT_FOUND);
   } else {
     reference->type = &symval->type;
-    return BCC_TERR_SUCCESS;
+    return astree_adopt(reference, 2, struct_, member_name_node);
   }
 }
 
-int validate_arrow(ASTree *arrow) {
-  ASTree *strunion = astree_get(arrow, 0);
-  int status = validate_expr(strunion);
-  if (status) return status;
-  status = perform_pointer_conv(arrow, &strunion);
-  if (status) return status;
-
-  const TypeSpec *strunion_type = strunion->type;
-  if (!typespec_is_structptr(strunion_type) &&
-      !typespec_is_unionptr(strunion_type)) {
-    return BCC_TERR_EXPECTED_TAG;
+ASTree *validate_arrow(ASTree *arrow, ASTree *struct_,
+                       ASTree *member_name_node) {
+  struct_ = perform_pointer_conv(struct_);
+  if (struct_->symbol == TOK_TYPE_ERROR) {
   }
-  ASTree *member = astree_get(arrow, 1);
-  const char *member_name = member->lexinfo;
+
+  const TypeSpec *struct_type = struct_->type;
+  if (!typespec_is_structptr(struct_type) &&
+      !typespec_is_unionptr(struct_type)) {
+    return create_type_error(astree_adopt(arrow, 2, struct_, member_name_node),
+                             BCC_TERR_EXPECTED_TAG);
+  }
+  const char *member_name = member_name_node->lexinfo;
   const size_t member_name_len = strlen(member_name);
   /* first auxtype is pointer; second is struct/union */
-  AuxSpec *strunion_aux = llist_get(&strunion_type->auxspecs, 1);
+  AuxSpec *strunion_aux = llist_get(&struct_type->auxspecs, 1);
   SymbolTable *member_table = strunion_aux->data.tag.val->data.members.by_name;
   SymbolValue *symval =
       symbol_table_get(member_table, (char *)member_name, member_name_len);
 
   if (symval == NULL) {
-    return BCC_TERR_SYM_NOT_FOUND;
+    return create_type_error(astree_adopt(arrow, 2, struct_, member_name_node),
+                             BCC_TERR_SYM_NOT_FOUND);
   } else {
     arrow->type = &symval->type;
-    return BCC_TERR_SUCCESS;
+    return astree_adopt(arrow, 2, struct_, member_name_node);
   }
-}
-
-int validate_expr(ASTree *expression) {
-  int status;
-  const char *ident;
-  ASTree *left;
-  ASTree *right;
-
-  DEBUGS('t', "Validating next expression");
-  switch (expression->symbol) {
-    case '?':
-      status = validate_conditional(expression);
-      break;
-    case ',':
-      status = validate_comma(expression);
-      break;
-    case '=':
-    case TOK_ADDEQ:
-    case TOK_SUBEQ:
-    case TOK_MULEQ:
-    case TOK_DIVEQ:
-    case TOK_REMEQ:
-    case TOK_ANDEQ:
-    case TOK_OREQ:
-    case TOK_XOREQ:
-    case TOK_SHREQ:
-    case TOK_SHLEQ:
-      status = validate_assignment(expression);
-      break;
-    case TOK_EQ:
-    case TOK_NE:
-    case TOK_OR:
-    case TOK_AND:
-    case TOK_LE:
-    case TOK_GE:
-    case '>':
-    case '<':
-    case '+':
-    case '-':
-    case '*':
-    case '/':
-    case '%':
-    case '|':
-    case '^':
-    case '&':
-    case TOK_SHL:
-    case TOK_SHR:
-      status = validate_binop(expression);
-      break;
-    case '!':
-    case TOK_POS: /* promotion operator */
-    case TOK_NEG:
-    case '~':
-    case TOK_INC:
-    case TOK_DEC:
-    case TOK_POST_INC:
-    case TOK_POST_DEC:
-      status = validate_unop(expression);
-      break;
-    case TOK_INDIRECTION:
-      status = validate_indirection(expression);
-      break;
-    case TOK_ADDROF:
-      status = validate_addrof(expression);
-      break;
-    case TOK_SIZEOF:
-      status = validate_sizeof(expression);
-      break;
-    case TOK_CALL:
-      /* expression->attributes |= ATTR_EXPR_VREG; */
-      status = validate_call(expression);
-      break;
-    case TOK_SUBSCRIPT:
-      status = validate_subscript(expression);
-      break;
-    case '.':
-      status = validate_reference(expression);
-      break;
-    case TOK_ARROW:
-      status = validate_arrow(expression);
-      break;
-    case TOK_INTCON:
-      status = validate_intcon(expression);
-      break;
-    case TOK_CHARCON:
-      status = validate_charcon(expression);
-      break;
-    case TOK_STRINGCON:
-      status = validate_stringcon(expression);
-      break;
-    case TOK_IDENT:
-      DEBUGS('t', "bonk");
-      status = validate_ident(expression);
-      break;
-    case TOK_CAST:
-      status = validate_cast(expression);
-      break;
-    default:
-      status = BCC_TERR_UNEXPECTED_TOKEN;
-  }
-  return status;
 }
 
 /*
@@ -1482,11 +1439,10 @@ int typecheck_array_initializer(ASTree *declarator, ASTree *init_list) {
   size_t i;
   for (i = 0; i < astree_count(init_list); ++i) {
     ASTree *initializer = astree_get(init_list, i);
-    int status = validate_expr(initializer);
-    if (status) return status;
-    status = perform_pointer_conv(init_list, &initializer);
-    if (status) return status;
-    status = convert_type(init_list, &initializer, &element_type);
+    initializer = perform_pointer_conv(initializer);
+    if (initializer->symbol == TOK_TYPE_ERROR) {
+    }
+    int status = convert_type(init_list, &initializer, &element_type);
     if (status) return status;
   }
   return BCC_TERR_SUCCESS;
@@ -1510,10 +1466,9 @@ int typecheck_union_initializer(ASTree *declarator, ASTree *init_list) {
      * first member of the union
      */
     ASTree *initializer = astree_get(init_list, 0);
-    int status = validate_expr(initializer);
-    if (status) return status;
-    status = perform_pointer_conv(init_list, &initializer);
-    if (status) return status;
+    initializer = perform_pointer_conv(initializer);
+    if (initializer->symbol == TOK_TYPE_ERROR) {
+    }
     SymbolValue *member_symbol = llist_front((LinkedList *)members);
     return convert_type(init_list, &initializer, &member_symbol->type);
   }
@@ -1536,12 +1491,11 @@ int typecheck_struct_initializer(ASTree *declarator, ASTree *init_list) {
     size_t i;
     for (i = 0; i < astree_count(init_list); ++i) {
       ASTree *initializer = astree_get(init_list, i);
-      int status = validate_expr(initializer);
-      if (status) return status;
-      status = perform_pointer_conv(init_list, &initializer);
-      if (status) return status;
+      initializer = perform_pointer_conv(initializer);
+      if (initializer->symbol == TOK_TYPE_ERROR) {
+      }
       SymbolValue *member_symbol = llist_get((LinkedList *)members, i);
-      status = convert_type(init_list, &initializer, &member_symbol->type);
+      int status = convert_type(init_list, &initializer, &member_symbol->type);
       if (status) return status;
     }
     return BCC_TERR_SUCCESS;
@@ -1550,13 +1504,21 @@ int typecheck_struct_initializer(ASTree *declarator, ASTree *init_list) {
 
 ASTree *define_symbol(ASTree *declaration, ASTree *declarator,
                       ASTree *equal_sign, ASTree *initializer) {
+  if (declaration->symbol == TOK_TYPE_ERROR) {
+    ASTree *real_declaration = astree_get(declaration, 0);
+    astree_adopt(real_declaration, 1,
+                 astree_adopt(equal_sign, 2, declarator, initializer));
+  }
   ASTree *err_or_decl = validate_declaration(declaration, declarator);
   if (err_or_decl->symbol == TOK_TYPE_ERROR) {
     ASTree *errnode = propogate_type_error(equal_sign, declarator);
     astree_adopt(equal_sign, 1, initializer);
     return propogate_type_error(declaration, errnode);
-  }
-  if (initializer->symbol == TOK_INIT_LIST) {
+  } else if (initializer->symbol == TOK_TYPE_ERROR) {
+    ASTree *errnode = propogate_type_error(
+        astree_adopt(equal_sign, 1, declarator), initializer);
+    return propogate_type_error(declaration, errnode);
+  } else if (initializer->symbol == TOK_INIT_LIST) {
     const TypeSpec *decl_type = declarator->type;
     int status = BCC_TERR_SUCCESS;
     if (typespec_is_array(decl_type)) {
@@ -1579,28 +1541,19 @@ ASTree *define_symbol(ASTree *declaration, ASTree *declarator,
                           astree_adopt(equal_sign, 2, declarator, initializer));
     }
   } else {
-    int status = validate_expr(initializer);
+    initializer = perform_pointer_conv(initializer);
+    if (initializer->symbol == TOK_TYPE_ERROR) {
+      ASTree *errnode = propogate_type_error(
+          astree_adopt(equal_sign, 1, declarator), initializer);
+      return propogate_type_error(declaration, errnode);
+    }
+    int status = convert_type(equal_sign, &initializer, declarator->type);
     if (status) {
       return create_type_error(
           astree_adopt(declaration, 1,
                        astree_adopt(equal_sign, 2, declarator, initializer)),
           status);
     }
-    status = perform_pointer_conv(equal_sign, &initializer);
-    if (status) {
-      return create_type_error(
-          astree_adopt(declaration, 1,
-                       astree_adopt(equal_sign, 2, declarator, initializer)),
-          status);
-    }
-    status = convert_type(equal_sign, &initializer, declarator->type);
-    if (status) {
-      return create_type_error(
-          astree_adopt(declaration, 1,
-                       astree_adopt(equal_sign, 2, declarator, initializer)),
-          status);
-    }
-
     return astree_adopt(declaration, 1,
                         astree_adopt(equal_sign, 2, declarator, initializer));
   }
@@ -1626,9 +1579,7 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
     astree_adopt(declaration, 1, body);
     return errnode;
   }
-  SymbolValue *symval = NULL;
-  state_get_symbol(state, declarator->lexinfo, strlen(declarator->lexinfo),
-                   &symval);
+  SymbolValue *symval = sym_from_type((TypeSpec *)declarator->type);
   if (symval == NULL) {
     return create_type_error(astree_adopt(declaration, 2, declarator, body),
                              BCC_TERR_FAILURE);
@@ -1640,23 +1591,7 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
                              BCC_TERR_REDEFINITION);
   }
 
-  int status = state_set_function(state, symval);
-  if (status) {
-    return create_type_error(astree_adopt(declaration, 2, declarator, body),
-                             status);
-  }
-  body->symbol_table = declarator->symbol_table;
-  status = validate_stmt(body);
-  if (status) {
-    state_unset_function(state);
-    return create_type_error(astree_adopt(declaration, 2, declarator, body),
-                             status);
-  }
-  status = state_unset_function(state);
-  if (status) {
-    return create_type_error(astree_adopt(declaration, 2, declarator, body),
-                             status);
-  }
+  /* TODO(Robert): check that there are no invalid flow control statements */
   /* mark function as defined */
   symval->flags |= SYMFLAG_FUNCTION_DEFINED;
   return astree_adopt(declaration, 2, declarator, body);
@@ -1836,26 +1771,18 @@ ASTree *define_enumerator(ASTree *enum_, ASTree *ident_node, ASTree *equal_sign,
 
   if (equal_sign != NULL) {
     /* TODO(Robert): evaluate enumeration constants */
-    int status = validate_expr(expr);
-    if (status) {
-      if (equal_sign != NULL) {
-        astree_adopt(left_brace, 1,
-                     astree_adopt(equal_sign, 2, ident_node, expr));
-        return create_type_error(enum_, status);
-      } else {
-        astree_adopt(left_brace, 1, ident_node);
-        return create_type_error(enum_, status);
-      }
+    if (expr->symbol == TOK_TYPE_ERROR) {
+      ASTree *errnode =
+          propogate_type_error(astree_adopt(equal_sign, 1, ident_node), expr);
+      /* TODO(Robert): have error propogation function handle more complex
+       * syntax tree structures
+       */
+      return propogate_type_error(enum_, errnode);
     }
     if ((expr->attributes & ATTR_EXPR_ARITHCONST) == 0) {
-      if (equal_sign != NULL) {
-        astree_adopt(left_brace, 1,
-                     astree_adopt(equal_sign, 2, ident_node, expr));
-        return create_type_error(enum_, BCC_TERR_EXPECTED_ARITHCONST);
-      } else {
-        astree_adopt(left_brace, 1, ident_node);
-        return create_type_error(enum_, BCC_TERR_EXPECTED_ARITHCONST);
-      }
+      astree_adopt(left_brace, 1,
+                   astree_adopt(equal_sign, 2, ident_node, expr));
+      return create_type_error(enum_, BCC_TERR_EXPECTED_ARITHCONST);
     }
     astree_adopt(left_brace, 1, astree_adopt(equal_sign, 2, ident_node, expr));
     return enum_;
@@ -1918,215 +1845,178 @@ ASTree *declare_symbol(ASTree *declaration, ASTree *declarator) {
   }
 }
 
-int validate_return(ASTree *ret) {
+ASTree *validate_return(ASTree *ret, ASTree *expr) {
   TypeSpec ret_spec = SPEC_EMPTY;
   /* strip function type */
   SymbolValue *function_symval = state_get_function(state);
   int status = strip_aux_type(&ret_spec, &function_symval->type);
-  if (status) return status;
-  if (astree_count(ret) > 0) {
-    ASTree *expr = astree_get(ret, 0);
-    int status = validate_expr(expr);
-    if (status) return status;
-    status = perform_pointer_conv(ret, &expr);
-    if (status) return status;
-    status = convert_type(ret, &expr, &ret_spec);
+  if (status) {
+    typespec_destroy(&ret_spec);
+    if (expr != NULL) astree_adopt(ret, 1, expr);
+    return create_type_error(ret, status);
+  }
+  if (expr != NULL) {
+    expr = perform_pointer_conv(expr);
+    if (expr->symbol == TOK_TYPE_ERROR) {
+      /* free temporary spec */
+      typespec_destroy(&ret_spec);
+      return propogate_type_error(ret, expr);
+    }
+    expr = convert_type(expr, &ret_spec);
+    if (expr->symbol == TOK_TYPE_ERROR) {
+      /* free temporary spec */
+      typespec_destroy(&ret_spec);
+      return propogate_type_error(ret, expr);
+    }
+    /* free temporary spec */
+    typespec_destroy(&ret_spec);
+    return astree_adopt(ret, 1, expr);
   } else {
     int compatibility = types_compatible(&ret_spec, &SPEC_VOID);
     if (compatibility != TCHK_COMPATIBLE) {
-      return BCC_TERR_EXPECTED_RETVAL;
+      /* free temporary spec */
+      typespec_destroy(&ret_spec);
+      return create_type_error(ret, BCC_TERR_EXPECTED_RETVAL);
+    } else {
+      /* free temporary spec */
+      typespec_destroy(&ret_spec);
+      return ret;
     }
   }
-
-  /* free temporary spec */
-  typespec_destroy(&ret_spec);
-  return status;
 }
 
-int validate_ifelse(ASTree *ifelse) {
-  ASTree *expr = astree_get(ifelse, 0);
-  int status = validate_expr(expr);
-  if (status) return status;
-  status = perform_pointer_conv(ifelse, &expr);
-  if (status) return status;
-
-  if (!typespec_is_scalar(expr->type)) {
-    return BCC_TERR_EXPECTED_SCALAR;
+ASTree *validate_ifelse(ASTree *ifelse, ASTree *condition, ASTree *if_body,
+                        ASTree *else_body) {
+  condition = perform_pointer_conv(condition);
+  if (condition->symbol == TOK_TYPE_ERROR) {
   }
 
-  ASTree *if_body = astree_get(ifelse, 1);
-  status = validate_stmt(if_body);
-  if (status) return status;
-
-  if (astree_count(ifelse) == 3) {
-    ASTree *else_body = astree_get(ifelse, 2);
-    status = validate_stmt(else_body);
-    if (status) return status;
+  if (!typespec_is_scalar(condition->type)) {
+    return create_type_error(
+        astree_adopt(ifelse, 3, condition, if_body, else_body),
+        BCC_TERR_EXPECTED_SCALAR);
   }
-  return BCC_TERR_SUCCESS;
+
+  return astree_adopt(ifelse, 3, condition, if_body, else_body);
 }
 
-int validate_switch(ASTree *switch_) {
-  ASTree *expr = astree_get(switch_, 0);
-  ASTree *stmt = astree_get(switch_, 1);
-
-  int status = validate_expr(expr);
-  if (status) return status;
+ASTree *validate_switch(ASTree *switch_, ASTree *expr, ASTree *stmt) {
   if (!typespec_is_integer(expr->type)) {
-    return BCC_TERR_EXPECTED_INTEGER;
+    return create_type_error(astree_adopt(switch_, 2, expr, stmt),
+                             BCC_TERR_EXPECTED_INTEGER);
   }
 
-  return validate_stmt(stmt);
+  return astree_adopt(switch_, 2, expr, stmt);
 }
 
-int validate_while(ASTree *while_) {
-  ASTree *expr = while_->symbol == TOK_WHILE ? astree_get(while_, 0)
-                                             : astree_get(while_, 1);
-  int status = validate_expr(expr);
-  if (status) return status;
-  status = perform_pointer_conv(while_, &expr);
-  if (status) return status;
-  if (!typespec_is_scalar(expr->type)) {
-    return BCC_TERR_EXPECTED_INTEGER;
+ASTree *validate_while(ASTree *while_, ASTree *condition, ASTree *stmt) {
+  condition = perform_pointer_conv(condition);
+  if (condition->symbol == TOK_TYPE_ERROR) {
+    ASTree *errnode = propogate_type_error(while_, condition);
+    astree_adopt(while_, 1, stmt);
+    return errnode;
   }
-  ASTree *while_body = while_->symbol == TOK_WHILE ? astree_get(while_, 1)
-                                                   : astree_get(while_, 0);
-  return validate_stmt(while_body);
+  if (!typespec_is_scalar(condition->type)) {
+    return create_type_error(astree_adopt(while_, 2, condition, stmt),
+                             BCC_TERR_EXPECTED_INTEGER);
+  }
+  return astree_adopt(while_, 2, condition, stmt);
 }
 
-int validate_for(ASTree *for_) {
-  ASTree *first_expr = astree_get(for_, 0);
-  if (first_expr != &EMPTY_EXPR) {
-    int status = validate_expr(first_expr);
-    if (status) return status;
+ASTree *validate_do(ASTree *do_, ASTree *stmt, ASTree *condition) {
+  condition = perform_pointer_conv(condition);
+  if (condition->symbol == TOK_TYPE_ERROR) {
+    ASTree *errnode = propogate_type_error(do_, condition);
+    astree_adopt(do_, 1, stmt);
+    return errnode;
   }
+  if (!typespec_is_scalar(condition->type)) {
+    return create_type_error(astree_adopt(do_, 2, condition, stmt),
+                             BCC_TERR_EXPECTED_INTEGER);
+  }
+  return astree_adopt(do_, 2, condition, stmt);
+}
 
-  ASTree *second_expr = astree_get(for_, 1);
-  if (second_expr != &EMPTY_EXPR) {
-    int status = validate_expr(second_expr);
-    if (status) return status;
-    if (!typespec_is_scalar(second_expr->type)) {
-      return BCC_TERR_EXPECTED_SCALCONST;
+ASTree *validate_for_exprs(ASTree *left_paren, ASTree *init_expr,
+                           ASTree *pre_iter_expr, ASTree *reinit_expr) {
+  if (init_expr->symbol == TOK_TYPE_ERROR) {
+  } else if (pre_iter_expr->symbol == TOK_TYPE_ERROR) {
+  } else if (reinit_expr->symbol == TOK_TYPE_ERROR) {
+  }
+  if (pre_iter_expr != &EMPTY_EXPR) {
+    if (!typespec_is_scalar(pre_iter_expr->type)) {
+      return create_type_error(
+          astree_adopt(left_paren, 3, init_expr, pre_iter_expr, reinit_expr),
+          BCC_TERR_EXPECTED_SCALCONST);
     }
   }
+  return astree_adopt(left_paren, 3, init_expr, pre_iter_expr, reinit_expr);
+}
 
-  ASTree *third_expr = astree_get(for_, 2);
-  if (third_expr != &EMPTY_EXPR) {
-    int status = validate_expr(third_expr);
-    if (status) return status;
+ASTree *validate_for(ASTree *for_, ASTree *left_paren, ASTree *stmt) {
+  if (left_paren->symbol == TOK_TYPE_ERROR) {
+  } else if (stmt->symbol == TOK_TYPE_ERROR) {
   }
-
-  ASTree *for_stmt = astree_get(for_, 3);
-  return validate_stmt(for_stmt);
+  return astree_adopt(for_, 2, left_paren, stmt);
 }
 
 /* TODO(Robert): decide whether or not to create empty labels for goto
  * statements whose label has not been defined yet.
  */
-int validate_label(ASTree *label) {
-  ASTree *ident = astree_get(label, 0);
-  const char *ident_str = ident->lexinfo;
-  size_t ident_str_len = strlen(ident_str);
-  LabelValue *existing_entry = state_get_label(state, ident_str, ident_str_len);
+ASTree *validate_label(ASTree *label, ASTree *ident_node, ASTree *stmt) {
+  if (stmt->symbol == TOK_TYPE_ERROR) {
+    astree_adopt(label, 1, ident_node);
+    return propogate_type_error(label, stmt);
+  }
+  const char *ident = ident_node->lexinfo;
+  size_t ident_len = strlen(ident);
+  LabelValue *existing_entry = state_get_label(state, ident, ident_len);
   if (existing_entry) {
     if (existing_entry->is_defined) {
-      return BCC_TERR_EXPECTED_CONST;
+      return create_type_error(astree_adopt(label, 2, ident_node, stmt),
+                               BCC_TERR_REDEFINITION);
     } else {
-      existing_entry->loc = &ident->loc;
+      existing_entry->loc = &ident_node->loc;
       existing_entry->is_defined = 1;
-      return validate_stmt(astree_get(label, 1));
+      return astree_adopt(label, 2, ident_node, stmt);
     }
   } else {
     LabelValue *labval = malloc(sizeof(*labval));
-    labval->loc = &ident->loc;
+    labval->loc = &ident_node->loc;
     labval->is_defined = 1;
-    int status = state_insert_label(state, ident_str, ident_str_len, labval);
-    if (status) return status;
-    return validate_stmt(astree_get(label, 1));
+    int status = state_insert_label(state, ident, ident_len, labval);
+    if (status) {
+      return create_type_error(astree_adopt(label, 2, ident_node, stmt),
+                               status);
+    }
+    return astree_adopt(label, 2, ident_node, stmt);
   }
 }
 
-int validate_case(ASTree *case_) {
-  ASTree *constexpr = astree_get(case_, 0);
-  int status = validate_expr(constexpr);
-  if (status) return status;
+ASTree *validate_case(ASTree *case_, ASTree *constexpr, ASTree *stmt) {
+  if (constexpr->symbol == TOK_TYPE_ERROR) {
+  } else if (stmt->symbol == TOK_TYPE_ERROR) {
+  }
+
   const TypeSpec *case_const_spec = constexpr->type;
   if (!typespec_is_integer(case_const_spec) ||
       !(constexpr->attributes | ATTR_EXPR_ARITHCONST)) {
-    return BCC_TERR_EXPECTED_INTCONST;
+    return create_type_error(astree_adopt(case_, 2, constexpr, stmt),
+                             BCC_TERR_EXPECTED_INTCONST);
   }
 
-  ASTree *statement = astree_get(case_, 1);
-  return validate_stmt(statement);
+  return astree_adopt(case_, 2, constexpr, stmt);
 }
 
-int validate_block(ASTree *block) {
-  size_t i;
-  /* don't overwrite scope if this block belongs to a function */
-  if (block->symbol_table == NULL)
-    block->symbol_table = symbol_table_init(state);
-  int status = state_push_table(state, block->symbol_table);
-  if (status) return status;
-  for (i = 0; i < astree_count(block); ++i) {
-    ASTree *statement = astree_get(block, i);
-    int status = validate_stmt(statement);
-    if (status) return status;
+ASTree *validate_block_content(ASTree *block, ASTree *block_content) {
+  if (block->symbol == TOK_TYPE_ERROR) {
+    ASTree *real_block = astree_get(block, 0);
+    astree_adopt(block, 1, block_content);
+    return block;
+  } else if (block_content->symbol == TOK_TYPE_ERROR) {
+    return propogate_type_error(block, block_content);
   }
-  return state_pop_table(state);
-}
-
-int validate_stmt(ASTree *statement) {
-  if (statement == &EMPTY_EXPR) return BCC_TERR_SUCCESS;
-  int status;
-  DEBUGS('t', "Validating next statement");
-  switch (statement->symbol) {
-    case TOK_RETURN:
-      status = validate_return(statement);
-      break;
-    case TOK_IF:
-      status = validate_ifelse(statement);
-      break;
-    case TOK_SWITCH:
-      status = validate_switch(statement);
-      break;
-    case TOK_DO:
-    case TOK_WHILE:
-      status = validate_while(statement);
-      break;
-    case TOK_BLOCK:
-      status = validate_block(statement);
-      break;
-    case TOK_DECLARATION:
-      /*
-      status = validate_declaration(statement);
-      */
-      break;
-    case TOK_FOR:
-      status = validate_for(statement);
-      break;
-    case TOK_LABEL:
-      status = validate_label(statement);
-      break;
-    case TOK_CASE:
-      status = validate_case(statement);
-      break;
-    case TOK_DEFAULT:
-      status = validate_stmt(astree_get(statement, 0));
-      break;
-    case TOK_CONTINUE:
-    case TOK_BREAK:
-    case TOK_GOTO:
-      /* handle this during assembly generation */
-      status = BCC_TERR_SUCCESS;
-      break;
-    default:
-      /* parser will catch anything that we don't want, so at this point the
-       * only thing left that this could be is an expression-statement
-       */
-      status = validate_expr(statement);
-      break;
-  }
-  return status;
+  return astree_adopt(block, 1, block_content);
 }
 
 /*

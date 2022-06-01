@@ -263,11 +263,16 @@ unary_expr          : postfix_expr                                      { $$ = $
 postfix_expr        : primary_expr                                      { $$ = $1; }
                     | postfix_expr TOK_INC                              { $$ = astree_adopt(parser_new_sym($2, TOK_POST_INC), 1, $1); }
                     | postfix_expr TOK_DEC                              { $$ = astree_adopt(parser_new_sym($2, TOK_POST_DEC), 1, $1); }
-                    | postfix_expr arg_list ')'                         { $$ = astree_adopt($2, 1, $1); parser_cleanup (1, $3); }
-                    | postfix_expr '(' ')'                              { $$ = astree_adopt(parser_new_sym($2, TOK_CALL), 1, $1); parser_cleanup (1, $3); }
+                    | call                                              { $$ = $1; }
                     | postfix_expr '[' expr ']'                         { $$ = astree_adopt(parser_new_sym($2, TOK_SUBSCRIPT), 2, $1, $3); parser_cleanup(1, $4); }
                     | postfix_expr '.' TOK_IDENT                        { $$ = astree_adopt($2, 2, $1, $3); }
                     | postfix_expr TOK_ARROW TOK_IDENT                  { $$ = astree_adopt($2, 2, $1, $3); }
+                    ;
+call                : postfix_expr '(' ')'                              { $$ = finalize_call(validate_call($1, $2)); parser_cleanup(1, $3);}
+                    | call_args ')'                                     { $$ = finalize_call($1); parser_cleanup(1, $2); }
+                    ;
+call_args           : postfix_expr '(' assign_expr                      { $$ = validate_arg(validate_call($1, $2), $3); }
+                    | call_args ',' assign_expr                         { $$ = validate_arg($1, $3); parser_cleanup($2); }
                     ;
 arg_list            : arg_list ',' assign_expr                          { $$ = astree_adopt($1, 1, $3); astree_destroy($2); }
                     | '(' assign_expr                                   { $$ = astree_adopt(parser_new_sym($1, TOK_CALL), 1, $2); }
