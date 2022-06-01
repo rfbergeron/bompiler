@@ -64,6 +64,16 @@ int state_push_type_error(CompilerState *state, TypeSpec *errtype) {
   }
 }
 
+int state_pop_type_error(CompilerState *state) {
+  if (llist_empty(&state->error_stack)) {
+    fprintf(stderr, "ERROR: attempted to pop type error from empty stack.\n");
+    return -1;
+  } else {
+    llist_pop_front(&state->error_stack);
+    return 0;
+  }
+}
+
 int state_get_symbol(CompilerState *state, const char *ident,
                      const size_t ident_len, SymbolValue **out) {
   size_t i;

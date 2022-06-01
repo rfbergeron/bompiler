@@ -96,6 +96,14 @@ ASTree *astree_adopt(ASTree *parent, const size_t count, ...) {
   return parent;
 }
 
+ASTree *astree_replace(ASTree *parent, const size_t index, ASTree *child) {
+  if (index >= astree_count(parent)) return NULL;
+  ASTree *old_child = llist_extract(&parent->children, index);
+  /* TODO(Robert): check status and indicate errors */
+  int status = llist_insert(&parent->children, child, index);
+  return old_child;
+}
+
 size_t astree_count(ASTree *parent) { return llist_size(&parent->children); }
 
 int astree_to_string(ASTree *tree, char *buffer, size_t size) {

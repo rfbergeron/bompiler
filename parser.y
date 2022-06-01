@@ -272,7 +272,7 @@ call                : postfix_expr '(' ')'                              { $$ = f
                     | call_args ')'                                     { $$ = finalize_call($1); parser_cleanup(1, $2); }
                     ;
 call_args           : postfix_expr '(' assign_expr                      { $$ = validate_arg(validate_call($1, $2), $3); }
-                    | call_args ',' assign_expr                         { $$ = validate_arg($1, $3); parser_cleanup($2); }
+                    | call_args ',' assign_expr                         { $$ = validate_arg($1, $3); parser_cleanup(1, $2); }
                     ;
 arg_list            : arg_list ',' assign_expr                          { $$ = astree_adopt($1, 1, $3); astree_destroy($2); }
                     | '(' assign_expr                                   { $$ = astree_adopt(parser_new_sym($1, TOK_CALL), 1, $2); }
