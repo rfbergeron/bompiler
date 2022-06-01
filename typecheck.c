@@ -325,7 +325,7 @@ int determine_conversion(const TypeSpec *type1, const TypeSpec *type2,
   return BCC_TERR_SUCCESS;
 }
 
-int validate_intcon(ASTree *intcon) {
+ASTree *validate_intcon(ASTree *intcon) {
   DEBUGS('t', "Validating integer constant %s", intcon->lexinfo);
   int status = 0;
   long signed_value = strtol(intcon->lexinfo, NULL, 10);
@@ -334,11 +334,11 @@ int validate_intcon(ASTree *intcon) {
    * architecture with different sizes of integer types.
    */
   if (signed_value == LONG_MIN) {
-    return BCC_TERR_CONST_TOO_SMALL;
+    return create_type_error(intcon, BCC_TERR_CONST_TOO_SMALL);
   } else if (signed_value == LONG_MAX) {
     unsigned long unsigned_value = strtoul(intcon->lexinfo, NULL, 10);
     if (unsigned_value == UINT64_MAX) {
-      return BCC_TERR_CONST_TOO_LARGE;
+      return create_type_error(intcon, BCC_TERR_CONST_TOO_LARGE);
     } else {
       intcon->type = &SPEC_ULONG;
     }
@@ -353,10 +353,10 @@ int validate_intcon(ASTree *intcon) {
   }
 
   intcon->attributes |= ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST;
-  return status;
+  return intcon;
 }
 
-int validate_charcon(ASTree *charcon) {
+ASTree *validate_charcon(ASTree *charcon) {
   const char *const_str = charcon->lexinfo + 1;
   size_t const_str_len = strlen(const_str) - 1;
   /* TODO(Robert): validate constant information (during assembly generation?)
@@ -375,14 +375,14 @@ int validate_charcon(ASTree *charcon) {
   }
   charcon->type = &SPEC_CHAR;
   charcon->attributes |= ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST;
-  return BCC_TERR_SUCCESS;
+  return charcon;
 }
 
-int validate_stringcon(ASTree *stringcon) {
+ASTree *validate_stringcon(ASTree *stringcon) {
   TypeSpec *stringcon_type = malloc(sizeof(*stringcon->type));
   *stringcon_type = SPEC_CHAR;
   int status = typespec_init(stringcon_type);
-  if (status) return status;
+  if (status) return create_type_error(stringcon, status);
 
   AuxSpec *array_aux = calloc(1, sizeof(*array_aux));
   array_aux->aux = AUX_ARRAY;
@@ -394,7 +394,7 @@ int validate_stringcon(ASTree *stringcon) {
 
   stringcon->type = stringcon_type;
   stringcon->attributes |= ATTR_EXPR_CONST;
-  return BCC_TERR_SUCCESS;
+  return stringcon;
 }
 
 int validate_integer_typespec(TypeSpec *out, enum typespec_index i,
@@ -850,7 +850,7 @@ ASTree *finalize_declaration(ASTree *declaration) {
   return declaration;
 }
 
-ASTree *validate_array(ASTree *array, ASTree *expr) {
+ASTree *validate_array_size(ASTree *array, ASTree *expr) {
   if (expr->symbol == TOK_TYPE_ERROR) {
     return propogate_type_error(array, expr);
   }
@@ -890,8 +890,8 @@ ASTree *validate_param(ASTree *param_list, ASTree *declaration,
   if (err_or_declaration->symbol == TOK_TYPE_ERROR) {
     return propogate_type_error(param_list, err_or_declaration);
   }
-
-  return astree_adopt(param_list, 1, astree_adopt(declaration, 1, declarator));
+  /* declaration already adopted the declarator in declare_symbol */
+  return astree_adopt(param_list, 1, declaration);
 }
 
 ASTree *finalize_param_list(ASTree *param_list) {
@@ -996,6 +996,10 @@ ASTree *define_dirdecl(ASTree *declarator, ASTree *dirdecl) {
 }
 
 ASTree *validate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
+  if (declaration->symbol == TOK_TYPE_ERROR) {
+  } else if (expr->symbol == TOK_TYPE_ERROR) {
+  }
+
   expr = perform_pointer_conv(expr);
   if (expr->symbol == TOK_TYPE_ERROR) {
   }
@@ -1903,7 +1907,7 @@ ASTree *validate_return(ASTree *ret, ASTree *expr) {
     if (expr != NULL) astree_adopt(ret, 1, expr);
     return create_type_error(ret, status);
   }
-  if (expr != NULL) {
+  if (expr != &EMPTY_EXPR) {
     expr = perform_pointer_conv(expr);
     if (expr->symbol == TOK_TYPE_ERROR) {
       /* free temporary spec */
@@ -1928,13 +1932,18 @@ ASTree *validate_return(ASTree *ret, ASTree *expr) {
     } else {
       /* free temporary spec */
       typespec_destroy(&ret_spec);
-      return ret;
+      return astree_adopt(ret, 1, expr);
     }
   }
 }
 
 ASTree *validate_ifelse(ASTree *ifelse, ASTree *condition, ASTree *if_body,
                         ASTree *else_body) {
+  if (condition->symbol == TOK_TYPE_ERROR) {
+  } else if (if_body->symbol == TOK_TYPE_ERROR) {
+  } else if (else_body->symbol == TOK_TYPE_ERROR) {
+  }
+
   condition = perform_pointer_conv(condition);
   if (condition->symbol == TOK_TYPE_ERROR) {
   }
@@ -2041,19 +2050,26 @@ ASTree *validate_label(ASTree *label, ASTree *ident_node, ASTree *stmt) {
   }
 }
 
-ASTree *validate_case(ASTree *case_, ASTree *constexpr, ASTree *stmt) {
-  if (constexpr->symbol == TOK_TYPE_ERROR) {
+ASTree *validate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
+  if (expr->symbol == TOK_TYPE_ERROR) {
   } else if (stmt->symbol == TOK_TYPE_ERROR) {
   }
 
-  const TypeSpec *case_const_spec = constexpr->type;
+  const TypeSpec *case_const_spec = expr->type;
   if (!typespec_is_integer(case_const_spec) ||
-      !(constexpr->attributes | ATTR_EXPR_ARITHCONST)) {
-    return create_type_error(astree_adopt(case_, 2, constexpr, stmt),
+      !(expr->attributes | ATTR_EXPR_ARITHCONST)) {
+    return create_type_error(astree_adopt(case_, 2, expr, stmt),
                              BCC_TERR_EXPECTED_INTCONST);
   }
 
-  return astree_adopt(case_, 2, constexpr, stmt);
+  return astree_adopt(case_, 2, expr, stmt);
+}
+
+ASTree *validate_default(ASTree *default_, ASTree *stmt) {
+  if (stmt->symbol == TOK_TYPE_ERROR) {
+    return propogate_type_error(default_, stmt);
+  }
+  return astree_adopt(default_, 1, stmt);
 }
 
 ASTree *validate_block_content(ASTree *block, ASTree *block_content) {
