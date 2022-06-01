@@ -36,6 +36,7 @@ int state_pop_table(CompilerState *state);
 int state_push_jump(CompilerState *state, JumpEntry *jump_entry);
 int state_pop_jump(CompilerState *state);
 int state_push_type_error(CompilerState *state, TypeSpec *errtype);
+int state_pop_type_error(CompilerState *state);
 int state_get_symbol(CompilerState *state, const char *ident,
                      const size_t ident_len, SymbolValue **out);
 int state_insert_symbol(CompilerState *state, const char *ident,

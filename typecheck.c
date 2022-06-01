@@ -851,9 +851,8 @@ ASTree *finalize_declaration(ASTree *declaration) {
 }
 
 ASTree *validate_array(ASTree *array, ASTree *expr) {
-  int status = validate_expr(expr);
-  if (status) {
-    return create_type_error(astree_adopt(array, 1, expr), status);
+  if (expr->symbol == TOK_TYPE_ERROR) {
+    return propogate_type_error(array, expr);
   }
   if ((expr->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST)) == 0) {
     return create_type_error(astree_adopt(array, 1, expr),
@@ -1420,15 +1419,7 @@ ASTree *validate_arrow(ASTree *arrow, ASTree *struct_,
   }
 }
 
-/*
-ASTree *validate_initialization(ASTree *declarator, ASTree *initializer) {}
-*/
-
-/* New, new strategy: since this function (and define function, and define
- * symbol) are all routed through validate_declaration, we can have this
- * function return the declarator (or an error node), and the adoption process
- * will occur in validate_declaration.
- */
+/* TODO(Robert): handle more complicated (nested list ) initializers */
 
 int typecheck_array_initializer(ASTree *declarator, ASTree *init_list) {
   /* TODO(Robert): evaluate array size when generating three address code */
@@ -1441,9 +1432,28 @@ int typecheck_array_initializer(ASTree *declarator, ASTree *init_list) {
     ASTree *initializer = astree_get(init_list, i);
     initializer = perform_pointer_conv(initializer);
     if (initializer->symbol == TOK_TYPE_ERROR) {
+      /* TODO(Robert): this is a hack; think of a better way */
+      ASTree *errnode = initializer;
+      int errcode = errnode->type->flags;
+      llist_extract(&errnode->children, 0);
+      state_pop_type_error(state);
+      /* TODO(Robert): check for and indicate errors */
+      int status = astree_destroy(errnode);
+      return errcode;
     }
-    int status = convert_type(init_list, &initializer, &element_type);
-    if (status) return status;
+    initializer = convert_type(initializer, &element_type);
+    if (initializer->symbol == TOK_TYPE_ERROR) {
+      /* TODO(Robert): this is a hack; think of a better way */
+      ASTree *errnode = initializer;
+      int errcode = errnode->type->flags;
+      llist_extract(&errnode->children, 0);
+      state_pop_type_error(state);
+      /* TODO(Robert): check for and indicate errors */
+      int status = astree_destroy(errnode);
+      return errcode;
+    }
+    /* insert conversion nodes into the tree */
+    astree_replace(init_list, i, initializer);
   }
   return BCC_TERR_SUCCESS;
 }
@@ -1468,9 +1478,30 @@ int typecheck_union_initializer(ASTree *declarator, ASTree *init_list) {
     ASTree *initializer = astree_get(init_list, 0);
     initializer = perform_pointer_conv(initializer);
     if (initializer->symbol == TOK_TYPE_ERROR) {
+      /* TODO(Robert): this is a hack; think of a better way */
+      ASTree *errnode = initializer;
+      int errcode = errnode->type->flags;
+      llist_extract(&errnode->children, 0);
+      state_pop_type_error(state);
+      /* TODO(Robert): check for and indicate errors */
+      int status = astree_destroy(errnode);
+      return errcode;
     }
     SymbolValue *member_symbol = llist_front((LinkedList *)members);
-    return convert_type(init_list, &initializer, &member_symbol->type);
+    initializer = convert_type(initializer, &member_symbol->type);
+    if (initializer->symbol == TOK_TYPE_ERROR) {
+      /* TODO(Robert): this is a hack; think of a better way */
+      ASTree *errnode = initializer;
+      int errcode = errnode->type->flags;
+      llist_extract(&errnode->children, 0);
+      state_pop_type_error(state);
+      /* TODO(Robert): check for and indicate errors */
+      int status = astree_destroy(errnode);
+      return errcode;
+    }
+    /* insert conversion nodes into the tree */
+    astree_replace(init_list, 0, initializer);
+    return BCC_TERR_SUCCESS;
   }
 }
 
@@ -1483,7 +1514,6 @@ int typecheck_struct_initializer(ASTree *declarator, ASTree *init_list) {
   if (tagval == NULL) {
     return BCC_TERR_TAG_NOT_FOUND;
   }
-
   const LinkedList *members = &tagval->data.members.in_order;
   if (members->size < astree_count(init_list)) {
     return BCC_TERR_EXCESS_INITIALIZERS;
@@ -1493,10 +1523,29 @@ int typecheck_struct_initializer(ASTree *declarator, ASTree *init_list) {
       ASTree *initializer = astree_get(init_list, i);
       initializer = perform_pointer_conv(initializer);
       if (initializer->symbol == TOK_TYPE_ERROR) {
+        /* TODO(Robert): this is a hack; think of a better way */
+        ASTree *errnode = initializer;
+        int errcode = errnode->type->flags;
+        llist_extract(&errnode->children, 0);
+        state_pop_type_error(state);
+        /* TODO(Robert): check for and indicate errors */
+        int status = astree_destroy(errnode);
+        return errcode;
       }
       SymbolValue *member_symbol = llist_get((LinkedList *)members, i);
-      int status = convert_type(init_list, &initializer, &member_symbol->type);
-      if (status) return status;
+      initializer = convert_type(initializer, &member_symbol->type);
+      if (initializer->symbol == TOK_TYPE_ERROR) {
+        /* TODO(Robert): this is a hack; think of a better way */
+        ASTree *errnode = initializer;
+        int errcode = errnode->type->flags;
+        llist_extract(&errnode->children, 0);
+        state_pop_type_error(state);
+        /* TODO(Robert): check for and indicate errors */
+        int status = astree_destroy(errnode);
+        return errcode;
+      }
+      /* insert conversion nodes into the tree */
+      astree_replace(init_list, i, initializer);
     }
     return BCC_TERR_SUCCESS;
   }
@@ -1547,12 +1596,11 @@ ASTree *define_symbol(ASTree *declaration, ASTree *declarator,
           astree_adopt(equal_sign, 1, declarator), initializer);
       return propogate_type_error(declaration, errnode);
     }
-    int status = convert_type(equal_sign, &initializer, declarator->type);
-    if (status) {
-      return create_type_error(
-          astree_adopt(declaration, 1,
-                       astree_adopt(equal_sign, 2, declarator, initializer)),
-          status);
+    initializer = convert_type(initializer, declarator->type);
+    if (initializer->symbol == TOK_TYPE_ERROR) {
+      astree_adopt(equal_sign, 1, declarator);
+      return propogate_type_error(
+          declaration, propogate_type_error(equal_sign, initializer));
     }
     return astree_adopt(declaration, 1,
                         astree_adopt(equal_sign, 2, declarator, initializer));
