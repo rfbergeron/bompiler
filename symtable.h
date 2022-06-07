@@ -12,6 +12,7 @@ typedef struct symbol_table {
   Map primary_namespace;
   Map *tag_namespace;
   Map *label_namespace;
+  LinkedList *control_stack;
 } SymbolTable;
 
 typedef enum symbol_flag {
@@ -45,6 +46,21 @@ typedef struct tag_value {
   int is_defined; /* used to identify forward declarations */
 } TagValue;
 
+typedef enum control_type {
+  CTRL_BREAK,
+  CTRL_CONTINUE,
+  CTRL_GOTO,
+  CTRL_RETURN,
+  CTRL_CASE,
+  CTRL_DEFAULT
+} ControlType;
+
+typedef struct astree ASTree;
+typedef struct control_value {
+  ASTree *tree;
+  ControlType type;
+} ControlValue;
+
 typedef struct label_value {
   Location *loc;
   int is_defined;
@@ -74,4 +90,8 @@ int symbol_table_insert_label(SymbolTable *table, const char *ident,
                               const size_t ident_len, LabelValue *labval);
 LabelValue *symbol_table_get_label(SymbolTable *table, const char *ident,
                                    const size_t ident_len);
+int symbol_table_add_control(SymbolTable *table, ControlValue *ctrlval);
+ControlValue *symbol_table_remove_control(SymbolTable *table, size_t i);
+ControlValue *symbol_table_get_control(SymbolTable *table, size_t i);
+size_t symbol_table_count_control(SymbolTable *table);
 #endif

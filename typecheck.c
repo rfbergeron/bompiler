@@ -1611,6 +1611,54 @@ ASTree *define_symbol(ASTree *declaration, ASTree *declarator,
   }
 }
 
+int typecheck_return(ASTree *ret, SymbolValue *symval) {
+  TypeSpec ret_spec = SPEC_EMPTY;
+  int status = strip_aux_type(&ret_spec, &symval->type);
+  if (status) {
+    typespec_destroy(&ret_spec);
+    return BCC_TERR_FAILURE;
+  }
+  ASTree *expr = astree_get(ret, 0);
+  if (expr != &EMPTY_EXPR) {
+    expr = convert_type(expr, &ret_spec);
+    if (expr->symbol == TOK_TYPE_ERROR) {
+      /* free temporary spec */
+      typespec_destroy(&ret_spec);
+      ASTree *errnode = expr;
+      expr = llist_extract(&errnode->children, 0);
+      int errcode = errnode->type->flags;
+      int status = astree_destroy(errnode);
+      return errcode;
+    }
+    astree_replace(ret, 0, expr);
+    /* free temporary spec */
+    typespec_destroy(&ret_spec);
+    return BCC_TERR_SUCCESS;
+  } else {
+    int compatibility = types_compatible(&ret_spec, &SPEC_VOID);
+    if (compatibility != TCHK_COMPATIBLE) {
+      /* free temporary spec */
+      typespec_destroy(&ret_spec);
+      return BCC_TERR_EXPECTED_RETVAL;
+    } else {
+      /* free temporary spec */
+      typespec_destroy(&ret_spec);
+      return BCC_TERR_SUCCESS;
+    }
+  }
+}
+
+int resolve_label(ASTree *ident_node) {
+  const char *ident = ident_node->lexinfo;
+  size_t ident_len = strnlen(ident, MAX_IDENT_LEN);
+  LabelValue *labval = state_get_label(state, ident, ident_len);
+  if (labval == NULL) {
+    return BCC_TERR_SYM_NOT_FOUND;
+  } else {
+    return BCC_TERR_SUCCESS;
+  }
+}
+
 ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
   /* TODO(Robert): make sure that the declaration location is that of the
    * earliest forward declaration, but that the names of the parameters are
@@ -1625,12 +1673,14 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
     astree_adopt(declaration, 1, body);
     return errnode;
   }
+
   ASTree *err_or_decl = validate_declaration(declaration, declarator);
   if (err_or_decl->symbol == TOK_TYPE_ERROR) {
     ASTree *errnode = propogate_type_error(declaration, err_or_decl);
     astree_adopt(declaration, 1, body);
     return errnode;
   }
+
   SymbolValue *symval = sym_from_type((TypeSpec *)declarator->type);
   if (symval == NULL) {
     return create_type_error(astree_adopt(declaration, 2, declarator, body),
@@ -1643,8 +1693,32 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
                              BCC_TERR_REDEFINITION);
   }
 
-  /* TODO(Robert): check that there are no invalid flow control statements */
-  /* mark function as defined */
+  int status = BCC_TERR_SUCCESS;
+  SymbolTable *table = body->symbol_table;
+  size_t i;
+  for (i = 0; i < symbol_table_count_control(table); ++i) {
+    ControlValue *ctrlval = symbol_table_get_control(table, i);
+    /* TODO(Robert): create label information */
+    if (ctrlval->type == CTRL_GOTO) {
+      status = resolve_label(ctrlval->tree);
+      symbol_table_remove_control(table, i--);
+      free(ctrlval);
+    } else if (ctrlval->type == CTRL_RETURN) {
+      status = typecheck_return(ctrlval->tree, symval);
+      symbol_table_remove_control(table, i--);
+      free(ctrlval);
+    } else {
+      symbol_table_remove_control(table, i--);
+      free(ctrlval);
+      status = BCC_TERR_UNEXPECTED_TOKEN;
+    }
+  }
+
+  if (status) {
+    return create_type_error(astree_adopt(declaration, 2, declarator, body),
+                             status);
+  }
+
   symval->flags |= SYMFLAG_FUNCTION_DEFINED;
   return astree_adopt(declaration, 2, declarator, body);
 }
@@ -1897,46 +1971,6 @@ ASTree *declare_symbol(ASTree *declaration, ASTree *declarator) {
   }
 }
 
-ASTree *validate_return(ASTree *ret, ASTree *expr) {
-  TypeSpec ret_spec = SPEC_EMPTY;
-  /* strip function type */
-  SymbolValue *function_symval = state_get_function(state);
-  int status = strip_aux_type(&ret_spec, &function_symval->type);
-  if (status) {
-    typespec_destroy(&ret_spec);
-    if (expr != NULL) astree_adopt(ret, 1, expr);
-    return create_type_error(ret, status);
-  }
-  if (expr != &EMPTY_EXPR) {
-    expr = perform_pointer_conv(expr);
-    if (expr->symbol == TOK_TYPE_ERROR) {
-      /* free temporary spec */
-      typespec_destroy(&ret_spec);
-      return propogate_type_error(ret, expr);
-    }
-    expr = convert_type(expr, &ret_spec);
-    if (expr->symbol == TOK_TYPE_ERROR) {
-      /* free temporary spec */
-      typespec_destroy(&ret_spec);
-      return propogate_type_error(ret, expr);
-    }
-    /* free temporary spec */
-    typespec_destroy(&ret_spec);
-    return astree_adopt(ret, 1, expr);
-  } else {
-    int compatibility = types_compatible(&ret_spec, &SPEC_VOID);
-    if (compatibility != TCHK_COMPATIBLE) {
-      /* free temporary spec */
-      typespec_destroy(&ret_spec);
-      return create_type_error(ret, BCC_TERR_EXPECTED_RETVAL);
-    } else {
-      /* free temporary spec */
-      typespec_destroy(&ret_spec);
-      return astree_adopt(ret, 1, expr);
-    }
-  }
-}
-
 ASTree *validate_ifelse(ASTree *ifelse, ASTree *condition, ASTree *if_body,
                         ASTree *else_body) {
   if (condition->symbol == TOK_TYPE_ERROR) {
@@ -1958,6 +1992,37 @@ ASTree *validate_ifelse(ASTree *ifelse, ASTree *condition, ASTree *if_body,
 }
 
 ASTree *validate_switch(ASTree *switch_, ASTree *expr, ASTree *stmt) {
+  if (stmt->symbol == TOK_BLOCK) {
+    SymbolTable *table = stmt->symbol_table;
+    size_t i;
+    for (i = 0; i < symbol_table_count_control(table); ++i) {
+      ControlValue *ctrlval = symbol_table_get_control(table, i);
+      /* TODO(Robert): create label information */
+      if (ctrlval->type == CTRL_BREAK) {
+        symbol_table_remove_control(table, i--);
+        free(ctrlval);
+      } else if (ctrlval->type == CTRL_CASE) {
+        symbol_table_remove_control(table, i--);
+        free(ctrlval);
+      } else if (ctrlval->type == CTRL_DEFAULT) {
+        symbol_table_remove_control(table, i--);
+        free(ctrlval);
+      }
+    }
+  } else if (stmt->symbol == CTRL_CASE) {
+    SymbolTable *table = state_peek_table(state);
+    ControlValue *ctrlval = symbol_table_remove_control(table, 0);
+    free(ctrlval);
+  } else if (stmt->symbol == CTRL_DEFAULT) {
+    SymbolTable *table = state_peek_table(state);
+    ControlValue *ctrlval = symbol_table_remove_control(table, 0);
+    free(ctrlval);
+  } else if (stmt->symbol == CTRL_BREAK) {
+    SymbolTable *table = state_peek_table(state);
+    ControlValue *ctrlval = symbol_table_remove_control(table, 0);
+    free(ctrlval);
+  }
+
   if (!typespec_is_integer(expr->type)) {
     return create_type_error(astree_adopt(switch_, 2, expr, stmt),
                              BCC_TERR_EXPECTED_INTEGER);
@@ -1967,6 +2032,30 @@ ASTree *validate_switch(ASTree *switch_, ASTree *expr, ASTree *stmt) {
 }
 
 ASTree *validate_while(ASTree *while_, ASTree *condition, ASTree *stmt) {
+  if (stmt->symbol == TOK_BLOCK) {
+    SymbolTable *table = stmt->symbol_table;
+    size_t i;
+    for (i = 0; i < symbol_table_count_control(table); ++i) {
+      ControlValue *ctrlval = symbol_table_get_control(table, i);
+      /* TODO(Robert): create label information */
+      if (ctrlval->type == CTRL_BREAK) {
+        symbol_table_remove_control(table, i--);
+        free(ctrlval);
+      } else if (ctrlval->type == CTRL_CONTINUE) {
+        symbol_table_remove_control(table, i--);
+        free(ctrlval);
+      }
+    }
+  } else if (stmt->symbol == CTRL_CONTINUE) {
+    SymbolTable *table = state_peek_table(state);
+    ControlValue *ctrlval = symbol_table_remove_control(table, 0);
+    free(ctrlval);
+  } else if (stmt->symbol == CTRL_BREAK) {
+    SymbolTable *table = state_peek_table(state);
+    ControlValue *ctrlval = symbol_table_remove_control(table, 0);
+    free(ctrlval);
+  }
+
   condition = perform_pointer_conv(condition);
   if (condition->symbol == TOK_TYPE_ERROR) {
     ASTree *errnode = propogate_type_error(while_, condition);
@@ -1981,6 +2070,30 @@ ASTree *validate_while(ASTree *while_, ASTree *condition, ASTree *stmt) {
 }
 
 ASTree *validate_do(ASTree *do_, ASTree *stmt, ASTree *condition) {
+  if (stmt->symbol == TOK_BLOCK) {
+    SymbolTable *table = stmt->symbol_table;
+    size_t i;
+    for (i = 0; i < symbol_table_count_control(table); ++i) {
+      ControlValue *ctrlval = symbol_table_get_control(table, i);
+      /* TODO(Robert): create label information */
+      if (ctrlval->type == CTRL_BREAK) {
+        symbol_table_remove_control(table, i--);
+        free(ctrlval);
+      } else if (ctrlval->type == CTRL_CONTINUE) {
+        symbol_table_remove_control(table, i--);
+        free(ctrlval);
+      }
+    }
+  } else if (stmt->symbol == CTRL_CONTINUE) {
+    SymbolTable *table = state_peek_table(state);
+    ControlValue *ctrlval = symbol_table_remove_control(table, 0);
+    free(ctrlval);
+  } else if (stmt->symbol == CTRL_BREAK) {
+    SymbolTable *table = state_peek_table(state);
+    ControlValue *ctrlval = symbol_table_remove_control(table, 0);
+    free(ctrlval);
+  }
+
   condition = perform_pointer_conv(condition);
   if (condition->symbol == TOK_TYPE_ERROR) {
     ASTree *errnode = propogate_type_error(do_, condition);
@@ -2011,6 +2124,30 @@ ASTree *validate_for_exprs(ASTree *left_paren, ASTree *init_expr,
 }
 
 ASTree *validate_for(ASTree *for_, ASTree *left_paren, ASTree *stmt) {
+  if (stmt->symbol == TOK_BLOCK) {
+    SymbolTable *table = stmt->symbol_table;
+    size_t i;
+    for (i = 0; i < symbol_table_count_control(table); ++i) {
+      ControlValue *ctrlval = symbol_table_get_control(table, i);
+      /* TODO(Robert): create label information */
+      if (ctrlval->type == CTRL_BREAK) {
+        symbol_table_remove_control(table, i--);
+        free(ctrlval);
+      } else if (ctrlval->type == CTRL_CONTINUE) {
+        symbol_table_remove_control(table, i--);
+        free(ctrlval);
+      }
+    }
+  } else if (stmt->symbol == CTRL_CONTINUE) {
+    SymbolTable *table = state_peek_table(state);
+    ControlValue *ctrlval = symbol_table_remove_control(table, 0);
+    free(ctrlval);
+  } else if (stmt->symbol == CTRL_BREAK) {
+    SymbolTable *table = state_peek_table(state);
+    ControlValue *ctrlval = symbol_table_remove_control(table, 0);
+    free(ctrlval);
+  }
+
   if (left_paren->symbol == TOK_TYPE_ERROR) {
   } else if (stmt->symbol == TOK_TYPE_ERROR) {
   }
@@ -2054,6 +2191,14 @@ ASTree *validate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
   if (expr->symbol == TOK_TYPE_ERROR) {
   } else if (stmt->symbol == TOK_TYPE_ERROR) {
   }
+  ControlValue *ctrlval = malloc(sizeof(*ctrlval));
+  ctrlval->type = CTRL_CASE;
+  ctrlval->tree = case_;
+  int status = symbol_table_add_control(state_peek_table(state), ctrlval);
+  if (status) {
+    free(ctrlval);
+    return create_type_error(astree_adopt(case_, 1, stmt), status);
+  }
 
   const TypeSpec *case_const_spec = expr->type;
   if (!typespec_is_integer(case_const_spec) ||
@@ -2069,7 +2214,78 @@ ASTree *validate_default(ASTree *default_, ASTree *stmt) {
   if (stmt->symbol == TOK_TYPE_ERROR) {
     return propogate_type_error(default_, stmt);
   }
+  ControlValue *ctrlval = malloc(sizeof(*ctrlval));
+  ctrlval->type = CTRL_DEFAULT;
+  ctrlval->tree = default_;
+  int status = symbol_table_add_control(state_peek_table(state), ctrlval);
+  if (status) {
+    free(ctrlval);
+    return create_type_error(astree_adopt(default_, 1, stmt), status);
+  }
   return astree_adopt(default_, 1, stmt);
+}
+
+ASTree *validate_goto(ASTree *goto_, ASTree *ident) {
+  ControlValue *ctrlval = malloc(sizeof(*ctrlval));
+  ctrlval->type = CTRL_GOTO;
+  ctrlval->tree = goto_;
+  int status = symbol_table_add_control(state_peek_table(state), ctrlval);
+  if (status) {
+    free(ctrlval);
+    return create_type_error(astree_adopt(goto_, 1, ident), status);
+  }
+  return astree_adopt(goto_, 1, ident);
+}
+
+ASTree *validate_continue(ASTree *continue_) {
+  ControlValue *ctrlval = malloc(sizeof(*ctrlval));
+  ctrlval->type = CTRL_CONTINUE;
+  ctrlval->tree = continue_;
+  int status = symbol_table_add_control(state_peek_table(state), ctrlval);
+  if (status) {
+    free(ctrlval);
+    return create_type_error(continue_, status);
+  }
+  return continue_;
+}
+
+ASTree *validate_break(ASTree *break_) {
+  ControlValue *ctrlval = malloc(sizeof(*ctrlval));
+  ctrlval->type = CTRL_BREAK;
+  ctrlval->tree = break_;
+  int status = symbol_table_add_control(state_peek_table(state), ctrlval);
+  if (status) {
+    free(ctrlval);
+    return create_type_error(break_, status);
+  }
+  return break_;
+}
+
+ASTree *validate_return(ASTree *ret, ASTree *expr) {
+  if (expr != &EMPTY_EXPR) {
+    expr = perform_pointer_conv(expr);
+    if (expr->symbol == TOK_TYPE_ERROR) {
+      return propogate_type_error(ret, expr);
+    }
+  }
+  ControlValue *ctrlval = malloc(sizeof(*ctrlval));
+  ctrlval->type = CTRL_RETURN;
+  ctrlval->tree = ret;
+  int status = symbol_table_add_control(state_peek_table(state), ctrlval);
+  if (status) {
+    free(ctrlval);
+    return create_type_error(astree_adopt(ret, 1, expr), status);
+  }
+  return astree_adopt(ret, 1, expr);
+}
+
+ASTree *validate_block(ASTree *block) {
+  block->symbol_table = symbol_table_init();
+  int status = state_push_table(state, block->symbol_table);
+  if (status) {
+    return create_type_error(block, status);
+  }
+  return block;
 }
 
 ASTree *validate_block_content(ASTree *block, ASTree *block_content) {
@@ -2081,6 +2297,14 @@ ASTree *validate_block_content(ASTree *block, ASTree *block_content) {
     return propogate_type_error(block, block_content);
   }
   return astree_adopt(block, 1, block_content);
+}
+
+ASTree *finalize_block(ASTree *block) {
+  int status = state_pop_table(state);
+  if (status) {
+    return create_type_error(block, status);
+  }
+  return block;
 }
 
 /*

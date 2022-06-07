@@ -71,6 +71,49 @@ nice features:
 - additional tree nodes can be inserted more freely during type checking, namely
   for implicit conversions
 
+## More useful jump tracking
+Because of the type checking occurs from the bottom up, a return statement
+cannot know the return type of its enclosing function because the production for
+the function will not have been matched until after the return statement has
+been processed. So, program state will also record return statements and they
+will be processed during `define_function`.
+
+We should also change the purpose of the jump tracker regarding iteration and
+switch statements. The jump tracker should be used to verify that break, case,
+default, and continue statements are in a valid context during type checking,
+instead of during intermediate language generation.
+
+Because of these changes, it may make more sense to have the symbol table hold
+these jump records. Then, whenever an iteration statement, switch statement, or
+function definition is produced, the function responsible can go through the
+stack and process the entries that it is responsible for. This would only need
+to be done if the statement matched during the production rule is a block.
+
+Since the statement may not be at the topmost level, there may be enclosing
+statements that handle leftover entries (for example, a switch statement
+enclosed in a for loop should leave `continue` entries on the stack). These
+leftover statements would have to be merged with the stack in the symbol table
+above.
+
+When the function body is processed, it checks and removes all return
+statements. Then, any leftover entries would be errors, since they must be
+enclosed within an iteration or switch statement to be valid.
+
+### Implementation
+All control statement tracking functions will be associated with the symbol
+table. When popping symbol tables from the stack, the state is responsible for
+merging the contents of the popped table and the table that is now present at
+the top of the stack.
+
+We also need a way to handle the special case where a switch/iteration statement
+does not have a block as its body, but rather only has a single statement which
+is a jump statement.
+
+#### `symbol_table_add_control`
+#### `symbol_table_remove_control`
+#### `symbol_table_get_control`
+#### `symbol_table_count_control`
+
 ## Concurrent type check
 For concurrent type checking, my current idea is to have the parser directives
 call type checking functions, or to have initialization functions for each type

@@ -71,7 +71,7 @@
  * are meant to be read.
  */
 %%
-program             : topdecl                                           { $$ = astree_adopt(parser_make_root(), 1, finalize_declaration($1)); }
+program             : %empty                                            { $$ = parser_make_root(); }
                     | program topdecl                                   { $$ = astree_adopt($1, 1, finalize_declaration($2)); }
                     | program error '}'                                 { $$ = $1; astree_destroy($3); }
                     | program error ';'                                 { $$ = $1; astree_destroy($3); }
@@ -157,9 +157,9 @@ param_list          : '(' typespec_list declarator                      { $$ = p
                     | param_list ',' typespec_list abs_declarator       { $$ = validate_param($1, $3, $4); astree_destroy($2); } /* define_param */
                     | param_list ',' typespec_list                      { $$ = validate_param($1, $3, parser_make_type_name($3)); astree_destroy($2); } /* define_param */
                     ;
-block               : block_content '}'                                 { $$ = $1; astree_destroy($2); }
+block               : block_content '}'                                 { $$ = finalize_block($1); astree_destroy($2); }
                     ;
-block_content       : '{'                                               { $$ = parser_new_sym($1, TOK_BLOCK); }
+block_content       : '{'                                               { $$ = validate_block(parser_new_sym($1, TOK_BLOCK)); }
                     | block_content stmt                                { $$ = validate_block_content($1, $2); }
                     | block_content declaration ';'                     { $$ = validate_block_content($1, finalize_declaration($2)); parser_cleanup(1, $3); }
                     ;
