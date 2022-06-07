@@ -26,14 +26,37 @@ int state_push_table(CompilerState *state, SymbolTable *table) {
   }
 }
 
+int combine_ctrl_stacks(LinkedList *parent, LinkedList *child) {
+  while (!llist_empty(child)) {
+    ControlValue *ctrlval = llist_pop_back(child);
+    if (ctrlval == NULL) {
+      return BCC_TERR_LIBRARY_FAILURE;
+    }
+    int status = llist_push_front(parent, ctrlval);
+    if (status) {
+      return BCC_TERR_LIBRARY_FAILURE;
+    }
+  }
+  return 0;
+}
+
 int state_pop_table(CompilerState *state) {
   if (llist_empty(&state->table_stack)) {
     fprintf(stderr, "ERROR: attempted to leave scope at top level.\n");
     return -1;
   } else {
-    llist_pop_front(&state->table_stack);
-    return 0;
+    SymbolTable *old_table = llist_pop_front(&state->table_stack);
+    SymbolTable *new_table = llist_front(&state->table_stack);
+    if (new_table == NULL) {
+      return 0;
+    }
+    return combine_ctrl_stacks(new_table->control_stack,
+                               old_table->control_stack);
   }
+}
+
+SymbolTable *state_peek_table(CompilerState *state) {
+  return llist_front(&state->table_stack);
 }
 
 int state_push_jump(CompilerState *state, JumpEntry *jump_entry) {

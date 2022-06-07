@@ -63,6 +63,8 @@ ASTree *validate_for(ASTree *for_, ASTree *left_paren, ASTree *stmt);
 ASTree *validate_label(ASTree *label, ASTree *ident_node, ASTree *stmt);
 ASTree *validate_case(ASTree *case_, ASTree *expr, ASTree *stmt);
 ASTree *validate_default(ASTree *default_, ASTree *stmt);
+ASTree *validate_block(ASTree *block);
 ASTree *validate_block_content(ASTree *block, ASTree *block_content);
+ASTree *finalize_block(ASTree *block);
 int type_checker_make_table(ASTree *root);
 #endif

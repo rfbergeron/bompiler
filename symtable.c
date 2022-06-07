@@ -164,6 +164,7 @@ int tag_value_print(const TagValue *tagval, char *buffer, size_t size) {
 SymbolTable *symbol_table_init() {
   SymbolTable *table = malloc(sizeof(*table));
   table->tag_namespace = table->label_namespace = NULL;
+  table->control_stack = NULL;
   int status =
       map_init(&table->primary_namespace, DEFAULT_MAP_SIZE, NULL,
                (void (*)(void *))symbol_value_destroy, strncmp_wrapper);
@@ -235,4 +236,28 @@ int symbol_table_insert_label(SymbolTable *table, const char *ident,
 LabelValue *symbol_table_get_label(SymbolTable *table, const char *ident,
                                    const size_t ident_len) {
   return map_get(table->label_namespace, (char *)ident, ident_len);
+}
+
+int symbol_table_add_control(SymbolTable *table, ControlValue *ctrlval) {
+  if (table->control_stack == NULL) {
+    table->control_stack = malloc(sizeof(*table->control_stack));
+    int status = llist_init(table->control_stack, free, NULL);
+    if (status) {
+      free(table->control_stack);
+      return status;
+    }
+  }
+  return llist_push_front(table->control_stack, ctrlval);
+}
+
+ControlValue *symbol_table_remove_control(SymbolTable *table, size_t i) {
+  return llist_extract(table->control_stack, i);
+}
+
+ControlValue *symbol_table_get_control(SymbolTable *table, size_t i) {
+  return llist_get(table->control_stack, i);
+}
+
+size_t symbol_table_count_control(SymbolTable *table) {
+  return llist_size(table->control_stack);
 }

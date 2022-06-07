@@ -33,6 +33,7 @@ CompilerState *state_init(void);
 int state_destroy(CompilerState *state);
 int state_push_table(CompilerState *state, SymbolTable *table);
 int state_pop_table(CompilerState *state);
+SymbolTable *state_peek_table(CompilerState *state);
 int state_push_jump(CompilerState *state, JumpEntry *jump_entry);
 int state_pop_jump(CompilerState *state);
 int state_push_type_error(CompilerState *state, TypeSpec *errtype);
