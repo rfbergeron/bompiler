@@ -7,8 +7,9 @@
 #include "astree.h"
 #include "debug.h"
 #include "attributes.h"
-/* #include "symtable.h" */
+#include "symtable.h"
 #include "typecheck.h"
+#include "state.h"
 %}
 
 %debug
@@ -210,7 +211,7 @@ expr                : assign_expr                                       { $$ = $
 assign_expr         : assign_expr '=' cond_expr                         { $$ = validate_assignment($2, $1, $3); }
                     | cond_expr                                         { $$ = $1; }
                     ;
-cond_expr           : binary_expr '?' expr ':' cond_expr                { $$ = astree_adopt($2, 3, $1, $3, $5); astree_destroy($4); }
+cond_expr           : binary_expr '?' expr ':' cond_expr                { $$ = validate_conditional($2, $1, $3, $5); astree_destroy($4); }
                     | binary_expr                                       { $$ = $1; }
                     ;
 binary_expr         : binary_expr '+' binary_expr                       { $$ = validate_binop($2, $1, $3); }
@@ -289,7 +290,11 @@ ASTree *parser_make_root() {
   DEBUGS('p', "Initializing AST, root token code: %d", TOK_ROOT);
   DEBUGS('p', "Translation of token code: %s", parser_get_tname(TOK_ROOT));
   Location root_loc = {lexer_get_filenr(), 0, 0};
-  return parser_root = astree_init(TOK_ROOT, root_loc, "_root");
+  parser_root = astree_init(TOK_ROOT, root_loc, "_root");
+  DEBUGS('t', "Making symbol table");
+  parser_root->symbol_table = symbol_table_init();
+  state_push_table(state, parser_root->symbol_table);
+  return parser_root;
 }
 
 ASTree *parser_new_sym(ASTree *tree, int new_symbol) {
@@ -300,6 +305,9 @@ ASTree *parser_new_sym(ASTree *tree, int new_symbol) {
 ASTree *parser_make_spec_list(ASTree *first_specifier) {
   ASTree *spec_list =
       astree_init(TOK_SPEC_LIST, first_specifier->loc, "_spec_list");
+  TypeSpec *type = calloc(1, sizeof(*type));
+  typespec_init(type);
+  spec_list->type = type;
   return validate_typespec(spec_list, first_specifier);
 }
 
@@ -331,6 +339,9 @@ ASTree *parser_make_param_list(ASTree *left_paren, ASTree *spec_list,
 ASTree *parser_make_type_name(ASTree *first_child) {
   ASTree *type_name =
       astree_init(TOK_TYPE_NAME, first_child->loc, "_type_name");
+  SymbolValue *symval =
+      symbol_value_init(&type_name->loc, state_get_sequence(state));
+  type_name->type = &symval->type;
   switch (first_child->symbol) {
     case TOK_SPEC_LIST:
       return type_name;

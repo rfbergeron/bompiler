@@ -2,6 +2,8 @@
 
 #include "stdlib.h"
 
+CompilerState *state;
+
 CompilerState *state_init(void) {
   CompilerState *state = malloc(sizeof(*state));
   llist_init(&state->table_stack, NULL, NULL);
@@ -50,8 +52,14 @@ int state_pop_table(CompilerState *state) {
     if (new_table == NULL) {
       return 0;
     }
-    return combine_ctrl_stacks(new_table->control_stack,
-                               old_table->control_stack);
+    if (new_table->control_stack == NULL) {
+      new_table->control_stack = old_table->control_stack;
+      old_table->control_stack = NULL;
+      return 0;
+    } else {
+      return combine_ctrl_stacks(new_table->control_stack,
+                                 old_table->control_stack);
+    }
   }
 }
 

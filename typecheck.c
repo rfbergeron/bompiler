@@ -72,8 +72,6 @@ typedef struct bcc_status {
   int code;
 } BCCStatus;
 
-CompilerState *state; /* back to global state... */
-
 SymbolValue *sym_from_type(TypeSpec *type) {
   SymbolValue temp;
   /* struct members have addresses increasing in order of declarations */
@@ -92,10 +90,11 @@ ASTree *create_type_error(ASTree *tree, int errcode) {
   } else {
     ASTree *errnode = astree_init(TOK_TYPE_ERROR, tree->loc, "_terr");
     TypeSpec *errtype = calloc(1, sizeof(TypeSpec));
-    errtype->base = TYPE_ERROR;
-    int status = llist_push_back(&errtype->auxspecs, erraux);
+    errnode->type = errtype;
+    int status = typespec_init(errtype);
     if (status) abort();
-    status = state_push_type_error(state, errtype);
+    errtype->base = TYPE_ERROR;
+    status = llist_push_back(&errtype->auxspecs, erraux);
     if (status) abort();
     return astree_adopt(errnode, 1, tree);
   }
@@ -1034,7 +1033,7 @@ ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
           state_insert_symbol(state, identifier, identifier_len, symbol);
       if (status) {
         symbol_value_destroy(symbol);
-        declarator->type = NULL;
+        declarator->type = &SPEC_EMPTY;
         return create_type_error(declarator, BCC_TERR_LIBRARY_FAILURE);
       }
       declarator->type = &symbol->type;
@@ -1046,7 +1045,7 @@ ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
               (symbol->type.flags & TYPESPEC_FLAG_TYPEDEF))) {
     int compatibility = types_compatible(&exists->type, &symbol->type);
     symbol_value_destroy(symbol);
-    declarator->type = NULL;
+    declarator->type = &SPEC_EMPTY;
     if (compatibility != TCHK_COMPATIBLE) {
       return create_type_error(declarator, BCC_TERR_REDEFINITION);
     } else {
@@ -1057,21 +1056,22 @@ ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
      * are compatible
      */
     symbol_value_destroy(symbol);
-    declarator->type = NULL;
+    declarator->type = &SPEC_EMPTY;
     return create_type_error(declarator, BCC_TERR_REDEFINITION);
   }
 }
 
 ASTree *finalize_declaration(ASTree *declaration) {
+  if (declaration == &EMPTY_EXPR) return declaration;
   ASTree *errnode = NULL;
   if (declaration->symbol == TOK_TYPE_ERROR) {
     errnode = declaration;
     declaration = astree_get(declaration, 0);
   }
   ASTree *spec_list = astree_get(declaration, 0);
-  if (spec_list->type != NULL) {
+  if (spec_list->type != &SPEC_EMPTY) {
     free((TypeSpec *)spec_list->type);
-    spec_list->type = NULL;
+    spec_list->type = &SPEC_EMPTY;
   }
   return errnode != NULL ? errnode : declaration;
 }
@@ -2372,32 +2372,4 @@ ASTree *finalize_block(ASTree *block) {
     return create_type_error(block, status);
   }
   return block;
-}
-
-/*
- * external functions
- */
-
-int type_checker_make_table(ASTree *root) {
-  DEBUGS('t', "Making symbol table");
-  state = state_init();
-  root->symbol_table = symbol_table_init();
-  state_push_table(state, root->symbol_table);
-  size_t i;
-  for (i = 0; i < astree_count(root); ++i) {
-    ASTree *child = astree_get(root, i);
-    if (child == &EMPTY_EXPR) {
-      continue;
-    } else if (child->symbol == TOK_DECLARATION) {
-      /*
-      int status = validate_declaration(child);
-      if (status) return status;
-      */
-    } else {
-      return BCC_TERR_UNEXPECTED_TOKEN;
-    }
-  }
-  int status = state_pop_table(state);
-  if (status) return status;
-  return state_destroy(state);
 }
