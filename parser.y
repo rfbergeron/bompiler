@@ -307,7 +307,7 @@ ASTree *parser_make_declaration(ASTree *spec_list) {
   ASTree *declaration =
       astree_init(TOK_DECLARATION, spec_list->loc, "_declaration");
   if (spec_list->symbol == TOK_TYPE_ERROR) {
-    return propogate_type_error(declaration, spec_list);
+    return propogate_err(declaration, spec_list);
   }
   return astree_adopt(declaration, 1, spec_list);
 }
@@ -345,8 +345,7 @@ ASTree *parser_make_type_name(ASTree *first_child) {
       if (real_first_child->symbol == TOK_SPEC_LIST)
         return validate_declarator(type_name);
       else
-        return propogate_type_error(validate_declarator(type_name),
-                                    first_child);
+        return propogate_err(validate_declarator(type_name), first_child);
     default:
       return create_type_error(
           astree_adopt(validate_declarator(type_name), 1, first_child),

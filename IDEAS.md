@@ -139,6 +139,38 @@ up the syntax tree. This will need its own function. Doing this will be a little
 less hacky than the way promotions and automatic conversions are inserted, since
 error nodes should have exactly one child.
 
+#### Implementation
+There are now two functions specifically for dealing with errors: `create_type_error`
+and `propogate_type_error`. We'll need more though. The tree should be able to record
+multiple errors. Also the code for detecting errors is too verbose.
+
+##### `propogate_type_errors`
+Takes as arguments the head node, the node which should adopt children (needed for
+tag definitions), the number of children to adopt, and a varargs list of children.
+Replacement for current propogation function. Combines errors into a single node at
+the top of the tree and returns it.
+
+The head node and child nodes may be error nodes, but the adopter node may not be.
+It is assumed that the adopter node is a child of the head node and that if any
+errors had occurred under the adopter node previously, they have already been
+propogated to the top of the tree.
+
+##### `compose_errors`
+Takes as arguments two tree nodes, the first being the parent and the second being
+the child. Combines errors under the parent error node, deletes the child error
+node, and has the "real" parent adopt the "real" child node.
+
+##### `astree_vadopt`
+Like `astree_adopt`, but has a `va_list` argument. For use when handling errors.
+
+##### `astree_ladopt`
+Like `astree_adopt`, but has a `ASTree **` argument instead of varargs. Used in
+macros to avoid needing variadic macros.
+
+##### `FAIL_ON_STATUS`
+
+##### `FAIL_ON_ERRNODE`
+
 ### Type checker constructed nodes
 The lexer (obviously) creates syntax tree nodes, but the parser does so as well
 in a handful of cases, like for type specifiers, declarations, declarators, etc.

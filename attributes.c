@@ -262,6 +262,7 @@ int auxspec_destroy(AuxSpec *auxspec) {
     case AUX_ENUM:
     case AUX_STRUCT:
     case AUX_UNION:
+    case AUX_ERROR:
       break;
     case AUX_FUNCTION:
       llist_destroy(auxspec->data.params);
@@ -289,7 +290,11 @@ int auxspec_copy(AuxSpec *dest, const AuxSpec *src) {
       status = llist_copy(dest->data.params, src->data.params);
       if (status) return status;
       break;
-    default:
+    case AUX_ERROR:
+      dest->data.errcode = src->data.errcode;
+      break;
+    case AUX_ENUM:
+    case AUX_NONE:
       break;
   }
   return 0;

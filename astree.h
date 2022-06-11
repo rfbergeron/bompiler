@@ -24,6 +24,7 @@ int astree_destroy(ASTree *tree);
 ASTree *astree_adopt(ASTree *parent, const size_t count, ...);
 ASTree *astree_replace(ASTree *parent, const size_t index, ASTree *child);
 ASTree *astree_get(ASTree *parent, const size_t index);
+ASTree *astree_remove(ASTree *parent, const size_t index);
 size_t astree_count(ASTree *parent);
 int astree_to_string(ASTree *astree, char *buffer, size_t size);
 int astree_print_tree(ASTree *tree, FILE *out, int depth);
