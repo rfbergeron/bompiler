@@ -20,9 +20,6 @@ extern int skip_type_check;
 
 ASTree EMPTY_EXPR = {&SPEC_EMPTY,      ";", NULL,     LOC_EMPTY,
                      BLIB_LLIST_EMPTY, ';', ATTR_NONE};
-ASTree *astree_get(ASTree *parent, const size_t index) {
-  return llist_get(&parent->children, index);
-}
 
 ASTree *astree_init(int symbol, const Location location, const char *info) {
   DEBUGS('t', "Initializing new astree node with code: %s, lexinfo: '%s'",
@@ -71,6 +68,10 @@ int astree_destroy(ASTree *tree) {
         typespec_destroy((TypeSpec *)tree->type);
         free((TypeSpec *)tree->type);
         break;
+      case TOK_TYPE_ERROR:
+        typespec_destroy((TypeSpec *)tree->type);
+        free((TypeSpec *)tree->type);
+        break;
     }
   }
 
@@ -102,6 +103,14 @@ ASTree *astree_replace(ASTree *parent, const size_t index, ASTree *child) {
   /* TODO(Robert): check status and indicate errors */
   int status = llist_insert(&parent->children, child, index);
   return old_child;
+}
+
+ASTree *astree_get(ASTree *parent, const size_t index) {
+  return llist_get(&parent->children, index);
+}
+
+ASTree *astree_remove(ASTree *parent, const size_t index) {
+  return llist_extract(&parent->children, index);
 }
 
 size_t astree_count(ASTree *parent) { return llist_size(&parent->children); }

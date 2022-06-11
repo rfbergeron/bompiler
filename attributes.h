@@ -56,6 +56,7 @@ typedef enum aux_type {
   AUX_UNION,
   AUX_ENUM,
   AUX_FUNCTION,
+  AUX_ERROR,
 } AuxType;
 
 /*
@@ -124,7 +125,7 @@ enum typespec_flag {
   TYPESPEC_FLAG_INLINE = 1 << TYPESPEC_INDEX_INLINE
 };
 
-enum bcc_type_err {
+typedef enum bcc_type_err {
   BCC_TERR_FAILURE = -1,
   BCC_TERR_SUCCESS = 0,
   BCC_TERR_LIBRARY_FAILURE,
@@ -160,7 +161,7 @@ enum bcc_type_err {
   BCC_TERR_REDEFINITION,
   BCC_TERR_CONST_TOO_SMALL,
   BCC_TERR_CONST_TOO_LARGE,
-};
+} TypeErr;
 
 typedef struct tag_value TagValue;
 typedef struct auxspec {
@@ -174,6 +175,7 @@ typedef struct auxspec {
       size_t length;
       unsigned int qualifiers;
     } memory_loc;
+    TypeErr errcode;
   } data;
   AuxType aux;
 } AuxSpec;

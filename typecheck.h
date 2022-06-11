@@ -4,7 +4,7 @@
 #include "astree.h"
 
 ASTree *create_type_error(ASTree *child, int errcode);
-ASTree *propogate_type_error(ASTree *parent, ASTree *errnode);
+ASTree *propogate_err(ASTree *parent, ASTree *child);
 ASTree *validate_intcon(ASTree *intcon);
 ASTree *validate_charcon(ASTree *charcon);
 ASTree *validate_stringcon(ASTree *stringcon);

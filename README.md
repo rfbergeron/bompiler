@@ -8,3 +8,4 @@ Tragic.
 ## Sources
 Links that have enlightened me
 https://stackoverflow.com/questions/19288859/how-to-redirect-stdout-to-a-string-in-ansi-c
+https://stackoverflow.com/questions/679979/how-to-make-a-variadic-macro-variable-number-of-arguments
