@@ -29,6 +29,8 @@ typedef struct jump_entry {
   char end_label[MAX_LABEL_LENGTH];
 } JumpEntry;
 
+extern CompilerState *state;
+
 CompilerState *state_init(void);
 int state_destroy(CompilerState *state);
 int state_push_table(CompilerState *state, SymbolTable *table);

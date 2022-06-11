@@ -65,12 +65,11 @@ int astree_destroy(ASTree *tree) {
       case TOK_SUBSCRIPT:
       case TOK_INDIRECTION:
       case TOK_CALL:
-        typespec_destroy((TypeSpec *)tree->type);
-        free((TypeSpec *)tree->type);
-        break;
       case TOK_TYPE_ERROR:
-        typespec_destroy((TypeSpec *)tree->type);
-        free((TypeSpec *)tree->type);
+        if (tree->type != &SPEC_EMPTY) {
+          typespec_destroy((TypeSpec *)tree->type);
+          free((TypeSpec *)tree->type);
+        }
         break;
     }
   }

@@ -14,6 +14,7 @@
 #include "astree.h"
 #include "debug.h"
 #include "lyutils.h"
+#include "state.h"
 #include "strset.h"
 #include "symtable.h"
 #include "typecheck.h"
@@ -187,6 +188,7 @@ int main(int argc, char **argv) {
   /* remember to initialize certain things, like the string table */
   string_set_init_globals();
   lexer_init_globals();
+  state = state_init();
   asmgen_init_globals();
 
   status = yyparse();
@@ -196,16 +198,7 @@ int main(int argc, char **argv) {
   }
 
   string_set_print(strfile);
-
-  if (skip_type_check) goto print_untyped;
-  status = type_checker_make_table(parser_root);
-  if (status) {
-    warnx("Type checking failed.");
-    goto cleanup;
-  }
-
   astree_print_symbols(parser_root, symfile);
-print_untyped:
   astree_print_tree(parser_root, astfile, 0);
 
   if (skip_asm || skip_type_check) goto cleanup;
@@ -234,6 +227,8 @@ cleanup:
   fclose(symfile);
   fclose(oilfile);
 
+  DEBUGS('m', "global state cleanup");
+  state_destroy(state);
   DEBUGS('m', "symbol table cleanup");
   symbol_table_destroy(parser_root->symbol_table);
   DEBUGS('m', "syntax tree cleanup");
