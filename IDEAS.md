@@ -140,36 +140,46 @@ less hacky than the way promotions and automatic conversions are inserted, since
 error nodes should have exactly one child.
 
 #### Implementation
-There are now two functions specifically for dealing with errors: `create_type_error`
-and `propogate_type_error`. We'll need more though. The tree should be able to record
-multiple errors. Also the code for detecting errors is too verbose.
 
-##### `propogate_type_errors`
-Takes as arguments the head node, the node which should adopt children (needed for
-tag definitions), the number of children to adopt, and a varargs list of children.
-Replacement for current propogation function. Combines errors into a single node at
-the top of the tree and returns it.
+##### `propogate_err`
+Takes as arguments a parent and child node, at least one of which must be an error
+node. Aggregates errors into a single node and places this node at the top of the
+subtree, followed by the parent, then the child.
 
-The head node and child nodes may be error nodes, but the adopter node may not be.
-It is assumed that the adopter node is a child of the head node and that if any
-errors had occurred under the adopter node previously, they have already been
-propogated to the top of the tree.
+##### `propogate_err_v`
+Takes as arguments a parent node, a count of the number of children it is to adopt,
+and a varargs list of child nodes. Aggregates errors into a single node at the top
+of the subtree through calls to `propogate_err`.
 
-##### `compose_errors`
-Takes as arguments two tree nodes, the first being the parent and the second being
-the child. Combines errors under the parent error node, deletes the child error
-node, and has the "real" parent adopt the "real" child node.
+##### `propogate_err_a`
+Takes as arguments a parent node, a count of the number of children it is to adopt,
+and an `ASTree**` that points to an array of child nodes. Aggregates errors into a
+single node at the top of the subtree through calls to `propogate_err`. For later
+use in error-handling macros, since proper ANSI C does not support variadic macros.
 
-##### `astree_vadopt`
-Like `astree_adopt`, but has a `va_list` argument. For use when handling errors.
+### Printing errors
+I have removed calls to printf from the type checker so that errors are not
+reported until type checking has been completed, and to remove duplicate code in
+the printing of errors.
 
-##### `astree_ladopt`
-Like `astree_adopt`, but has a `ASTree **` argument instead of varargs. Used in
-macros to avoid needing variadic macros.
+Error printing functions will be located in `bcc_err.c`. They will operate
+primarily on `TypeSpec`s and `AuxSpec`s, since that is what we are using to store
+error information.
 
-##### `FAIL_ON_STATUS`
+#### Functions
+There will be one primary error handling function, most of whose body will be a
+massive switch statement that selects which format to use, or which function to
+call to print the error.
 
-##### `FAIL_ON_ERRNODE`
+The functions for creating and propogating type errors will also be moved into
+this function and modified to accomodate the extra information.
+
+#### Error contents
+The `AuxSpec`s for errors will have an `void **` member, an array of all of the
+relevant error information in the form of pointers to `TypeSpec`s, `SymbolValue`s,
+and `ASTree`s. They will also have a member indicating the length of this array.
+The array will be dynamically allocated and must be freed when the `AuxSpec` is
+destroyed.
 
 ### Type checker constructed nodes
 The lexer (obviously) creates syntax tree nodes, but the parser does so as well

@@ -9,6 +9,7 @@
 #include "attributes.h"
 #include "symtable.h"
 #include "typecheck.h"
+#include "bcc_err.h"
 #include "state.h"
 %}
 
@@ -73,7 +74,7 @@
  */
 %%
 program             : %empty                                            { $$ = parser_make_root(); }
-                    | program topdecl                                   { $$ = astree_adopt($1, 1, finalize_declaration($2)); }
+                    | program topdecl                                   { $$ = validate_topdecl($1, finalize_declaration($2)); }
                     | program error '}'                                 { $$ = $1; astree_destroy($3); }
                     | program error ';'                                 { $$ = $1; astree_destroy($3); }
                     ;

@@ -175,7 +175,11 @@ typedef struct auxspec {
       size_t length;
       unsigned int qualifiers;
     } memory_loc;
-    TypeErr errcode;
+    struct {
+      void **info;
+      size_t info_count;
+      TypeErr code;
+    } err;
   } data;
   AuxType aux;
 } AuxSpec;
