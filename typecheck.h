@@ -3,8 +3,6 @@
 
 #include "astree.h"
 
-ASTree *create_type_error(ASTree *child, int errcode);
-ASTree *propogate_err(ASTree *parent, ASTree *child);
 ASTree *validate_intcon(ASTree *intcon);
 ASTree *validate_charcon(ASTree *charcon);
 ASTree *validate_stringcon(ASTree *stringcon);
@@ -66,4 +64,5 @@ ASTree *validate_default(ASTree *default_, ASTree *stmt);
 ASTree *validate_block(ASTree *block);
 ASTree *validate_block_content(ASTree *block, ASTree *block_content);
 ASTree *finalize_block(ASTree *block);
+ASTree *validate_topdecl(ASTree *root, ASTree *topdecl);
 #endif

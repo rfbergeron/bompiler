@@ -4,6 +4,7 @@
 #include "attributes.h"
 #include "badlib/badllist.h"
 #include "badlib/badmap.h"
+#include "bcc_err.h"
 #include "ctype.h"
 #include "debug.h"
 #include "err.h"
@@ -12,7 +13,6 @@
 #include "simplestack.h"
 #include "state.h"
 #include "stdint.h"
-#include "string.h"
 #include "symtable.h"
 /* TODO(Robert): Linux-specific; replace with strtoul or similar */
 #include "inttypes.h"
@@ -27,9 +27,6 @@
 #define TYPESPEC_FLAGS_SIGNEDNESS \
   (TYPESPEC_FLAG_SIGNED | TYPESPEC_FLAG_UNSIGNED)
 #define TYPESPEC_FLAGS_STORAGE_CLASS (TYPESPEC_FLAG_TYPEDEF)
-
-#define UNWRAP(node) \
-  (node->symbol == TOK_TYPE_ERROR ? astree_get(node, 0) : node)
 
 /* TODO(Robert): Implement "long long" integer type. For now, the type checker
  * should report an error if "long" is specified twice.
@@ -78,71 +75,6 @@ SymbolValue *sym_from_type(TypeSpec *type) {
   ptrdiff_t offset = (char *)&temp.type - (char *)&temp;
   return (SymbolValue *)((char *)type - offset);
 }
-
-ASTree *create_type_error(ASTree *tree, int errcode) {
-  AuxSpec *erraux = calloc(1, sizeof(*erraux));
-  erraux->aux = AUX_ERROR;
-  erraux->data.errcode = errcode;
-  if (tree->symbol == TOK_TYPE_ERROR) {
-    int status = llist_push_back((LinkedList *)&tree->type->auxspecs, erraux);
-    if (status) abort();
-    return tree;
-  } else {
-    ASTree *errnode = astree_init(TOK_TYPE_ERROR, tree->loc, "_terr");
-    TypeSpec *errtype = calloc(1, sizeof(TypeSpec));
-    errnode->type = errtype;
-    int status = typespec_init(errtype);
-    if (status) abort();
-    errtype->base = TYPE_ERROR;
-    status = llist_push_back(&errtype->auxspecs, erraux);
-    if (status) abort();
-    return astree_adopt(errnode, 1, tree);
-  }
-}
-
-ASTree *propogate_err(ASTree *parent, ASTree *child) {
-  if (child->symbol != TOK_TYPE_ERROR) {
-    (void)astree_adopt(UNWRAP(parent), 1, child);
-    return parent;
-  } else if (parent->symbol != TOK_TYPE_ERROR) {
-    ASTree *real_child = astree_replace(child, 0, parent);
-    (void)astree_adopt(parent, 1, real_child);
-    return child;
-  } else {
-    TypeSpec *parent_errs = (TypeSpec *)parent->type;
-    TypeSpec *child_errs = (TypeSpec *)child->type;
-    int status = typespec_append_auxspecs(parent_errs, child_errs);
-    /* TODO(Robert): be a man */
-    if (status) abort();
-    (void)astree_adopt(UNWRAP(parent), 1, astree_remove(child, 0));
-    status = astree_destroy(child);
-    if (status) abort();
-    return parent;
-  }
-}
-
-ASTree *propogate_err_v(ASTree *parent, size_t count, ...) {
-  va_list children;
-  va_start(children, count);
-  size_t i;
-  for (i = 0; i < count; ++i) {
-    ASTree *child = va_arg(children, ASTree *);
-    parent = propogate_err(parent, child);
-  }
-  va_end(children);
-  return parent;
-}
-
-ASTree *propogate_err_a(ASTree *parent, size_t count, ASTree **children) {
-  size_t i;
-  for (i = 0; i < count; ++i) {
-    ASTree *child = children[i];
-    parent = propogate_err(parent, child);
-  }
-  return parent;
-}
-
-void create_error_symbol(SymbolValue *symval, int errcode) {}
 
 /*
  * TODO(Robert): recursively setting the block number no longer works because
@@ -2372,4 +2304,14 @@ ASTree *finalize_block(ASTree *block) {
     return create_type_error(block, status);
   }
   return block;
+}
+
+ASTree *validate_topdecl(ASTree *root, ASTree *topdecl) {
+  if (root->symbol == TOK_TYPE_ERROR) {
+    return propogate_err(root, topdecl);
+  } else if (topdecl->symbol == TOK_TYPE_ERROR) {
+    return propogate_err(root, topdecl);
+  } else {
+    return astree_adopt(root, 1, topdecl);
+  }
 }

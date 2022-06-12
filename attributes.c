@@ -291,7 +291,7 @@ int auxspec_copy(AuxSpec *dest, const AuxSpec *src) {
       if (status) return status;
       break;
     case AUX_ERROR:
-      dest->data.errcode = src->data.errcode;
+      dest->data.err.code = src->data.err.code;
       break;
     case AUX_ENUM:
     case AUX_NONE:
