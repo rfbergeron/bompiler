@@ -7,6 +7,8 @@
 #include "stdlib.h"
 #include "symtable.h"
 
+#define LINESIZE 1024
+
 ASTree *create_type_error(ASTree *tree, int errcode) {
   AuxSpec *erraux = calloc(1, sizeof(*erraux));
   erraux->aux = AUX_ERROR;
@@ -57,6 +59,157 @@ ASTree *create_terr(ASTree *tree, int errcode, size_t info_count, ...) {
     if (status) abort();
     return astree_adopt(errnode, 1, tree);
   }
+}
+
+int expected_err_to_string(AuxSpec *erraux, const char *expected_str, char *buf,
+                           size_t size) {
+  ASTree *parent = erraux->data.err.info[0];
+  char parent_buf[LINESIZE];
+  int chars_written = astree_to_string(parent, parent_buf, LINESIZE);
+  ASTree *child1 = erraux->data.err.info[1];
+  char child1_buf[LINESIZE];
+  chars_written = type_to_string(child1->type, child1_buf, LINESIZE);
+  if (erraux->data.err.info_count == 3) {
+    ASTree *child2 = erraux->data.err.info[2];
+    char child2_buf[LINESIZE];
+    chars_written = type_to_string(child2->type, child2_buf, LINESIZE);
+    return snprintf(
+        buf, size,
+        "Semantic error: node %s expected %s types, but found %s and %s",
+        parent_buf, expected_str, child1_buf, child2_buf);
+  } else {
+    return snprintf(buf, size,
+                    "Semantic error: node %s expected %s type, but found %s",
+                    parent_buf, expected_str, child1_buf);
+  }
+}
+
+int tag_err_to_string(AuxSpec *erraux, char *buf, size_t size) {
+  ASTree *tag_node = erraux->data.err.info[0];
+  char tag_node_buf[LINESIZE];
+  int chars_written = astree_to_string(tag_node, tag_node_buf, LINESIZE);
+  ASTree *tag_name_node = astree_get(tag_node, 0);
+  TagValue *tagval = erraux->data.err.info[1];
+  /* TODO(Robert: to_string procedure for tagvalues */
+  return snprintf(buf, size,
+                  "Semantic error: identifier %s previously "
+                  "declared as a tag type incompatible with node %s",
+                  tag_name_node->lexinfo, tag_node_buf);
+}
+
+int erraux_to_string(AuxSpec *erraux, char *buf, size_t size) {
+  switch (erraux->data.err.code) {
+    case BCC_TERR_FAILURE:
+    case BCC_TERR_SUCCESS:
+    case BCC_TERR_LIBRARY_FAILURE:
+    case BCC_TERR_INCOMPLETE_TYPE:
+    case BCC_TERR_INCOMPATIBLE_TYPES:
+    case BCC_TERR_INCOMPATIBLE_SPEC:
+      return 0;
+    case BCC_TERR_EXPECTED_TAG: {
+      ASTree *operator= erraux->data.err.info[0];
+      char operator_buf[LINESIZE];
+      int chars_written = astree_to_string(operator, operator_buf, LINESIZE);
+      TypeSpec *spec = erraux->data.err.info[1];
+      char spec_buf[LINESIZE];
+      chars_written = type_to_string(spec, spec_buf, LINESIZE);
+      return snprintf(buf, size,
+                      "Semantic error: operator %s expected an "
+                      "operand with tag type but found %s",
+                      operator_buf, spec_buf);
+    }
+    case BCC_TERR_EXPECTED_STRUCT:
+    case BCC_TERR_EXPECTED_UNION:
+    case BCC_TERR_EXPECTED_ENUM:
+      return tag_err_to_string(erraux, buf, size);
+    case BCC_TERR_EXPECTED_FUNCTION:
+      if (erraux->data.err.info_count == 2) {
+        return expected_err_to_string(erraux, "function pointer", buf, size);
+      } else {
+        ASTree *declarator = erraux->data.err.info[0];
+        char declarator_buf[LINESIZE];
+        int chars_written =
+            astree_to_string(declarator, declarator_buf, LINESIZE);
+        return snprintf(
+            buf, size,
+            "Semantic error: function definition expected declarator of "
+            "function type, but found %s",
+            declarator_buf);
+      }
+    case BCC_TERR_EXPECTED_TYPEID: {
+      ASTree *spec_list = erraux->data.err.info[0];
+      ASTree *ident = erraux->data.err.info[1];
+      char spec_list_buf[LINESIZE];
+      int chars_written = astree_to_string(spec_list, spec_list_buf, LINESIZE);
+      return snprintf(
+          buf, size,
+          "Semantic error: identifier \"%s\" in specifier list %s does not "
+          "refer to a type name",
+          ident->lexinfo, spec_list_buf);
+    }
+    case BCC_TERR_EXPECTED_CONST:
+      /* TODO(Robert): unused */
+      return 0;
+    case BCC_TERR_EXPECTED_INTEGER:
+      return expected_err_to_string(erraux, "integer", buf, size);
+    case BCC_TERR_EXPECTED_INTCONST:
+      /* TODO(Robert): create two separate errors */
+      return expected_err_to_string(erraux, "integer constant", buf, size);
+    case BCC_TERR_EXPECTED_ARITHMETIC:
+      return expected_err_to_string(erraux, "arithmetic", buf, size);
+    case BCC_TERR_EXPECTED_ARITHCONST:
+      /* TODO(Robert): create two separate errors */
+      return expected_err_to_string(erraux, "arithmetic constant", buf, size);
+    case BCC_TERR_EXPECTED_SCALAR:
+      return expected_err_to_string(erraux, "scalar", buf, size);
+    case BCC_TERR_EXPECTED_SCALCONST:
+      /* TODO(Robert): create two separate errors */
+      return expected_err_to_string(erraux, "scalar constant", buf, size);
+    case BCC_TERR_EXPECTED_POINTER:
+      return expected_err_to_string(erraux, "pointer", buf, size);
+    case BCC_TERR_EXPECTED_RETURN:
+      /* TODO(Robert): unused */
+      return 0;
+    case BCC_TERR_EXPECTED_RETVAL:
+      /* TODO(Robert): not usable as implemented */
+      return 0;
+    case BCC_TERR_UNEXPECTED_LIST:
+    case BCC_TERR_UNEXPECTED_TOKEN:
+    case BCC_TERR_UNEXPECTED_BODY:
+    case BCC_TERR_UNEXPECTED_RETURN:
+    case BCC_TERR_EXCESS_INITIALIZERS:
+    case BCC_TERR_EXCESS_PARAMS:
+    case BCC_TERR_INSUFF_PARAMS:
+    case BCC_TERR_SYM_NOT_FOUND:
+    case BCC_TERR_TYPEID_NOT_FOUND: {
+      ASTree *spec_list = erraux->data.err.info[0];
+      ASTree *ident = erraux->data.err.info[1];
+      char spec_list_buf[LINESIZE];
+      int chars_written = astree_to_string(spec_list, spec_list_buf, LINESIZE);
+      return snprintf(
+          buf, size,
+          "Semantic error: identifier \"%s\" in specifier list %s cannot "
+          "be resolved",
+          ident->lexinfo, spec_list_buf);
+    }
+    case BCC_TERR_TAG_NOT_FOUND:
+    case BCC_TERR_REDEFINITION:
+    case BCC_TERR_CONST_TOO_SMALL:
+    case BCC_TERR_CONST_TOO_LARGE:
+      return 0;
+  }
+}
+
+int errspec_to_string(TypeSpec *errspec, char *buf, size_t size) {
+  int ret = 0;
+  size_t i, erraux_count = llist_size(&errspec->auxspecs);
+  for (i = 0; i < erraux_count; ++i) {
+    AuxSpec *erraux = llist_get(&errspec->auxspecs, i);
+    int chars_written = erraux_to_string(erraux, buf + ret, size - ret);
+    if (chars_written < 0) return chars_written;
+    ret += chars_written;
+  }
+  return ret;
 }
 
 ASTree *propogate_err(ASTree *parent, ASTree *child) {
