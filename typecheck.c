@@ -738,154 +738,133 @@ ASTree *validate_comma(ASTree *comma, ASTree *left_expr, ASTree *right_expr) {
 
 /* TODO(Robert): handle more complicated (nested list) initializers */
 
-int typecheck_array_initializer(ASTree *declarator, ASTree *init_list) {
+ASTree *typecheck_array_initializer(ASTree *equal_sign, ASTree *declarator,
+                                    ASTree *init_list) {
   /* TODO(Robert): evaluate array size when generating three address code */
   const TypeSpec *array_type = declarator->type;
   TypeSpec element_type = SPEC_EMPTY;
   int status = strip_aux_type(&element_type, array_type);
-  if (status) return status;
+  if (status) {
+    return create_terr(astree_adopt(equal_sign, 2, declarator, init_list),
+                       BCC_TERR_LIBRARY_FAILURE, 0);
+  }
+  ASTree *ret = astree_adopt(equal_sign, 2, declarator, init_list);
   size_t i;
   for (i = 0; i < astree_count(init_list); ++i) {
     ASTree *initializer = astree_get(init_list, i);
-    initializer = perform_pointer_conv(initializer);
-    if (initializer->symbol == TOK_TYPE_ERROR) {
-      /* TODO(Robert): this is a hack; think of a better way */
-      ASTree *errnode = initializer;
-      int errcode = errnode->type->flags;
-      llist_extract(&errnode->children, 0);
-      state_pop_type_error(state);
-      /* TODO(Robert): check for and indicate errors */
-      int status = astree_destroy(errnode);
-      return errcode;
+    ASTree *errnode = perform_pointer_conv(initializer);
+    errnode = convert_type(errnode, &element_type);
+    /* insert any successfully created conversion nodes into the tree, but do
+     * not insert the error node, since that goes at the top of the tree */
+    (void)astree_replace(init_list, i, UNWRAP(errnode));
+    if (errnode->symbol == TOK_TYPE_ERROR) {
+      /* remove initializer tree from errnode's list of children */
+      (void)llist_extract(&errnode->children, 0);
+      if (ret->symbol == TOK_TYPE_ERROR) {
+        int status = typespec_append_auxspecs((TypeSpec *)ret->type,
+                                              (TypeSpec *)errnode->type);
+        /* TODO(Robert): check for and indicate errors */
+        if (status) abort();
+        status = astree_destroy(errnode);
+        if (status) abort();
+      } else {
+        ret = astree_adopt(errnode, 1, ret);
+      }
     }
-    initializer = convert_type(initializer, &element_type);
-    if (initializer->symbol == TOK_TYPE_ERROR) {
-      /* TODO(Robert): this is a hack; think of a better way */
-      ASTree *errnode = initializer;
-      int errcode = errnode->type->flags;
-      llist_extract(&errnode->children, 0);
-      state_pop_type_error(state);
-      /* TODO(Robert): check for and indicate errors */
-      int status = astree_destroy(errnode);
-      return errcode;
-    }
-    /* insert conversion nodes into the tree */
-    astree_replace(init_list, i, initializer);
   }
-  return BCC_TERR_SUCCESS;
+  return ret;
 }
 
-int typecheck_union_initializer(ASTree *declarator, ASTree *init_list) {
+ASTree *typecheck_union_initializer(ASTree *equal_sign, ASTree *declarator,
+                                    ASTree *init_list) {
   ASTree *identifier = declarator;
   AuxSpec *union_aux = llist_front((LinkedList *)&identifier->type->auxspecs);
   const char *tag_name = union_aux->data.tag.name;
   TagValue *tagval = NULL;
   state_get_tag(state, tag_name, strlen(tag_name), &tagval);
   if (tagval == NULL) {
-    return BCC_TERR_TAG_NOT_FOUND;
+    return create_terr(astree_adopt(equal_sign, 2, declarator, init_list),
+                       BCC_TERR_TAG_NOT_FOUND, 2, identifier, tag_name);
   }
 
   const LinkedList *members = &tagval->data.members.in_order;
   if (astree_count(init_list) > 1) {
-    return BCC_TERR_EXCESS_INITIALIZERS;
+    return create_terr(astree_adopt(equal_sign, 2, declarator, init_list),
+                       BCC_TERR_EXCESS_INITIALIZERS, 1, declarator);
   } else {
     /* there should be one initializer of a type compatible with the type of the
      * first member of the union
      */
     ASTree *initializer = astree_get(init_list, 0);
-    initializer = perform_pointer_conv(initializer);
-    if (initializer->symbol == TOK_TYPE_ERROR) {
-      /* TODO(Robert): this is a hack; think of a better way */
-      ASTree *errnode = initializer;
-      int errcode = errnode->type->flags;
-      llist_extract(&errnode->children, 0);
-      state_pop_type_error(state);
-      /* TODO(Robert): check for and indicate errors */
-      int status = astree_destroy(errnode);
-      return errcode;
-    }
+    ASTree *errnode = perform_pointer_conv(initializer);
     SymbolValue *member_symbol = llist_front((LinkedList *)members);
-    initializer = convert_type(initializer, &member_symbol->type);
-    if (initializer->symbol == TOK_TYPE_ERROR) {
-      /* TODO(Robert): this is a hack; think of a better way */
-      ASTree *errnode = initializer;
-      int errcode = errnode->type->flags;
-      llist_extract(&errnode->children, 0);
-      state_pop_type_error(state);
-      /* TODO(Robert): check for and indicate errors */
-      int status = astree_destroy(errnode);
-      return errcode;
+    errnode = convert_type(errnode, &member_symbol->type);
+    (void)astree_replace(init_list, 0, UNWRAP(errnode));
+    if (errnode->symbol == TOK_TYPE_ERROR) {
+      (void)llist_extract(&errnode->children, 0);
+      return astree_adopt(errnode, 1,
+                          astree_adopt(equal_sign, 2, declarator, init_list));
+    } else {
+      return astree_adopt(equal_sign, 2, declarator, init_list);
     }
-    /* insert conversion nodes into the tree */
-    astree_replace(init_list, 0, initializer);
-    return BCC_TERR_SUCCESS;
   }
 }
 
-int typecheck_struct_initializer(ASTree *declarator, ASTree *init_list) {
+ASTree *typecheck_struct_initializer(ASTree *equal_sign, ASTree *declarator,
+                                     ASTree *init_list) {
   ASTree *identifier = declarator;
   AuxSpec *struct_aux = llist_front((LinkedList *)&identifier->type->auxspecs);
   const char *tag_name = struct_aux->data.tag.name;
   TagValue *tagval = NULL;
   state_get_tag(state, tag_name, strlen(tag_name), &tagval);
   if (tagval == NULL) {
-    return BCC_TERR_TAG_NOT_FOUND;
+    return create_terr(astree_adopt(equal_sign, 2, declarator, init_list),
+                       BCC_TERR_TAG_NOT_FOUND, 2, identifier, tag_name);
   }
   const LinkedList *members = &tagval->data.members.in_order;
   if (members->size < astree_count(init_list)) {
-    return BCC_TERR_EXCESS_INITIALIZERS;
+    return create_terr(astree_adopt(equal_sign, 2, declarator, init_list),
+                       BCC_TERR_EXCESS_INITIALIZERS, 1, declarator);
   } else {
+    ASTree *ret = astree_adopt(equal_sign, 2, declarator, init_list);
     size_t i;
     for (i = 0; i < astree_count(init_list); ++i) {
       ASTree *initializer = astree_get(init_list, i);
-      initializer = perform_pointer_conv(initializer);
-      if (initializer->symbol == TOK_TYPE_ERROR) {
-        /* TODO(Robert): this is a hack; think of a better way */
-        ASTree *errnode = initializer;
-        int errcode = errnode->type->flags;
-        llist_extract(&errnode->children, 0);
-        state_pop_type_error(state);
-        /* TODO(Robert): check for and indicate errors */
-        int status = astree_destroy(errnode);
-        return errcode;
-      }
+      ASTree *errnode = perform_pointer_conv(initializer);
       SymbolValue *member_symbol = llist_get((LinkedList *)members, i);
-      initializer = convert_type(initializer, &member_symbol->type);
-      if (initializer->symbol == TOK_TYPE_ERROR) {
-        /* TODO(Robert): this is a hack; think of a better way */
-        ASTree *errnode = initializer;
-        int errcode = errnode->type->flags;
-        llist_extract(&errnode->children, 0);
-        state_pop_type_error(state);
-        /* TODO(Robert): check for and indicate errors */
-        int status = astree_destroy(errnode);
-        return errcode;
+      errnode = convert_type(errnode, &member_symbol->type);
+      (void)astree_replace(init_list, i, UNWRAP(errnode));
+      if (errnode->symbol == TOK_TYPE_ERROR) {
+        /* remove initializer tree from errnode's list of children */
+        (void)llist_extract(&errnode->children, 0);
+        if (ret->symbol == TOK_TYPE_ERROR) {
+          int status = typespec_append_auxspecs((TypeSpec *)ret->type,
+                                                (TypeSpec *)errnode->type);
+          /* TODO(Robert): check for and indicate errors */
+          if (status) abort();
+          status = astree_destroy(errnode);
+          if (status) abort();
+        } else {
+          ret = astree_adopt(errnode, 1, ret);
+        }
       }
-      /* insert conversion nodes into the tree */
-      astree_replace(init_list, i, initializer);
     }
-    return BCC_TERR_SUCCESS;
+    return ret;
   }
 }
 
 ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src) {
   if (src->symbol == TOK_INIT_LIST) {
     const TypeSpec *decl_type = dest->type;
-    int status = BCC_TERR_SUCCESS;
     if (typespec_is_array(decl_type)) {
-      status = typecheck_array_initializer(dest, src);
+      return typecheck_array_initializer(assignment, dest, src);
     } else if (decl_type->base == TYPE_UNION) {
-      status = typecheck_union_initializer(dest, src);
+      return typecheck_union_initializer(assignment, dest, src);
     } else if (decl_type->base == TYPE_STRUCT) {
-      status = typecheck_struct_initializer(dest, src);
+      return typecheck_struct_initializer(assignment, dest, src);
     } else {
-      status = BCC_TERR_UNEXPECTED_LIST;
-    }
-
-    if (status != BCC_TERR_SUCCESS) {
-      return create_type_error(astree_adopt(assignment, 2, dest, src), status);
-    } else {
-      return astree_adopt(assignment, 2, dest, src);
+      return create_terr(astree_adopt(assignment, 2, dest, src),
+                         BCC_TERR_UNEXPECTED_LIST, 2, dest, src);
     }
   } else {
     src = perform_pointer_conv(src);
