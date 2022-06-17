@@ -73,8 +73,8 @@
  * are meant to be read.
  */
 %%
-program             : %empty                                            { $$ = parser_make_root(); }
-                    | program topdecl                                   { $$ = validate_topdecl($1, finalize_declaration($2)); }
+program             : %empty                                            { $$ = parser_root = parser_make_root(); }
+                    | program topdecl                                   { $$ = parser_root = validate_topdecl($1, finalize_declaration($2)); }
                     | program error '}'                                 { $$ = $1; astree_destroy($3); }
                     | program error ';'                                 { $$ = $1; astree_destroy($3); }
                     ;
@@ -105,8 +105,7 @@ typespec            : TOK_LONG                                          { $$ = $
                     | enum_spec                                         { $$ = $1; }
                     ;
 struct_spec         : struct_def '}'                                    { $$ = finalize_tag_def($1); astree_destroy($2); } /* cleanup intermediate products */
-                    | TOK_STRUCT TOK_IDENT                              { $$ = validate_tag_def($1, $2, NULL); } /* declare tag if necessary */
-                    | TOK_UNION TOK_IDENT                               { $$ = validate_tag_def($1, $2, NULL); } /* declare tag if necessary */
+                    | struct_or_union TOK_IDENT                         { $$ = validate_tag_def($1, $2, NULL); } /* declare tag if necessary */
                     ;
 struct_def          : struct_or_union TOK_IDENT '{'                     { $$ = validate_tag_def($1, $2, $3); }
                     | struct_or_union '{'                               { $$ = validate_tag_def($1, NULL, $2); }
@@ -291,11 +290,11 @@ ASTree *parser_make_root() {
   DEBUGS('p', "Initializing AST, root token code: %d", TOK_ROOT);
   DEBUGS('p', "Translation of token code: %s", parser_get_tname(TOK_ROOT));
   Location root_loc = {lexer_get_filenr(), 0, 0};
-  parser_root = astree_init(TOK_ROOT, root_loc, "_root");
+  ASTree *root = astree_init(TOK_ROOT, root_loc, "_root");
   DEBUGS('t', "Making symbol table");
-  parser_root->symbol_table = symbol_table_init();
-  state_push_table(state, parser_root->symbol_table);
-  return parser_root;
+  root->symbol_table = symbol_table_init();
+  state_push_table(state, root->symbol_table);
+  return root;
 }
 
 ASTree *parser_new_sym(ASTree *tree, int new_symbol) {
