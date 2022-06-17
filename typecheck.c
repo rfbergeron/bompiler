@@ -512,6 +512,8 @@ ASTree *validate_type_id_typespec(ASTree *spec_list, ASTree *type_id) {
 ASTree *validate_typespec(ASTree *spec_list, ASTree *spec) {
   if (spec_list->symbol == TOK_TYPE_ERROR) {
     return propogate_err(spec_list, spec);
+  } else if (spec->symbol == TOK_TYPE_ERROR) {
+    return propogate_err(spec_list, spec);
   }
 
   if (spec_list->type == NULL) {
@@ -654,6 +656,9 @@ ASTree *validate_arg(ASTree *call, ASTree *arg) {
 }
 
 ASTree *validate_call(ASTree *call, ASTree *function) {
+  if (call->symbol == TOK_TYPE_ERROR) {
+    return propogate_err(call, function);
+  }
   function = perform_pointer_conv(function);
   if (function->symbol == TOK_TYPE_ERROR) {
     return propogate_err(call, function);
@@ -1090,6 +1095,9 @@ ASTree *define_array(ASTree *declarator, ASTree *array) {
 }
 
 ASTree *define_pointer(ASTree *declarator, ASTree *pointer) {
+  if (declarator->symbol == TOK_TYPE_ERROR) {
+    return propogate_err(declarator, pointer);
+  }
   AuxSpec *aux_pointer = calloc(1, sizeof(*aux_pointer));
   aux_pointer->aux = AUX_POINTER;
   TypeSpec *spec = (TypeSpec *)declarator->type;
@@ -1484,6 +1492,7 @@ ASTree *validate_indirection(ASTree *indirection, ASTree *operand) {
 ASTree *validate_addrof(ASTree *addrof, ASTree *operand) {
   /* TODO(Robert): check that operand is an lval */
   /* TODO(Robert): set constexpr attribute if operand is static/extern */
+  if (operand->symbol == TOK_TYPE_ERROR) return propogate_err(addrof, operand);
   TypeSpec *addrof_spec = malloc(sizeof(*addrof_spec));
   int status = typespec_copy(addrof_spec, operand->type);
   if (status) {
@@ -1927,14 +1936,22 @@ ASTree *define_enumerator(ASTree *enum_, ASTree *ident_node, ASTree *equal_sign,
 
 ASTree *define_struct_member(ASTree *struct_, ASTree *member) {
   if (struct_->symbol == TOK_TYPE_ERROR) {
-    ASTree *real_struct = astree_get(struct_, 0);
-    ASTree *left_brace = astree_get(real_struct, 1);
-    astree_adopt(left_brace, 1, member);
+    ASTree *left_brace = astree_get(UNWRAP(struct_), 1);
+    (void)astree_adopt(left_brace, 1, UNWRAP(member));
+    if (member->symbol == TOK_TYPE_ERROR) {
+      ASTree *errnode = member;
+      (void)llist_extract(&member->children, 0);
+      int status = typespec_append_auxspecs((TypeSpec *)struct_->type,
+                                            (TypeSpec *)errnode->type);
+      if (status) abort();
+      status = astree_destroy(errnode);
+      if (status) abort();
+    }
     return struct_;
   } else if (member->symbol == TOK_TYPE_ERROR) {
     ASTree *left_brace = astree_get(struct_, 1);
-    ASTree *errnode = propogate_err(left_brace, member);
-    return propogate_err(struct_, errnode);
+    (void)astree_adopt(left_brace, 1, llist_extract(&member->children, 0));
+    return astree_adopt(member, 1, struct_);
   }
   AuxSpec *struct_aux = llist_back(&struct_->type->auxspecs);
   TagValue *tagval = struct_aux->data.tag.val;
@@ -1972,6 +1989,8 @@ ASTree *validate_declarator(ASTree *declarator) {
 ASTree *declare_symbol(ASTree *declaration, ASTree *declarator) {
   ASTree *err_or_decl = validate_declaration(declaration, declarator);
   if (err_or_decl->symbol == TOK_TYPE_ERROR) {
+    return propogate_err(declaration, err_or_decl);
+  } else if (declaration->symbol == TOK_TYPE_ERROR) {
     return propogate_err(declaration, err_or_decl);
   } else {
     return astree_adopt(declaration, 1, declarator);

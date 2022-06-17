@@ -57,7 +57,7 @@ int astree_destroy(ASTree *tree) {
   llist_destroy(&tree->children);
 
   /* free one-off TypeSpec objects */
-  if (!skip_type_check) {
+  if (!skip_type_check && tree->type != &SPEC_EMPTY) {
     switch (tree->symbol) {
       case TOK_ADDROF:
         /* free pointer auxspec that was added */
@@ -66,10 +66,8 @@ int astree_destroy(ASTree *tree) {
       case TOK_INDIRECTION:
       case TOK_CALL:
       case TOK_TYPE_ERROR:
-        if (tree->type != &SPEC_EMPTY) {
-          typespec_destroy((TypeSpec *)tree->type);
-          free((TypeSpec *)tree->type);
-        }
+        typespec_destroy((TypeSpec *)tree->type);
+        free((TypeSpec *)tree->type);
         break;
     }
   }
@@ -79,11 +77,20 @@ int astree_destroy(ASTree *tree) {
 }
 
 ASTree *astree_adopt(ASTree *parent, const size_t count, ...) {
+  /*
+   * only one of the following may be true:
+   * - the parent's symbol is TOK_TYPE_ERROR
+   * - the number of children post adoption is greater than 1
+   */
+  assert((parent->symbol != TOK_TYPE_ERROR) ||
+         (astree_count(parent) + count == 1));
   va_list args;
   va_start(args, count);
   size_t i;
   for (i = 0; i < count; ++i) {
     ASTree *child = va_arg(args, ASTree *);
+    assert((child == &EMPTY_EXPR) ||
+           (llist_find(&parent->children, child) == -1));
     DEBUGS('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
            parser_get_tname(child->symbol));
     int status = llist_push_back(&parent->children, child);
