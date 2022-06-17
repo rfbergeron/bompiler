@@ -359,9 +359,9 @@ ASTree *parser_make_type_name(ASTree *first_child) {
       else
         return propogate_err(validate_declarator(type_name), first_child);
     default:
-      return create_type_error(
+      return create_terr(
           astree_adopt(validate_declarator(type_name), 1, first_child),
-          BCC_TERR_UNEXPECTED_TOKEN);
+          BCC_TERR_UNEXPECTED_TOKEN, 1, first_child);
   }
 }
 

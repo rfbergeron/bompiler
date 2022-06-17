@@ -298,6 +298,15 @@ int erraux_to_string(AuxSpec *erraux, char *buf, size_t size) {
     }
     case BCC_TERR_TAG_NOT_FOUND:
       if (erraux->data.err.info_count == 2) {
+        ASTree *object_node = erraux->data.err.info[0];
+        char object_node_buf[LINESIZE];
+        int chars_written =
+            astree_to_string(object_node, object_node_buf, LINESIZE);
+        const char *tag_name = erraux->data.err.info[1];
+        return snprintf(
+            buf, size,
+            "Semantic error: object node %s has undefined tag type %s",
+            object_node_buf, tag_name);
       } else {
         ASTree *tag_node = erraux->data.err.info[0];
         char tag_node_buf[LINESIZE];
