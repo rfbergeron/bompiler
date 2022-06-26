@@ -1,5 +1,6 @@
 #include "typecheck.h"
 
+#include "assert.h"
 #include "astree.h"
 #include "attributes.h"
 #include "badlib/badllist.h"
@@ -666,7 +667,7 @@ ASTree *validate_call(ASTree *call, ASTree *function) {
   TypeSpec *function_spec = (TypeSpec *)function->type;
   if (!typespec_is_fnptr(function_spec)) {
     return create_terr(astree_adopt(call, 1, function),
-                       BCC_TERR_EXPECTED_FUNCTION, 2, call, function);
+                       BCC_TERR_EXPECTED_FN_PTR, 2, call, function);
   }
 
   /* strip pointer */
@@ -787,10 +788,10 @@ ASTree *typecheck_union_initializer(ASTree *equal_sign, ASTree *declarator,
   const char *tag_name = union_aux->data.tag.name;
   TagValue *tagval = NULL;
   state_get_tag(state, tag_name, strlen(tag_name), &tagval);
-  if (tagval == NULL) {
-    return create_terr(astree_adopt(equal_sign, 2, declarator, init_list),
-                       BCC_TERR_TAG_NOT_FOUND, 2, identifier, tag_name);
-  }
+  /* tag was found previously when the declarator was validated, so if it is not
+   * found now, there is a bug in the compiler, not the input.
+   */
+  assert(tagval != NULL);
 
   const LinkedList *members = &tagval->data.members.in_order;
   if (astree_count(init_list) > 1) {
@@ -822,10 +823,11 @@ ASTree *typecheck_struct_initializer(ASTree *equal_sign, ASTree *declarator,
   const char *tag_name = struct_aux->data.tag.name;
   TagValue *tagval = NULL;
   state_get_tag(state, tag_name, strlen(tag_name), &tagval);
-  if (tagval == NULL) {
-    return create_terr(astree_adopt(equal_sign, 2, declarator, init_list),
-                       BCC_TERR_TAG_NOT_FOUND, 2, identifier, tag_name);
-  }
+  /* tag was found previously when the declarator was validated, so if it is not
+   * found now, there is a bug in the compiler, not the input.
+   */
+  assert(tagval != NULL);
+
   const LinkedList *members = &tagval->data.members.in_order;
   if (members->size < astree_count(init_list)) {
     return create_terr(astree_adopt(equal_sign, 2, declarator, init_list),
@@ -1009,7 +1011,7 @@ ASTree *validate_array_size(ASTree *array, ASTree *expr) {
   }
   if ((expr->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST)) == 0) {
     return create_terr(astree_adopt(array, 1, expr), BCC_TERR_EXPECTED_INTCONST,
-                       2, array, expr->type);
+                       2, array, expr);
   }
   return astree_adopt(array, 1, expr);
 }
@@ -1223,8 +1225,7 @@ ASTree *typecheck_logop(ASTree *operator, ASTree * left, ASTree *right) {
     return astree_adopt(operator, 2, left, right);
   } else {
     return create_terr(astree_adopt(operator, 2, left, right),
-                       BCC_TERR_EXPECTED_SCALAR, 3, operator, left->type,
-                       right->type);
+                       BCC_TERR_EXPECTED_SCALAR, 3, operator, left, right);
   }
 }
 
@@ -1298,8 +1299,7 @@ ASTree *typecheck_mulop(ASTree *operator, ASTree * left, ASTree *right) {
     return astree_adopt(operator, 2, left, right);
   } else {
     return create_terr(astree_adopt(operator, 2, left, right),
-                       BCC_TERR_EXPECTED_ARITHMETIC, 3, operator, left->type,
-                       right->type);
+                       BCC_TERR_EXPECTED_ARITHMETIC, 3, operator, left, right);
   }
 }
 
@@ -1333,8 +1333,7 @@ ASTree *typecheck_shfop(ASTree *operator, ASTree * left, ASTree *right) {
     return astree_adopt(operator, 2, left, right);
   } else {
     return create_terr(astree_adopt(operator, 2, left, right),
-                       BCC_TERR_EXPECTED_INTEGER, 3, operator, left->type,
-                       right->type);
+                       BCC_TERR_EXPECTED_INTEGER, 3, operator, left, right);
   }
 }
 
@@ -1360,8 +1359,7 @@ ASTree *typecheck_bitop(ASTree *operator, ASTree * left, ASTree *right) {
     return astree_adopt(operator, 2, left, right);
   } else {
     return create_terr(astree_adopt(operator, 2, left, right),
-                       BCC_TERR_EXPECTED_INTEGER, 3, operator, left->type,
-                       right->type);
+                       BCC_TERR_EXPECTED_INTEGER, 3, operator, left, right);
   }
 }
 
@@ -1430,22 +1428,21 @@ ASTree *validate_unop(ASTree *operator, ASTree * operand) {
 
   if (is_increment(operator->symbol) && !typespec_is_scalar(operand_type)) {
     return create_terr(astree_adopt(operator, 1, operand),
-                       BCC_TERR_EXPECTED_SCALAR, 2, operator, operand->type);
+                       BCC_TERR_EXPECTED_SCALAR, 2, operator, operand);
   } else if ((operator->symbol == TOK_NEG || operator->symbol == TOK_POS) &&
              !typespec_is_arithmetic(operand_type)) {
     return create_terr(astree_adopt(operator, 1, operand),
-                       BCC_TERR_EXPECTED_ARITHMETIC, 2, operator,
-                       operand->type);
+                       BCC_TERR_EXPECTED_ARITHMETIC, 2, operator, operand);
   } else if (operator->symbol == '~' && !typespec_is_integer(operand_type)) {
     return create_terr(astree_adopt(operator, 1, operand),
-                       BCC_TERR_EXPECTED_INTEGER, 2, operator, operand->type);
+                       BCC_TERR_EXPECTED_INTEGER, 2, operator, operand);
   } else if (operator->symbol == '!') {
     if (typespec_is_scalar(operand_type)) {
       operator->type = & SPEC_INT;
       return astree_adopt(operator, 1, operand);
     } else {
       return create_terr(astree_adopt(operator, 1, operand),
-                         BCC_TERR_EXPECTED_SCALAR, 2, operand, operand->type);
+                         BCC_TERR_EXPECTED_SCALAR, 2, operand, operand);
     }
   } else {
     if (!is_increment(operator->symbol)) {
@@ -1484,8 +1481,7 @@ ASTree *validate_indirection(ASTree *indirection, ASTree *operand) {
     return astree_adopt(indirection, 1, operand);
   } else {
     return create_terr(astree_adopt(indirection, 1, operand),
-                       BCC_TERR_EXPECTED_POINTER, 2, indirection,
-                       operand->type);
+                       BCC_TERR_EXPECTED_POINTER, 2, indirection, operand);
   }
 }
 
@@ -1542,10 +1538,10 @@ ASTree *validate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
 
   if (!typespec_is_pointer(pointer->type)) {
     return create_terr(astree_adopt(subscript, 2, pointer, index),
-                       BCC_TERR_EXPECTED_POINTER, 2, subscript, pointer->type);
+                       BCC_TERR_EXPECTED_POINTER, 2, subscript, pointer);
   } else if (!typespec_is_integer(index->type)) {
     return create_terr(astree_adopt(subscript, 2, pointer, index),
-                       BCC_TERR_EXPECTED_INTEGER, 2, subscript, index->type);
+                       BCC_TERR_EXPECTED_INTEGER, 2, subscript, index);
   } else {
     TypeSpec *subscript_spec = malloc(sizeof(*subscript_spec));
     int status = strip_aux_type(subscript_spec, pointer->type);
@@ -1562,7 +1558,7 @@ ASTree *validate_reference(ASTree *reference, ASTree *struct_,
   const TypeSpec *struct_type = struct_->type;
   if (!typespec_is_struct(struct_type) && !typespec_is_union(struct_type)) {
     return create_terr(astree_adopt(reference, 2, struct_, member_name_node),
-                       BCC_TERR_EXPECTED_TAG, 2, reference, struct_->type);
+                       BCC_TERR_EXPECTED_TAG, 2, reference, struct_);
   }
 
   const char *member_name = member_name_node->lexinfo;
@@ -1592,7 +1588,7 @@ ASTree *validate_arrow(ASTree *arrow, ASTree *struct_,
   if (!typespec_is_structptr(struct_type) &&
       !typespec_is_unionptr(struct_type)) {
     return create_terr(astree_adopt(arrow, 2, struct_, member_name_node),
-                       BCC_TERR_EXPECTED_TAG, 2, arrow, struct_type);
+                       BCC_TERR_EXPECTED_TAG_PTR, 2, arrow, struct_type);
   }
   const char *member_name = member_name_node->lexinfo;
   const size_t member_name_len = strlen(member_name);
@@ -1924,7 +1920,7 @@ ASTree *define_enumerator(ASTree *enum_, ASTree *ident_node, ASTree *equal_sign,
       astree_adopt(left_brace, 1,
                    astree_adopt(equal_sign, 2, ident_node, expr));
       return create_terr(enum_, BCC_TERR_EXPECTED_ARITHCONST, 2, equal_sign,
-                         expr->type);
+                         expr);
     }
     astree_adopt(left_brace, 1, astree_adopt(equal_sign, 2, ident_node, expr));
     return enum_;
@@ -2010,7 +2006,7 @@ ASTree *validate_ifelse(ASTree *ifelse, ASTree *condition, ASTree *if_body,
 
   if (!typespec_is_scalar(condition->type)) {
     return create_terr(astree_adopt(ifelse, 3, condition, if_body, else_body),
-                       BCC_TERR_EXPECTED_SCALAR, 2, ifelse, condition->type);
+                       BCC_TERR_EXPECTED_SCALAR, 2, ifelse, condition);
   }
 
   return astree_adopt(ifelse, 3, condition, if_body, else_body);
@@ -2055,7 +2051,7 @@ ASTree *validate_switch(ASTree *switch_, ASTree *expr, ASTree *stmt) {
 
   if (!typespec_is_integer(expr->type)) {
     return create_terr(astree_adopt(switch_, 2, expr, stmt),
-                       BCC_TERR_EXPECTED_INTEGER, 2, switch_, expr->type);
+                       BCC_TERR_EXPECTED_INTEGER, 2, switch_, expr);
   }
 
   return astree_adopt(switch_, 2, expr, stmt);
@@ -2098,7 +2094,7 @@ ASTree *validate_while(ASTree *while_, ASTree *condition, ASTree *stmt) {
 
   if (!typespec_is_scalar(condition->type)) {
     return create_terr(astree_adopt(while_, 2, condition, stmt),
-                       BCC_TERR_EXPECTED_INTEGER, 2, while_, condition->type);
+                       BCC_TERR_EXPECTED_INTEGER, 2, while_, condition);
   }
   return astree_adopt(while_, 2, condition, stmt);
 }
@@ -2137,7 +2133,7 @@ ASTree *validate_do(ASTree *do_, ASTree *stmt, ASTree *condition) {
 
   if (!typespec_is_scalar(condition->type)) {
     return create_terr(astree_adopt(do_, 2, condition, stmt),
-                       BCC_TERR_EXPECTED_INTEGER, 2, do_, condition->type);
+                       BCC_TERR_EXPECTED_INTEGER, 2, do_, condition);
   }
   return astree_adopt(do_, 2, condition, stmt);
 }
@@ -2159,7 +2155,7 @@ ASTree *validate_for_exprs(ASTree *left_paren, ASTree *init_expr,
     if (!typespec_is_scalar(pre_iter_expr->type)) {
       return create_terr(
           astree_adopt(left_paren, 3, init_expr, pre_iter_expr, reinit_expr),
-          BCC_TERR_EXPECTED_SCALCONST, 2, left_paren, pre_iter_expr->type);
+          BCC_TERR_EXPECTED_SCALCONST, 2, left_paren, pre_iter_expr);
     }
   }
   return astree_adopt(left_paren, 3, init_expr, pre_iter_expr, reinit_expr);
@@ -2253,7 +2249,7 @@ ASTree *validate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
   if (!typespec_is_integer(case_const_spec) ||
       !(expr->attributes | ATTR_EXPR_ARITHCONST)) {
     return create_terr(astree_adopt(case_, 2, expr, stmt),
-                       BCC_TERR_EXPECTED_INTCONST, 2, case_, expr->type);
+                       BCC_TERR_EXPECTED_INTCONST, 2, case_, expr);
   }
 
   return astree_adopt(case_, 2, expr, stmt);
