@@ -107,29 +107,28 @@ int erraux_to_string(AuxSpec *erraux, char *buf, size_t size) {
     case BCC_TERR_LIBRARY_FAILURE:
       return snprintf(buf, size,
                       "Library failure: unspecified data structure failure");
-    case BCC_TERR_INCOMPLETE_TYPE:
-      if (erraux->data.err.info_count == 2) {
-        ASTree *affected_node = erraux->data.err.info[0];
-        char affected_node_buf[LINESIZE];
-        int chars_written =
-            astree_to_string(affected_node, affected_node_buf, LINESIZE);
-        TypeSpec *spec = erraux->data.err.info[1];
-        char spec_buf[LINESIZE];
-        chars_written = type_to_string(spec, spec_buf, size);
-        return snprintf(buf, size,
-                        "Semantic error: node %s expected complete "
-                        "type, but found %s",
-                        affected_node_buf, spec_buf);
-      } else {
-        ASTree *spec_list = erraux->data.err.info[0];
-        char spec_list_buf[LINESIZE];
-        int chars_written =
-            astree_to_string(spec_list, spec_list_buf, LINESIZE);
-        return snprintf(buf, size,
-                        "Semantic error: specifier list at %s has "
-                        "incomplete type that cannot be completed",
-                        spec_list_buf);
-      }
+    case BCC_TERR_INCOMPLETE_TYPE: {
+      ASTree *affected_node = erraux->data.err.info[0];
+      char affected_node_buf[LINESIZE];
+      int chars_written =
+          astree_to_string(affected_node, affected_node_buf, LINESIZE);
+      TypeSpec *spec = erraux->data.err.info[1];
+      char spec_buf[LINESIZE];
+      chars_written = type_to_string(spec, spec_buf, size);
+      return snprintf(buf, size,
+                      "Semantic error: node %s expected complete "
+                      "type, but found %s",
+                      affected_node_buf, spec_buf);
+    }
+    case BCC_TERR_INCOMPLETE_SPEC: {
+      ASTree *spec_list = erraux->data.err.info[0];
+      char spec_list_buf[LINESIZE];
+      int chars_written = astree_to_string(spec_list, spec_list_buf, LINESIZE);
+      return snprintf(buf, size,
+                      "Semantic error: specifier list at %s has "
+                      "incomplete type that cannot be completed",
+                      spec_list_buf);
+    }
     case BCC_TERR_INCOMPATIBLE_TYPES: {
       ASTree *affected_node = erraux->data.err.info[0];
       char affected_node_buf[LINESIZE];
@@ -169,26 +168,38 @@ int erraux_to_string(AuxSpec *erraux, char *buf, size_t size) {
                       "operand with tag type but found %s",
                       operator_buf, spec_buf);
     }
+    case BCC_TERR_EXPECTED_TAG_PTR: {
+      ASTree *operator= erraux->data.err.info[0];
+      char operator_buf[LINESIZE];
+      int chars_written = astree_to_string(operator, operator_buf, LINESIZE);
+      TypeSpec *spec = erraux->data.err.info[1];
+      char spec_buf[LINESIZE];
+      chars_written = type_to_string(spec, spec_buf, LINESIZE);
+      return snprintf(
+          buf, size,
+          "Semantic error: operator %s expected an "
+          "operand with type pointer to struct or union but found %s",
+          operator_buf, spec_buf);
+    }
     case BCC_TERR_EXPECTED_STRUCT:
       /* fall through */
     case BCC_TERR_EXPECTED_UNION:
       /* fall through */
     case BCC_TERR_EXPECTED_ENUM:
       return tag_err_to_string(erraux, buf, size);
-    case BCC_TERR_EXPECTED_FUNCTION:
-      if (erraux->data.err.info_count == 2) {
-        return expected_err_to_string(erraux, "function pointer", buf, size);
-      } else {
-        ASTree *declarator = erraux->data.err.info[0];
-        char declarator_buf[LINESIZE];
-        int chars_written =
-            astree_to_string(declarator, declarator_buf, LINESIZE);
-        return snprintf(
-            buf, size,
-            "Semantic error: function definition expected declarator of "
-            "function type, but found %s",
-            declarator_buf);
-      }
+    case BCC_TERR_EXPECTED_FUNCTION: {
+      ASTree *declarator = erraux->data.err.info[0];
+      char declarator_buf[LINESIZE];
+      int chars_written =
+          astree_to_string(declarator, declarator_buf, LINESIZE);
+      return snprintf(
+          buf, size,
+          "Semantic error: function definition expected declarator of "
+          "function type, but found %s",
+          declarator_buf);
+    }
+    case BCC_TERR_EXPECTED_FN_PTR:
+      return expected_err_to_string(erraux, "function pointer", buf, size);
     case BCC_TERR_EXPECTED_TYPEID: {
       ASTree *spec_list = erraux->data.err.info[0];
       ASTree *ident = erraux->data.err.info[1];
@@ -296,26 +307,14 @@ int erraux_to_string(AuxSpec *erraux, char *buf, size_t size) {
           "be resolved",
           ident->lexinfo, spec_list_buf);
     }
-    case BCC_TERR_TAG_NOT_FOUND:
-      if (erraux->data.err.info_count == 2) {
-        ASTree *object_node = erraux->data.err.info[0];
-        char object_node_buf[LINESIZE];
-        int chars_written =
-            astree_to_string(object_node, object_node_buf, LINESIZE);
-        const char *tag_name = erraux->data.err.info[1];
-        return snprintf(
-            buf, size,
-            "Semantic error: object node %s has undefined tag type %s",
-            object_node_buf, tag_name);
-      } else {
-        ASTree *tag_node = erraux->data.err.info[0];
-        char tag_node_buf[LINESIZE];
-        int chars_written = astree_to_string(tag_node, tag_node_buf, LINESIZE);
-        const char *name = astree_get(tag_node, 0)->lexinfo;
-        return snprintf(buf, size,
-                        "Semantic error: tag %s not found at node %s", name,
-                        tag_node_buf);
-      }
+    case BCC_TERR_TAG_NOT_FOUND: {
+      ASTree *tag_node = erraux->data.err.info[0];
+      char tag_node_buf[LINESIZE];
+      int chars_written = astree_to_string(tag_node, tag_node_buf, LINESIZE);
+      const char *name = astree_get(tag_node, 0)->lexinfo;
+      return snprintf(buf, size, "Semantic error: tag %s not found at node %s",
+                      name, tag_node_buf);
+    }
     case BCC_TERR_REDEFINITION: {
       /* TODO(Robert): differentiate between redefinition of tags, symbols,
        * labels, etc. so we can print more detailed information */
@@ -360,7 +359,6 @@ int errspec_to_string(TypeSpec *errspec, char *buf, size_t size) {
 
 int print_errs(ASTree *errnode, FILE *out) {
   if (errnode->symbol != TOK_TYPE_ERROR) return 0;
-  int ret = 0;
   TypeSpec *errspec = (TypeSpec *)errnode->type;
   size_t i, erraux_count = llist_size(&errspec->auxspecs);
   for (i = 0; i < erraux_count; ++i) {
@@ -372,9 +370,8 @@ int print_errs(ASTree *errnode, FILE *out) {
     if (chars_written < 0) return chars_written;
     chars_written = fprintf(out, "%s\n", erraux_buf);
     if (chars_written < 0) return chars_written;
-    ret += chars_written;
   }
-  return ret;
+  return 0;
 }
 
 ASTree *propogate_err(ASTree *parent, ASTree *child) {

@@ -262,7 +262,9 @@ int auxspec_destroy(AuxSpec *auxspec) {
     case AUX_ENUM:
     case AUX_STRUCT:
     case AUX_UNION:
+      break;
     case AUX_ERROR:
+      free(auxspec->data.err.info);
       break;
     case AUX_FUNCTION:
       llist_destroy(auxspec->data.params);
@@ -292,6 +294,10 @@ int auxspec_copy(AuxSpec *dest, const AuxSpec *src) {
       break;
     case AUX_ERROR:
       dest->data.err.code = src->data.err.code;
+      dest->data.err.info_count = src->data.err.info_count;
+      dest->data.err.info = malloc(dest->data.err.info_count * sizeof(void *));
+      memcpy(dest->data.err.info, src->data.err.info,
+             dest->data.err.info_count * sizeof(void *));
       break;
     case AUX_ENUM:
     case AUX_NONE:
