@@ -12,6 +12,7 @@
 
 #include "asmgen.h"
 #include "astree.h"
+#include "bcc_err.h"
 #include "debug.h"
 #include "lyutils.h"
 #include "state.h"
@@ -27,6 +28,7 @@ const char *TOK_EXT = ".tok";
 const char *AST_EXT = ".ast";
 const char *SYM_EXT = ".sym";
 const char *OIL_EXT = ".oil";
+const char *ERR_EXT = ".err";
 char cppcmd[LINESIZE];
 char name[LINESIZE];
 char strname[LINESIZE];
@@ -34,6 +36,7 @@ char tokname[LINESIZE];
 char astname[LINESIZE];
 char symname[LINESIZE];
 char oilname[LINESIZE];
+char errname[LINESIZE];
 
 /* cpp options go here */
 FILE *strfile;
@@ -41,6 +44,7 @@ FILE *tokfile;
 FILE *astfile;
 FILE *symfile;
 FILE *oilfile;
+FILE *errfile;
 
 int skip_type_check = 0;
 int skip_asm = 0;
@@ -119,6 +123,8 @@ int main(int argc, char **argv) {
   strcat(symname, SYM_EXT);
   strcpy(oilname, name);
   strcat(oilname, OIL_EXT);
+  strcpy(errname, name);
+  strcat(errname, ERR_EXT);
   strcpy(cppcmd, CPP);
   strcat(cppcmd, ocname);
 
@@ -184,6 +190,10 @@ int main(int argc, char **argv) {
   if (oilfile == NULL) {
     err(1, "%s", oilname);
   }
+  errfile = fopen(errname, "w");
+  if (errfile == NULL) {
+    err(1, "%s", oilname);
+  }
 
   /* remember to initialize certain things, like the string table */
   string_set_init_globals();
@@ -215,6 +225,10 @@ int main(int argc, char **argv) {
   }
 
 cleanup:
+  status = print_errs(parser_root, errfile);
+  if (status) {
+    warnx("Failed to print program errors.");
+  }
   DEBUGS('m', "Execution finished; wrapping up.");
 
   /* restore stdin */
@@ -226,6 +240,7 @@ cleanup:
   fclose(astfile);
   fclose(symfile);
   fclose(oilfile);
+  fclose(errfile);
 
   DEBUGS('m', "global state cleanup");
   state_destroy(state);
