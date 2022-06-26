@@ -358,6 +358,25 @@ int errspec_to_string(TypeSpec *errspec, char *buf, size_t size) {
   return ret;
 }
 
+int print_errs(ASTree *errnode, FILE *out) {
+  if (errnode->symbol != TOK_TYPE_ERROR) return 0;
+  int ret = 0;
+  TypeSpec *errspec = (TypeSpec *)errnode->type;
+  size_t i, erraux_count = llist_size(&errspec->auxspecs);
+  for (i = 0; i < erraux_count; ++i) {
+    AuxSpec *erraux = llist_get(&errspec->auxspecs, i);
+    size_t info_count = erraux->data.err.info_count;
+    char erraux_buf[info_count * LINESIZE];
+    int chars_written =
+        erraux_to_string(erraux, erraux_buf, info_count * LINESIZE);
+    if (chars_written < 0) return chars_written;
+    chars_written = fprintf(out, "%s\n", erraux_buf);
+    if (chars_written < 0) return chars_written;
+    ret += chars_written;
+  }
+  return ret;
+}
+
 ASTree *propogate_err(ASTree *parent, ASTree *child) {
   if (child->symbol != TOK_TYPE_ERROR) {
     (void)astree_adopt(UNWRAP(parent), 1, child);
