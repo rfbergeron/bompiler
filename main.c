@@ -208,8 +208,8 @@ int main(int argc, char **argv) {
   }
 
   string_set_print(strfile);
-  astree_print_symbols(parser_root, symfile);
-  astree_print_tree(parser_root, astfile, 0);
+  astree_print_symbols(UNWRAP(parser_root), symfile);
+  astree_print_tree(UNWRAP(parser_root), astfile, 0);
 
   if (skip_asm || skip_type_check) goto cleanup;
   status = translate_file(parser_root);
@@ -244,8 +244,6 @@ cleanup:
 
   DEBUGS('m', "global state cleanup");
   state_destroy(state);
-  DEBUGS('m', "symbol table cleanup");
-  symbol_table_destroy(parser_root->symbol_table);
   DEBUGS('m', "syntax tree cleanup");
   astree_destroy(parser_root);
   DEBUGS('m', "string set cleanup");

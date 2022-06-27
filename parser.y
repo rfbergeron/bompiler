@@ -146,7 +146,7 @@ abs_declarator      : '*' abs_declarator                                { $$ = d
                     | abs_declarator direct_decl                        { $$ = define_dirdecl($1, $2); } /* validate_dirdecl */
                     ;
 direct_decl         : '[' ']'                                           { $$ = parser_new_sym($1, TOK_ARRAY); astree_destroy($2); } /* do nothing */
-                    | '[' cond_expr   ']'                               { $$ = validate_array_size($1, $2); astree_destroy($3); } /* validate_array_size */
+                    | '[' cond_expr   ']'                               { $$ = validate_array_size(parser_new_sym($1, TOK_ARRAY), $2); astree_destroy($3); } /* validate_array_size */
                     | param_list ')'                                    { $$ = finalize_param_list($1); astree_destroy($2); } /* exit parameter table */
                     | '(' ')'                                           { $$ = parser_new_sym($1, TOK_PARAM_LIST); astree_destroy($2); } /* create param table */
                     | '(' TOK_VOID ')'                                  { $$ = parser_new_sym($1, TOK_PARAM_LIST); parser_cleanup(2, $2, $3); } /* create param table */
@@ -154,9 +154,9 @@ direct_decl         : '[' ']'                                           { $$ = p
 param_list          : '(' typespec_list declarator                      { $$ = parser_make_param_list($1, $2, $3); } /* create param table; define_param */
                     | '(' typespec_list abs_declarator                  { $$ = parser_make_param_list($1, $2, $3); } /* create param table; define_param */
                     | '(' typespec_list                                 { $$ = parser_make_param_list($1, $2, parser_make_type_name($2)); } /* create param table; define_param */
-                    | param_list ',' typespec_list declarator           { $$ = validate_param($1, $3, $4); astree_destroy($2); } /* define_param */
-                    | param_list ',' typespec_list abs_declarator       { $$ = validate_param($1, $3, $4); astree_destroy($2); } /* define_param */
-                    | param_list ',' typespec_list                      { $$ = validate_param($1, $3, parser_make_type_name($3)); astree_destroy($2); } /* define_param */
+                    | param_list ',' typespec_list declarator           { $$ = validate_param($1, parser_make_declaration($3), $4); astree_destroy($2); } /* define_param */
+                    | param_list ',' typespec_list abs_declarator       { $$ = validate_param($1, parser_make_declaration($3), $4); astree_destroy($2); } /* define_param */
+                    | param_list ',' typespec_list                      { $$ = validate_param($1, parser_make_declaration($3), parser_make_type_name($3)); astree_destroy($2); } /* define_param */
                     ;
 block               : block_content '}'                                 { $$ = finalize_block($1); astree_destroy($2); }
                     ;
@@ -314,6 +314,7 @@ ASTree *parser_make_spec_list(ASTree *first_specifier) {
 ASTree *parser_make_declaration(ASTree *spec_list) {
   ASTree *declaration =
       astree_init(TOK_DECLARATION, spec_list->loc, "_declaration");
+  spec_list = validate_typespec_list(spec_list);
   if (spec_list->symbol == TOK_TYPE_ERROR) {
     return propogate_err(declaration, spec_list);
   }
@@ -367,9 +368,8 @@ ASTree *parser_make_type_name(ASTree *first_child) {
 ASTree *parser_make_cast(ASTree *left_paren, ASTree *spec_list,
                          ASTree *type_name, ASTree *expr) {
   ASTree *cast = parser_new_sym(left_paren, TOK_CAST);
-  ASTree *declaration_or_err = parser_make_declaration(spec_list);
-  return validate_cast(cast, declare_symbol(declaration_or_err, type_name),
-                       expr);
+  ASTree *declaration = parser_make_declaration(spec_list);
+  return validate_cast(cast, declare_symbol(declaration, type_name), expr);
 }
 
 ASTree *parser_make_label(ASTree *ident) {
