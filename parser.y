@@ -79,8 +79,12 @@ program             : %empty                                            { $$ = p
                     | program error ';'                                 { $$ = $1; astree_destroy($3); }
                     ;
 topdecl             : declaration ';'                                   { $$ = $1; astree_destroy($2); }
-                    | typespec_list declarator block                    { $$ = define_function(parser_make_declaration($1), $2, $3); }
+                    | function_def '}'                                  { $$ = finalize_function($1); parser_cleanup(1, $2); }
                     | ';'                                               { $$ = &EMPTY_EXPR; astree_destroy($1); }
+                    ;
+function_def        : typespec_list declarator '{'                      { $$ = define_function(parser_make_declaration($1), $2, parser_new_sym($3, TOK_BLOCK)); }
+                    | function_def stmt                                 { $$ = validate_fnbody_content($1, $2); }
+                    | function_def declaration ';'                      { $$ = validate_fnbody_content($1, $2); }
                     ;
 declaration         : typespec_list                                     { $$ = parser_make_declaration($1); } /* fine as-is */
                     | declarations                                      { $$ = $1; } /* fine as-is */

@@ -1000,6 +1000,7 @@ ASTree *finalize_declaration(ASTree *declaration) {
   }
   ASTree *spec_list = astree_get(declaration, 0);
   if (spec_list->type != &SPEC_EMPTY) {
+    int status = typespec_destroy((TypeSpec *)spec_list->type);
     free((TypeSpec *)spec_list->type);
     spec_list->type = &SPEC_EMPTY;
   }
@@ -1622,52 +1623,36 @@ ASTree *define_symbol(ASTree *declaration, ASTree *declarator,
   return astree_adopt(declaration, 1, equal_sign);
 }
 
-ASTree *typecheck_return(ASTree *declaration, ASTree *ret,
-                         SymbolValue *symval) {
-  /* TODO(Robert): statement may contain errors; check for those if necessary */
+ASTree *validate_return(ASTree *ret, ASTree *expr) {
+  SymbolValue *symval = state_get_function(state);
   TypeSpec ret_spec = SPEC_EMPTY;
   int status = strip_aux_type(&ret_spec, &symval->type);
   if (status) {
     typespec_destroy(&ret_spec);
-    return create_terr(declaration, BCC_TERR_FAILURE, 0);
+    return create_terr(astree_adopt(ret, 1, expr), BCC_TERR_FAILURE, 0);
   }
-  ASTree *expr = astree_get(ret, 0);
   if (expr != &EMPTY_EXPR) {
-    ASTree *errnode = convert_type(expr, &ret_spec);
-    if (errnode->symbol == TOK_TYPE_ERROR) {
-      /* free temporary spec */
+    expr = perform_pointer_conv(expr);
+    if (expr->symbol == TOK_TYPE_ERROR) {
       typespec_destroy(&ret_spec);
-      /* remove return expr from errnode's list of children */
-      (void)llist_extract(&errnode->children, 0);
-      /* combine errors */
-      if (declaration->symbol == TOK_TYPE_ERROR) {
-        int status = typespec_append_auxspecs((TypeSpec *)declaration->type,
-                                              (TypeSpec *)errnode->type);
-        /* TODO(Robert): be a man */
-        if (status) abort();
-        status = astree_destroy(errnode);
-        if (status) abort();
-        return declaration;
-      } else {
-        /* free temporary spec */
-        typespec_destroy(&ret_spec);
-        return astree_adopt(errnode, 1, declaration);
-      }
+      return propogate_err(ret, expr);
     }
-    /* free temporary spec */
+    expr = convert_type(expr, &ret_spec);
+    if (expr->symbol == TOK_TYPE_ERROR) {
+      typespec_destroy(&ret_spec);
+      return propogate_err(ret, expr);
+    }
     typespec_destroy(&ret_spec);
-    return declaration;
+    return astree_adopt(ret, 1, expr);
   } else {
     int compatibility = types_compatible(&ret_spec, &SPEC_VOID);
     if (compatibility != TCHK_COMPATIBLE) {
-      /* free temporary spec */
       typespec_destroy(&ret_spec);
-      return create_terr(declaration, BCC_TERR_EXPECTED_RETVAL, 0);
-    } else {
-      /* free temporary spec */
-      typespec_destroy(&ret_spec);
-      return declaration;
+      return create_terr(astree_adopt(ret, 1, expr), BCC_TERR_EXPECTED_RETVAL,
+                         0);
     }
+    typespec_destroy(&ret_spec);
+    return astree_adopt(ret, 1, expr);
   }
 }
 
@@ -1688,6 +1673,11 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
    * from the actual definition of the function.
    */
   declarator = validate_declaration(declaration, declarator);
+  /* the function body should be treated the same as a normal block statement,
+   * we just have to parse it differently to ensure that the function is defined
+   * before the statements in the function body are parsed
+   */
+  body = validate_block(body);
   if (declaration->symbol == TOK_TYPE_ERROR) {
     return propogate_err_v(declaration, 2, declarator, body);
   } else if (declarator->symbol == TOK_TYPE_ERROR) {
@@ -1708,8 +1698,48 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
                        BCC_TERR_REDEFINITION, 1, declarator);
   }
 
-  ASTree *ret = astree_adopt(declaration, 2, declarator, body);
+  /* TODO(Robert): set function to a dummy value even in the event of failure so
+   * that return statements in the body may be processed in some way
+   */
+  int status = state_set_function(state, symval);
+  if (status)
+    return create_terr(astree_adopt(declaration, 2, declarator, body),
+                       BCC_TERR_FAILURE, 0);
+  return astree_adopt(declaration, 2, declarator, body);
+  ;
+}
+
+ASTree *validate_fnbody_content(ASTree *function, ASTree *fnbody_content) {
+  /* we can't reuse validate_block_content here because all that function does
+   * is perform adoption and propogate errors, both of which are different here
+   * because of the tree structure of function definitions
+   */
+  ASTree *fnbody = astree_get(UNWRAP(function), 2);
+  (void)astree_adopt(fnbody, 1, UNWRAP(fnbody_content));
+  if (fnbody_content->symbol == TOK_TYPE_ERROR) {
+    (void)astree_remove(fnbody_content, 0);
+    if (function->symbol == TOK_TYPE_ERROR) {
+      /* TODO(Robert): copy-pasted from propogate_err; deduplicate later */
+      TypeSpec *parent_errs = (TypeSpec *)function->type;
+      TypeSpec *child_errs = (TypeSpec *)fnbody_content->type;
+      int status = typespec_append_auxspecs(parent_errs, child_errs);
+      /* TODO(Robert): be a man */
+      if (status) abort();
+      status = astree_destroy(fnbody_content);
+      if (status) abort();
+      return function;
+    } else {
+      return astree_adopt(fnbody_content, 1, function);
+    }
+  }
+  return function;
+}
+
+ASTree *finalize_function(ASTree *function) {
+  ASTree *body = astree_get(UNWRAP(function), 2);
+  ASTree *ret = function;
   SymbolTable *table = body->symbol_table;
+  SymbolValue *symval = state_get_function(state);
   size_t i;
   for (i = 0; i < symbol_table_count_control(table); ++i) {
     ControlValue *ctrlval = symbol_table_get_control(table, i);
@@ -1721,19 +1751,19 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
       }
       symbol_table_remove_control(table, i--);
       free(ctrlval);
-    } else if (ctrlval->type == CTRL_RETURN) {
-      ret = typecheck_return(declaration, ctrlval->tree, symval);
-      symbol_table_remove_control(table, i--);
-      free(ctrlval);
     } else {
       symbol_table_remove_control(table, i--);
       free(ctrlval);
-      ret =
-          create_terr(declaration, BCC_TERR_UNEXPECTED_TOKEN, 1, ctrlval->tree);
+      ret = create_terr(function, BCC_TERR_UNEXPECTED_TOKEN, 1, ctrlval->tree);
     }
   }
-
   symval->flags |= SYMFLAG_FUNCTION_DEFINED;
+  int status = state_unset_function(state);
+  if (status) ret = create_terr(ret, BCC_TERR_FAILURE, 0);
+  /* do not use finalize_block because it will put the error in an awkward place
+   */
+  status = state_pop_table(state);
+  if (status) ret = create_terr(ret, BCC_TERR_LIBRARY_FAILURE, 0);
   return ret;
 }
 
@@ -1834,6 +1864,7 @@ ASTree *finalize_tag_def(ASTree *tag) {
   tagval->is_defined = 1;
   int status = typespec_destroy((TypeSpec *)tag->type);
   free((TypeSpec *)tag->type);
+  tag->type = &SPEC_EMPTY;
   return errnode == NULL ? tag : errnode;
 }
 
@@ -2306,24 +2337,6 @@ ASTree *validate_break(ASTree *break_) {
     return create_terr(break_, BCC_TERR_LIBRARY_FAILURE, 0);
   }
   return break_;
-}
-
-ASTree *validate_return(ASTree *ret, ASTree *expr) {
-  if (expr != &EMPTY_EXPR) {
-    expr = perform_pointer_conv(expr);
-    if (expr->symbol == TOK_TYPE_ERROR) {
-      return propogate_err(ret, expr);
-    }
-  }
-  ControlValue *ctrlval = malloc(sizeof(*ctrlval));
-  ctrlval->type = CTRL_RETURN;
-  ctrlval->tree = ret;
-  int status = symbol_table_add_control(state_peek_table(state), ctrlval);
-  if (status) {
-    free(ctrlval);
-    return create_terr(astree_adopt(ret, 1, expr), BCC_TERR_LIBRARY_FAILURE, 0);
-  }
-  return astree_adopt(ret, 1, expr);
 }
 
 ASTree *validate_block(ASTree *block) {
