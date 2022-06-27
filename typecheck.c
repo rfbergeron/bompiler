@@ -577,6 +577,7 @@ ASTree *validate_typespec(ASTree *spec_list, ASTree *spec) {
 }
 
 ASTree *validate_typespec_list(ASTree *spec_list) {
+  if (spec_list->symbol == TOK_TYPE_ERROR) return spec_list;
   TypeSpec *out = (TypeSpec *)spec_list->type;
   if ((out->flags & (TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAG_CHAR)) &&
       !(out->flags & TYPESPEC_FLAGS_SIGNEDNESS)) {
@@ -1017,9 +1018,8 @@ ASTree *validate_array_size(ASTree *array, ASTree *expr) {
 }
 
 ASTree *validate_param_list(ASTree *param_list) {
-  SymbolTable *param_table = symbol_table_init();
-  param_list->symbol_table = param_table;
-  int status = state_push_table(state, param_table);
+  param_list->symbol_table = symbol_table_init();
+  int status = state_push_table(state, param_list->symbol_table);
   if (status)
     return create_terr(param_list, BCC_TERR_LIBRARY_FAILURE, 0);
   else

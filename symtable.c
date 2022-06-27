@@ -106,9 +106,11 @@ int tag_value_destroy(TagValue *tagval) {
       fprintf(stderr, "your data structures library sucks\n");
       abort();
     }
-    /* don't destroy the member table; it is a child of whatever scope the tag
-     * was declared in, so it should be destroyed recursively
-     */
+    status = symbol_table_destroy(tagval->data.members.by_name);
+    if (status) {
+      fprintf(stderr, "unable to destroy struct member table\n");
+      abort();
+    }
   } else if (tagval->tag == TAG_ENUM) {
     int status = map_destroy(&tagval->data.enumerators);
     if (status) {

@@ -54,7 +54,20 @@ int astree_destroy(ASTree *tree) {
   }
 
   /* llist should handle destruction of children */
-  llist_destroy(&tree->children);
+  int status = llist_destroy(&tree->children);
+  if (status) {
+    fprintf(stderr, "your datas structures library sucks\n");
+    abort();
+  }
+
+  /* free symbol table if present */
+  if (tree->symbol_table != NULL) {
+    int status = symbol_table_destroy(tree->symbol_table);
+    if (status) {
+      fprintf(stderr, "unable to destroy symbol table\n");
+      abort();
+    }
+  }
 
   /* free one-off TypeSpec objects */
   if (!skip_type_check && tree->type != &SPEC_EMPTY) {
