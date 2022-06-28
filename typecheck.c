@@ -1673,16 +1673,9 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
    * from the actual definition of the function.
    */
   declarator = validate_declaration(declaration, declarator);
-  /* the function body should be treated the same as a normal block statement,
-   * we just have to parse it differently to ensure that the function is defined
-   * before the statements in the function body are parsed
-   */
-  body = validate_block(body);
   if (declaration->symbol == TOK_TYPE_ERROR) {
     return propogate_err_v(declaration, 2, declarator, body);
   } else if (declarator->symbol == TOK_TYPE_ERROR) {
-    return propogate_err_v(declaration, 2, declarator, body);
-  } else if (body->symbol == TOK_TYPE_ERROR) {
     return propogate_err_v(declaration, 2, declarator, body);
   }
 
@@ -1698,15 +1691,27 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
                        BCC_TERR_REDEFINITION, 1, declarator);
   }
 
+  /* param list should be first child for properly defined functions */
+  ASTree *param_list = astree_get(declarator, 0);
+  assert(param_list->symbol == TOK_PARAM_LIST);
+  /* treat body like a normal block statement, but move param table to body node
+   * and define function before entering body scope */
+  body->symbol_table = param_list->symbol_table;
+  param_list->symbol_table = NULL;
+  int status = state_push_table(state, body->symbol_table);
+  if (status) {
+    return create_terr(astree_adopt(declaration, 2, declarator, body),
+                       BCC_TERR_LIBRARY_FAILURE, 0);
+  }
+
   /* TODO(Robert): set function to a dummy value even in the event of failure so
    * that return statements in the body may be processed in some way
    */
-  int status = state_set_function(state, symval);
+  status = state_set_function(state, symval);
   if (status)
     return create_terr(astree_adopt(declaration, 2, declarator, body),
                        BCC_TERR_FAILURE, 0);
   return astree_adopt(declaration, 2, declarator, body);
-  ;
 }
 
 ASTree *validate_fnbody_content(ASTree *function, ASTree *fnbody_content) {
@@ -1752,9 +1757,9 @@ ASTree *finalize_function(ASTree *function) {
       symbol_table_remove_control(table, i--);
       free(ctrlval);
     } else {
+      ret = create_terr(ret, BCC_TERR_UNEXPECTED_TOKEN, 1, ctrlval->tree);
       symbol_table_remove_control(table, i--);
       free(ctrlval);
-      ret = create_terr(function, BCC_TERR_UNEXPECTED_TOKEN, 1, ctrlval->tree);
     }
   }
   symval->flags |= SYMFLAG_FUNCTION_DEFINED;
