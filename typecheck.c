@@ -1714,6 +1714,34 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
   return astree_adopt(declaration, 2, declarator, body);
 }
 
+int merge_block_controls(ASTree *block, ASTree *stmt) {
+  ASTree *sub_block = NULL;
+  switch (stmt->symbol) {
+    case TOK_FOR:
+    case TOK_WHILE:
+    case TOK_SWITCH:
+      if (astree_get(stmt, 1)->symbol == TOK_BLOCK)
+        sub_block = astree_get(stmt, 1);
+      break;
+    case TOK_DO:
+      if (astree_get(stmt, 0)->symbol == TOK_BLOCK)
+        sub_block = astree_get(stmt, 0);
+      break;
+    case TOK_BLOCK:
+      sub_block = stmt;
+      break;
+    default:
+      break;
+  }
+
+  if (sub_block != NULL) {
+    return symbol_table_merge_control(block->symbol_table,
+                                      sub_block->symbol_table);
+  } else {
+    return 0;
+  }
+}
+
 ASTree *validate_fnbody_content(ASTree *function, ASTree *fnbody_content) {
   /* we can't reuse validate_block_content here because all that function does
    * is perform adoption and propogate errors, both of which are different here
@@ -1736,6 +1764,13 @@ ASTree *validate_fnbody_content(ASTree *function, ASTree *fnbody_content) {
     } else {
       return astree_adopt(fnbody_content, 1, function);
     }
+  }
+
+  /* TODO(Robert): handle control flow statements even in the case of errors */
+  int status = merge_block_controls(fnbody, fnbody_content);
+  if (status) {
+    return create_terr(astree_adopt(fnbody, 1, fnbody_content),
+                       BCC_TERR_LIBRARY_FAILURE, 0);
   }
   return function;
 }
@@ -2358,6 +2393,13 @@ ASTree *validate_block_content(ASTree *block, ASTree *block_content) {
     return propogate_err(block, block_content);
   } else if (block_content->symbol == TOK_TYPE_ERROR) {
     return propogate_err(block, block_content);
+  }
+
+  /* TODO(Robert): handle control flow statements even in the case of errors */
+  int status = merge_block_controls(block, block_content);
+  if (status) {
+    return create_terr(astree_adopt(block, 1, block_content),
+                       BCC_TERR_LIBRARY_FAILURE, 0);
   }
   return astree_adopt(block, 1, block_content);
 }
