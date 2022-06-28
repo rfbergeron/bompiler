@@ -657,38 +657,38 @@ ASTree *validate_arg(ASTree *call, ASTree *arg) {
   }
 }
 
-ASTree *validate_call(ASTree *call, ASTree *function) {
+ASTree *validate_call(ASTree *expr, ASTree *call) {
   if (call->symbol == TOK_TYPE_ERROR) {
-    return propogate_err(call, function);
+    return propogate_err(call, expr);
   }
-  function = perform_pointer_conv(function);
-  if (function->symbol == TOK_TYPE_ERROR) {
-    return propogate_err(call, function);
+  expr = perform_pointer_conv(expr);
+  if (expr->symbol == TOK_TYPE_ERROR) {
+    return propogate_err(call, expr);
   }
-  TypeSpec *function_spec = (TypeSpec *)function->type;
-  if (!typespec_is_fnptr(function_spec)) {
-    return create_terr(astree_adopt(call, 1, function),
-                       BCC_TERR_EXPECTED_FN_PTR, 2, call, function);
+  TypeSpec *expr_spec = (TypeSpec *)expr->type;
+  if (!typespec_is_fnptr(expr_spec)) {
+    return create_terr(astree_adopt(call, 1, expr), BCC_TERR_EXPECTED_FN_PTR, 2,
+                       call, expr);
   }
 
   /* strip pointer */
   TypeSpec temp_spec = SPEC_EMPTY;
-  int status = strip_aux_type(&temp_spec, function_spec);
+  int status = strip_aux_type(&temp_spec, expr_spec);
   if (status) {
-    return create_terr(astree_adopt(call, 1, function),
-                       BCC_TERR_LIBRARY_FAILURE, 0);
+    return create_terr(astree_adopt(call, 1, expr), BCC_TERR_LIBRARY_FAILURE,
+                       0);
   }
   /* strip function */
   TypeSpec *return_spec = malloc(sizeof(*return_spec));
   status = strip_aux_type(return_spec, &temp_spec);
   if (status) {
-    return create_terr(astree_adopt(call, 1, function),
-                       BCC_TERR_LIBRARY_FAILURE, 0);
+    return create_terr(astree_adopt(call, 1, expr), BCC_TERR_LIBRARY_FAILURE,
+                       0);
   }
   /* free temporaries created by stripping */
   typespec_destroy(&temp_spec);
   call->type = return_spec;
-  return astree_adopt(call, 1, function);
+  return astree_adopt(call, 1, expr);
 }
 
 ASTree *validate_conditional(ASTree *qmark, ASTree *condition,

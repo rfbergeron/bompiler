@@ -263,10 +263,10 @@ postfix_expr        : primary_expr                                      { $$ = $
                     | postfix_expr '.' TOK_IDENT                        { $$ = validate_reference($2, $1, $3); }
                     | postfix_expr TOK_ARROW TOK_IDENT                  { $$ = validate_arrow($2, $1, $3); }
                     ;
-call                : postfix_expr '(' ')'                              { $$ = finalize_call(validate_call($1, $2)); parser_cleanup(1, $3);}
+call                : postfix_expr '(' ')'                              { $$ = finalize_call(validate_call($1, parser_new_sym($2, TOK_CALL))); parser_cleanup(1, $3);}
                     | call_args ')'                                     { $$ = finalize_call($1); parser_cleanup(1, $2); }
                     ;
-call_args           : postfix_expr '(' assign_expr                      { $$ = validate_arg(validate_call($1, $2), $3); }
+call_args           : postfix_expr '(' assign_expr                      { $$ = validate_arg(validate_call($1, parser_new_sym($2, TOK_CALL)), $3); }
                     | call_args ',' assign_expr                         { $$ = validate_arg($1, $3); parser_cleanup(1, $2); }
                     ;
 primary_expr        : TOK_IDENT                                         { $$ = validate_ident($1); }
