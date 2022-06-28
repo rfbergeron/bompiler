@@ -192,6 +192,11 @@ int symbol_table_destroy(SymbolTable *table) {
     if (status) return status;
     free(table->label_namespace);
   }
+  if (table->control_stack != NULL) {
+    int status = llist_destroy(table->control_stack);
+    if (status) return status;
+    free(table->control_stack);
+  }
   free(table);
   return 0;
 }
@@ -238,6 +243,34 @@ int symbol_table_insert_label(SymbolTable *table, const char *ident,
 LabelValue *symbol_table_get_label(SymbolTable *table, const char *ident,
                                    const size_t ident_len) {
   return map_get(table->label_namespace, (char *)ident, ident_len);
+}
+
+int symbol_table_merge_control(SymbolTable *dest, SymbolTable *src) {
+  if (src->control_stack == NULL) {
+    return 0;
+  } else if (dest->control_stack == NULL) {
+    dest->control_stack = src->control_stack;
+    src->control_stack = NULL;
+    return 0;
+  } else {
+    while (!llist_empty(src->control_stack)) {
+      ControlValue *ctrlval = llist_pop_back(src->control_stack);
+      if (ctrlval == NULL) {
+        return -1;
+      }
+      int status = llist_push_front(dest->control_stack, ctrlval);
+      if (status) {
+        return -1;
+      }
+    }
+    int status = llist_destroy(src->control_stack);
+    if (status) {
+      return -1;
+    }
+    free(src->control_stack);
+    src->control_stack = NULL;
+  }
+  return 0;
 }
 
 int symbol_table_add_control(SymbolTable *table, ControlValue *ctrlval) {
