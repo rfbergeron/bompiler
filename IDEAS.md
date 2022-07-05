@@ -73,7 +73,7 @@ nice features:
 
 ### Implementation
 #### Lexer and Parser
-To implement the hack, a new token, `TOK_TYPE_ID`, will be added to the parser,
+To implement the hack, a new token, `TOK_TYPEDEF_NAME`, will be added to the parser,
 which represents identifiers that refer to an existing declaration that has the
 `typedef` storage class specifier.
 
@@ -81,10 +81,10 @@ When the lexer matches an identifier, it will not immediately produce a syntax
 tree node. Instead, it will call another function. This function will look up the
 identifier in the symbol table. If there is an existing symbol and the symbol
 was declared with the `typedef` storage class specifier, this function will
-construct a syntax tree node with the `TOK_TYPE_ID` symbol. Otherwise, it will
+construct a syntax tree node with the `TOK_TYPEDEF_NAME` symbol. Otherwise, it will
 construct a tree with the `TOK_IDENT` symbol.
 
-This is not a perfect solution: the lexer will assign `TOK_TYPE_ID` to
+This is not a perfect solution: the lexer will assign `TOK_TYPEDEF_NAME` to
 `typedef`ed identifiers even when that identifier is being redeclared, which
 will cause the identifier to be used in the `typespec_list` production. This
 will cause a semantic error due to incompatible type specifiers, possibly
@@ -92,31 +92,44 @@ followed by a syntax error because of a missing identifier.
 
 #### Type Checker
 The type checker will be responsible for fixing nodes that have been mistakenly
-labelled `TOK_TYPE_ID`.
+labelled `TOK_TYPEDEF_NAME`.
 
-This cannot be accomodated for by allowing the parser to accept `TOK_TYPE_ID`
+This cannot be accomodated for by allowing the parser to accept `TOK_TYPEDEF_NAME`
 in the place of `TOK_IDENT` (in all cases), since it leads to reduce-reduce
 conflicts, in particular when parsing type specifiers and declarators.
 
 To avoid this, we could use the type checker to detect when the lexer has
-mistakenly labelled a `TOK_IDENT` as a `TOK_TYPE_ID`. The only valid way in
+mistakenly labelled a `TOK_IDENT` as a `TOK_TYPEDEF_NAME`. The only valid way in
 which this can occur is:
-1. The last type/storage class specifier/qualifier in a list is a `TOK_TYPE_ID`
+1. The last type/storage class specifier/qualifier in a list is a `TOK_TYPEDEF_NAME`
 2. This token caused an error because it is incompatible with other specifiers
 3. The `typespec_list` token is not followed by a `declarator` token; this token
    is either omitted or is replaced by an `abs_declarator` token
 
 If these conditions are true, we can relatively easily shuffle around the
 contents of the tree nodes:
-- If present, the `TOK_TYPE_ID` must adopt the children of the `TOK_TYPE_NAME`
+- If present, the `TOK_TYPEDEF_NAME` must adopt the children of the `TOK_TYPE_NAME`
   created by the `abs_declarator` production.
-- `TOK_SPEC_LIST` must drop `TOK_TYPE_ID` from its list of children
-- `TOK_DECLARATOR` must adopt `TOK_TYPE_ID`
-- `TOK_TYPE_ID` must have its symbol changed to `TOK_IDENT`
+- `TOK_SPEC_LIST` must drop `TOK_TYPEDEF_NAME` from its list of children
+- `TOK_DECLARATOR` must adopt `TOK_TYPEDEF_NAME`
+- `TOK_TYPEDEF_NAME` must have its symbol changed to `TOK_IDENT`
 
-In places where accepting both `TOK_IDENT` and `TOK_TYPE_ID` does not cause
+In places where accepting both `TOK_IDENT` and `TOK_TYPEDEF_NAME` does not cause
 reduce-reduce conflicts (tag names, struct members, enumerators, and labels),
 the parser will accept both tokens and change it back to `TOK_IDENT`.
+
+#### Consequences
+In order to handle this, many productions whose recipe includes a `declarator`
+will also need to accept an `abs_declarator`, which is checked for the above
+conditions.
+
+If the above conditions are not met, the declaration it is a part of is a
+"nothing declaration." Nothing declarations are not syntactically valid if:
+- the declaration includes any pointers or direct declarators
+- the declaration has multiple declarators or abstract declarators
+- the declaration is for a parameter of a function definition
+
+The type checker should detect these and report them as syntax errors.
 
 ## More useful jump tracking
 Because of the type checking occurs from the bottom up, a return statement
