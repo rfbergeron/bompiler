@@ -40,6 +40,8 @@ void push_linenr(size_t linenr) {
 /* external functions */
 size_t lexer_get_filenr() { return lexer_loc.filenr; }
 
+Location lexer_get_loc(void) { return lexer_loc; }
+
 const char *lexer_filename(int filenr) {
   return llist_get(&lexer_filenames, (size_t)filenr);
 }

@@ -31,6 +31,7 @@ int yyparse();
 void yyerror(const char *message);
 
 size_t lexer_get_filenr();
+Location lexer_get_loc(void);
 const char *lexer_filename(int filenr);
 size_t lexer_include_linenr(int filenr);
 void lexer_new_filename(const char *filename);
@@ -53,7 +54,7 @@ ASTree *parser_make_spec_list(ASTree *first_specifier);
 ASTree *parser_make_declaration(ASTree *spec_list);
 ASTree *parser_make_param_list(ASTree *left_paren, ASTree *spec_list,
                                ASTree *declarator);
-ASTree *parser_make_type_name(ASTree *first_child);
+ASTree *parser_make_type_name(void);
 ASTree *parser_make_cast(ASTree *left_paren, ASTree *spec_list,
                          ASTree *type_name, ASTree *expr);
 ASTree *parser_make_label(ASTree *ident);
