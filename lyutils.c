@@ -9,11 +9,11 @@
 #include <string.h>
 
 #include "astree.h"
-#include "state.h"
-#include "symtable.h"
 #include "attributes.h"
 #include "badlib/badllist.h"
 #include "debug.h"
+#include "state.h"
+#include "symtable.h"
 
 extern FILE *tokfile;
 size_t lexer_last_yyleng;
@@ -120,7 +120,7 @@ int lexer_ident(void) {
   DEBUGS('l', "Determining appropriate token type for %s", yytext);
   size_t yytext_len = strlen(yytext);
   SymbolValue *symval = NULL;
-  (void) state_get_symbol(state, yytext, yytext_len, &symval);
+  (void)state_get_symbol(state, yytext, yytext_len, &symval);
   if (symval != NULL && symval->type.flags & TYPESPEC_FLAG_TYPEDEF) {
     return lexer_token(TOK_TYPEDEF_NAME);
   } else {

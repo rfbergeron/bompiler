@@ -18,43 +18,6 @@
 /* TODO(Robert): Linux-specific; replace with strtoul or similar */
 #include "inttypes.h"
 
-/* "char" is not included in any of these groups */
-#define TYPESPEC_FLAGS_INTEGER                                    \
-  (TYPESPEC_FLAG_INT | TYPESPEC_FLAG_SHORT | TYPESPEC_FLAG_LONG | \
-   TYPESPEC_FLAG_LONG_LONG)
-#define TYPESPEC_FLAGS_NON_INTEGER                                   \
-  (TYPESPEC_FLAG_VOID | TYPESPEC_FLAG_STRUCT | TYPESPEC_FLAG_UNION | \
-   TYPESPEC_FLAG_ENUM)
-#define TYPESPEC_FLAGS_SIGNEDNESS \
-  (TYPESPEC_FLAG_SIGNED | TYPESPEC_FLAG_UNSIGNED)
-#define TYPESPEC_FLAGS_STORAGE_CLASS (TYPESPEC_FLAG_TYPEDEF)
-
-/* TODO(Robert): Implement "long long" integer type. For now, the type checker
- * should report an error if "long" is specified twice.
- */
-const unsigned int INCOMPATIBLE_FLAGSETS[] = {
-    TYPESPEC_FLAG_INT | TYPESPEC_FLAG_CHAR |
-        TYPESPEC_FLAGS_NON_INTEGER, /* int */
-    TYPESPEC_FLAG_CHAR | TYPESPEC_FLAGS_INTEGER |
-        TYPESPEC_FLAGS_NON_INTEGER, /* char */
-    TYPESPEC_FLAG_SHORT | TYPESPEC_FLAG_LONG | TYPESPEC_FLAG_LONG_LONG |
-        TYPESPEC_FLAG_CHAR | TYPESPEC_FLAGS_NON_INTEGER, /* short */
-    TYPESPEC_FLAG_LONG | TYPESPEC_FLAG_LONG_LONG | TYPESPEC_FLAG_SHORT |
-        TYPESPEC_FLAG_CHAR | TYPESPEC_FLAGS_NON_INTEGER, /* long */
-    TYPESPEC_FLAG_LONG | TYPESPEC_FLAG_LONG_LONG | TYPESPEC_FLAG_SHORT |
-        TYPESPEC_FLAG_CHAR | TYPESPEC_FLAGS_NON_INTEGER,    /* long long */
-    TYPESPEC_FLAGS_SIGNEDNESS | TYPESPEC_FLAGS_NON_INTEGER, /* signed */
-    TYPESPEC_FLAGS_SIGNEDNESS | TYPESPEC_FLAGS_NON_INTEGER, /* unsigned */
-    TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_NON_INTEGER |
-        TYPESPEC_FLAGS_SIGNEDNESS, /* void */
-    TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_NON_INTEGER |
-        TYPESPEC_FLAGS_SIGNEDNESS, /* struct */
-    TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_NON_INTEGER |
-        TYPESPEC_FLAGS_SIGNEDNESS, /* union */
-    TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_NON_INTEGER |
-        TYPESPEC_FLAGS_SIGNEDNESS, /* enum */
-};
-
 enum type_checker_action {
   TCHK_COMPATIBLE,
   TCHK_IMPLICIT_CAST,
@@ -481,6 +444,10 @@ ASTree *validate_typedef_typespec(ASTree *spec_list, ASTree *typedef_) {
 
 ASTree *validate_type_id_typespec(ASTree *spec_list, ASTree *type_id) {
   TypeSpec *out = (TypeSpec *)spec_list->type;
+  if (out->flags & INCOMPATIBLE_FLAGSETS[TYPESPEC_INDEX_TYPEDEF_NAME]) {
+    return create_terr(astree_adopt(spec_list, 1, type_id),
+                       BCC_TERR_INCOMPATIBLE_SPEC, 2, spec_list, type_id);
+  }
   const char *type_name = type_id->lexinfo;
   size_t type_name_len = strlen(type_name);
   SymbolValue *symval = NULL;
@@ -571,6 +538,8 @@ ASTree *validate_typespec(ASTree *spec_list, ASTree *spec) {
       return validate_type_id_typespec(spec_list, spec);
     case TOK_TYPEDEF:
       return validate_typedef_typespec(spec_list, spec);
+    case TOK_TYPEDEF_NAME:
+      return validate_type_id_typespec(spec_list, spec);
     default:
       return create_terr(astree_adopt(spec_list, 1, spec), BCC_TERR_FAILURE, 0);
   }
@@ -913,6 +882,68 @@ int spec_list_includes_type(ASTree *spec_list) {
   return 0;
 }
 
+int check_typedef_redecl(ASTree **nodes) {
+  ASTree *declaration = nodes[0];
+  ASTree *declarator = nodes[1];
+  if (declaration->symbol != TOK_TYPE_ERROR ||
+      declarator->symbol != TOK_TYPE_NAME) {
+    return 0;
+  }
+  AuxSpec *erraux = llist_back(&declaration->type->auxspecs);
+  if (erraux->data.err.code != BCC_TERR_INCOMPATIBLE_SPEC) {
+    return 0;
+  }
+  ASTree *spec_list = astree_get(UNWRAP(declaration), 0);
+  ASTree *last_spec = astree_get(spec_list, astree_count(spec_list) - 1);
+  ASTree *incompatible_spec = erraux->data.err.info[1];
+  if (last_spec != incompatible_spec || last_spec->symbol != TOK_TYPEDEF_NAME) {
+    return 0;
+  }
+  /* remove and clean up the error */
+  if (llist_size(&declaration->type->auxspecs) > 1) {
+    (void)llist_pop_back((LinkedList *)&declaration->type->auxspecs);
+    int status = auxspec_destroy(erraux);
+    if (status) abort();
+    free(erraux);
+  } else {
+    ASTree *errnode = declaration;
+    nodes[0] = declaration = astree_remove(declaration, 0);
+    int status = astree_destroy(errnode);
+    if (status) abort();
+  }
+  /* restructure the tree */
+  ASTree *ident = astree_remove(spec_list, astree_count(spec_list) - 1);
+  ident->symbol = TOK_IDENT;
+  ident->type = declarator->type;
+  declarator->type = &SPEC_EMPTY;
+  LinkedList temp_children = ident->children;
+  ident->children = declarator->children;
+  declarator->children = temp_children;
+  nodes[1] = ident;
+  int status = astree_destroy(declarator);
+  if (status) abort();
+  /* do what the type checker should have done */
+  ASTree *errnode = validate_typespec_list(spec_list);
+  if (spec_list->symbol == TOK_TYPE_ERROR) {
+    (void)astree_remove(errnode, 0);
+    if (declaration->symbol == TOK_TYPE_ERROR) {
+      /* TODO(Robert): copy-pasted from propogate_err; deduplicate later */
+      TypeSpec *parent_errs = (TypeSpec *)declaration->type;
+      TypeSpec *child_errs = (TypeSpec *)errnode->type;
+      int status = typespec_append_auxspecs(parent_errs, child_errs);
+      /* TODO(Robert): be a man */
+      if (status) abort();
+      status = astree_destroy(errnode);
+      if (status) abort();
+      return -1;
+    } else {
+      nodes[0] = declaration = astree_adopt(errnode, 1, declaration);
+      return -1;
+    }
+  }
+  return 0;
+}
+
 /*
  * Combines type specifier and declarator information and inserts symbol value
  * into the table at the current scope. Returns the declarator node passed in
@@ -920,6 +951,12 @@ int spec_list_includes_type(ASTree *spec_list) {
  * called with error nodes as arguments.
  */
 ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
+  /* TODO(Robert): do this in a less funky way */
+  ASTree *nodes[] = {declaration, declarator};
+  int status = check_typedef_redecl(nodes);
+  if (status) abort();
+  declaration = nodes[0];
+  declarator = nodes[1];
   DEBUGS('t', "Making object entry for value %s", declarator->lexinfo);
   if (declaration->symbol == TOK_TYPE_ERROR ||
       declarator->symbol == TOK_TYPE_ERROR) {
@@ -932,7 +969,7 @@ ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
   symbol->type.alignment = decl_specs->alignment;
   symbol->type.width = decl_specs->width;
   symbol->type.flags = decl_specs->flags;
-  int status = typespec_append_auxspecs(&symbol->type, (TypeSpec *)decl_specs);
+  status = typespec_append_auxspecs(&symbol->type, (TypeSpec *)decl_specs);
   if (status) {
     return create_terr(declarator, BCC_TERR_LIBRARY_FAILURE, 0);
   }
