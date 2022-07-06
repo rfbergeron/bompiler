@@ -43,15 +43,47 @@ const char STRING_INT_MAP[][32] = {
     "unsigned short int", "signed short int", "unsigned char", "signed char",
 };
 
-const char typespec_flag_string[][10] = {"int", "char", "short", "long",
-                                         "long long", "signed", "unsigned",
-                                         "void", "struct", "union", "enum",
-                                         /* storage class */
-                                         "register", "static", "extern", "auto",
-                                         /* qualifiers */
-                                         "const", "volatile",
-                                         /* function only */
-                                         "inline"};
+/* note that "typedef name" should not appear at any point in the compiler's
+ * symbol output; typedef names should be converted to their underlying type
+ * when the type checker processes them
+ */
+const char typespec_flag_string[][16] = {
+    "int", "char", "short", "long", "long long", "signed", "unsigned", "void",
+    "struct", "union", "enum", "typedef name",
+    /* storage class */
+    "register", "static", "extern", "auto", "typedef",
+    /* qualifiers */
+    "const", "volatile",
+    /* function only */
+    "inline"};
+
+/* TODO(Robert): Implement "long long" integer type. For now, the type checker
+ * should report an error if "long" is specified twice.
+ */
+const unsigned int INCOMPATIBLE_FLAGSETS[] = {
+    TYPESPEC_FLAG_INT | TYPESPEC_FLAG_CHAR |
+        TYPESPEC_FLAGS_NON_INTEGER, /* int */
+    TYPESPEC_FLAG_CHAR | TYPESPEC_FLAGS_INTEGER |
+        TYPESPEC_FLAGS_NON_INTEGER, /* char */
+    TYPESPEC_FLAG_SHORT | TYPESPEC_FLAG_LONG | TYPESPEC_FLAG_LONG_LONG |
+        TYPESPEC_FLAG_CHAR | TYPESPEC_FLAGS_NON_INTEGER, /* short */
+    TYPESPEC_FLAG_LONG | TYPESPEC_FLAG_LONG_LONG | TYPESPEC_FLAG_SHORT |
+        TYPESPEC_FLAG_CHAR | TYPESPEC_FLAGS_NON_INTEGER, /* long */
+    TYPESPEC_FLAG_LONG | TYPESPEC_FLAG_LONG_LONG | TYPESPEC_FLAG_SHORT |
+        TYPESPEC_FLAG_CHAR | TYPESPEC_FLAGS_NON_INTEGER,    /* long long */
+    TYPESPEC_FLAGS_SIGNEDNESS | TYPESPEC_FLAGS_NON_INTEGER, /* signed */
+    TYPESPEC_FLAGS_SIGNEDNESS | TYPESPEC_FLAGS_NON_INTEGER, /* unsigned */
+    TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_NON_INTEGER |
+        TYPESPEC_FLAGS_SIGNEDNESS, /* void */
+    TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_NON_INTEGER |
+        TYPESPEC_FLAGS_SIGNEDNESS, /* struct */
+    TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_NON_INTEGER |
+        TYPESPEC_FLAGS_SIGNEDNESS, /* union */
+    TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_NON_INTEGER |
+        TYPESPEC_FLAGS_SIGNEDNESS, /* enum */
+    TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_NON_INTEGER |
+        TYPESPEC_FLAGS_SIGNEDNESS, /* typedef name */
+};
 
 const char *STRING_ULONG = STRING_INT_MAP[INDEX_FROM_INT(UNSIGNED, LONG)];
 const char *STRING_LONG = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, LONG)];
