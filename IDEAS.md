@@ -79,57 +79,33 @@ which represents identifiers that refer to an existing declaration that has the
 
 When the lexer matches an identifier, it will not immediately produce a syntax
 tree node. Instead, it will call another function. This function will look up the
-identifier in the symbol table. If there is an existing symbol and the symbol
-was declared with the `typedef` storage class specifier, this function will
-construct a syntax tree node with the `TOK_TYPEDEF_NAME` symbol. Otherwise, it will
-construct a tree with the `TOK_IDENT` symbol.
+identifier in the symbol table, and additionally get the semantic value produced
+by the last matched parser rule.
 
-This is not a perfect solution: the lexer will assign `TOK_TYPEDEF_NAME` to
-`typedef`ed identifiers even when that identifier is being redeclared, which
-will cause the identifier to be used in the `typespec_list` production. This
-will cause a semantic error due to incompatible type specifiers, possibly
-followed by a syntax error because of a missing identifier.
+The identifier will produce a `TOK_TYPEDEF_NAME` if and only if the following are true:
+1. There must be an existing symbol for the identifier
+2. This symbol must have the `typedef` bit set in its `flags` member
+3. The semantic value is not a specifier list, UNLESS:
+4. The specifier list DOES NOT have a valid type specified; ie, its list of
+   children may only contain nodes with the following symbols: `const`,
+   `volatile`, `typedef`, `auto`, `static`, `extern`, `register`, `restrict`
 
-#### Type Checker
-The type checker will be responsible for fixing nodes that have been mistakenly
-labelled `TOK_TYPEDEF_NAME`.
+If these conditions are met, then the identifier is certainly meant to be interpreted
+as a typedef name; otherwise, the code would result in a syntax error. If they are not
+met, we instead interpret the input as a normal declaration or as a redefinition of
+a typedef name.
 
-This cannot be accomodated for by allowing the parser to accept `TOK_TYPEDEF_NAME`
-in the place of `TOK_IDENT` (in all cases), since it leads to reduce-reduce
-conflicts, in particular when parsing type specifiers and declarators.
-
-To avoid this, we could use the type checker to detect when the lexer has
-mistakenly labelled a `TOK_IDENT` as a `TOK_TYPEDEF_NAME`. The only valid way in
-which this can occur is:
-1. The last type/storage class specifier/qualifier in a list is a `TOK_TYPEDEF_NAME`
-2. This token caused an error because it is incompatible with other specifiers
-3. The `typespec_list` token is not followed by a `declarator` token; this token
-   is either omitted or is replaced by an `abs_declarator` token
-
-If these conditions are true, we can relatively easily shuffle around the
-contents of the tree nodes:
-- If present, the `TOK_TYPEDEF_NAME` must adopt the children of the `TOK_TYPE_NAME`
-  created by the `abs_declarator` production.
-- `TOK_SPEC_LIST` must drop `TOK_TYPEDEF_NAME` from its list of children
-- `TOK_DECLARATOR` must adopt `TOK_TYPEDEF_NAME`
-- `TOK_TYPEDEF_NAME` must have its symbol changed to `TOK_IDENT`
-
-In places where accepting both `TOK_IDENT` and `TOK_TYPEDEF_NAME` does not cause
-reduce-reduce conflicts (tag names, struct members, enumerators, and labels),
-the parser will accept both tokens and change it back to `TOK_IDENT`.
+This method does not produce the correct result in all situations; since tags, labels,
+and struct members have separate namespaces, they do not conflict with typedef names
+and will need to have their symbol changed to `TOK_IDENT` in the parser rules where
+they appear.
 
 #### Consequences
-In order to handle this, many productions whose recipe includes a `declarator`
-will also need to accept an `abs_declarator`, which is checked for the above
-conditions.
-
-If the above conditions are not met, the declaration it is a part of is a
-"nothing declaration." Nothing declarations are not syntactically valid if:
-- the declaration includes any pointers or direct declarators
-- the declaration has multiple declarators or abstract declarators
-- the declaration is for a parameter of a function definition
-
-The type checker should detect these and report them as syntax errors.
+No negative impact compared to previous approach, and much less code. It turns out
+that `yyval` is a local variable inside one of the generated parser's functions,
+so it cannot be accessed anyways. Instead, each parser rule assigns to
+`bcc_yyval`, which is defined in `lyutils.h`. This solution can probably be cut
+down to something less tedious and invasive at a later date.
 
 ## More useful jump tracking
 Because of the type checking occurs from the bottom up, a return statement
