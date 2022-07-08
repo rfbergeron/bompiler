@@ -101,12 +101,11 @@ and will need to have their symbol changed to `TOK_IDENT` in the parser rules wh
 they appear.
 
 #### Consequences
-To get the last semantic value, we have to read the variable `yyval`
-(not `yylval`) that is present in the generated parser. This variable is not
-listed in the manual as a global variable that the user is meant to access, so
-using it may not be reliable. However, it does not look like the generated
-parser does anything funky with it in between executing parser rules, so its
-value should be "clean" when the lexer goes to look at it.
+No negative impact compared to previous approach, and much less code. It turns out
+that `yyval` is a local variable inside one of the generated parser's functions,
+so it cannot be accessed anyways. Instead, each parser rule assigns to
+`bcc_yyval`, which is defined in `lyutils.h`. This solution can probably be cut
+down to something less tedious and invasive at a later date.
 
 ## More useful jump tracking
 Because of the type checking occurs from the bottom up, a return statement
