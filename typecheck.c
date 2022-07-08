@@ -462,7 +462,7 @@ ASTree *validate_type_id_typespec(ASTree *spec_list, ASTree *type_id) {
     out->base = symval->type.base;
     out->width = symval->type.width;
     out->alignment = symval->type.alignment;
-    out->flags = symval->type.flags & (~TYPESPEC_FLAG_TYPEDEF);
+    out->flags = symval->type.flags;
 
     if (out->auxspecs.anchor == NULL) {
       typespec_init(out);
