@@ -125,6 +125,21 @@ enum typespec_flag {
   TYPESPEC_FLAG_INLINE = 1 << TYPESPEC_INDEX_INLINE
 };
 
+/* "char" is not included in any of these groups */
+#define TYPESPEC_FLAGS_INTEGER                                    \
+  (TYPESPEC_FLAG_INT | TYPESPEC_FLAG_SHORT | TYPESPEC_FLAG_LONG | \
+   TYPESPEC_FLAG_LONG_LONG)
+#define TYPESPEC_FLAGS_NON_INTEGER                                   \
+  (TYPESPEC_FLAG_VOID | TYPESPEC_FLAG_STRUCT | TYPESPEC_FLAG_UNION | \
+   TYPESPEC_FLAG_ENUM)
+#define TYPESPEC_FLAGS_SIGNEDNESS \
+  (TYPESPEC_FLAG_SIGNED | TYPESPEC_FLAG_UNSIGNED)
+#define TYPESPEC_FLAGS_STORAGE_CLASS                                      \
+  (TYPESPEC_FLAG_REGISTER | TYPESPEC_FLAG_STATIC | TYPESPEC_FLAG_EXTERN | \
+   TYPESPEC_FLAG_AUTO | TYPESPEC_FLAG_TYPEDEF)
+
+extern const unsigned int INCOMPATIBLE_FLAGSETS[];
+
 typedef enum bcc_type_err {
   BCC_TERR_FAILURE = -1,
   BCC_TERR_SUCCESS = 0,
