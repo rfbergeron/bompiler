@@ -9,17 +9,18 @@
 #include <string.h>
 
 #include "astree.h"
-#include "state.h"
-#include "symtable.h"
 #include "attributes.h"
 #include "badlib/badllist.h"
 #include "debug.h"
+#include "state.h"
+#include "symtable.h"
 
 extern FILE *tokfile;
 size_t lexer_last_yyleng;
 Location lexer_loc;
 int lexer_interactive;
 ASTree *parser_root;
+ASTree *bcc_yyval;
 struct llist lexer_filenames;
 struct {
   size_t *data;
@@ -117,14 +118,18 @@ int lexer_token(int symbol) {
 }
 
 int lexer_ident(void) {
-  DEBUGS('l', "Determining appropriate token type for %s", yytext);
-  size_t yytext_len = strlen(yytext);
+  DEBUGS('l', "Determining appropriate token type for identifier %s", yytext);
   SymbolValue *symval = NULL;
-  (void) state_get_symbol(state, yytext, yytext_len, &symval);
-  if (symval != NULL && symval->type.flags & TYPESPEC_FLAG_TYPEDEF) {
-    return lexer_token(TOK_TYPEDEF_NAME);
-  } else {
+  (void)state_get_symbol(state, yytext, yyleng, &symval);
+  if (symval == NULL || !(symval->type.flags & TYPESPEC_FLAG_TYPEDEF)) {
     return lexer_token(TOK_IDENT);
+  } else if (bcc_yyval->symbol == TOK_SPEC_LIST &&
+             (bcc_yyval->type->flags &
+              (TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_SIGNEDNESS |
+               TYPESPEC_FLAGS_NON_INTEGER | TYPESPEC_FLAG_CHAR))) {
+    return lexer_token(TOK_IDENT);
+  } else {
+    return lexer_token(TOK_TYPEDEF_NAME);
   }
 }
 

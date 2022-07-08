@@ -24,6 +24,7 @@ extern int yyleng;
 extern FILE *tokfile;
 extern int lexer_interactive;
 extern ASTree *parser_root;
+extern ASTree *bcc_yyval;
 
 int yylex();
 int yylex_destroy();
