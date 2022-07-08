@@ -18,43 +18,6 @@
 /* TODO(Robert): Linux-specific; replace with strtoul or similar */
 #include "inttypes.h"
 
-/* "char" is not included in any of these groups */
-#define TYPESPEC_FLAGS_INTEGER                                    \
-  (TYPESPEC_FLAG_INT | TYPESPEC_FLAG_SHORT | TYPESPEC_FLAG_LONG | \
-   TYPESPEC_FLAG_LONG_LONG)
-#define TYPESPEC_FLAGS_NON_INTEGER                                   \
-  (TYPESPEC_FLAG_VOID | TYPESPEC_FLAG_STRUCT | TYPESPEC_FLAG_UNION | \
-   TYPESPEC_FLAG_ENUM)
-#define TYPESPEC_FLAGS_SIGNEDNESS \
-  (TYPESPEC_FLAG_SIGNED | TYPESPEC_FLAG_UNSIGNED)
-#define TYPESPEC_FLAGS_STORAGE_CLASS (TYPESPEC_FLAG_TYPEDEF)
-
-/* TODO(Robert): Implement "long long" integer type. For now, the type checker
- * should report an error if "long" is specified twice.
- */
-const unsigned int INCOMPATIBLE_FLAGSETS[] = {
-    TYPESPEC_FLAG_INT | TYPESPEC_FLAG_CHAR |
-        TYPESPEC_FLAGS_NON_INTEGER, /* int */
-    TYPESPEC_FLAG_CHAR | TYPESPEC_FLAGS_INTEGER |
-        TYPESPEC_FLAGS_NON_INTEGER, /* char */
-    TYPESPEC_FLAG_SHORT | TYPESPEC_FLAG_LONG | TYPESPEC_FLAG_LONG_LONG |
-        TYPESPEC_FLAG_CHAR | TYPESPEC_FLAGS_NON_INTEGER, /* short */
-    TYPESPEC_FLAG_LONG | TYPESPEC_FLAG_LONG_LONG | TYPESPEC_FLAG_SHORT |
-        TYPESPEC_FLAG_CHAR | TYPESPEC_FLAGS_NON_INTEGER, /* long */
-    TYPESPEC_FLAG_LONG | TYPESPEC_FLAG_LONG_LONG | TYPESPEC_FLAG_SHORT |
-        TYPESPEC_FLAG_CHAR | TYPESPEC_FLAGS_NON_INTEGER,    /* long long */
-    TYPESPEC_FLAGS_SIGNEDNESS | TYPESPEC_FLAGS_NON_INTEGER, /* signed */
-    TYPESPEC_FLAGS_SIGNEDNESS | TYPESPEC_FLAGS_NON_INTEGER, /* unsigned */
-    TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_NON_INTEGER |
-        TYPESPEC_FLAGS_SIGNEDNESS, /* void */
-    TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_NON_INTEGER |
-        TYPESPEC_FLAGS_SIGNEDNESS, /* struct */
-    TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_NON_INTEGER |
-        TYPESPEC_FLAGS_SIGNEDNESS, /* union */
-    TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_NON_INTEGER |
-        TYPESPEC_FLAGS_SIGNEDNESS, /* enum */
-};
-
 enum type_checker_action {
   TCHK_COMPATIBLE,
   TCHK_IMPLICIT_CAST,
@@ -437,13 +400,43 @@ AuxType aux_from_tag(TagType tag) {
   }
 }
 
+unsigned int flag_from_symbol(int symbol) {
+  switch (symbol) {
+    case TOK_STRUCT:
+      return TYPESPEC_FLAG_STRUCT;
+    case TOK_UNION:
+      return TYPESPEC_FLAG_UNION;
+    case TOK_ENUM:
+      return TYPESPEC_FLAG_ENUM;
+    default:
+      return TYPESPEC_FLAG_NONE;
+  }
+}
+
+unsigned int index_from_symbol(int symbol) {
+  switch (symbol) {
+    case TOK_STRUCT:
+      return TYPESPEC_INDEX_STRUCT;
+    case TOK_UNION:
+      return TYPESPEC_INDEX_UNION;
+    case TOK_ENUM:
+      return TYPESPEC_INDEX_ENUM;
+    default:
+      return TYPESPEC_INDEX_COUNT;
+  }
+}
+
 /* tags will need two passes to define their members: the first for inserting
  * the symbols into the symbol table, and the second to swipe the symbols from
  * the members and put them into an auxspec
  */
 ASTree *validate_tag_typespec(ASTree *spec_list, ASTree *tag) {
-  /* TODO(Robert): get unique tag name/info somehow */
   TypeSpec *out = (TypeSpec *)spec_list->type;
+  if (out->flags & INCOMPATIBLE_FLAGSETS[index_from_symbol(tag->symbol)]) {
+    return create_terr(astree_adopt(spec_list, 1, tag),
+                       BCC_TERR_INCOMPLETE_SPEC, 2, spec_list, tag);
+  }
+  /* TODO(Robert): get unique tag name/info somehow */
   const char *tag_name = astree_get(tag, 0)->lexinfo;
   size_t tag_name_len = strlen(tag_name);
   TagValue *tagval = NULL;
@@ -452,9 +445,11 @@ ASTree *validate_tag_typespec(ASTree *spec_list, ASTree *tag) {
     return create_terr(astree_adopt(spec_list, 1, tag), BCC_TERR_TAG_NOT_FOUND,
                        1, tag);
   }
+
   out->base = type_from_tag(tagval->tag);
   out->width = tagval->width;
   out->alignment = tagval->alignment;
+  out->flags |= flag_from_symbol(tag->symbol);
 
   if (out->auxspecs.anchor == NULL) {
     typespec_init(out);
@@ -495,7 +490,7 @@ ASTree *validate_type_id_typespec(ASTree *spec_list, ASTree *type_id) {
     out->base = symval->type.base;
     out->width = symval->type.width;
     out->alignment = symval->type.alignment;
-    out->flags = symval->type.flags;
+    out->flags |= symval->type.flags & (~TYPESPEC_FLAG_TYPEDEF);
 
     if (out->auxspecs.anchor == NULL) {
       typespec_init(out);
@@ -567,7 +562,7 @@ ASTree *validate_typespec(ASTree *spec_list, ASTree *spec) {
       /* fall through */
     case TOK_VOLATILE:
       return astree_adopt(spec_list, 1, spec);
-    case TOK_IDENT:
+    case TOK_TYPEDEF_NAME:
       return validate_type_id_typespec(spec_list, spec);
     case TOK_TYPEDEF:
       return validate_typedef_typespec(spec_list, spec);

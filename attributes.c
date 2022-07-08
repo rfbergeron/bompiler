@@ -38,6 +38,32 @@ static const size_t NUM_ATTRIBUTES = 6;
 static const size_t NUM_TYPES = 4;
 const size_t MAX_IDENT_LEN = 31;
 
+/* TODO(Robert): Implement "long long" integer type. For now, the type checker
+ * should report an error if "long" is specified twice.
+ */
+const unsigned int INCOMPATIBLE_FLAGSETS[] = {
+    TYPESPEC_FLAG_INT | TYPESPEC_FLAG_CHAR |
+        TYPESPEC_FLAGS_NON_INTEGER, /* int */
+    TYPESPEC_FLAG_CHAR | TYPESPEC_FLAGS_INTEGER |
+        TYPESPEC_FLAGS_NON_INTEGER, /* char */
+    TYPESPEC_FLAG_SHORT | TYPESPEC_FLAG_LONG | TYPESPEC_FLAG_LONG_LONG |
+        TYPESPEC_FLAG_CHAR | TYPESPEC_FLAGS_NON_INTEGER, /* short */
+    TYPESPEC_FLAG_LONG | TYPESPEC_FLAG_LONG_LONG | TYPESPEC_FLAG_SHORT |
+        TYPESPEC_FLAG_CHAR | TYPESPEC_FLAGS_NON_INTEGER, /* long */
+    TYPESPEC_FLAG_LONG | TYPESPEC_FLAG_LONG_LONG | TYPESPEC_FLAG_SHORT |
+        TYPESPEC_FLAG_CHAR | TYPESPEC_FLAGS_NON_INTEGER,    /* long long */
+    TYPESPEC_FLAGS_SIGNEDNESS | TYPESPEC_FLAGS_NON_INTEGER, /* signed */
+    TYPESPEC_FLAGS_SIGNEDNESS | TYPESPEC_FLAGS_NON_INTEGER, /* unsigned */
+    TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_NON_INTEGER |
+        TYPESPEC_FLAGS_SIGNEDNESS, /* void */
+    TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_NON_INTEGER |
+        TYPESPEC_FLAGS_SIGNEDNESS, /* struct */
+    TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_NON_INTEGER |
+        TYPESPEC_FLAGS_SIGNEDNESS, /* union */
+    TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_NON_INTEGER |
+        TYPESPEC_FLAGS_SIGNEDNESS, /* enum */
+};
+
 const char STRING_INT_MAP[][32] = {
     "unsigned long int",  "signed long int",  "unsigned int",  "signed int",
     "unsigned short int", "signed short int", "unsigned char", "signed char",
