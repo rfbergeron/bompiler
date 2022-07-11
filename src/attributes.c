@@ -1,7 +1,7 @@
 #include "attributes.h"
 
-#include "badlib/badllist.h"
-#include "badlib/badmap.h"
+#include "badllist.h"
+#include "badmap.h"
 #include "stdio.h"
 #include "stdlib.h"
 #include "string.h"

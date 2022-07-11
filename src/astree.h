@@ -2,8 +2,8 @@
 #define __ASTREE_H__
 
 #include "attributes.h"
-#include "badlib/badllist.h"
-#include "badlib/badmap.h"
+#include "badllist.h"
+#include "badmap.h"
 #include "debug.h"
 #include "symtable.h"
 

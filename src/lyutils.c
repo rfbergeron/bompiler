@@ -10,7 +10,7 @@
 
 #include "astree.h"
 #include "attributes.h"
-#include "badlib/badllist.h"
+#include "badllist.h"
 #include "debug.h"
 #include "state.h"
 #include "symtable.h"

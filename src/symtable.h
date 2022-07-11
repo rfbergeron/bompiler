@@ -2,8 +2,8 @@
 #define __SYMTABLE_H__
 
 #include "attributes.h"
-#include "badlib/badllist.h"
-#include "badlib/badmap.h"
+#include "badllist.h"
+#include "badmap.h"
 
 #define DEFAULT_MAP_SIZE 100
 
