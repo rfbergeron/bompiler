@@ -2,7 +2,7 @@
 
 #include "astree.h"
 #include "attributes.h"
-#include "badlib/badalist.h"
+#include "badalist.h"
 #include "debug.h"
 #include "lyutils.h"
 #include "state.h"

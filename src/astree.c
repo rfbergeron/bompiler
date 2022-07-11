@@ -8,7 +8,7 @@
 #include <string.h>
 
 #include "attributes.h"
-#include "badlib/badllist.h"
+#include "badllist.h"
 #include "debug.h"
 #include "lyutils.h"
 #include "strset.h"
