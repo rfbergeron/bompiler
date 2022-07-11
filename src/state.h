@@ -1,6 +1,6 @@
 #ifndef __STATE_H__
 #define __STATE_H__
-#include "badlib/badllist.h"
+#include "badllist.h"
 #include "symtable.h"
 #define MAX_LABEL_LENGTH 32
 #define MAX_OP_LENGTH 32
