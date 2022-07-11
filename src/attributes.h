@@ -1,7 +1,7 @@
 #ifndef __ATTRIBUTES_H__
 #define __ATTRIBUTES_H__
-#include "badlib/badllist.h"
-#include "badlib/badmap.h"
+#include "badllist.h"
+#include "badmap.h"
 #include "stdio.h"
 
 #define X64_SIZEOF_LONG (size_t)8

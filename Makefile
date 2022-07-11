@@ -1,8 +1,8 @@
 CC ?= gcc
-CWARN = -Wall -Wextra -Werror -Wpedantic -Wshadow -Wno-declaration-after-statement
-CFLAGS = -Ibadlib -Ibadlib/murmur3 -ansi -Og -pg -ggdb -fsanitize=address
+CWARN ?= -Wall -Wextra -Wpedantic -Wshadow -Wno-declaration-after-statement
+CFLAGS ?= -Isrc -Ibuild -Ibadlib -Ibadlib/murmur3 -ansi -Og -pg -ggdb -fsanitize=address
 MKFILE = Makefile
-EXECNAME = bompiler
+EXE = build/bompiler
 SRC = debug.c bcc_err.c attributes.c strset.c lyutils.c astree.c symtable.c typecheck.c asmgen.c state.c main.c
 HDR = debug.h bcc_err.h attributes.h strset.h lyutils.h astree.h symtable.h typecheck.h asmgen.h state.h simplestack.h
 OBJ = ${SRC:.c=.o}
@@ -14,13 +14,10 @@ GENOBJ = ${GENSRC:.c=.o}
 LIBHDR = badlib/badmap.h badlib/badllist.h badlib/badalist.h
 LIBOBJ = badmap.o badllist.o badalist.o murmur3.o
 # convenient groups
-ALLSRC = ${SRC} ${GENSRC}
-ALLHDR = ${HDR} ${GENHDR} ${LIBHDR}
-ALLOBJ = ${OBJ} ${GENOBJ} ${LIBOBJ}
-# .gch header gens
-GCH = ${ALLHDR:=.gch}
+HDRFILES = ${HDR:%=src/%} ${GENHDR:%=build/%} ${LIBHDR}
+OBJFILES = ${OBJ:%=build/%} ${GENOBJ:%=build/%} ${LIBOBJ:%=build/%}
 
-.PHONY: all badlib
+.PHONY: all badlib build
 
 # Target-specific variables
 #sanitize: CFLAGS += ${SANITIZE}
@@ -28,50 +25,47 @@ GCH = ${ALLHDR:=.gch}
 #warn: CFLAGS += ${WARN}
 #paranoid: CFLAGS += ${SANITIZE} ${WARN} ${DEBUG}
 
-all: ${EXECNAME}
+all: ${EXE}
 
-#sanitize: ${EXECNAME}
+#debug: ${EXE}
 
-#warn: ${EXECNAME}
-
-#debug: ${EXECNAME}
-
-#paranoid: ${EXECNAME}
-
-${EXECNAME}: ${ALLOBJ}
+${EXE}: ${OBJFILES}
 	${CC} ${CFLAGS} ${CWARN} -o $@ $^
+
+build:
+	mkdir build
 
 badlib:
 	git submodule update --init --recursive badlib
 
-yylex.o: yylex.c
-	${CC} ${CFLAGS} ${CWARN} -c $^
+build/yylex.o: build/yylex.c
+	${CC} ${CFLAGS} ${CWARN} -c -o $@ $^
 
-yyparse.o: yyparse.c yyparse.h
-	${CC} ${CFLAGS} ${CWARN} -c $^
+build/yyparse.o: build/yyparse.c build/yyparse.h
+	${CC} ${CFLAGS} ${CWARN} -c -o $@ $<
 
-${LIBOBJ}&: badlib
+${LIBOBJ:%=build/%}: badlib build
 	make -C badlib/ objects
-	cp $(foreach file, ${LIBOBJ}, badlib/${file}) ./
+	cp ${@:build/%=badlib/%} ./build/
 
 ${LIBHDR}: badlib
 
-%.o: %.c ${ALLHDR}
-	${CC} ${CFLAGS} ${CWARN} -c $^
+build/%.o: src/%.c ${HDRFILES} build
+	${CC} ${CFLAGS} ${CWARN} -c $< -o $@
 
-yylex.c: scanner.l
-	flex --outfile=yylex.c scanner.l
+build/yylex.c: src/scanner.l build
+	flex --outfile=$@ $<
 
-yyparse.h yyparse.c&: parser.y
-	bison -Wall -v --defines=yyparse.h --output=yyparse.c parser.y
+build/yyparse.h build/yyparse.c&: src/parser.y build
+	bison -Wall -v --defines=build/yyparse.h --output=build/yyparse.c $<
 
 clean:
 	make -C badlib/ clean
-	rm -f ${ALLOBJ} ${GENSRC} ${GENHDR} ${GCH} yyparse.output
+	rm -f ${OBJFILES} ${GENSRC:%=build/%} ${GENHDR:%=build/%} build/yyparse.output
 
 ci: 
-	git add ${HDR} ${SRC} ${MKFILE} README.md DESIGN.md TODO.md DESIGN2.md \
-	IDEAS.md .gitignore .gitmodules parser.y scanner.l
+	git add ${HDR:%=src/%} ${SRC:%=src/%} ${MKFILE} README.md doc/*.md .gitignore .gitmodules \
+		src/parser.y src/scanner.l
 
 format:
 	clang-format --style=Google -i ${SRC} ${HDR} parser.y

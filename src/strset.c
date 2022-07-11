@@ -5,7 +5,7 @@
 #include <string.h>
 
 #include "attributes.h"
-#include "badlib/badmap.h"
+#include "badmap.h"
 #include "debug.h"
 
 static const size_t starting_size = 100;

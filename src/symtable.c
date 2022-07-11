@@ -2,8 +2,8 @@
 
 #include "astree.h"
 #include "attributes.h"
-#include "badlib/badllist.h"
-#include "badlib/badmap.h"
+#include "badllist.h"
+#include "badmap.h"
 #include "debug.h"
 #include "err.h"
 #include "simplestack.h"
