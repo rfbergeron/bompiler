@@ -1,6 +1,6 @@
 CC ?= gcc
 CWARN ?= -Wall -Wextra -Wpedantic -Wshadow -Wno-declaration-after-statement
-CFLAGS ?= -Isrc -Ibuild -Ibadlib -Ibadlib/murmur3 -ansi -Og -pg -ggdb -fsanitize=address
+CFLAGS ?= -Isrc -Ibuild -Ibadlib -Ibadlib/murmur3 -ansi
 MKFILE = Makefile
 EXE = build/bompiler
 SRC = debug.c bcc_err.c attributes.c strset.c lyutils.c astree.c symtable.c typecheck.c asmgen.c state.c main.c
@@ -17,23 +17,20 @@ LIBOBJ = badmap.o badllist.o badalist.o murmur3.o
 HDRFILES = ${HDR:%=src/%} ${GENHDR:%=build/%} ${LIBHDR}
 OBJFILES = ${OBJ:%=build/%} ${GENOBJ:%=build/%} ${LIBOBJ:%=build/%}
 
-.PHONY: all badlib build
+.PHONY: all badlib build debug
 
-# Target-specific variables
-#sanitize: CFLAGS += ${SANITIZE}
-#debug: CFLAGS += ${DEBUG}
-#warn: CFLAGS += ${WARN}
-#paranoid: CFLAGS += ${SANITIZE} ${WARN} ${DEBUG}
-
+all: CFLAGS += -O1
 all: ${EXE}
 
-#debug: ${EXE}
+debug: CFLAGS += -Og -pg -ggdb -fsanitize=address
+debug: LIB_TARGET = debug
+debug: ${EXE}
 
 ${EXE}: ${OBJFILES}
 	${CC} ${CFLAGS} ${CWARN} -o $@ $^
 
 build:
-	mkdir build
+	[ -d build ] || mkdir build
 
 badlib:
 	git submodule update --init --recursive badlib
@@ -45,7 +42,7 @@ build/yyparse.o: build/yyparse.c build/yyparse.h
 	${CC} ${CFLAGS} ${CWARN} -c -o $@ $<
 
 ${LIBOBJ:%=build/%}: badlib build
-	make -C badlib/ objects
+	make -C badlib/ ${LIB_TARGET}
 	cp ${@:build/%=badlib/%} ./build/
 
 ${LIBHDR}: badlib
@@ -65,7 +62,7 @@ clean:
 
 ci: 
 	git add ${HDR:%=src/%} ${SRC:%=src/%} ${MKFILE} README.md doc/*.md .gitignore .gitmodules \
-		src/parser.y src/scanner.l
+		src/parser.y src/scanner.l badlib
 
 format:
 	clang-format --style=Google -i ${SRC} ${HDR} parser.y
