@@ -7,3 +7,4 @@ or the meaning of the C standard.
 - https://stackoverflow.com/questions/19288859/how-to-redirect-stdout-to-a-string-in-ansi-c
 - https://stackoverflow.com/questions/679979/how-to-make-a-variadic-macro-variable-number-of-arguments
 - https://blog.microjoe.org/2017/unit-tests-c-cmocka-coverage-cmake.html
+- https://api.cmocka.org/group__cmocka__alloc.html

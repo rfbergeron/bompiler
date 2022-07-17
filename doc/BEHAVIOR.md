@@ -38,6 +38,12 @@ information is freed:
 Finally, the memory for the node itself is freed, and an error code indicating
 success is returned.
 
+#### Changes
+Assert that the node is not `NULL`, rather than returning an error code.
+
+### `astree_adopt`
+A parent syntax tree node adopts a number of child nodes.
+
 #### Assumptions
 If the parent node's symbol is `TYPE_ERROR`, it shall not have more than one
 child.
@@ -47,12 +53,10 @@ Nodes are not adopted by more than one parent.
 Nodes are not adopted by the same parent more than once.
 
 #### Changes
-Since the syntax tree should never adopt `NULL` values, this procedure should
-assume that the argument is never `NULL` and validate that assumption with an
-assertion.
+Assert that nodes are not `NULL`, rather than return error code.
 
-### `astree_adopt`
-A parent syntax tree node adopts a number of child nodes.
+Assert that parent is not the empty node, since that node should never adopt
+any children.
 
 ### `astree_replace`
 A parent syntax tree node has one of its child nodes replaced, and the
@@ -61,17 +65,15 @@ replaced node is returned.
 If the index is out of bounds, no operations are performed, and `NULL` is
 returned.
 
-#### Changes
-Badlib already does its own bounds checks, so they may not be necessary here.
+Badlib already does its own bounds checks.
+
 However, without performing bounds/`NULL` checks here, we have
 undesired behavior: if the given index equals the number of children, the call
 to `llist_extract` will fail, but the call to `llist_insert` will succeed.
+Effectively, the node would adopt a new child instead of replacing one.
 
-The result is that instead of replacing a child, the parent effectively adopts
-a new child, and the procedure returns `NULL`.
-
-It would likely be best for this procedure to assert that the inputs are valid,
-rather than relying on badlib.
+#### Changes
+Assert that nodes are not `NULL`, instead of relying on badlib return codes.
 
 ### `astree_get`
 Retrieves the parent node's `N`th child.
