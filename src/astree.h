@@ -17,6 +17,8 @@ typedef struct astree {
   unsigned int attributes;   /* node-specific attributes */
 } ASTree;
 
+#define EMPTY_EXPR_VALUE {&SPEC_EMPTY,      ";", NULL,     LOC_EMPTY, \
+                     BLIB_LLIST_EMPTY, ';', ATTR_NONE}
 extern ASTree EMPTY_EXPR;
 
 ASTree *astree_init(int symbol, const Location location, const char *lexinfo);
