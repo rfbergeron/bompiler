@@ -16,10 +16,18 @@
 #include "yyparse.h"
 #define LINESIZE 1024
 
+#ifdef UNIT_TESTING
+extern void* _test_malloc(const size_t size, const char* file, const int line);
+#define malloc(size) _test_malloc(size, __FILE__, __LINE__)
+extern void _test_free(void *ptr, const char *file, const int line);
+#define free(ptr) _test_free(ptr, __FILE__, __LINE__)
+#undef assert
+#define assert mock_assert
+#endif
+
 extern int skip_type_check;
 
-ASTree EMPTY_EXPR = {&SPEC_EMPTY,      ";", NULL,     LOC_EMPTY,
-                     BLIB_LLIST_EMPTY, ';', ATTR_NONE};
+ASTree EMPTY_EXPR = EMPTY_EXPR_VALUE;
 
 ASTree *astree_init(int symbol, const Location location, const char *info) {
   DEBUGS('t', "Initializing new astree node with code: %s, lexinfo: '%s'",
@@ -134,6 +142,7 @@ ASTree *astree_remove(ASTree *parent, const size_t index) {
 
 size_t astree_count(ASTree *parent) { return llist_size(&parent->children); }
 
+#ifndef UNIT_TESTING
 int astree_to_string(ASTree *tree, char *buffer, size_t size) {
   /* print token name, lexinfo in quotes, the location, block number,
    * attributes, and the typeid if this is a struct
@@ -228,3 +237,4 @@ int astree_print_symbols(ASTree *tree, FILE *out) {
   }
   return 0;
 }
+#endif
