@@ -39,6 +39,13 @@ test: ${TESTS}
 ${EXE}: ${OBJFILES}
 	${CC} ${CFLAGS} ${CWARN} $^ -o $@
 
+build/test_symtable: CFLAGS += -Itest -Og -pg -ggdb
+# hack: relies on that fact that we don't issue warning on test code
+build/test_symtable: CWARN += -DUNIT_TESTING -DNDEBUG
+build/test_symtable: build/symtable.o ${LIBOBJ:%=build/%}
+	${CC} ${CFLAGS} -c ${@:build/%=test/%.c} -o ${@:%=%.o}
+	${CC} ${CFLAGS} -lcmocka -Wl,--wrap=typespec_destroy,--wrap=typespec_init,--wrap=state_get_label ${@:%=%.o} $^ -o $@
+
 build/test_%: build/test_%.o build/debug.o
 	${CC} ${CFLAGS} ${CWARN} -DUNIT_TESTING -c ${@:build/test_%=src/%.c} -o ${@:build/test_%=build/%.o}
 	${CC} ${CFLAGS} ${WRAP_ALL} -lcmocka ${@:build/test_%=build/%.o} $^ -o $@
@@ -78,7 +85,7 @@ clean:
 	rm -f ${OBJFILES} ${OBJFILES:build/%.o=build/test_%.o} ${GENSRC:%=build/%} ${GENHDR:%=build/%} build/yyparse.output
 
 ci: 
-	git add ${HDR:%=src/%} ${SRC:%=src/%} test/wrap_badllist.c test/test_astree.c ${MKFILE} README.md doc/*.md .gitignore .gitmodules \
+	git add ${HDR:%=src/%} ${SRC:%=src/%} test/wrap_badllist.c test/test_astree.c test/test_symtable.c ${MKFILE} README.md doc/*.md .gitignore .gitmodules \
 		src/parser.y src/scanner.l badlib
 
 format:
