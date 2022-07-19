@@ -14,6 +14,7 @@
 #include "strset.h"
 #include "symtable.h"
 #include "yyparse.h"
+#include "bcc_err.h"
 #define LINESIZE 1024
 
 #ifdef UNIT_TESTING
@@ -138,6 +139,70 @@ ASTree *astree_get(ASTree *parent, const size_t index) {
 
 ASTree *astree_remove(ASTree *parent, const size_t index) {
   return llist_extract(&parent->children, index);
+}
+
+ASTree *astree_create_errnode(ASTree *child, int errcode, size_t info_count, ...) {
+  va_list info_ptrs;
+  va_start(info_ptrs, info_count);
+  AuxSpec *erraux = create_erraux_v(errcode, info_count, info_ptrs);
+  va_end(info_ptrs);
+  if (child->symbol == TOK_TYPE_ERROR) {
+    int status = llist_push_back((LinkedList *)&child->type->auxspecs, erraux);
+    if (status) abort();
+    return child;
+  } else {
+    ASTree *errnode = astree_init(TOK_TYPE_ERROR, child->loc, "_terr");
+    TypeSpec *errtype = calloc(1, sizeof(TypeSpec));
+    errnode->type = errtype;
+    int status = typespec_init(errtype);
+    if (status) abort();
+    errtype->base = TYPE_ERROR;
+    status = llist_push_back(&errtype->auxspecs, erraux);
+    if (status) abort();
+    return astree_adopt(errnode, 1, child);
+  }
+}
+
+ASTree *astree_propogate_errnode(ASTree *parent, ASTree *child) {
+  if (child->symbol != TOK_TYPE_ERROR) {
+    (void)astree_adopt(UNWRAP(parent), 1, child);
+    return parent;
+  } else if (parent->symbol != TOK_TYPE_ERROR) {
+    ASTree *real_child = astree_replace(child, 0, parent);
+    (void)astree_adopt(parent, 1, real_child);
+    return child;
+  } else {
+    TypeSpec *parent_errs = (TypeSpec *)parent->type;
+    TypeSpec *child_errs = (TypeSpec *)child->type;
+    int status = typespec_append_auxspecs(parent_errs, child_errs);
+    /* TODO(Robert): be a man */
+    if (status) abort();
+    (void)astree_adopt(UNWRAP(parent), 1, astree_remove(child, 0));
+    status = astree_destroy(child);
+    if (status) abort();
+    return parent;
+  }
+}
+
+ASTree *astree_propogate_errnode_v(ASTree *parent, size_t count, ...) {
+  va_list children;
+  va_start(children, count);
+  size_t i;
+  for (i = 0; i < count; ++i) {
+    ASTree *child = va_arg(children, ASTree *);
+    parent = astree_propogate_errnode(parent, child);
+  }
+  va_end(children);
+  return parent;
+}
+
+ASTree *astree_propogate_errnode_a(ASTree *parent, size_t count, ASTree **children) {
+  size_t i;
+  for (i = 0; i < count; ++i) {
+    ASTree *child = children[i];
+    parent = astree_propogate_errnode(parent, child);
+  }
+  return parent;
 }
 
 size_t astree_count(ASTree *parent) { return llist_size(&parent->children); }
