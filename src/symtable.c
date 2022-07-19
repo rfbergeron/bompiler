@@ -1,6 +1,8 @@
 #include "symtable.h"
 
 #include "astree.h"
+#include "state.h"
+#include "yyparse.h"
 #include "attributes.h"
 #include "badllist.h"
 #include "badmap.h"
@@ -11,6 +13,18 @@
 #include "string.h"
 #define LINESIZE 1024
 #define EMPTY_SYMTABLE = ((SymbolTable){BLIB_MAP_EMPTY, NULL, NULL, NULL});
+
+#ifdef UNIT_TESTING
+extern void* _test_malloc(const size_t size, const char* file, const int line);
+#define malloc(size) _test_malloc(size, __FILE__, __LINE__)
+extern void _test_free(void *ptr, const char *file, const int line);
+#define free(ptr) _test_free(ptr, __FILE__, __LINE__)
+extern void mock_assert(const int result, const char* const expression,
+                        const char * const file, const int line);
+#undef assert
+#define assert(expression) \
+    mock_assert((int)(expression), #expression, __FILE__, __LINE__);
+#endif
 
 const char TAG_TYPE_STRINGS[][8] = {
     "struct",
@@ -54,6 +68,7 @@ int symbol_value_destroy(SymbolValue *symbol_value) {
   return 0;
 }
 
+#ifndef UNIT_TESTING
 int symbol_value_print(const SymbolValue *symbol, char *buffer, size_t size) {
   if (!symbol || !buffer || size < 1) {
     fprintf(stderr, "ERROR: invalid arguments to symbol_value_print\n");
@@ -66,6 +81,7 @@ int symbol_value_print(const SymbolValue *symbol, char *buffer, size_t size) {
 
   return snprintf(buffer, size, "{%s} {%s}", locstr, typestr);
 }
+#endif
 
 /*
  * TagValue functions
@@ -126,6 +142,7 @@ int tag_value_destroy(TagValue *tagval) {
   return 0;
 }
 
+#ifndef UNIT_TESTING
 int tag_value_print(const TagValue *tagval, char *buffer, size_t size) {
   if (!tagval || !buffer || size < 1) {
     fprintf(stderr, "ERROR: invalid arguments to tag_value_print\n");
@@ -159,6 +176,7 @@ int tag_value_print(const TagValue *tagval, char *buffer, size_t size) {
 
   return snprintf(buffer + buffer_offset, size - buffer_offset, "}");
 }
+#endif
 
 /*
  * SymbolTable functions
@@ -271,6 +289,38 @@ int symbol_table_merge_control(SymbolTable *dest, SymbolTable *src) {
     src->control_stack = NULL;
   }
   return 0;
+}
+
+void symbol_table_process_control(SymbolTable *table, int parent_symbol) {
+  assert(parent_symbol == TOK_DECLARATION || parent_symbol == TOK_SWITCH
+          || parent_symbol == TOK_FOR || parent_symbol == TOK_DO
+          || parent_symbol == TOK_WHILE);
+  size_t i;
+  for (i = 0; i < symbol_table_count_control(table); ++i) {
+    ControlValue *ctrlval = symbol_table_get_control(table, i);
+    /* TODO(Robert): create label information */
+    if (ctrlval->type == CTRL_GOTO && parent_symbol == TOK_DECLARATION) {
+      const char *ident = ctrlval->tree->lexinfo;
+      size_t ident_len = strnlen(ident, MAX_IDENT_LEN);
+      LabelValue *labval = state_get_label(state, ident, ident_len);
+      /* if not defined, leave on stack so it can be marked as an error */
+      if (labval != NULL) {
+        symbol_table_remove_control(table, i--);
+        free(ctrlval);
+      }
+    } else if (ctrlval->type == CTRL_CONTINUE && (parent_symbol == TOK_FOR
+                || parent_symbol == TOK_WHILE || parent_symbol == TOK_DO)) {
+      symbol_table_remove_control(table, i--);
+      free(ctrlval);
+    } else if ((ctrlval->type == CTRL_CASE || ctrlval->type == CTRL_DEFAULT)
+            && parent_symbol == TOK_SWITCH) {
+      symbol_table_remove_control(table, i--);
+      free(ctrlval);
+    } else if (ctrlval->type == CTRL_BREAK && parent_symbol != TOK_DECLARATION) {
+      symbol_table_remove_control(table, i--);
+      free(ctrlval);
+    }
+  }
 }
 
 int symbol_table_add_control(SymbolTable *table, ControlValue *ctrlval) {
