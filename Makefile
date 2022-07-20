@@ -44,7 +44,7 @@ build/test_symtable: CFLAGS += -Itest -Og -pg -ggdb
 build/test_symtable: CWARN += -DUNIT_TESTING -DNDEBUG
 build/test_symtable: build/symtable.o ${LIBOBJ:%=build/%}
 	${CC} ${CFLAGS} -c ${@:build/%=test/%.c} -o ${@:%=%.o}
-	${CC} ${CFLAGS} -lcmocka -Wl,--wrap=typespec_destroy,--wrap=typespec_init,--wrap=state_get_label ${@:%=%.o} $^ -o $@
+	${CC} ${CFLAGS} -lcmocka -Wl,--wrap=typespec_destroy,--wrap=typespec_init,--wrap=state_get_label,--wrap=create_erraux ${@:%=%.o} $^ -o $@
 
 build/test_%: build/test_%.o build/debug.o
 	${CC} ${CFLAGS} ${CWARN} -DUNIT_TESTING -c ${@:build/test_%=src/%.c} -o ${@:build/test_%=build/%.o}
