@@ -8,7 +8,9 @@
 #include "debug.h"
 #include "attributes.h"
 #include "symtable.h"
-#include "typecheck.h"
+#include "tchk_expr.h"
+#include "tchk_stmt.h"
+#include "tchk_decl.h"
 #include "bcc_err.h"
 #include "state.h"
 %}
