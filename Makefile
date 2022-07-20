@@ -1,5 +1,5 @@
 CC ?= gcc
-CWARN ?= -Wall -Wextra -Wpedantic -Wshadow -Wno-declaration-after-statement
+CWARN ?= -Wall -Wextra -Wpedantic -Wno-shadow -Wno-declaration-after-statement -Wno-unused -Wno-variadic-macros -Wno-cast-function-type
 CFLAGS ?= -Isrc -Ibuild -Ibadlib -Ibadlib/murmur3 -ansi
 WRAP_ATTRS = -Wl,--wrap=auxspec_destroy,--wrap=typespec_destroy
 WRAP_LIB = -Wl,--wrap=llist_destroy,--wrap=llist_pop_front,--wrap=llist_find,--wrap=llist_extract,--wrap=llist_get,--wrap=llist_size,--wrap=llist_insert,--wrap=llist_push_back,--wrap=llist_init
@@ -57,10 +57,10 @@ badlib:
 	git submodule update --init --recursive badlib
 
 build/yylex.o: build/yylex.c
-	${CC} ${CFLAGS} ${CWARN} -c $^ -o $@
+	${CC} ${CFLAGS} -c $^ -o $@
 
 build/yyparse.o: build/yyparse.c build/yyparse.h
-	${CC} ${CFLAGS} ${CWARN} -c $< -o $@
+	${CC} ${CFLAGS} -c $< -o $@
 
 ${LIBOBJ:%=build/%}: badlib build
 	make -C badlib/ ${LIB_TARGET}

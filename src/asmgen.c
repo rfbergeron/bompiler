@@ -117,7 +117,7 @@ typedef enum instruction_enum {
 enum instruction_flag {
   NO_INSTR_FLAGS = 0,
   USE_REG = 1 << 1,   /* result must be placed in a register */
-  WANT_ADDR = 1 << 2, /* result should be object address, not value */
+  WANT_ADDR = 1 << 2 /* result should be object address, not value */
 };
 
 const char instructions[][MAX_INSTRUCTION_LENGTH] = {
@@ -130,19 +130,19 @@ const char instructions[][MAX_INSTRUCTION_LENGTH] = {
  * stars indicate that field width is an argument
  * TODO(Robert): make field width an argument
  */
-static const char INDEX_FMT[] = "[%s+%s*%zu+%i]";
+static const char INDEX_FMT[] = "[%s+%s*%lu+%i]";
 static const char OFFSET_FMT[] = "[%s+%i]";
 static const char INDIRECT_FMT[] = "[%s]";
-static const char VREG_FMT[] = "vr%zu%c";
+static const char VREG_FMT[] = "vr%lu%c";
 static const char BINOP_FMT[] = "%8s%8s %16s, %s\n";
 static const char UNOP_FMT[] = "%8s%8s %16s\n";
 static const char NULLOP_FMT[] = "%8s%8s\n";
 static const char LABEL_FMT[] = "%s: \n";
-static const char COND_FMT[] = ".C%zu";
-static const char END_FMT[] = ".E%zu";
-static const char STMT_FMT[] = ".S%zu";
-static const char LOOP_FMT[] = ".L%zu";
-static const char BOOL_FMT[] = ".B%zu";
+static const char COND_FMT[] = ".C%lu";
+static const char END_FMT[] = ".E%lu";
+static const char STMT_FMT[] = ".S%lu";
+static const char LOOP_FMT[] = ".L%lu";
+static const char BOOL_FMT[] = ".B%lu";
 static const char SECTION_FMT[] = ".section %s\n";
 static const char EMPTY_FMT[] = "";
 
@@ -183,7 +183,7 @@ int assign_space(SymbolValue *symval, const char *location) {
   size_t required_padding =
       symval->type.alignment - (stack_window % symval->type.alignment);
   stack_window += required_padding;
-  sprintf(symval->obj_loc, "%s+%zu", location, stack_window);
+  sprintf(symval->obj_loc, "%s+%lu", location, stack_window);
   stack_window += symval->type.width;
   return 0;
 }
@@ -214,7 +214,7 @@ int assign_vreg(const TypeSpec *type, char *dest, const size_t vreg_num) {
         reg_width = 'b';
         break;
       default:
-        fprintf(stderr, "ERROR: unable to assign vreg of width %zu\n",
+        fprintf(stderr, "ERROR: unable to assign vreg of width %lu\n",
                 type->width);
         return -1;
         break;
@@ -309,7 +309,7 @@ int translate_conversion(ASTree *operator, CompilerState * state,
   } else {
     fprintf(
         stderr,
-        "ERROR: unable to perform conversion on node which has %zu children\n",
+        "ERROR: unable to perform conversion on node which has %lu children\n",
         astree_count(operator));
     return -1;
   }
@@ -1526,7 +1526,7 @@ int translate_global_decl(ASTree *declaration, InstructionData *data) {
         default:
           fprintf(stderr,
                   "ERROR: unable to determine instruction for initialized"
-                  " data of width %zu for symbol %s\n",
+                  " data of width %lu for symbol %s\n",
                   ident->type->width, ident->lexinfo);
           return -1;
           break;
@@ -1551,7 +1551,7 @@ int translate_global_decl(ASTree *declaration, InstructionData *data) {
         default:
           fprintf(stderr,
                   "ERROR: unable to determine instruction for uninitialized"
-                  " data of width %zu for symbol %s\n",
+                  " data of width %lu for symbol %s\n",
                   ident->type->width, ident->lexinfo);
           return -1;
           break;

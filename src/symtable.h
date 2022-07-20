@@ -7,7 +7,6 @@
 
 #define DEFAULT_MAP_SIZE 100
 
-typedef struct symbol_value SymbolValue;
 typedef struct symbol_table {
   Map primary_namespace;
   Map *tag_namespace;
@@ -19,7 +18,7 @@ typedef enum symbol_flag {
   SYMFLAG_NONE = 0,
   SYMFLAG_FUNCTION_DEFINED,
   SYMFLAG_ENUM_CONST,
-  SYMFLAG_INCOMPLETE,
+  SYMFLAG_INCOMPLETE
 } SymbolFlag;
 
 typedef struct symbol_value {
@@ -55,9 +54,8 @@ typedef enum control_type {
   CTRL_DEFAULT
 } ControlType;
 
-typedef struct astree ASTree;
 typedef struct control_value {
-  ASTree *tree;
+  struct astree *tree;
   ControlType type;
 } ControlValue;
 
