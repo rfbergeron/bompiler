@@ -83,7 +83,8 @@ void lexer_bad_char(unsigned char bad) {
   if (isgraph(bad))
     sprintf(buffer, "Invalid source character (%s)\n", &bad);
   else
-    sprintf(buffer, "Invalid source character (\\%3u)\n", ((unsigned int)bad) & 0xFF);
+    sprintf(buffer, "Invalid source character (\\%3u)\n",
+            ((unsigned int)bad) & 0xFF);
 
   lexer_error(buffer);
 }

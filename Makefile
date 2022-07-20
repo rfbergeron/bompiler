@@ -89,4 +89,4 @@ ci:
 		src/parser.y src/scanner.l badlib
 
 format:
-	clang-format --style=Google -i ${SRC} ${HDR} parser.y
+	clang-format --style=Google -i ${SRC:%=src/%} ${HDR:%=src/%} test/wrap_badllist.c test/test_astree.c test/test_symtable.c src/parser.y
