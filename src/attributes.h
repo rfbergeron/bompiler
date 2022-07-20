@@ -34,7 +34,7 @@ enum attribute {
   ATTR_EXPR_ARITHCONST =
       1 << 3,               /* as above, but only arithmetic/enum types used */
   ATTR_EXPR_BOOL = 1 << 4,  /* int guaranteed to be 0 or 1 */
-  ATTR_EXPR_VADDR = 1 << 5, /* int is memory address */
+  ATTR_EXPR_VADDR = 1 << 5 /* int is memory address */
 };
 
 typedef enum base_type {
@@ -45,7 +45,7 @@ typedef enum base_type {
   TYPE_STRUCT,
   TYPE_UNION,
   TYPE_ENUM,
-  TYPE_ERROR,
+  TYPE_ERROR
 } BaseType;
 
 typedef enum aux_type {
@@ -56,7 +56,7 @@ typedef enum aux_type {
   AUX_UNION,
   AUX_ENUM,
   AUX_FUNCTION,
-  AUX_ERROR,
+  AUX_ERROR
 } AuxType;
 
 /*
@@ -178,15 +178,14 @@ typedef enum bcc_type_err {
   BCC_TERR_TAG_NOT_FOUND,
   BCC_TERR_REDEFINITION,
   BCC_TERR_CONST_TOO_SMALL,
-  BCC_TERR_CONST_TOO_LARGE,
+  BCC_TERR_CONST_TOO_LARGE
 } TypeErr;
 
-typedef struct tag_value TagValue;
 typedef struct auxspec {
   union {
     struct {
       const char *name;
-      TagValue *val;
+      struct tag_value *val;
     } tag;
     LinkedList *params;
     struct {
@@ -238,7 +237,7 @@ extern const TypeSpec SPEC_SHRT;
 extern const TypeSpec SPEC_UCHAR;
 extern const TypeSpec SPEC_SCHAR;
 
-#define LOC_EMPTY ((Location){0, 0, 0, 0})
+#define LOC_EMPTY {0, 0, 0, 0}
 
 int attributes_to_string(const unsigned int attributes, char *buf, size_t size);
 int location_to_string(const Location *loc, char *buf, size_t size);

@@ -13,7 +13,7 @@
       X64_SIZEOF_##width, X64_ALIGNOF_##width,                          \
       BLIB_LLIST_EMPTY,   TYPESPEC_FLAG_##sign | TYPESPEC_FLAG_##width, \
       TYPE_##sign,                                                      \
-  };
+  }
 
 /*
 struct conversion_entry {
@@ -31,7 +31,7 @@ enum string_int_index {
   INDEX_FROM_INT(UNSIGNED, SHORT),
   INDEX_FROM_INT(SIGNED, SHORT),
   INDEX_FROM_INT(UNSIGNED, CHAR),
-  INDEX_FROM_INT(SIGNED, CHAR),
+  INDEX_FROM_INT(SIGNED, CHAR)
 };
 
 static const size_t NUM_ATTRIBUTES = 6;
@@ -154,7 +154,8 @@ int attributes_to_string(const unsigned int attributes, char *buf,
 }
 
 int location_to_string(const Location *loc, char *buf, size_t size) {
-  return snprintf(buf, size, "%lu, %lu, %lu, %lu", loc->filenr, loc->linenr,
+  /* TODO(Robert): check size without using snprintf */
+  return sprintf(buf, "%lu, %lu, %lu, %lu", loc->filenr, loc->linenr,
                   loc->offset, loc->blocknr);
 }
 
@@ -187,8 +188,8 @@ int type_to_string(const TypeSpec *type, char *buf, size_t size) {
       case AUX_ARRAY:
         /* TODO(Robert): no special case for -1 >:( */
         if (auxspec->data.memory_loc.length > 0 &&
-            auxspec->data.memory_loc.length != -1) {
-          ret += sprintf((buf + ret), "array of size %zu of ",
+            auxspec->data.memory_loc.length != (size_t)-1L) {
+          ret += sprintf((buf + ret), "array of size %lu of ",
                          auxspec->data.memory_loc.length);
         } else {
           ret += sprintf((buf + ret), "array of ");

@@ -81,7 +81,7 @@ ASTree *validate_stringcon(ASTree *stringcon) {
 ASTree *validate_ident(ASTree *ident) {
   DEBUGS('t', "Attempting to assign a type");
   const char *id_str = ident->lexinfo;
-  size_t id_str_len = strnlen(id_str, MAX_IDENT_LEN);
+  size_t id_str_len = strlen(id_str);
   SymbolValue *symval = NULL;
   int in_current_scope = state_get_symbol(state, id_str, id_str_len, &symval);
   if (symval) {

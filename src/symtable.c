@@ -84,7 +84,8 @@ int symbol_value_print(const SymbolValue *symbol, char *buffer, size_t size) {
   char typestr[LINESIZE];
   type_to_string(&symbol->type, typestr, LINESIZE);
 
-  return snprintf(buffer, size, "{%s} {%s}", locstr, typestr);
+  /* TODO(Robert): check size without snprintf */
+  return sprintf(buffer, "{%s} {%s}", locstr, typestr);
 }
 #endif
 
@@ -155,7 +156,7 @@ int tag_value_print(const TagValue *tagval, char *buffer, size_t size) {
   }
 
   int buffer_offset =
-      snprintf(buffer, size, "Type: %s, Width: %zu, Align: %zu, Members: {",
+      sprintf(buffer, "Type: %s, Width: %lu, Align: %lu, Members: {",
                TAG_TYPE_STRINGS[tagval->tag], tagval->width, tagval->alignment);
   /* TODO(Robert): check buffer_offset for snprintf errors */
   /* TODO(Robert): print tags defined within struct and union tags */
@@ -173,13 +174,13 @@ int tag_value_print(const TagValue *tagval, char *buffer, size_t size) {
       int status = symbol_value_print(symval, symbuf, LINESIZE);
       if (status) return status;
       int characters_printed =
-          snprintf(buffer + buffer_offset, size - buffer_offset, "%s: %s, ",
+          sprintf(buffer + buffer_offset, "%s: %s, ",
                    symname, symbuf);
       buffer_offset += characters_printed;
     }
   }
 
-  return snprintf(buffer + buffer_offset, size - buffer_offset, "}");
+  return sprintf(buffer + buffer_offset, "}");
 }
 #endif
 
@@ -308,7 +309,7 @@ TypeSpec *symbol_table_process_control(SymbolTable *table, int parent_symbol) {
     if (parent_symbol == TOK_DECLARATION) {
       if (ctrlval->type == CTRL_GOTO) {
         const char *ident = ctrlval->tree->lexinfo;
-        size_t ident_len = strnlen(ident, MAX_IDENT_LEN);
+        size_t ident_len = strlen(ident);
         LabelValue *labval = state_get_label(state, ident, ident_len);
         if (labval == NULL) {
           AuxSpec *erraux = create_erraux(BCC_TERR_SYM_NOT_FOUND, 1, ctrlval->tree);
