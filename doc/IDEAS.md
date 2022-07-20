@@ -52,6 +52,20 @@ that has does not do most of the things that I thought:
 - You can only implicitly convert between `void*` and other pointer types, not
   any other kind of void pointer (for example `void**`).
 
+## Type checker refactor
+This is supposed to be a (relatively) small refactor of the type checker to make
+unit testing it easier, since it's over 2000 lines long.
+
+The type checker will consist of 4 translation units:
+- `tchk_stmt`
+- `tchk_expr`
+- `tchk_decl`
+- `tchk_common`
+
+Each will have their own header file. `tchk_stmt` and `tchk_decl` will both be
+dependent on `tchk_expr`. All will be dependent on `tchk_common`. The contents
+of each unit should be self-explanatory.
+
 ## The lexer hack
 I did not realize until now that identifiers are context sensitive. I had
 assumed that it was some cognitive deficiency of my own that the parser that I
