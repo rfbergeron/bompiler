@@ -1,11 +1,11 @@
 #include "bcc_err.h"
 
-#include "attributes.h"
 #include "astree.h"
+#include "attributes.h"
+#include "stdarg.h"
 #include "stddef.h"
 #include "stdlib.h"
 #include "symtable.h"
-#include "stdarg.h"
 
 #define LINESIZE 1024
 
@@ -54,13 +54,12 @@ int expected_err_to_string(AuxSpec *erraux, const char *expected_str, char *buf,
     chars_written = type_to_string(child2->type, child2_buf, LINESIZE);
     /* TODO(Robert): check size without snprintf */
     return sprintf(
-        buf,
-        "Semantic error: node %s expected %s types, but found %s and %s",
+        buf, "Semantic error: node %s expected %s types, but found %s and %s",
         parent_buf, expected_str, child1_buf, child2_buf);
   } else {
     return sprintf(buf,
-                    "Semantic error: node %s expected %s type, but found %s",
-                    parent_buf, expected_str, child1_buf);
+                   "Semantic error: node %s expected %s type, but found %s",
+                   parent_buf, expected_str, child1_buf);
   }
 }
 
@@ -71,11 +70,11 @@ int tag_err_to_string(AuxSpec *erraux, char *buf, size_t size) {
   ASTree *tag_name_node = astree_get(tag_node, 0);
   TagValue *tagval = erraux->data.err.info[1];
   /* TODO(Robert: to_string procedure for tagvalues */
-    /* TODO(Robert): check size without snprintf */
+  /* TODO(Robert): check size without snprintf */
   return sprintf(buf,
-                  "Semantic error: identifier %s previously "
-                  "declared as a tag type incompatible with node %s",
-                  tag_name_node->lexinfo, tag_node_buf);
+                 "Semantic error: identifier %s previously "
+                 "declared as a tag type incompatible with node %s",
+                 tag_name_node->lexinfo, tag_node_buf);
 }
 
 int erraux_to_string(AuxSpec *erraux, char *buf, size_t size) {
@@ -84,11 +83,11 @@ int erraux_to_string(AuxSpec *erraux, char *buf, size_t size) {
     case BCC_TERR_FAILURE:
       return sprintf(buf, "Error: unspecified error ");
     case BCC_TERR_SUCCESS:
-      return sprintf(
-          buf, "Error: error occurred, but error code indicates success");
+      return sprintf(buf,
+                     "Error: error occurred, but error code indicates success");
     case BCC_TERR_LIBRARY_FAILURE:
       return sprintf(buf,
-                      "Library failure: unspecified data structure failure");
+                     "Library failure: unspecified data structure failure");
     case BCC_TERR_INCOMPLETE_TYPE: {
       ASTree *affected_node = erraux->data.err.info[0];
       char affected_node_buf[LINESIZE];
@@ -98,18 +97,18 @@ int erraux_to_string(AuxSpec *erraux, char *buf, size_t size) {
       char spec_buf[LINESIZE];
       chars_written = type_to_string(spec, spec_buf, size);
       return sprintf(buf,
-                      "Semantic error: node %s expected complete "
-                      "type, but found %s",
-                      affected_node_buf, spec_buf);
+                     "Semantic error: node %s expected complete "
+                     "type, but found %s",
+                     affected_node_buf, spec_buf);
     }
     case BCC_TERR_INCOMPLETE_SPEC: {
       ASTree *spec_list = erraux->data.err.info[0];
       char spec_list_buf[LINESIZE];
       int chars_written = astree_to_string(spec_list, spec_list_buf, LINESIZE);
       return sprintf(buf,
-                      "Semantic error: specifier list at %s has "
-                      "incomplete type that cannot be completed",
-                      spec_list_buf);
+                     "Semantic error: specifier list at %s has "
+                     "incomplete type that cannot be completed",
+                     spec_list_buf);
     }
     case BCC_TERR_INCOMPATIBLE_TYPES: {
       ASTree *affected_node = erraux->data.err.info[0];
@@ -123,9 +122,9 @@ int erraux_to_string(AuxSpec *erraux, char *buf, size_t size) {
       char spec2_buf[LINESIZE];
       chars_written = type_to_string(spec2, spec2_buf, LINESIZE);
       return sprintf(buf,
-                      "Semantic error: at node %s, types %s and "
-                      "%s are incompatible",
-                      affected_node_buf, spec1_buf, spec2_buf);
+                     "Semantic error: at node %s, types %s and "
+                     "%s are incompatible",
+                     affected_node_buf, spec1_buf, spec2_buf);
     }
     case BCC_TERR_INCOMPATIBLE_SPEC: {
       ASTree *spec_list = erraux->data.err.info[0];
@@ -134,9 +133,9 @@ int erraux_to_string(AuxSpec *erraux, char *buf, size_t size) {
           type_to_string(spec_list->type, spec_list_buf, LINESIZE);
       ASTree *spec = erraux->data.err.info[1];
       return sprintf(buf,
-                      "Semantic error: specifier %s incompatible "
-                      "with specifier list %s",
-                      spec->lexinfo, spec_list_buf);
+                     "Semantic error: specifier %s incompatible "
+                     "with specifier list %s",
+                     spec->lexinfo, spec_list_buf);
     }
     case BCC_TERR_EXPECTED_TAG: {
       ASTree *operator= erraux->data.err.info[0];
@@ -146,9 +145,9 @@ int erraux_to_string(AuxSpec *erraux, char *buf, size_t size) {
       char spec_buf[LINESIZE];
       chars_written = type_to_string(spec, spec_buf, LINESIZE);
       return sprintf(buf,
-                      "Semantic error: operator %s expected an "
-                      "operand with tag type but found %s",
-                      operator_buf, spec_buf);
+                     "Semantic error: operator %s expected an "
+                     "operand with tag type but found %s",
+                     operator_buf, spec_buf);
     }
     case BCC_TERR_EXPECTED_TAG_PTR: {
       ASTree *operator= erraux->data.err.info[0];
@@ -218,8 +217,7 @@ int erraux_to_string(AuxSpec *erraux, char *buf, size_t size) {
       return 0;
     case BCC_TERR_EXPECTED_RETVAL:
       /* TODO(Robert): not usable as implemented */
-      return sprintf(buf,
-                      "Semantic error: expected return value expression");
+      return sprintf(buf, "Semantic error: expected return value expression");
     case BCC_TERR_UNEXPECTED_LIST: {
       ASTree *dest = erraux->data.err.info[0];
       char dest_buf[LINESIZE];
@@ -237,7 +235,7 @@ int erraux_to_string(AuxSpec *erraux, char *buf, size_t size) {
       char tree_buf[LINESIZE];
       int chars_written = astree_to_string(tree, tree_buf, LINESIZE);
       return sprintf(buf, "Semantic error: node %s has unexpected token",
-                      tree_buf);
+                     tree_buf);
     }
     case BCC_TERR_UNEXPECTED_BODY:
       /* TODO(Robert): unused */
@@ -250,32 +248,29 @@ int erraux_to_string(AuxSpec *erraux, char *buf, size_t size) {
       char declarator_buf[LINESIZE];
       int chars_written =
           astree_to_string(declarator, declarator_buf, LINESIZE);
-      return sprintf(buf,
-                      "Semantic error: excess initializers for node %s",
-                      declarator_buf);
+      return sprintf(buf, "Semantic error: excess initializers for node %s",
+                     declarator_buf);
     }
     case BCC_TERR_EXCESS_PARAMS: {
       ASTree *call = erraux->data.err.info[0];
       char call_buf[LINESIZE];
       int chars_written = astree_to_string(call, call_buf, LINESIZE);
       return sprintf(buf, "Semantic error: excess parameters in call %s",
-                      call_buf);
+                     call_buf);
     }
     case BCC_TERR_INSUFF_PARAMS: {
       ASTree *call = erraux->data.err.info[0];
       char call_buf[LINESIZE];
       int chars_written = astree_to_string(call, call_buf, LINESIZE);
-      return sprintf(buf,
-                      "Semantic error: insufficient parameters in call %s",
-                      call_buf);
+      return sprintf(buf, "Semantic error: insufficient parameters in call %s",
+                     call_buf);
     }
     case BCC_TERR_SYM_NOT_FOUND: {
       ASTree *ident = erraux->data.err.info[0];
       char ident_buf[LINESIZE];
       int chars_written = astree_to_string(ident, ident_buf, LINESIZE);
       return sprintf(
-          buf,
-          "Semantic error: identifier referred to by node %s not found",
+          buf, "Semantic error: identifier referred to by node %s not found",
           ident_buf);
     }
     case BCC_TERR_TYPEID_NOT_FOUND: {
@@ -294,8 +289,8 @@ int erraux_to_string(AuxSpec *erraux, char *buf, size_t size) {
       char tag_node_buf[LINESIZE];
       int chars_written = astree_to_string(tag_node, tag_node_buf, LINESIZE);
       const char *name = astree_get(tag_node, 0)->lexinfo;
-      return sprintf(buf, "Semantic error: tag %s not found at node %s",
-                      name, tag_node_buf);
+      return sprintf(buf, "Semantic error: tag %s not found at node %s", name,
+                     tag_node_buf);
     }
     case BCC_TERR_REDEFINITION: {
       /* TODO(Robert): differentiate between redefinition of tags, symbols,
@@ -304,25 +299,22 @@ int erraux_to_string(AuxSpec *erraux, char *buf, size_t size) {
       ASTree *ident = erraux->data.err.info[0];
       char ident_buf[LINESIZE];
       int chars_written = astree_to_string(ident, ident_buf, LINESIZE);
-      return sprintf(buf,
-                      "Semantic error: redefinition of symbol at node %s",
-                      ident_buf);
+      return sprintf(buf, "Semantic error: redefinition of symbol at node %s",
+                     ident_buf);
     }
     case BCC_TERR_CONST_TOO_SMALL: {
       ASTree *constant = erraux->data.err.info[0];
       char constant_buf[LINESIZE];
       int chars_written = astree_to_string(constant, constant_buf, LINESIZE);
-      return sprintf(buf,
-                      "Semantic error: constant at node %s too small",
-                      constant_buf);
+      return sprintf(buf, "Semantic error: constant at node %s too small",
+                     constant_buf);
     }
     case BCC_TERR_CONST_TOO_LARGE: {
       ASTree *constant = erraux->data.err.info[0];
       char constant_buf[LINESIZE];
       int chars_written = astree_to_string(constant, constant_buf, LINESIZE);
-      return sprintf(buf,
-                      "Semantic error: constant at node %s too large",
-                      constant_buf);
+      return sprintf(buf, "Semantic error: constant at node %s too large",
+                     constant_buf);
     }
   }
 }
@@ -348,13 +340,13 @@ int print_errs(TypeSpec *errspec, FILE *out) {
     int chars_written =
         erraux_to_string(erraux, erraux_buf, info_count * LINESIZE);
     if (chars_written < 0) {
-        free(erraux_buf);
-        return chars_written;
+      free(erraux_buf);
+      return chars_written;
     }
     chars_written = fprintf(out, "%s\n", erraux_buf);
     if (chars_written < 0) {
-        free(erraux_buf);
-        return chars_written;
+      free(erraux_buf);
+      return chars_written;
     }
   }
   return 0;

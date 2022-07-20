@@ -1,34 +1,34 @@
 #include "symtable.h"
 
+#include "assert.h"
 #include "astree.h"
-#include "state.h"
-#include "yyparse.h"
 #include "attributes.h"
 #include "badllist.h"
 #include "badmap.h"
+#include "bcc_err.h"
 #include "debug.h"
 #include "err.h"
-#include "assert.h"
 #include "simplestack.h"
+#include "state.h"
 #include "stdlib.h"
 #include "string.h"
-#include "bcc_err.h"
+#include "yyparse.h"
 #define LINESIZE 1024
 #define EMPTY_SYMTABLE = ((SymbolTable){BLIB_MAP_EMPTY, NULL, NULL, NULL});
 
 #ifdef UNIT_TESTING
-extern void* _test_malloc(const size_t size, const char* file, const int line);
+extern void *_test_malloc(const size_t size, const char *file, const int line);
 #define malloc(size) _test_malloc(size, __FILE__, __LINE__)
-extern void* _test_calloc(const size_t nmemb, const size_t size,
-        const char* file, const int line);
+extern void *_test_calloc(const size_t nmemb, const size_t size,
+                          const char *file, const int line);
 #define calloc(nmemb, size) _test_calloc(nmemb, size, __FILE__, __LINE__)
 extern void _test_free(void *ptr, const char *file, const int line);
 #define free(ptr) _test_free(ptr, __FILE__, __LINE__)
-extern void mock_assert(const int result, const char* const expression,
-                        const char * const file, const int line);
+extern void mock_assert(const int result, const char *const expression,
+                        const char *const file, const int line);
 #undef assert
 #define assert(expression) \
-    mock_assert((int)(expression), #expression, __FILE__, __LINE__);
+  mock_assert((int)(expression), #expression, __FILE__, __LINE__);
 #endif
 
 const char TAG_TYPE_STRINGS[][8] = {
@@ -157,7 +157,7 @@ int tag_value_print(const TagValue *tagval, char *buffer, size_t size) {
 
   int buffer_offset =
       sprintf(buffer, "Type: %s, Width: %lu, Align: %lu, Members: {",
-               TAG_TYPE_STRINGS[tagval->tag], tagval->width, tagval->alignment);
+              TAG_TYPE_STRINGS[tagval->tag], tagval->width, tagval->alignment);
   /* TODO(Robert): check buffer_offset for snprintf errors */
   /* TODO(Robert): print tags defined within struct and union tags */
   if (tagval->tag == TAG_STRUCT || tagval->tag == TAG_UNION) {
@@ -174,8 +174,7 @@ int tag_value_print(const TagValue *tagval, char *buffer, size_t size) {
       int status = symbol_value_print(symval, symbuf, LINESIZE);
       if (status) return status;
       int characters_printed =
-          sprintf(buffer + buffer_offset, "%s: %s, ",
-                   symname, symbuf);
+          sprintf(buffer + buffer_offset, "%s: %s, ", symname, symbuf);
       buffer_offset += characters_printed;
     }
   }
@@ -298,9 +297,9 @@ int symbol_table_merge_control(SymbolTable *dest, SymbolTable *src) {
 }
 
 TypeSpec *symbol_table_process_control(SymbolTable *table, int parent_symbol) {
-  assert(parent_symbol == TOK_DECLARATION || parent_symbol == TOK_SWITCH
-          || parent_symbol == TOK_FOR || parent_symbol == TOK_DO
-          || parent_symbol == TOK_WHILE);
+  assert(parent_symbol == TOK_DECLARATION || parent_symbol == TOK_SWITCH ||
+         parent_symbol == TOK_FOR || parent_symbol == TOK_DO ||
+         parent_symbol == TOK_WHILE);
   TypeSpec *ret = NULL;
   size_t i;
   for (i = 0; i < symbol_table_count_control(table); ++i) {
@@ -312,12 +311,13 @@ TypeSpec *symbol_table_process_control(SymbolTable *table, int parent_symbol) {
         size_t ident_len = strlen(ident);
         LabelValue *labval = state_get_label(state, ident, ident_len);
         if (labval == NULL) {
-          AuxSpec *erraux = create_erraux(BCC_TERR_SYM_NOT_FOUND, 1, ctrlval->tree);
+          AuxSpec *erraux =
+              create_erraux(BCC_TERR_SYM_NOT_FOUND, 1, ctrlval->tree);
           if (ret == NULL) {
-             ret = calloc(1, sizeof(TypeSpec));
-             int status = typespec_init(ret);
-             if (status) abort();
-             ret->base = TYPE_ERROR;
+            ret = calloc(1, sizeof(TypeSpec));
+            int status = typespec_init(ret);
+            if (status) abort();
+            ret->base = TYPE_ERROR;
           }
           int status = llist_push_back(&ret->auxspecs, erraux);
           if (status) abort();
@@ -325,27 +325,30 @@ TypeSpec *symbol_table_process_control(SymbolTable *table, int parent_symbol) {
         symbol_table_remove_control(table, i--);
         free(ctrlval);
       } else {
-        AuxSpec *erraux = create_erraux(BCC_TERR_UNEXPECTED_TOKEN, 1, ctrlval->tree);
+        AuxSpec *erraux =
+            create_erraux(BCC_TERR_UNEXPECTED_TOKEN, 1, ctrlval->tree);
         if (ret == NULL) {
-           ret = calloc(1, sizeof(TypeSpec));
-           int status = typespec_init(ret);
-           if (status) abort();
-           ret->base = TYPE_ERROR;
+          ret = calloc(1, sizeof(TypeSpec));
+          int status = typespec_init(ret);
+          if (status) abort();
+          ret->base = TYPE_ERROR;
         }
         int status = llist_push_back(&ret->auxspecs, erraux);
         if (status) abort();
         symbol_table_remove_control(table, i--);
         free(ctrlval);
       }
-    } else if (ctrlval->type == CTRL_CONTINUE && (parent_symbol == TOK_FOR
-                || parent_symbol == TOK_WHILE || parent_symbol == TOK_DO)) {
+    } else if (ctrlval->type == CTRL_CONTINUE &&
+               (parent_symbol == TOK_FOR || parent_symbol == TOK_WHILE ||
+                parent_symbol == TOK_DO)) {
       symbol_table_remove_control(table, i--);
       free(ctrlval);
-    } else if ((ctrlval->type == CTRL_CASE || ctrlval->type == CTRL_DEFAULT)
-            && parent_symbol == TOK_SWITCH) {
+    } else if ((ctrlval->type == CTRL_CASE || ctrlval->type == CTRL_DEFAULT) &&
+               parent_symbol == TOK_SWITCH) {
       symbol_table_remove_control(table, i--);
       free(ctrlval);
-    } else if (ctrlval->type == CTRL_BREAK && parent_symbol != TOK_DECLARATION) {
+    } else if (ctrlval->type == CTRL_BREAK &&
+               parent_symbol != TOK_DECLARATION) {
       symbol_table_remove_control(table, i--);
       free(ctrlval);
     }
