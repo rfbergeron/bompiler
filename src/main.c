@@ -225,7 +225,7 @@ int main(int argc, char **argv) {
 
 cleanup:
   if (parser_root->symbol == TOK_TYPE_ERROR) {
-    int status = print_errs((TypeSpec*)parser_root->type, errfile);
+    int status = print_errs((TypeSpec *)parser_root->type, errfile);
     if (status) {
       warnx("Failed to print program errors.");
     }

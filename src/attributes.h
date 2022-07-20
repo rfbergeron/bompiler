@@ -32,8 +32,8 @@ enum attribute {
   ATTR_EXPR_LVAL = 1 << 1,  /* refers to an assignable location */
   ATTR_EXPR_CONST = 1 << 2, /* refers to a compile-time constant */
   ATTR_EXPR_ARITHCONST =
-      1 << 3,               /* as above, but only arithmetic/enum types used */
-  ATTR_EXPR_BOOL = 1 << 4,  /* int guaranteed to be 0 or 1 */
+      1 << 3,              /* as above, but only arithmetic/enum types used */
+  ATTR_EXPR_BOOL = 1 << 4, /* int guaranteed to be 0 or 1 */
   ATTR_EXPR_VADDR = 1 << 5 /* int is memory address */
 };
 
@@ -237,7 +237,8 @@ extern const TypeSpec SPEC_SHRT;
 extern const TypeSpec SPEC_UCHAR;
 extern const TypeSpec SPEC_SCHAR;
 
-#define LOC_EMPTY {0, 0, 0, 0}
+#define LOC_EMPTY \
+  { 0, 0, 0, 0 }
 
 int attributes_to_string(const unsigned int attributes, char *buf, size_t size);
 int location_to_string(const Location *loc, char *buf, size_t size);

@@ -56,8 +56,8 @@ void debug_where_short(char flag, const char *file, int line, const char *msg,
   char full_msg[MAX_MESSAGE_LEN];
   vsprintf(full_msg, msg, args);
   char spec_msg[MAX_MESSAGE_LEN];
-  sprintf(spec_msg, "DEBUG(%%c) %%-%us[%%%ud] %%s",
-           FILENAME_WIDTH, LINENR_DIGITS);
+  sprintf(spec_msg, "DEBUG(%%c) %%-%us[%%%ud] %%s", FILENAME_WIDTH,
+          LINENR_DIGITS);
   /* warnx ("DEBUG(%c) %s[%d] %s", flag, file, line, full_msg); */
   warnx(spec_msg, flag, file, line, full_msg);
   va_end(args);

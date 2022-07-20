@@ -8,11 +8,10 @@
 #include "symtable.h"
 
 #define INDEX_FROM_INT(sign, width) INDEX_##sign##_##width
-#define SPECIFY_INT(sign, width)                                        \
-  {                                                                     \
-      X64_SIZEOF_##width, X64_ALIGNOF_##width,                          \
-      BLIB_LLIST_EMPTY,   TYPESPEC_FLAG_##sign | TYPESPEC_FLAG_##width, \
-      TYPE_##sign,                                                      \
+#define SPECIFY_INT(sign, width)                                   \
+  {                                                                \
+    X64_SIZEOF_##width, X64_ALIGNOF_##width, BLIB_LLIST_EMPTY,     \
+        TYPESPEC_FLAG_##sign | TYPESPEC_FLAG_##width, TYPE_##sign, \
   }
 
 /*
@@ -156,7 +155,7 @@ int attributes_to_string(const unsigned int attributes, char *buf,
 int location_to_string(const Location *loc, char *buf, size_t size) {
   /* TODO(Robert): check size without using snprintf */
   return sprintf(buf, "%lu, %lu, %lu, %lu", loc->filenr, loc->linenr,
-                  loc->offset, loc->blocknr);
+                 loc->offset, loc->blocknr);
 }
 
 int flags_to_string(const unsigned int flags, char *buf, size_t size) {

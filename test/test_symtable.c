@@ -1,13 +1,14 @@
+#include <setjmp.h>
 #include <stdarg.h>
 #include <stddef.h>
-#include <setjmp.h>
 /* get rid of inline in cmocka */
 #define inline
 #include <cmocka.h>
 #include <stdlib.h>
+
 #include "astree.h"
-#include "symtable.h"
 #include "state.h"
+#include "symtable.h"
 #include "yyparse.h"
 
 /* duplicate globals... regret... */
@@ -18,14 +19,12 @@ const size_t MAX_IDENT_LEN = 31;
 CompilerState *state = NULL;
 
 LabelValue *__wrap_state_get_label(CompilerState *state, const char *ident,
-        const size_t ident_len) {
+                                   const size_t ident_len) {
   check_expected_ptr(ident);
   return mock_ptr_type(LabelValue *);
 }
 
-int __wrap_typespec_destroy(TypeSpec *spec) {
-  return mock_type(int);
-}
+int __wrap_typespec_destroy(TypeSpec *spec) { return mock_type(int); }
 
 int __wrap_typespec_init(TypeSpec *spec) {
   llist_init(&spec->auxspecs, NULL, NULL);
@@ -35,7 +34,7 @@ int __wrap_typespec_init(TypeSpec *spec) {
 AuxSpec *__wrap_create_erraux(int errcode, size_t info_count, ...) {
   check_expected(errcode);
   check_expected(info_count);
-  return mock_ptr_type(AuxSpec*);
+  return mock_ptr_type(AuxSpec *);
 }
 
 void process_control_bad_symbol(void **state) {
@@ -213,14 +212,12 @@ void process_control_function(void **state) {
 }
 
 int main(int argc, char **argv) {
-    struct CMUnitTest tests[] = {
-      cmocka_unit_test(process_control_bad_symbol),
-      cmocka_unit_test(process_control_none),
-      cmocka_unit_test(process_control_bad_label),
-      cmocka_unit_test(process_control_switch),
-      cmocka_unit_test(process_control_while),
-      cmocka_unit_test(process_control_function)
-    };
+  struct CMUnitTest tests[] = {cmocka_unit_test(process_control_bad_symbol),
+                               cmocka_unit_test(process_control_none),
+                               cmocka_unit_test(process_control_bad_label),
+                               cmocka_unit_test(process_control_switch),
+                               cmocka_unit_test(process_control_while),
+                               cmocka_unit_test(process_control_function)};
 
-    return cmocka_run_group_tests(tests, NULL, NULL);
+  return cmocka_run_group_tests(tests, NULL, NULL);
 }
