@@ -75,7 +75,7 @@ int string_set_print(FILE *out) {
     size_t map_location[] = {-1, -1};
     map_find(&string_set, key, strlen(key), map_location);
     fprintf(out, "string_set[%4lu,%4lu]: %p->\"%s\"\n", map_location[0],
-            map_location[1], (void*)key, key);
+            map_location[1], (void *)key, key);
   }
   llist_destroy(&key_list);
   return 0;

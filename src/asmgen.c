@@ -116,7 +116,7 @@ typedef enum instruction_enum {
  */
 enum instruction_flag {
   NO_INSTR_FLAGS = 0,
-  USE_REG = 1 << 1,   /* result must be placed in a register */
+  USE_REG = 1 << 1,  /* result must be placed in a register */
   WANT_ADDR = 1 << 2 /* result should be object address, not value */
 };
 

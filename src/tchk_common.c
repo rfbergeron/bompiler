@@ -1,6 +1,7 @@
 #include "tchk_common.h"
-#include "yyparse.h"
+
 #include "stdlib.h"
+#include "yyparse.h"
 
 /*
  * TODO(Robert): recursively setting the block number no longer works because
@@ -62,8 +63,8 @@ ASTree *convert_type(ASTree *expr, const TypeSpec *type) {
   if (compatibility == TCHK_COMPATIBLE) {
     return expr;
   } else if (compatibility == TCHK_INCOMPATIBLE) {
-    return astree_create_errnode(expr, BCC_TERR_INCOMPATIBLE_TYPES, 3, expr, expr->type,
-                       type);
+    return astree_create_errnode(expr, BCC_TERR_INCOMPATIBLE_TYPES, 3, expr,
+                                 expr->type, type);
   }
   TypeSpec *cast_spec = malloc(sizeof(*cast_spec));
   int status = typespec_copy(cast_spec, type);

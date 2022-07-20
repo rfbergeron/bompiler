@@ -9,16 +9,16 @@
 
 #include "attributes.h"
 #include "badllist.h"
+#include "bcc_err.h"
 #include "debug.h"
 #include "lyutils.h"
 #include "strset.h"
 #include "symtable.h"
 #include "yyparse.h"
-#include "bcc_err.h"
 #define LINESIZE 1024
 
 #ifdef UNIT_TESTING
-extern void* _test_malloc(const size_t size, const char* file, const int line);
+extern void *_test_malloc(const size_t size, const char *file, const int line);
 #define malloc(size) _test_malloc(size, __FILE__, __LINE__)
 extern void _test_free(void *ptr, const char *file, const int line);
 #define free(ptr) _test_free(ptr, __FILE__, __LINE__)
@@ -142,7 +142,8 @@ ASTree *astree_remove(ASTree *parent, const size_t index) {
   return llist_extract(&parent->children, index);
 }
 
-ASTree *astree_create_errnode(ASTree *child, int errcode, size_t info_count, ...) {
+ASTree *astree_create_errnode(ASTree *child, int errcode, size_t info_count,
+                              ...) {
   va_list info_ptrs;
   va_start(info_ptrs, info_count);
   AuxSpec *erraux = create_erraux_v(errcode, info_count, info_ptrs);
@@ -197,7 +198,8 @@ ASTree *astree_propogate_errnode_v(ASTree *parent, size_t count, ...) {
   return parent;
 }
 
-ASTree *astree_propogate_errnode_a(ASTree *parent, size_t count, ASTree **children) {
+ASTree *astree_propogate_errnode_a(ASTree *parent, size_t count,
+                                   ASTree **children) {
   size_t i;
   for (i = 0; i < count; ++i) {
     ASTree *child = children[i];
@@ -228,8 +230,8 @@ int astree_to_string(ASTree *tree, char *buffer, size_t size) {
   if (characters_printed < 0) return characters_printed;
 
   if (strlen(tname) > 4) tname += 4;
-  return sprintf(buffer, "%s \"%s\" {%s} {%s} {%s}", tname,
-                  tree->lexinfo, locstr, typestr, attrstr);
+  return sprintf(buffer, "%s \"%s\" {%s} {%s} {%s}", tname, tree->lexinfo,
+                 locstr, typestr, attrstr);
 }
 
 int astree_print_tree(ASTree *tree, FILE *out, int depth) {
