@@ -372,7 +372,7 @@ ASTree *parse_sizeof(ASTree *sizeof_, ASTree *spec_list, ASTree *declarator) {
 }
 
 void parser_cleanup(size_t count, ...) {
-  DEBUGS('p', "Cleaning up %zu astree nodes", count);
+  DEBUGS('p', "Cleaning up %lu astree nodes", count);
   va_list args;
   va_start(args, count);
   size_t i;

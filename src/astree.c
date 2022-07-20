@@ -84,6 +84,7 @@ int astree_destroy(ASTree *tree) {
       case TOK_ADDROF:
         /* free pointer auxspec that was added */
         auxspec_destroy(llist_pop_front((LinkedList *)&tree->type->auxspecs));
+        /* fallthrough */
       case TOK_SUBSCRIPT:
       case TOK_INDIRECTION:
       case TOK_CALL:
@@ -112,7 +113,7 @@ ASTree *astree_adopt(ASTree *parent, const size_t count, ...) {
   for (i = 0; i < count; ++i) {
     ASTree *child = va_arg(args, ASTree *);
     assert((child == &EMPTY_EXPR) ||
-           (llist_find(&parent->children, child) == -1));
+           (llist_find(&parent->children, child) == (size_t)-1L));
     DEBUGS('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
            parser_get_tname(child->symbol));
     int status = llist_push_back(&parent->children, child);
@@ -227,7 +228,7 @@ int astree_to_string(ASTree *tree, char *buffer, size_t size) {
   if (characters_printed < 0) return characters_printed;
 
   if (strlen(tname) > 4) tname += 4;
-  return snprintf(buffer, size, "%s \"%s\" {%s} {%s} {%s}", tname,
+  return sprintf(buffer, "%s \"%s\" {%s} {%s} {%s}", tname,
                   tree->lexinfo, locstr, typestr, attrstr);
 }
 
@@ -264,12 +265,12 @@ int astree_print_tree(ASTree *tree, FILE *out, int depth) {
 
 int astree_print_symbols(ASTree *tree, FILE *out) {
   if (tree->symbol_table != NULL) {
-    LinkedList symnames = (LinkedList)BLIB_LLIST_EMPTY;
+    LinkedList symnames = BLIB_LLIST_EMPTY;
     int status = llist_init(&symnames, NULL, NULL);
     if (status) return status;
     status = map_keys(&tree->symbol_table->primary_namespace, &symnames);
     if (status) return status;
-    DEBUGS('a', "Printing %zu symbols",
+    DEBUGS('a', "Printing %lu symbols",
            map_size(&tree->symbol_table->primary_namespace));
     const char *tname = parser_get_tname(tree->symbol);
     char locstr[LINESIZE];

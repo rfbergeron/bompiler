@@ -17,8 +17,8 @@
 
 extern FILE *tokfile;
 size_t lexer_last_yyleng;
-Location lexer_loc;
-int lexer_interactive;
+Location lexer_loc = {0, 1, 0, 0};
+int lexer_interactive = 0;
 ASTree *parser_root;
 ASTree *bcc_yyval;
 struct llist lexer_filenames;
@@ -26,7 +26,7 @@ struct {
   size_t *data;
   size_t count;
   size_t size;
-} lexer_include_linenrs;
+} lexer_include_linenrs = {NULL, 0, 10};
 
 /* internal functions */
 void push_linenr(size_t linenr) {
@@ -83,7 +83,7 @@ void lexer_bad_char(unsigned char bad) {
   if (isgraph(bad))
     sprintf(buffer, "Invalid source character (%s)\n", &bad);
   else
-    sprintf(buffer, "Invalid source character (\\%3p)\n", (unsigned *)&bad);
+    sprintf(buffer, "Invalid source character (\\%3u)\n", ((unsigned int)bad) & 0xFF);
 
   lexer_error(buffer);
 }
@@ -91,7 +91,7 @@ void lexer_bad_char(unsigned char bad) {
 void lexer_include() {
   size_t linenr;
   char filename[1024];
-  int scan_rc = sscanf(yytext, "# %zu \"%[^\"]\"", &linenr, filename);
+  int scan_rc = sscanf(yytext, "# %lu \"%[^\"]\"", &linenr, filename);
 
   if (scan_rc != 2) {
     fprintf(stderr, "Invalid directive, ignored: %s\n", yytext);
@@ -158,10 +158,6 @@ void lexer_dump_filenames(FILE *out) {
 
 /* TODO(Robert): add filename comparator to prevent duplicates */
 void lexer_init_globals() {
-  lexer_interactive = 0;
-  lexer_loc = (Location){0, 1, 0};
-  lexer_include_linenrs.count = 0;
-  lexer_include_linenrs.size = 10;
   lexer_include_linenrs.data =
       malloc(lexer_include_linenrs.size * sizeof(size_t));
   llist_init(&lexer_filenames, free, NULL);
