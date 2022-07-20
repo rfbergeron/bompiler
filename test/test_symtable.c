@@ -28,7 +28,14 @@ int __wrap_typespec_destroy(TypeSpec *spec) {
 }
 
 int __wrap_typespec_init(TypeSpec *spec) {
+  llist_init(&spec->auxspecs, NULL, NULL);
   return mock_type(int);
+}
+
+AuxSpec *__wrap_create_erraux(int errcode, size_t info_count, ...) {
+  check_expected(errcode);
+  check_expected(info_count);
+  return mock_ptr_type(AuxSpec*);
 }
 
 void process_control_bad_symbol(void **state) {
@@ -39,7 +46,7 @@ void process_control_bad_symbol(void **state) {
 
 void process_control_none(void **state) {
   SymbolTable *table = symbol_table_init();
-  symbol_table_process_control(table, TOK_FOR);
+  assert_null(symbol_table_process_control(table, TOK_FOR));
   symbol_table_destroy(table);
 }
 
@@ -53,13 +60,7 @@ void process_control_bad_label(void **state) {
   good_ctrl->type = CTRL_GOTO;
   symbol_table_add_control(table, good_ctrl);
 
-  /* Unfortunately, this memory will be freed using a function pointer called
-   * by badlib. The _test_free function cannot be used in its place since it
-   * has too many parameters.
-   *
-   * It is possible, but it will require changes to badlib.
-   */
-  ControlValue *bad_ctrl = malloc(sizeof(ControlValue));
+  ControlValue *bad_ctrl = test_malloc(sizeof(ControlValue));
   ASTree bad_node = EMPTY_EXPR_VALUE;
   bad_node.lexinfo = "bad";
   bad_ctrl->tree = &bad_node;
@@ -68,12 +69,25 @@ void process_control_bad_label(void **state) {
 
   expect_string(__wrap_state_get_label, ident, "bad");
   will_return(__wrap_state_get_label, NULL);
+
+  expect_value(__wrap_create_erraux, errcode, BCC_TERR_SYM_NOT_FOUND);
+  expect_value(__wrap_create_erraux, info_count, 1);
+  AuxSpec erraux = {0};
+  erraux.aux = AUX_ERROR;
+  erraux.data.err.code = BCC_TERR_SYM_NOT_FOUND;
+  will_return(__wrap_create_erraux, &erraux);
+
+  will_return(__wrap_typespec_init, 0);
+
   expect_string(__wrap_state_get_label, ident, "good");
   LabelValue good_labval = {0};
   will_return(__wrap_state_get_label, &good_labval);
 
-  symbol_table_process_control(table, TOK_DECLARATION);
-  assert_int_equal(symbol_table_count_control(table), 1);
+  TypeSpec *errspec = symbol_table_process_control(table, TOK_DECLARATION);
+  assert_int_equal(symbol_table_count_control(table), 0);
+  assert_non_null(errspec);
+  llist_destroy(&errspec->auxspecs);
+  test_free(errspec);
   symbol_table_destroy(table);
 }
 
@@ -143,19 +157,19 @@ void process_control_function(void **state) {
   goto_ctrl->type = CTRL_GOTO;
   symbol_table_add_control(table, goto_ctrl);
 
-  ControlValue *break_ctrl = malloc(sizeof(ControlValue));
+  ControlValue *break_ctrl = test_malloc(sizeof(ControlValue));
   break_ctrl->type = CTRL_BREAK;
   symbol_table_add_control(table, break_ctrl);
 
-  ControlValue *continue_ctrl = malloc(sizeof(ControlValue));
+  ControlValue *continue_ctrl = test_malloc(sizeof(ControlValue));
   continue_ctrl->type = CTRL_CONTINUE;
   symbol_table_add_control(table, continue_ctrl);
 
-  ControlValue *default_ctrl = malloc(sizeof(ControlValue));
+  ControlValue *default_ctrl = test_malloc(sizeof(ControlValue));
   default_ctrl->type = CTRL_DEFAULT;
   symbol_table_add_control(table, default_ctrl);
 
-  ControlValue *case_ctrl = malloc(sizeof(ControlValue));
+  ControlValue *case_ctrl = test_malloc(sizeof(ControlValue));
   case_ctrl->type = CTRL_CASE;
   symbol_table_add_control(table, case_ctrl);
 
@@ -163,8 +177,38 @@ void process_control_function(void **state) {
   LabelValue goto_labval = {0};
   will_return(__wrap_state_get_label, &goto_labval);
 
-  symbol_table_process_control(table, TOK_DECLARATION);
-  assert_int_equal(symbol_table_count_control(table), 4);
+  /* unexpected break */
+  expect_value(__wrap_create_erraux, errcode, BCC_TERR_UNEXPECTED_TOKEN);
+  expect_value(__wrap_create_erraux, info_count, 1);
+  AuxSpec erraux = {0};
+  erraux.aux = AUX_ERROR;
+  erraux.data.err.code = BCC_TERR_UNEXPECTED_TOKEN;
+  will_return(__wrap_create_erraux, &erraux);
+
+  /* initialize typespec after first failure */
+  will_return(__wrap_typespec_init, 0);
+
+  /* unexpected continue */
+  expect_value(__wrap_create_erraux, errcode, BCC_TERR_UNEXPECTED_TOKEN);
+  expect_value(__wrap_create_erraux, info_count, 1);
+  will_return(__wrap_create_erraux, &erraux);
+
+  /* unexpected default */
+  expect_value(__wrap_create_erraux, errcode, BCC_TERR_UNEXPECTED_TOKEN);
+  expect_value(__wrap_create_erraux, info_count, 1);
+  will_return(__wrap_create_erraux, &erraux);
+
+  /* unexpected case */
+  expect_value(__wrap_create_erraux, errcode, BCC_TERR_UNEXPECTED_TOKEN);
+  expect_value(__wrap_create_erraux, info_count, 1);
+  will_return(__wrap_create_erraux, &erraux);
+
+  TypeSpec *errspec = symbol_table_process_control(table, TOK_DECLARATION);
+  assert_int_equal(symbol_table_count_control(table), 0);
+  assert_non_null(errspec);
+  assert_int_equal(llist_size(&errspec->auxspecs), 4);
+  llist_destroy(&errspec->auxspecs);
+  test_free(errspec);
   symbol_table_destroy(table);
 }
 
