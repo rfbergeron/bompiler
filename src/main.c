@@ -18,7 +18,6 @@
 #include "state.h"
 #include "strset.h"
 #include "symtable.h"
-#include "typecheck.h"
 
 #define LINESIZE 1024
 const char *CPP = "/usr/bin/cpp -nostdinc ";
