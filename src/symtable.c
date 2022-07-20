@@ -8,15 +8,20 @@
 #include "badmap.h"
 #include "debug.h"
 #include "err.h"
+#include "assert.h"
 #include "simplestack.h"
 #include "stdlib.h"
 #include "string.h"
+#include "bcc_err.h"
 #define LINESIZE 1024
 #define EMPTY_SYMTABLE = ((SymbolTable){BLIB_MAP_EMPTY, NULL, NULL, NULL});
 
 #ifdef UNIT_TESTING
 extern void* _test_malloc(const size_t size, const char* file, const int line);
 #define malloc(size) _test_malloc(size, __FILE__, __LINE__)
+extern void* _test_calloc(const size_t nmemb, const size_t size,
+        const char* file, const int line);
+#define calloc(nmemb, size) _test_calloc(nmemb, size, __FILE__, __LINE__)
 extern void _test_free(void *ptr, const char *file, const int line);
 #define free(ptr) _test_free(ptr, __FILE__, __LINE__)
 extern void mock_assert(const int result, const char* const expression,
@@ -291,20 +296,43 @@ int symbol_table_merge_control(SymbolTable *dest, SymbolTable *src) {
   return 0;
 }
 
-void symbol_table_process_control(SymbolTable *table, int parent_symbol) {
+TypeSpec *symbol_table_process_control(SymbolTable *table, int parent_symbol) {
   assert(parent_symbol == TOK_DECLARATION || parent_symbol == TOK_SWITCH
           || parent_symbol == TOK_FOR || parent_symbol == TOK_DO
           || parent_symbol == TOK_WHILE);
+  TypeSpec *ret = NULL;
   size_t i;
   for (i = 0; i < symbol_table_count_control(table); ++i) {
     ControlValue *ctrlval = symbol_table_get_control(table, i);
     /* TODO(Robert): create label information */
-    if (ctrlval->type == CTRL_GOTO && parent_symbol == TOK_DECLARATION) {
-      const char *ident = ctrlval->tree->lexinfo;
-      size_t ident_len = strnlen(ident, MAX_IDENT_LEN);
-      LabelValue *labval = state_get_label(state, ident, ident_len);
-      /* if not defined, leave on stack so it can be marked as an error */
-      if (labval != NULL) {
+    if (parent_symbol == TOK_DECLARATION) {
+      if (ctrlval->type == CTRL_GOTO) {
+        const char *ident = ctrlval->tree->lexinfo;
+        size_t ident_len = strnlen(ident, MAX_IDENT_LEN);
+        LabelValue *labval = state_get_label(state, ident, ident_len);
+        if (labval == NULL) {
+          AuxSpec *erraux = create_erraux(BCC_TERR_SYM_NOT_FOUND, 1, ctrlval->tree);
+          if (ret == NULL) {
+             ret = calloc(1, sizeof(TypeSpec));
+             int status = typespec_init(ret);
+             if (status) abort();
+             ret->base = TYPE_ERROR;
+          }
+          int status = llist_push_back(&ret->auxspecs, erraux);
+          if (status) abort();
+        }
+        symbol_table_remove_control(table, i--);
+        free(ctrlval);
+      } else {
+        AuxSpec *erraux = create_erraux(BCC_TERR_UNEXPECTED_TOKEN, 1, ctrlval->tree);
+        if (ret == NULL) {
+           ret = calloc(1, sizeof(TypeSpec));
+           int status = typespec_init(ret);
+           if (status) abort();
+           ret->base = TYPE_ERROR;
+        }
+        int status = llist_push_back(&ret->auxspecs, erraux);
+        if (status) abort();
         symbol_table_remove_control(table, i--);
         free(ctrlval);
       }
@@ -321,6 +349,7 @@ void symbol_table_process_control(SymbolTable *table, int parent_symbol) {
       free(ctrlval);
     }
   }
+  return ret;
 }
 
 int symbol_table_add_control(SymbolTable *table, ControlValue *ctrlval) {
