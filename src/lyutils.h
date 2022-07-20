@@ -14,8 +14,6 @@
 
 /* #define YYEOF 0 */
 
-typedef struct astree ASTree;
-
 extern FILE *yyin;
 extern char *yytext;
 extern int yy_flex_debug;

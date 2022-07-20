@@ -52,10 +52,11 @@ void debug_where_short(char flag, const char *file, int line, const char *msg,
                        ...) {
   va_list args;
   va_start(args, msg);
+  /* TODO(Robert): check size without snprintf */
   char full_msg[MAX_MESSAGE_LEN];
-  vsnprintf(full_msg, MAX_MESSAGE_LEN, msg, args);
+  vsprintf(full_msg, msg, args);
   char spec_msg[MAX_MESSAGE_LEN];
-  snprintf(spec_msg, MAX_MESSAGE_LEN, "DEBUG(%%c) %%-%us[%%%ud] %%s",
+  sprintf(spec_msg, "DEBUG(%%c) %%-%us[%%%ud] %%s",
            FILENAME_WIDTH, LINENR_DIGITS);
   /* warnx ("DEBUG(%c) %s[%d] %s", flag, file, line, full_msg); */
   warnx(spec_msg, flag, file, line, full_msg);

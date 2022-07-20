@@ -241,7 +241,7 @@ ASTree *validate_typespec(ASTree *spec_list, ASTree *spec) {
     case TOK_ENUM:
       return validate_tag_typespec(spec_list, spec);
     case TOK_CONST:
-      /* fall through */
+      /* fallthrough */
     case TOK_VOLATILE:
       return astree_adopt(spec_list, 1, spec);
     case TOK_TYPEDEF_NAME:
@@ -299,7 +299,7 @@ ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
   }
 
   const char *identifier = declarator->lexinfo;
-  size_t identifier_len = strnlen(identifier, MAX_IDENT_LEN);
+  size_t identifier_len = strlen(identifier);
   SymbolValue *exists = NULL;
   int is_redefinition =
       state_get_symbol(state, identifier, identifier_len, &exists);
@@ -670,7 +670,7 @@ ASTree *define_symbol(ASTree *declaration, ASTree *declarator,
 
 int resolve_label(ASTree *ident_node) {
   const char *ident = ident_node->lexinfo;
-  size_t ident_len = strnlen(ident, MAX_IDENT_LEN);
+  size_t ident_len = strlen(ident);
   LabelValue *labval = state_get_label(state, ident, ident_len);
   if (labval == NULL) {
     return BCC_TERR_SYM_NOT_FOUND;
@@ -814,7 +814,7 @@ int errcode_from_tagtype(TagType tag_type) {
 ASTree *validate_tag_def(ASTree *tag_type_node, ASTree *tag_name_node,
                          ASTree *left_brace) {
   const char *tag_name = tag_name_node->lexinfo;
-  const size_t tag_name_len = strnlen(tag_name, MAX_IDENT_LEN);
+  const size_t tag_name_len = strlen(tag_name);
   TagValue *exists = NULL;
   int is_redefinition = state_get_tag(state, tag_name, tag_name_len, &exists);
   int tag_declares_members = left_brace != NULL;
@@ -902,7 +902,7 @@ ASTree *define_enumerator(ASTree *enum_, ASTree *ident_node, ASTree *equal_sign,
   }
   ASTree *left_brace = astree_get(enum_, 1);
   const char *ident = ident_node->lexinfo;
-  const size_t ident_len = strnlen(ident, MAX_IDENT_LEN);
+  const size_t ident_len = strlen(ident);
 
   SymbolValue *exists = NULL;
   int is_redefinition = state_get_symbol(state, ident, ident_len, &exists);
@@ -1010,7 +1010,7 @@ ASTree *define_struct_member(ASTree *struct_, ASTree *member) {
       tagval->alignment = symval->type.alignment;
     }
     if (tagval->tag == TAG_STRUCT) {
-      sprintf(symval->obj_loc, "%%s+%zu", tagval->width);
+      sprintf(symval->obj_loc, "%%s+%lu", tagval->width);
       size_t padding =
           symval->type.alignment - (tagval->width % symval->type.alignment);
       tagval->width += padding + symval->type.width;

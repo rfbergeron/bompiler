@@ -51,7 +51,7 @@ const char *string_set_intern(const char *string) {
         ret, len, ret);
     map_insert(&string_set, ret, len, ret);
   } else {
-    const size_t len2 = strnlen(ret, MAX_IDENT_LEN);
+    const size_t len2 = strlen(ret);
     if (len2 != len) {
       fprintf(stderr, "fuck you\n");
       abort();
@@ -63,7 +63,7 @@ const char *string_set_intern(const char *string) {
 
 int string_set_print(FILE *out) {
   DEBUGS('s', "Printing string set");
-  LinkedList key_list = (LinkedList)BLIB_LLIST_EMPTY;
+  LinkedList key_list = BLIB_LLIST_EMPTY;
   int status = llist_init(&key_list, NULL, NULL);
   if (status) return status;
   status = map_keys(&string_set, &key_list);
@@ -73,9 +73,9 @@ int string_set_print(FILE *out) {
   for (i = 0; i < llist_size(&key_list); ++i) {
     char *key = llist_get(&key_list, i);
     size_t map_location[] = {-1, -1};
-    map_find(&string_set, key, strnlen(key, MAX_IDENT_LEN), map_location);
-    fprintf(out, "string_set[%4zu,%4zu]: %p->\"%s\"\n", map_location[0],
-            map_location[1], key, key);
+    map_find(&string_set, key, strlen(key), map_location);
+    fprintf(out, "string_set[%4lu,%4lu]: %p->\"%s\"\n", map_location[0],
+            map_location[1], (void*)key, key);
   }
   llist_destroy(&key_list);
   return 0;
