@@ -34,7 +34,7 @@ ASTree *validate_intcon(ASTree *intcon) {
     intcon->type = &SPEC_LONG;
   }
 
-  intcon->attributes |= ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST;
+  intcon->attributes |= ATTR_EXPR_CONST | ATTR_EXPR_ARITH;
   return intcon;
 }
 
@@ -56,7 +56,7 @@ ASTree *validate_charcon(ASTree *charcon) {
   } else {
   }
   charcon->type = &SPEC_CHAR;
-  charcon->attributes |= ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST;
+  charcon->attributes |= ATTR_EXPR_CONST | ATTR_EXPR_ARITH;
   return charcon;
 }
 
@@ -226,7 +226,7 @@ ASTree *validate_comma(ASTree *comma, ASTree *left_expr, ASTree *right_expr) {
     return astree_propogate_errnode_v(comma, 2, left_expr, right_expr);
   }
   comma->attributes |=
-      right_expr->attributes & (ATTR_EXPR_ARITHCONST | ATTR_EXPR_CONST);
+      right_expr->attributes & (ATTR_EXPR_ARITH | ATTR_EXPR_CONST);
 
   comma->type = right_expr->type;
   return astree_adopt(comma, 2, left_expr, right_expr);
@@ -248,8 +248,7 @@ ASTree *validate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
                                  type_name->type, expr->type);
   } else {
     cast->type = type_name->type;
-    cast->attributes |=
-        expr->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST);
+    cast->attributes |= expr->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITH);
     return astree_adopt(cast, 2, declaration, expr);
   }
 }
@@ -510,7 +509,7 @@ ASTree *validate_binop(ASTree *operator, ASTree * left_operand,
   unsigned int result_attrs =
       UNWRAP(left_operand)->attributes & UNWRAP(right_operand)->attributes;
   UNWRAP(result)->attributes |=
-      result_attrs & (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST);
+      result_attrs & (ATTR_EXPR_CONST | ATTR_EXPR_ARITH);
   return result;
 }
 
@@ -627,7 +626,7 @@ ASTree *validate_sizeof(ASTree *sizeof_, ASTree *type_node) {
    * platform
    */
   sizeof_->type = &SPEC_ULONG;
-  sizeof_->attributes |= (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST);
+  sizeof_->attributes |= (ATTR_EXPR_CONST | ATTR_EXPR_ARITH);
   return astree_adopt(sizeof_, 1, type_node);
 }
 
