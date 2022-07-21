@@ -89,7 +89,8 @@ ASTree *validate_ident(ASTree *ident) {
   if (symval) {
     DEBUGS('t', "Assigning %s a symbol", id_str);
     ident->type = &(symval->type);
-    if (!typespec_is_array(ident->type) && !typespec_is_function(ident->type)) {
+    if (!typespec_is_array(ident->type) && !typespec_is_function(ident->type) &&
+        !(ident->type->flags & TYPESPEC_FLAG_TYPEDEF)) {
       ident->attributes |= ATTR_EXPR_LVAL;
     }
     return ident;

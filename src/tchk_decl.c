@@ -336,7 +336,8 @@ ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
       }
       declarator->type = &symbol->type;
       if (!typespec_is_function(declarator->type) &&
-          !(typespec_is_array(declarator->type))) {
+          !(typespec_is_array(declarator->type)) &&
+          !(declarator->type->flags & TYPESPEC_FLAG_TYPEDEF)) {
         declarator->attributes |= ATTR_EXPR_LVAL;
       }
       return declarator;
@@ -651,8 +652,18 @@ ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src) {
     if (typespec_is_array(decl_type)) {
       return typecheck_array_initializer(assignment, dest, src);
     } else if (decl_type->base == TYPE_UNION) {
+      if (!(dest->attributes & ATTR_EXPR_LVAL)) {
+        return astree_create_errnode(astree_adopt(assignment, 2, dest, src),
+                                     BCC_TERR_EXPECTED_LVAL, 2, assignment,
+                                     dest);
+      }
       return typecheck_union_initializer(assignment, dest, src);
     } else if (decl_type->base == TYPE_STRUCT) {
+      if (!(dest->attributes & ATTR_EXPR_LVAL)) {
+        return astree_create_errnode(astree_adopt(assignment, 2, dest, src),
+                                     BCC_TERR_EXPECTED_LVAL, 2, assignment,
+                                     dest);
+      }
       return typecheck_struct_initializer(assignment, dest, src);
     } else {
       return astree_create_errnode(astree_adopt(assignment, 2, dest, src),
@@ -665,6 +676,9 @@ ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src) {
       return astree_propogate_errnode_v(assignment, 2, dest, src);
     } else if (src->symbol == TOK_TYPE_ERROR) {
       return astree_propogate_errnode_v(assignment, 2, dest, src);
+    } else if (!(dest->attributes & ATTR_EXPR_LVAL)) {
+      return astree_create_errnode(astree_adopt(assignment, 2, dest, src),
+                                   BCC_TERR_EXPECTED_LVAL, 2, assignment, dest);
     }
     assignment->attributes |=
         src->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITH);
