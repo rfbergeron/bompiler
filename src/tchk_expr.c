@@ -89,6 +89,9 @@ ASTree *validate_ident(ASTree *ident) {
   if (symval) {
     DEBUGS('t', "Assigning %s a symbol", id_str);
     ident->type = &(symval->type);
+    if (!typespec_is_array(ident->type) && !typespec_is_function(ident->type)) {
+      ident->attributes |= ATTR_EXPR_LVAL;
+    }
     return ident;
   } else {
     return astree_create_errnode(ident, BCC_TERR_SYM_NOT_FOUND, 1, ident);
@@ -213,6 +216,9 @@ ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
         BCC_TERR_INCOMPATIBLE_TYPES, 3, qmark, true_expr->type,
         false_expr->type);
   }
+
+  qmark->attributes |=
+      true_expr->attributes & false_expr->attributes & ATTR_EXPR_ARITH;
 
   return astree_adopt(qmark, 3, condition, true_expr, false_expr);
 }
@@ -563,6 +569,7 @@ ASTree *validate_unop(ASTree *operator, ASTree * operand) {
     if (operand->symbol == TOK_TYPE_ERROR) {
       return astree_propogate_errnode(operator, operand);
     }
+    operator->attributes |= operand->attributes & ATTR_EXPR_ARITH;
     return astree_adopt(operator, 1, operand);
   }
 }
@@ -581,6 +588,7 @@ ASTree *validate_indirection(ASTree *indirection, ASTree *operand) {
                                    BCC_TERR_LIBRARY_FAILURE, 0);
     }
     indirection->type = indirection_spec;
+    indirection->attributes |= ATTR_EXPR_LVAL;
     return astree_adopt(indirection, 1, operand);
   } else {
     return astree_create_errnode(astree_adopt(indirection, 1, operand),
@@ -656,6 +664,10 @@ ASTree *validate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
       return astree_create_errnode(astree_adopt(subscript, 2, pointer, index),
                                    BCC_TERR_LIBRARY_FAILURE, 0);
     subscript->type = subscript_spec;
+    if (!typespec_is_array(subscript->type) &&
+        !typespec_is_function(subscript->type)) {
+      subscript->attributes |= ATTR_EXPR_LVAL;
+    }
     return astree_adopt(subscript, 2, pointer, index);
   }
 }
@@ -682,6 +694,10 @@ ASTree *validate_reference(ASTree *reference, ASTree *struct_,
         BCC_TERR_SYM_NOT_FOUND, 1, member_name_node);
   } else {
     reference->type = &symval->type;
+    if (!typespec_is_array(reference->type) &&
+        !typespec_is_function(reference->type)) {
+      reference->attributes |= ATTR_EXPR_LVAL;
+    }
     return astree_adopt(reference, 2, struct_, member_name_node);
   }
 }
@@ -714,6 +730,9 @@ ASTree *validate_arrow(ASTree *arrow, ASTree *struct_,
         BCC_TERR_SYM_NOT_FOUND, 1, member_name_node);
   } else {
     arrow->type = &symval->type;
+    if (!typespec_is_array(arrow->type) && !typespec_is_function(arrow->type)) {
+      arrow->attributes |= ATTR_EXPR_LVAL;
+    }
     return astree_adopt(arrow, 2, struct_, member_name_node);
   }
 }
