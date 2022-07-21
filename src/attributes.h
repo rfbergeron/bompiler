@@ -13,28 +13,13 @@
 #define X64_SIZEOF_CHAR (size_t)1
 #define X64_ALIGNOF_CHAR (size_t)1
 
-/* attributes correspond to array indices in the order they are listed here */
-/* the following operations resolve to an lvalue:
- * - most identifiers
- * - the result of the arrow operator
- * - the result of the dot operator
- * - the result of the indirection operator
- * - the result of the subscript operator
- *
- * the following resolve to an rvalue:
- * - plain array and function identifiers
- * - the result of the address-of operator
- * - the result of any expression not explicitly listed as an lval
- */
 enum attribute {
-  ATTR_NONE = 0,            /* no attributes set */
-  ATTR_EXPR_VREG = 1 << 0,  /* requires a virtual register */
-  ATTR_EXPR_LVAL = 1 << 1,  /* refers to an assignable location */
-  ATTR_EXPR_CONST = 1 << 2, /* refers to a compile-time constant */
-  ATTR_EXPR_ARITHCONST =
-      1 << 3,              /* as above, but only arithmetic/enum types used */
-  ATTR_EXPR_BOOL = 1 << 4, /* int guaranteed to be 0 or 1 */
-  ATTR_EXPR_VADDR = 1 << 5 /* int is memory address */
+  ATTR_NONE = 0,           /* no attributes set */
+  ATTR_EXPR_LVAL = 1 << 0, /* refers to an assignable location */
+  ATTR_EXPR_CONST =
+      1 << 1, /* expression, and any below it, have constant values */
+  ATTR_EXPR_ARITH =
+      1 << 2 /* expression, and any below it, have arithmetic values */
 };
 
 typedef enum base_type {

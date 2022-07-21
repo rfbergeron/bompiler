@@ -381,7 +381,9 @@ ASTree *validate_array_size(ASTree *array, ASTree *expr) {
   if (expr->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(array, expr);
   }
-  if ((expr->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST)) == 0) {
+  if (!typespec_is_integer(expr->type) ||
+      (expr->attributes & ATTR_EXPR_CONST) == 0 ||
+      (expr->attributes & ATTR_EXPR_ARITH) == 0) {
     return astree_create_errnode(astree_adopt(array, 1, expr),
                                  BCC_TERR_EXPECTED_INTCONST, 2, array, expr);
   }
@@ -661,7 +663,7 @@ ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src) {
       return astree_propogate_errnode_v(assignment, 2, dest, src);
     }
     assignment->attributes |=
-        src->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITHCONST);
+        src->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITH);
 
     assignment->type = dest->type;
     return astree_adopt(assignment, 2, dest, src);
@@ -982,7 +984,8 @@ ASTree *define_enumerator(ASTree *enum_, ASTree *ident_node, ASTree *equal_sign,
        */
       return astree_propogate_errnode(enum_, errnode);
     }
-    if ((expr->attributes & ATTR_EXPR_ARITHCONST) == 0) {
+    if ((expr->attributes & ATTR_EXPR_ARITH) == 0 ||
+        (expr->attributes & ATTR_EXPR_CONST) == 0) {
       astree_adopt(left_brace, 1,
                    astree_adopt(equal_sign, 2, ident_node, expr));
       return astree_create_errnode(enum_, BCC_TERR_EXPECTED_ARITHCONST, 2,
