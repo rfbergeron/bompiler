@@ -21,12 +21,12 @@
 
 #define LINESIZE 1024
 const char *CPP = "/usr/bin/cpp -nostdinc ";
-const char *SRC_EXT = ".oc";
+const char *SRC_EXT = ".c";
 const char *STR_EXT = ".str";
 const char *TOK_EXT = ".tok";
 const char *AST_EXT = ".ast";
 const char *SYM_EXT = ".sym";
-const char *OIL_EXT = ".oil";
+const char *IL_EXT = ".il";
 const char *ERR_EXT = ".err";
 char cppcmd[LINESIZE];
 char name[LINESIZE];
@@ -34,7 +34,7 @@ char strname[LINESIZE];
 char tokname[LINESIZE];
 char astname[LINESIZE];
 char symname[LINESIZE];
-char oilname[LINESIZE];
+char ilname[LINESIZE];
 char errname[LINESIZE];
 
 /* cpp options go here */
@@ -42,7 +42,7 @@ FILE *strfile;
 FILE *tokfile;
 FILE *astfile;
 FILE *symfile;
-FILE *oilfile;
+FILE *ilfile;
 FILE *errfile;
 
 int skip_type_check = 0;
@@ -90,25 +90,26 @@ int main(int argc, char **argv) {
   yy_flex_debug = 0;
   scan_options(argc, argv);
 
-  char *ocname = basename(argv[optind]);
-  char *ext_ptr = strstr(ocname, SRC_EXT);
-  ptrdiff_t name_len = ext_ptr - ocname;
+  char *srcpath = argv[optind];
+  char *srcname = basename(srcpath);
+  char *ext_ptr = strstr(srcname, SRC_EXT);
+  ptrdiff_t name_len = ext_ptr - srcname;
 
   assert(name_len < LINESIZE);
 
   if (ext_ptr == NULL || name_len <= 0) {
-    errx(1, "%s: Not an oc file.", ocname);
+    errx(1, "%s: Not a valid source file name.", srcname);
   }
 
   struct stat statbuf;
-  int status = stat(ocname, &statbuf);
+  int status = stat(srcpath, &statbuf);
 
   if (status == -1) {
-    err(1, "%s", ocname);
+    err(1, "%s", srcname);
   }
 
   /* chop off the source extension */
-  strcpy(name, ocname);
+  strcpy(name, srcname);
   name[name_len] = 0;
 
   DEBUGS('m', "Creating names of output files and cpp exec line");
@@ -120,12 +121,12 @@ int main(int argc, char **argv) {
   strcat(astname, AST_EXT);
   strcpy(symname, name);
   strcat(symname, SYM_EXT);
-  strcpy(oilname, name);
-  strcat(oilname, OIL_EXT);
+  strcpy(ilname, name);
+  strcat(ilname, IL_EXT);
   strcpy(errname, name);
   strcat(errname, ERR_EXT);
   strcpy(cppcmd, CPP);
-  strcat(cppcmd, ocname);
+  strcat(cppcmd, srcname);
 
   DEBUGS('m', "Opening preprocessor pipe");
   /* this is way more complicated than it would normally be since -ansi does
@@ -163,7 +164,7 @@ int main(int argc, char **argv) {
     close(pipedes[0]);
     close(pipedes[1]);
     /* execute the preprocessor; if successful execution should stop here */
-    execlp("/usr/bin/cpp", "cpp", ocname, NULL);
+    execlp("/usr/bin/cpp", "cpp", srcpath, NULL);
     /* error if the preprocessor was unable to run */
     err(EXIT_FAILURE, "Failed to lay pipe\n");
   }
@@ -185,13 +186,13 @@ int main(int argc, char **argv) {
   if (symfile == NULL) {
     err(1, "%s", symname);
   }
-  oilfile = fopen(oilname, "w");
-  if (oilfile == NULL) {
-    err(1, "%s", oilname);
+  ilfile = fopen(ilname, "w");
+  if (ilfile == NULL) {
+    err(1, "%s", ilname);
   }
   errfile = fopen(errname, "w");
   if (errfile == NULL) {
-    err(1, "%s", oilname);
+    err(1, "%s", ilname);
   }
 
   /* remember to initialize certain things, like the string table */
@@ -217,7 +218,7 @@ int main(int argc, char **argv) {
     goto cleanup;
   }
 
-  status = write_asm(oilfile);
+  status = write_asm(ilfile);
   if (status) {
     warnx("Failed to emit assembly instructions.");
     goto cleanup;
@@ -240,7 +241,7 @@ cleanup:
   fclose(tokfile);
   fclose(astfile);
   fclose(symfile);
-  fclose(oilfile);
+  fclose(ilfile);
   fclose(errfile);
 
   DEBUGS('m', "global state cleanup");
