@@ -3,5 +3,5 @@ build/*
 **.tok
 **.ast
 **.sym
-**.oil
+**.il
 **.err
