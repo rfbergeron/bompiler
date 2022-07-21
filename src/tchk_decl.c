@@ -335,6 +335,10 @@ ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
         return astree_create_errnode(declarator, BCC_TERR_LIBRARY_FAILURE, 0);
       }
       declarator->type = &symbol->type;
+      if (!typespec_is_function(declarator->type) &&
+          !(typespec_is_array(declarator->type))) {
+        declarator->attributes |= ATTR_EXPR_LVAL;
+      }
       return declarator;
     }
   } else if ((typespec_is_function(&exists->type) &&
