@@ -1,6 +1,7 @@
 #include "tchk_stmt.h"
 
 #include "assert.h"
+#include "bcc_err.h"
 #include "state.h"
 #include "stdlib.h"
 #include "tchk_common.h"
@@ -66,23 +67,11 @@ ASTree *validate_switch(ASTree *switch_, ASTree *expr, ASTree *stmt) {
   } else if (stmt->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(switch_, 2, expr, stmt);
   }
-  if (stmt->symbol == TOK_BLOCK) {
-    TypeSpec *errspec =
-        symbol_table_process_control(stmt->symbol_table, switch_->symbol);
-    assert(errspec == NULL);
-  } else if (stmt->symbol == CTRL_CASE) {
-    SymbolTable *table = state_peek_table(state);
-    ControlValue *ctrlval = symbol_table_remove_control(table, 0);
-    free(ctrlval);
-  } else if (stmt->symbol == CTRL_DEFAULT) {
-    SymbolTable *table = state_peek_table(state);
-    ControlValue *ctrlval = symbol_table_remove_control(table, 0);
-    free(ctrlval);
-  } else if (stmt->symbol == CTRL_BREAK) {
-    SymbolTable *table = state_peek_table(state);
-    ControlValue *ctrlval = symbol_table_remove_control(table, 0);
-    free(ctrlval);
-  }
+
+  assert(state_get_break_id(state) == switch_->jump_id);
+  assert(state_get_selection_id(state) == switch_->jump_id);
+  state_pop_break_id(state);
+  state_pop_selection(state);
 
   if (!typespec_is_integer(expr->type)) {
     return astree_create_errnode(astree_adopt(switch_, 2, expr, stmt),
@@ -103,19 +92,10 @@ ASTree *validate_while(ASTree *while_, ASTree *condition, ASTree *stmt) {
     return astree_propogate_errnode_v(while_, 2, condition, stmt);
   }
 
-  if (stmt->symbol == TOK_BLOCK) {
-    TypeSpec *errspec =
-        symbol_table_process_control(stmt->symbol_table, while_->symbol);
-    assert(errspec == NULL);
-  } else if (stmt->symbol == CTRL_CONTINUE) {
-    SymbolTable *table = state_peek_table(state);
-    ControlValue *ctrlval = symbol_table_remove_control(table, 0);
-    free(ctrlval);
-  } else if (stmt->symbol == CTRL_BREAK) {
-    SymbolTable *table = state_peek_table(state);
-    ControlValue *ctrlval = symbol_table_remove_control(table, 0);
-    free(ctrlval);
-  }
+  assert(state_get_break_id(state) == while_->jump_id);
+  assert(state_get_continue_id(state) == while_->jump_id);
+  state_pop_break_id(state);
+  state_pop_continue_id(state);
 
   if (!typespec_is_scalar(condition->type)) {
     return astree_create_errnode(astree_adopt(while_, 2, condition, stmt),
@@ -133,19 +113,15 @@ ASTree *validate_do(ASTree *do_, ASTree *stmt, ASTree *condition) {
     return astree_propogate_errnode_v(do_, 2, stmt, condition);
   }
 
-  if (stmt->symbol == TOK_BLOCK) {
-    TypeSpec *errspec =
-        symbol_table_process_control(stmt->symbol_table, do_->symbol);
-    assert(errspec == NULL);
-  } else if (stmt->symbol == CTRL_CONTINUE) {
-    SymbolTable *table = state_peek_table(state);
-    ControlValue *ctrlval = symbol_table_remove_control(table, 0);
-    free(ctrlval);
-  } else if (stmt->symbol == CTRL_BREAK) {
-    SymbolTable *table = state_peek_table(state);
-    ControlValue *ctrlval = symbol_table_remove_control(table, 0);
-    free(ctrlval);
-  }
+  /* fix bogus jump id information */
+  state_pop_break_id(state);
+  state_pop_continue_id(state);
+  state_dec_jump_id_count(state);
+
+  assert(state_get_break_id(state) == do_->jump_id);
+  assert(state_get_continue_id(state) == do_->jump_id);
+  state_pop_break_id(state);
+  state_pop_continue_id(state);
 
   if (!typespec_is_scalar(condition->type)) {
     return astree_create_errnode(astree_adopt(do_, 2, condition, stmt),
@@ -184,19 +160,10 @@ ASTree *validate_for(ASTree *for_, ASTree *left_paren, ASTree *stmt) {
     return astree_propogate_errnode_v(for_, 2, left_paren, stmt);
   }
 
-  if (stmt->symbol == TOK_BLOCK) {
-    TypeSpec *errspec =
-        symbol_table_process_control(stmt->symbol_table, for_->symbol);
-    assert(errspec == NULL);
-  } else if (stmt->symbol == CTRL_CONTINUE) {
-    SymbolTable *table = state_peek_table(state);
-    ControlValue *ctrlval = symbol_table_remove_control(table, 0);
-    free(ctrlval);
-  } else if (stmt->symbol == CTRL_BREAK) {
-    SymbolTable *table = state_peek_table(state);
-    ControlValue *ctrlval = symbol_table_remove_control(table, 0);
-    free(ctrlval);
-  }
+  assert(state_get_break_id(state) == for_->jump_id);
+  assert(state_get_continue_id(state) == for_->jump_id);
+  state_pop_break_id(state);
+  state_pop_continue_id(state);
 
   return astree_adopt(for_, 2, left_paren, stmt);
 }
@@ -241,15 +208,13 @@ ASTree *validate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
     return astree_propogate_errnode_v(case_, 2, expr, stmt);
   }
 
-  ControlValue *ctrlval = malloc(sizeof(*ctrlval));
-  ctrlval->type = CTRL_CASE;
-  ctrlval->tree = case_;
-  int status = symbol_table_add_control(state_peek_table(state), ctrlval);
-  if (status) {
-    free(ctrlval);
-    return astree_create_errnode(astree_adopt(case_, 1, stmt),
-                                 BCC_TERR_LIBRARY_FAILURE, 0);
+  case_->jump_id = state_get_selection_id(state);
+  if (case_->jump_id == (size_t)-1L) {
+    return astree_create_errnode(case_, BCC_TERR_UNEXPECTED_TOKEN, 1, case_);
   }
+  case_->case_id = state_get_case_id(state);
+  assert(case_->jump_id != (size_t)-1L);
+  state_inc_case_id(state);
 
   const TypeSpec *case_const_spec = expr->type;
   if (!typespec_is_integer(case_const_spec) ||
@@ -266,15 +231,13 @@ ASTree *validate_default(ASTree *default_, ASTree *stmt) {
   if (stmt->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(default_, stmt);
   }
-  ControlValue *ctrlval = malloc(sizeof(*ctrlval));
-  ctrlval->type = CTRL_DEFAULT;
-  ctrlval->tree = default_;
-  int status = symbol_table_add_control(state_peek_table(state), ctrlval);
-  if (status) {
-    free(ctrlval);
+
+  default_->jump_id = state_get_selection_id(state);
+  if (default_->jump_id == (size_t)-1L) {
     return astree_create_errnode(astree_adopt(default_, 1, stmt),
-                                 BCC_TERR_LIBRARY_FAILURE, 0);
+                                 BCC_TERR_UNEXPECTED_TOKEN, 1, default_);
   }
+
   return astree_adopt(default_, 1, stmt);
 }
 
@@ -292,26 +255,21 @@ ASTree *validate_goto(ASTree *goto_, ASTree *ident) {
 }
 
 ASTree *validate_continue(ASTree *continue_) {
-  ControlValue *ctrlval = malloc(sizeof(*ctrlval));
-  ctrlval->type = CTRL_CONTINUE;
-  ctrlval->tree = continue_;
-  int status = symbol_table_add_control(state_peek_table(state), ctrlval);
-  if (status) {
-    free(ctrlval);
-    return astree_create_errnode(continue_, BCC_TERR_LIBRARY_FAILURE, 0);
+  continue_->jump_id = state_get_continue_id(state);
+  if (continue_->jump_id == (size_t)-1L) {
+    return astree_create_errnode(continue_, BCC_TERR_UNEXPECTED_TOKEN, 1,
+                                 continue_);
   }
+
   return continue_;
 }
 
 ASTree *validate_break(ASTree *break_) {
-  ControlValue *ctrlval = malloc(sizeof(*ctrlval));
-  ctrlval->type = CTRL_BREAK;
-  ctrlval->tree = break_;
-  int status = symbol_table_add_control(state_peek_table(state), ctrlval);
-  if (status) {
-    free(ctrlval);
-    return astree_create_errnode(break_, BCC_TERR_LIBRARY_FAILURE, 0);
+  break_->jump_id = state_get_break_id(state);
+  if (break_->jump_id == (size_t)-1L) {
+    return astree_create_errnode(break_, BCC_TERR_UNEXPECTED_TOKEN, 1, break_);
   }
+
   return break_;
 }
 
