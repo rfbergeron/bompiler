@@ -87,6 +87,12 @@ scope stack, since the state of the two would not match completely.
 There would be multiple stacks: one for `continue`, one for `case` and `default`
 and one for `break`.
 
+`continue` and `break` statements pull from their own stack of `size_t`
+identifying the construct that these statements are associated with. `case` and
+`default` statements pull from a stack of structures with two `size_t` members.
+One is the id of the `switch` statement, the other is a count of the number of
+`case` statements for the `switch` statement.
+
 ### Lexer/Parser behavior
 When the lexer matches a `switch` token, new entries are created on the
 `case`/`default` and `break` stacks.
@@ -104,32 +110,35 @@ These actions are independent of the scoping rules, so there would not need to
 be special cases for iteration/selection statements whose body is not a compound
 statement.
 
-### Entry information
-`continue` and `break` statements only need the name of the label generated for
-the iteration/selection statement they are associated with. This would be the
-label preceeding the condition for iteration statements and the label after the
-body for both iteration and selection statements.
+### Selection/iteration statement information
+Selection and iteration statements will need to have the information used by
+jump statements encoded in their own nodes, so that they emit the same labels
+that were chosen during type checking. This information is stored in an `ASTree`
+member, and is a `size_t`.
 
-`case` statements require more information:
-- the name of the label before the code checking the condition
-- the name of the label after the code checking the condition
-- the name of the label before the next condition check
+### Entry information and emitted code
+`break`, `continue`, and `default` statements only need the id of the statement
+they are associated with. The other parts of their emitted code remain the same:
+`break` statements have the form `jmp .En`, `continue` statements have the
+form `jmp .Cn`, and `default` statements are labels of the form `.Dn`, `n` being
+the id of the statement.
 
-The purpose of the second label is to allow fallthrough to occur. Before the
-pre-condition label is emitted, a jump to the post-condition label is emitted.
-That way, any jump to a destination before this case statement skips the
-associated condition check.
+`case` statements also need the id of the statement they are associated with.
+In addition, they need their own id. The id of the following case will be the
+next id in ascending order, so that does not need to be stored. `case`
+statements emit the following code:
+1. an unconditional jump to a label marking the "body" of this `case`
+2. a label marking the condition for this `case`
+3. the condition code for this `case`
+4. a label marking the "body" of this `case`
+5. the code for the "body" of this `case`
 
-The purpose of the third label is to provide a jump destination if the condition
-for the case statement fails.
+The "body" referred to above refers to the statement immediately following the
+`case` statement and all subsequent statements until the next `case`.
 
-`default` similar to `case` statements:
-- there is no condition label for default statements, only a "body" label
-- the format for the single label marking a default statement has a different
-  format from the one used for case statements
-- default statements do not alter any of the state associated with case
-  statements; the fail condition for the previous case statement jumps over
-  the default statement
+The purpose of the second label and the preceeding jump is to allow fallthrough
+to occur. That way, any jump to a destination before this case statement skips
+the associated condition check.
 
 So that the behavior is consistent regardless of where the default statement
 occurs in the switch, the following "epilogue" is emitted at the end of every
