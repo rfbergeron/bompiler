@@ -12,13 +12,15 @@ typedef struct astree {
   const char *lexinfo;       /* lexical information */
   SymbolTable *symbol_table; /* symbol table for scope, if applicable */
   Location loc;              /* source location */
-  LinkedList children;       /* children of this n-way node */
-  int symbol;                /* token code */
-  unsigned int attributes;   /* node-specific attributes */
+  size_t jump_id;
+  size_t case_id;
+  LinkedList children;     /* children of this n-way node */
+  int symbol;              /* token code */
+  unsigned int attributes; /* node-specific attributes */
 } ASTree;
 
 #define EMPTY_EXPR_VALUE \
-  { &SPEC_EMPTY, ";", NULL, LOC_EMPTY, BLIB_LLIST_EMPTY, ';', ATTR_NONE }
+  { &SPEC_EMPTY, ";", NULL, LOC_EMPTY, 0, 0, BLIB_LLIST_EMPTY, ';', ATTR_NONE }
 #define UNWRAP(node) \
   (node->symbol == TOK_TYPE_ERROR ? astree_get(node, 0) : node)
 extern ASTree EMPTY_EXPR;
