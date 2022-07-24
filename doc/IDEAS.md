@@ -66,6 +66,107 @@ Each will have their own header file. `tchk_stmt` and `tchk_decl` will both be
 dependent on `tchk_expr`. All will be dependent on `tchk_common`. The contents
 of each unit should be self-explanatory.
 
+## New jump resource ownership idea
+Jump statements could have all relevant information they need assigned to them
+during type checking by having the lexer execute special actions based on the
+tokens being matched.
+
+The tokens `for`, `do`, and `switch` all mean that a loop/selection statement
+is coming up, and that the meanings of jumps within those statements is about
+to change. We manipulate the compiler state, pushing jump information to the
+stack before the parser actions.
+
+We can do almost the same for `while` tokens. However, because `while` is also
+a part of do-while statements, do-while statements will need to do some extra
+state manipulation to fix what would be a mistake made be the lexer action.
+
+### State additions
+The current jump stack would need to be split up and kept separate from the
+scope stack, since the state of the two would not match completely.
+
+There would be multiple stacks: one for `continue`, one for `case` and `default`
+and one for `break`.
+
+### Lexer/Parser behavior
+When the lexer matches a `switch` token, new entries are created on the
+`case`/`default` and `break` stacks.
+
+When the lexer matches a `for`, `while` or `do` token, new entries are created
+on the `continue` and `break` stacks.
+
+The parser productions for each of the rules including these token pop the entry
+they created from the same stacks they pushed to, with the exception that the
+production for do-while statements pops one additional entry from the `break`
+and `continue` stacks. This is to account for the bogus entry the lexer creates
+when it matches tho `while` token used in the do-while statement.
+
+These actions are independent of the scoping rules, so there would not need to
+be special cases for iteration/selection statements whose body is not a compound
+statement.
+
+### Entry information
+`continue` and `break` statements only need the name of the label generated for
+the iteration/selection statement they are associated with. This would be the
+label preceeding the condition for iteration statements and the label after the
+body for both iteration and selection statements.
+
+`case` statements require more information:
+- the name of the label before the code checking the condition
+- the name of the label after the code checking the condition
+- the name of the label before the next condition check
+
+The purpose of the second label is to allow fallthrough to occur. Before the
+pre-condition label is emitted, a jump to the post-condition label is emitted.
+That way, any jump to a destination before this case statement skips the
+associated condition check.
+
+The purpose of the third label is to provide a jump destination if the condition
+for the case statement fails.
+
+`default` similar to `case` statements:
+- there is no condition label for default statements, only a "body" label
+- the format for the single label marking a default statement has a different
+  format from the one used for case statements
+- default statements do not alter any of the state associated with case
+  statements; the fail condition for the previous case statement jumps over
+  the default statement
+
+So that the behavior is consistent regardless of where the default statement
+occurs in the switch, the following "epilogue" is emitted at the end of every
+switch statement:
+- the default label (if it was not defined previously)
+- a jump to the end of the switch statement
+- a label, which looks like the condition label for another case statement
+- a jump to the default label
+- a label marking the end of the switch statement
+
+### Output format
+```
+// break
+jmp .E0
+
+// continue
+jmp .C0
+
+// case
+jmp .S0B0
+.S0C0
+/* ... evaluate condition */
+jne .S0C1
+.S0B0
+/* ... case body */
+
+// default
+.S0D
+
+// switch epilogue
+.S0D
+jmp .E0
+.S0C2
+jmp .S0D
+.E0
+```
+
 ## The lexer hack
 I did not realize until now that identifiers are context sensitive. I had
 assumed that it was some cognitive deficiency of my own that the parser that I
