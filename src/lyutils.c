@@ -134,6 +134,26 @@ int lexer_ident(void) {
   }
 }
 
+int lexer_iteration(int symbol) {
+  (void)lexer_token(symbol);
+  DEBUGS('l', "Creating jump stack entries for token %s", yytext);
+  size_t id = state_next_jump_id(state);
+  yylval->jump_id = id;
+  state_push_break_id(state, id);
+  state_push_continue_id(state, id);
+  return symbol;
+}
+
+int lexer_switch(void) {
+  (void)lexer_token(TOK_SWITCH);
+  DEBUGS('l', "Creating jump stack entries for token %s", yytext);
+  size_t id = state_next_jump_id(state);
+  yylval->jump_id = id;
+  state_push_break_id(state, id);
+  state_push_selection(state, id);
+  return TOK_SWITCH;
+}
+
 int lexer_bad_token(int symbol) {
   char buffer[1024];
   sprintf(buffer, "Invalid token (%s)\n", yytext);

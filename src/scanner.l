@@ -53,10 +53,10 @@ NOTSTRING       (\"[^"]*)
 "unsigned"      { return lexer_token (TOK_UNSIGNED); }
 "if"            { return lexer_token (TOK_IF); }
 "else"          { return lexer_token (TOK_ELSE); }
-"switch"        { return lexer_token (TOK_SWITCH); }
-"do"            { return lexer_token (TOK_DO); }
-"while"         { return lexer_token (TOK_WHILE); }
-"for"           { return lexer_token (TOK_FOR); }
+"switch"        { return lexer_switch(); }
+"do"            { return lexer_iteration (TOK_DO); }
+"while"         { return lexer_iteration (TOK_WHILE); }
+"for"           { return lexer_iteration (TOK_FOR); }
 "return"        { return lexer_token (TOK_RETURN); }
 "break"         { return lexer_token (TOK_BREAK); }
 "continue"      { return lexer_token (TOK_CONTINUE); }
