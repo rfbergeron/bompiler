@@ -9,6 +9,9 @@ CompilerState *state_init(void) {
   CompilerState *state = malloc(sizeof(*state));
   llist_init(&state->table_stack, NULL, NULL);
   llist_init(&state->jump_stack, NULL, NULL);
+  llist_init(&state->switch_stack, NULL, NULL);
+  size_t_stack_init(&state->break_stack, 4);
+  size_t_stack_init(&state->continue_stack, 4);
   state->enclosing_function = NULL;
   return state;
 }
@@ -16,6 +19,9 @@ CompilerState *state_init(void) {
 int state_destroy(CompilerState *state) {
   llist_destroy(&state->table_stack);
   llist_destroy(&state->jump_stack);
+  llist_destroy(&state->switch_stack);
+  size_t_stack_destroy(&state->break_stack);
+  size_t_stack_destroy(&state->continue_stack);
   free(state);
   return 0;
 }
@@ -243,6 +249,10 @@ size_t state_get_continue_id(CompilerState *state) {
   }
 
   return size_t_stack_top(&state->continue_stack);
+}
+
+size_t state_next_jump_id(CompilerState *state) {
+  return state->jump_id_count++;
 }
 
 void state_pop_selection(CompilerState *state) {

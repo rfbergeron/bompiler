@@ -798,8 +798,8 @@ ASTree *validate_fnbody_content(ASTree *function, ASTree *fnbody_content) {
 ASTree *finalize_function(ASTree *function) {
   ASTree *body = astree_get(UNWRAP(function), 2);
   ASTree *ret = function;
-  TypeSpec *errspec =
-      symbol_table_process_control(body->symbol_table, function->symbol);
+  TypeSpec *errspec = symbol_table_process_control(body->symbol_table,
+                                                   UNWRAP(function)->symbol);
   if (errspec != NULL) {
     if (function->symbol == TOK_TYPE_ERROR) {
       TypeSpec *function_errs = (TypeSpec *)function->type;

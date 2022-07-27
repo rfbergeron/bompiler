@@ -74,6 +74,7 @@ size_t state_get_selection_id(CompilerState *state);
 size_t state_get_case_id(CompilerState *state);
 size_t state_get_break_id(CompilerState *state);
 size_t state_get_continue_id(CompilerState *state);
+size_t state_next_jump_id(CompilerState *state);
 void state_pop_selection(CompilerState *state);
 void state_pop_break_id(CompilerState *state);
 void state_pop_continue_id(CompilerState *state);
