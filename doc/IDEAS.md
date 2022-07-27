@@ -49,8 +49,72 @@ that has does not do most of the things that I thought:
   is, more or less), which you can then perform member access on if the
   underlying type is a struct or union.
 - In fact, in all but a few cases, arrays are treated as above.
+- The initializer for objects of arithmetic or pointer type can be enclosed in
+  braces
+- Function parameters can be declared with array or function type. However, they
+  are treated as if they were declared as pointers (pointer/pointer to function)
 - You can only implicitly convert between `void*` and other pointer types, not
   any other kind of void pointer (for example `void**`).
+
+## Simpler structure handling
+Structure handling could be simplified, removing the need to have a second pass
+over the declarators of a structure's members. In this scheme, the members of a
+structure or union would be added to the tag value's information and have their
+width and alignment accounted for when they are declared.
+
+However, to accomplish this, we need to add more global state. It is a single
+`TagValue*`, pointing at the entry of the tag being defined. It is set in
+`validate_tag_def` and unset in `finalize_tag_def`
+
+## Simpler init list handling
+Initializer list handling could be simplified as well, again using global state.
+In this case, the state would need to be more complicated, since the way nested
+initializers work is a little complicated. There will need to be a stack used to
+track nested initializer lists for aggregate types with aggregate members.
+Entries on this stack will need a member holding the type of the aggregate, as
+well as the a counter for the number of initializers for the members of the
+aggregate type that have been seen so far.
+
+When a left brace marking the beginning of a new initializer list is seen, a new
+entry is created on the stack. If there is already an entry on the stack, the
+type for the new entry is computed from the type of the entry on the stack. This
+type is the type of the member at the current member index if the type on the
+stack is a struct or union, or the underlying type of the array if it is an
+array.
+
+When a member of an initializer list for an object of aggregate type is seen,
+the type of the member being initialized is checked. If the member also has
+aggregate type, a new entry is created on the stack using this type. The
+initializer is treated as an initializer for the first member of this type.
+This process happens recursively until the type of the member is not an
+aggregate.
+
+If the member counter for the current entry equals the number of members of the
+aggregate type when an initializers is seen, the entry is popped from the stack
+and the initializer is treated as if it were for the next entry. If the stack
+is empty when this occurs, too many initializers were provided for the
+aggregate, and a semantic error will be generated.
+
+As an exception, if the aggregate type is an array with deduced length, the
+deduced length of the array is adjusted to accomodate the initializer.
+
+When a right brace marking the end of an initializer list is seen, the topmost
+entry on the stack is popped. The parser would not accept a string of tokens
+such that there would be more right braces than left braces, so if the stack
+happens to be empty when a right brace is seen, it is indicative of a bug and
+the compiler will abort.
+
+## Single pass to intermediate language
+With all the changes made to the type checker and parser, it is now possible to
+generate the intermediate code in a single pass. Since the behavior of the code
+would become more complicated if the parser still called the type checker
+directly, which would then call the intermediate language generator, it will be
+better to write functions that the parser can call, which in turn call the
+functions for type checking and assembly generation based on the status of the
+called functions.
+
+Instead, there should be functions that dictating what processing happens to
+the node. These wrap the type checking and assembly generation functions.
 
 ## Type checker refactor
 This is supposed to be a (relatively) small refactor of the type checker to make

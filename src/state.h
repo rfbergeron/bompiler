@@ -11,7 +11,7 @@ typedef struct size_t_stack SizetStack;
 
 typedef struct switch_info {
   size_t id;
-  size_t case_count;
+  size_t case_id;
 } SwitchInfo;
 
 typedef struct compiler_state {

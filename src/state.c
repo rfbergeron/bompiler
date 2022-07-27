@@ -3,6 +3,7 @@
 #include "stdlib.h"
 
 CompilerState *state;
+PROC_STACK(size_t_stack, size_t)
 
 CompilerState *state_init(void) {
   CompilerState *state = malloc(sizeof(*state));
@@ -211,6 +212,84 @@ JumpEntry *state_get_jump(CompilerState *state) {
     return llist_front(&state->jump_stack);
   }
 }
+
+size_t state_get_selection_id(CompilerState *state) {
+  if (llist_empty(&state->switch_stack)) {
+    return (size_t)-1L;
+  }
+
+  return ((SwitchInfo *)llist_front(&state->switch_stack))->id;
+}
+
+size_t state_get_case_id(CompilerState *state) {
+  if (llist_empty(&state->switch_stack)) {
+    return (size_t)-1L;
+  }
+
+  return ((SwitchInfo *)llist_front(&state->switch_stack))->case_id;
+}
+
+size_t state_get_break_id(CompilerState *state) {
+  if (size_t_stack_count(&state->break_stack) == 0) {
+    return (size_t)-1L;
+  }
+
+  return size_t_stack_top(&state->break_stack);
+}
+
+size_t state_get_continue_id(CompilerState *state) {
+  if (size_t_stack_count(&state->continue_stack) == 0) {
+    return (size_t)-1L;
+  }
+
+  return size_t_stack_top(&state->continue_stack);
+}
+
+void state_pop_selection(CompilerState *state) {
+  if (llist_size(&state->switch_stack) == 0) {
+    abort();
+  }
+
+  free(llist_pop_front(&state->switch_stack));
+}
+
+void state_pop_break_id(CompilerState *state) {
+  if (size_t_stack_count(&state->break_stack) == 0) {
+    abort();
+  }
+
+  (void)size_t_stack_pop(&state->break_stack);
+}
+
+void state_pop_continue_id(CompilerState *state) {
+  if (size_t_stack_count(&state->continue_stack) == 0) {
+    abort();
+  }
+
+  (void)size_t_stack_pop(&state->continue_stack);
+}
+
+void state_push_selection(CompilerState *state, size_t id) {
+  SwitchInfo *info = malloc(sizeof(SwitchInfo));
+  info->id = id;
+  info->case_id = 0;
+  llist_push_front(&state->switch_stack, info);
+}
+
+void state_inc_case_id(CompilerState *state) {
+  SwitchInfo *info = llist_front(&state->switch_stack);
+  if (info != NULL) ++info->case_id;
+}
+
+void state_push_break_id(CompilerState *state, size_t id) {
+  size_t_stack_push(&state->break_stack, id);
+}
+
+void state_push_continue_id(CompilerState *state, size_t id) {
+  size_t_stack_push(&state->continue_stack, id);
+}
+
+void state_dec_jump_id_count(CompilerState *state) { --state->jump_id_count; }
 
 int state_set_function(CompilerState *state, SymbolValue *function_symval) {
   if (state->enclosing_function != NULL) {
