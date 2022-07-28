@@ -163,7 +163,7 @@ int state_insert_tag(CompilerState *state, const char *ident,
 LabelValue *state_get_label(CompilerState *state, const char *ident,
                             const size_t ident_len) {
   SymbolTable *function_table =
-      llist_get(&state->table_stack, llist_size(&state->table_stack) - 1);
+      llist_get(&state->table_stack, llist_size(&state->table_stack) - 2);
   if (function_table == NULL) {
     fprintf(stderr, "ERROR: attempt to get label at top level.\n");
     return NULL;
@@ -174,7 +174,7 @@ LabelValue *state_get_label(CompilerState *state, const char *ident,
 int state_insert_label(CompilerState *state, const char *ident,
                        const size_t ident_len, LabelValue *labval) {
   SymbolTable *function_table =
-      llist_get(&state->table_stack, llist_size(&state->table_stack) - 1);
+      llist_get(&state->table_stack, llist_size(&state->table_stack) - 2);
   if (function_table == NULL) {
     fprintf(stderr, "ERROR: attempt to insert label at top level.\n");
     return -1;

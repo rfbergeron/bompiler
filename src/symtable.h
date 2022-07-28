@@ -60,7 +60,7 @@ typedef struct control_value {
 } ControlValue;
 
 typedef struct label_value {
-  Location *loc;
+  struct astree *tree;
   int is_defined;
 } LabelValue;
 

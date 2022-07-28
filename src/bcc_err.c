@@ -294,6 +294,17 @@ int erraux_to_string(AuxSpec *erraux, char *buf, size_t size) {
       return sprintf(buf, "Semantic error: tag %s not found at node %s", name,
                      tag_node_buf);
     }
+    case BCC_TERR_LABEL_NOT_FOUND: {
+      ASTree *ident_node = erraux->data.err.info[0];
+      char ident_node_buf[LINESIZE];
+      int chars_written =
+          astree_to_string(ident_node, ident_node_buf, LINESIZE);
+      const char *name = ident_node->lexinfo;
+      return sprintf(buf,
+                     "Semantic error: label %s not found; first referred "
+                     "to here: %s",
+                     name, ident_node_buf);
+    }
     case BCC_TERR_REDEFINITION: {
       /* TODO(Robert): differentiate between redefinition of tags, symbols,
        * labels, etc. so we can print more detailed information */
