@@ -104,7 +104,7 @@ const TypeSpec SPEC_SCHAR = SPECIFY_INT(SIGNED, CHAR);
 
 const char type_map[][16] = {"void", "int", "float", "struct"};
 
-const char attr_map[][16] = {"LVAL", "CONST", "ARITH"};
+const char attr_map[][16] = {"LVAL", "CONST", "ARITH", "DEFAULT"};
 
 /* Precedence for conversions:
  * 1. long double

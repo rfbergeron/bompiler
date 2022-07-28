@@ -70,6 +70,9 @@ ASTree *validate_switch(ASTree *switch_, ASTree *expr, ASTree *stmt) {
 
   assert(state_get_break_id(state) == switch_->jump_id);
   assert(state_get_selection_id(state) == switch_->jump_id);
+  if (state_get_selection_default(state)) {
+    switch_->attributes |= ATTR_STMT_DEFAULT;
+  }
   state_pop_break_id(state);
   state_pop_selection(state);
 
@@ -230,6 +233,10 @@ ASTree *validate_default(ASTree *default_, ASTree *stmt) {
 
   default_->jump_id = state_get_selection_id(state);
   if (default_->jump_id == (size_t)-1L) {
+    return astree_create_errnode(astree_adopt(default_, 1, stmt),
+                                 BCC_TERR_UNEXPECTED_TOKEN, 1, default_);
+  }
+  if (state_set_selection_default(state)) {
     return astree_create_errnode(astree_adopt(default_, 1, stmt),
                                  BCC_TERR_UNEXPECTED_TOKEN, 1, default_);
   }
