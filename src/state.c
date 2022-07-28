@@ -235,6 +235,11 @@ size_t state_get_case_id(CompilerState *state) {
   return ((SwitchInfo *)llist_front(&state->switch_stack))->case_id;
 }
 
+int state_get_selection_default(CompilerState *state) {
+  if (llist_empty(&state->switch_stack)) abort();
+  return ((SwitchInfo *)llist_front(&state->switch_stack))->has_default;
+}
+
 size_t state_get_break_id(CompilerState *state) {
   if (size_t_stack_count(&state->break_stack) == 0) {
     return (size_t)-1L;
@@ -283,12 +288,22 @@ void state_push_selection(CompilerState *state, size_t id) {
   SwitchInfo *info = malloc(sizeof(SwitchInfo));
   info->id = id;
   info->case_id = 0;
+  info->has_default = 0;
   llist_push_front(&state->switch_stack, info);
 }
 
 void state_inc_case_id(CompilerState *state) {
   SwitchInfo *info = llist_front(&state->switch_stack);
   if (info != NULL) ++info->case_id;
+}
+
+int state_set_selection_default(CompilerState *state) {
+  SwitchInfo *info = llist_front(&state->switch_stack);
+  /* do not call if there is no switch info */
+  if (info == NULL) abort();
+  if (info->has_default) return 1;
+  info->has_default = 1;
+  return 0;
 }
 
 void state_push_break_id(CompilerState *state, size_t id) {

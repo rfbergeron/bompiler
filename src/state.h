@@ -12,6 +12,7 @@ typedef struct size_t_stack SizetStack;
 typedef struct switch_info {
   size_t id;
   size_t case_id;
+  int has_default;
 } SwitchInfo;
 
 typedef struct compiler_state {
@@ -72,6 +73,7 @@ JumpEntry *state_get_switch(CompilerState *state);
 JumpEntry *state_get_jump(CompilerState *state);
 size_t state_get_selection_id(CompilerState *state);
 size_t state_get_case_id(CompilerState *state);
+int state_get_selection_default(CompilerState *state);
 size_t state_get_break_id(CompilerState *state);
 size_t state_get_continue_id(CompilerState *state);
 size_t state_next_jump_id(CompilerState *state);
@@ -80,6 +82,7 @@ void state_pop_break_id(CompilerState *state);
 void state_pop_continue_id(CompilerState *state);
 void state_push_selection(CompilerState *state, size_t id);
 void state_inc_case_id(CompilerState *state);
+int state_set_selection_default(CompilerState *state);
 void state_push_break_id(CompilerState *state, size_t id);
 void state_push_continue_id(CompilerState *state, size_t id);
 void state_dec_jump_id_count(CompilerState *state);
