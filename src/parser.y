@@ -181,9 +181,9 @@ stmt                : block                                             { $$ = b
                     | return                                            { $$ = bcc_yyval = $1; }
                     | labelled_stmt                                     { $$ = bcc_yyval = $1; }
                     | expr ';'                                          { $$ = bcc_yyval = $1; parser_cleanup (1, $2); }
-                    | TOK_CONTINUE ';'                                  { $$ = bcc_yyval = $1; astree_destroy($2); }
-                    | TOK_BREAK ';'                                     { $$ = bcc_yyval = $1; astree_destroy($2); }
-                    | TOK_GOTO any_ident ';'                            { $$ = bcc_yyval = astree_adopt($1, 1, $2); astree_destroy($3); }
+                    | TOK_CONTINUE ';'                                  { $$ = bcc_yyval = validate_continue($1); astree_destroy($2); }
+                    | TOK_BREAK ';'                                     { $$ = bcc_yyval = validate_break($1); astree_destroy($2); }
+                    | TOK_GOTO any_ident ';'                            { $$ = bcc_yyval = validate_goto($1, $2); astree_destroy($3); }
                     | ';'                                               { $$ = bcc_yyval = &EMPTY_EXPR; astree_destroy($1); }
                     ;
 labelled_stmt       : any_ident ':' stmt                                { $$ = bcc_yyval = validate_label(parser_make_label($1), $1, $3); parser_cleanup(1, $2); }

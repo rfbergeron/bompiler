@@ -168,9 +168,6 @@ ASTree *validate_for(ASTree *for_, ASTree *left_paren, ASTree *stmt) {
   return astree_adopt(for_, 2, left_paren, stmt);
 }
 
-/* TODO(Robert): decide whether or not to create empty labels for goto
- * statements whose label has not been defined yet.
- */
 ASTree *validate_label(ASTree *label, ASTree *ident_node, ASTree *stmt) {
   if (stmt->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(astree_adopt(label, 1, ident_node), stmt);
@@ -184,18 +181,17 @@ ASTree *validate_label(ASTree *label, ASTree *ident_node, ASTree *stmt) {
       return astree_create_errnode(astree_adopt(label, 2, ident_node, stmt),
                                    BCC_TERR_REDEFINITION, 1, ident_node);
     } else {
-      existing_entry->loc = &ident_node->loc;
+      existing_entry->tree = ident_node;
       existing_entry->is_defined = 1;
       return astree_adopt(label, 2, ident_node, stmt);
     }
   } else {
     LabelValue *labval = malloc(sizeof(*labval));
-    labval->loc = &ident_node->loc;
+    labval->tree = ident_node;
     labval->is_defined = 1;
     int status = state_insert_label(state, ident, ident_len, labval);
     if (status) {
-      return astree_create_errnode(astree_adopt(label, 2, ident_node, stmt),
-                                   BCC_TERR_LIBRARY_FAILURE, 0);
+      abort();
     }
     return astree_adopt(label, 2, ident_node, stmt);
   }
@@ -242,14 +238,17 @@ ASTree *validate_default(ASTree *default_, ASTree *stmt) {
 }
 
 ASTree *validate_goto(ASTree *goto_, ASTree *ident) {
-  ControlValue *ctrlval = malloc(sizeof(*ctrlval));
-  ctrlval->type = CTRL_GOTO;
-  ctrlval->tree = goto_;
-  int status = symbol_table_add_control(state_peek_table(state), ctrlval);
-  if (status) {
-    free(ctrlval);
-    return astree_create_errnode(astree_adopt(goto_, 1, ident),
-                                 BCC_TERR_LIBRARY_FAILURE, 0);
+  const char *ident_str = ident->lexinfo;
+  size_t ident_str_len = strlen(ident_str);
+  LabelValue *existing_entry = state_get_label(state, ident_str, ident_str_len);
+  if (!existing_entry) {
+    LabelValue *labval = malloc(sizeof(*labval));
+    labval->tree = ident;
+    labval->is_defined = 0;
+    int status = state_insert_label(state, ident_str, ident_str_len, labval);
+    if (status) {
+      abort();
+    }
   }
   return astree_adopt(goto_, 1, ident);
 }
