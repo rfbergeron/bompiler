@@ -29,7 +29,7 @@ OBJFILES = ${OBJ:%=build/%} ${GENOBJ:%=build/%} ${LIBOBJ:%=build/%}
 all: CFLAGS += -O1
 all: ${EXE}
 
-debug: CFLAGS += -Og -pg -ggdb -fsanitize=address
+debug: CFLAGS += -Og -pg -ggdb
 debug: LIB_TARGET = debug
 debug: ${EXE}
 

@@ -798,18 +798,24 @@ ASTree *validate_fnbody_content(ASTree *function, ASTree *fnbody_content) {
 ASTree *finalize_function(ASTree *function) {
   ASTree *body = astree_get(UNWRAP(function), 2);
   ASTree *ret = function;
-  TypeSpec *errspec = symbol_table_process_control(body->symbol_table,
-                                                   UNWRAP(function)->symbol);
-  if (errspec != NULL) {
-    if (function->symbol == TOK_TYPE_ERROR) {
-      TypeSpec *function_errs = (TypeSpec *)function->type;
-      int status = typespec_append_auxspecs(function_errs, errspec);
-      if (status) abort();
-    } else {
-      ASTree *errnode = astree_init(TOK_TYPE_ERROR, function->loc, "_terr");
-      errnode->type = errspec;
-      ret = astree_adopt(errnode, 1, function);
+  if (body->symbol_table->label_namespace != NULL) {
+    LinkedList label_strs;
+    int status = llist_init(&label_strs, NULL, NULL);
+    if (status) abort();
+    status = map_keys(body->symbol_table->label_namespace, &label_strs);
+    if (status) abort();
+    size_t i;
+    for (i = 0; i < llist_size(&label_strs); ++i) {
+      const char *label_str = llist_get(&label_strs, i);
+      size_t label_str_len = strlen(label_str);
+      LabelValue *labval = state_get_label(state, label_str, label_str_len);
+      if (!labval->is_defined) {
+        ret = astree_create_errnode(ret, BCC_TERR_LABEL_NOT_FOUND, 1,
+                                    labval->tree);
+      }
     }
+    status = llist_destroy(&label_strs);
+    if (status) abort();
   }
   SymbolValue *symval = state_get_function(state);
   symval->flags |= SYMFLAG_FUNCTION_DEFINED;
