@@ -673,7 +673,8 @@ TypeSpec *get_agg_member_spec(TypeSpec *spec, size_t index) {
     assert(typespec_is_struct(spec) || index == 0);
     AuxSpec *struct_aux = llist_front(&spec->auxspecs);
     LinkedList *member_list = &struct_aux->data.tag.val->data.members.in_order;
-    TypeSpec *member_spec = llist_get(member_list, index);
+    SymbolValue *member_symval = llist_get(member_list, index);
+    TypeSpec *member_spec = &member_symval->type;
     /* must be copied so that we can call typespec_destroy/free on it */
     TypeSpec *copy_spec = malloc(sizeof(TypeSpec));
     assert(!typespec_copy(copy_spec, member_spec));
@@ -699,8 +700,9 @@ ASTree *validate_initializer(TypeSpec *dest_spec, ASTree *initializer) {
   }
 }
 
-/* assumes that dest_spec has aggregate type */
 ASTree *validate_init_list(TypeSpec *dest_spec, ASTree *init_list) {
+  assert(typespec_is_array(dest_spec) || typespec_is_union(dest_spec) ||
+         typespec_is_struct(dest_spec));
   struct agg_entry {
     TypeSpec *spec;
     size_t index;
@@ -725,10 +727,12 @@ ASTree *validate_init_list(TypeSpec *dest_spec, ASTree *init_list) {
       errnode = validate_initializer(member_spec, initializer);
       ++initializer_index;
       ++entry->index;
+      cleanup_agg_member_spec(member_spec);
     } else if (initializer->symbol == TOK_INIT_LIST) {
       errnode = validate_init_list(member_spec, initializer);
       ++initializer_index;
       ++entry->index;
+      cleanup_agg_member_spec(member_spec);
     } else {
       struct agg_entry *new_entry = malloc(sizeof(struct agg_entry));
       new_entry->index = 0;
@@ -754,31 +758,17 @@ ASTree *validate_init_list(TypeSpec *dest_spec, ASTree *init_list) {
 }
 
 ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src) {
-  if (src->symbol == TOK_INIT_LIST) {
-    const TypeSpec *decl_type = dest->type;
-    if (typespec_is_array(decl_type)) {
-      return typecheck_array_initializer(assignment, dest, src);
-    } else if (decl_type->base == TYPE_UNION) {
-      if (!(dest->attributes & ATTR_EXPR_LVAL)) {
-        return astree_create_errnode(astree_adopt(assignment, 2, dest, src),
-                                     BCC_TERR_EXPECTED_LVAL, 2, assignment,
-                                     dest);
-      }
-      return typecheck_union_initializer(assignment, dest, src);
-    } else if (decl_type->base == TYPE_STRUCT) {
-      if (!(dest->attributes & ATTR_EXPR_LVAL)) {
-        return astree_create_errnode(astree_adopt(assignment, 2, dest, src),
-                                     BCC_TERR_EXPECTED_LVAL, 2, assignment,
-                                     dest);
-      }
-      return typecheck_struct_initializer(assignment, dest, src);
-    } else {
-      return astree_create_errnode(astree_adopt(assignment, 2, dest, src),
-                                   BCC_TERR_UNEXPECTED_LIST, 2, dest, src);
+  TypeSpec *dest_spec = (TypeSpec *)dest->type;
+  if ((typespec_is_array(dest_spec) || typespec_is_union(dest_spec) ||
+       typespec_is_struct(dest_spec)) &&
+      src->symbol == TOK_INIT_LIST) {
+    ASTree *errnode = validate_init_list(dest_spec, src);
+    if (errnode->symbol == TOK_TYPE_ERROR) {
+      (void)astree_remove(errnode, 0);
+      return astree_adopt(errnode, 1, astree_adopt(assignment, 2, dest, src));
     }
   } else {
-    src = perform_pointer_conv(src);
-    src = convert_type(src, dest->type);
+    src = validate_initializer(dest_spec, src);
     if (dest->symbol == TOK_TYPE_ERROR) {
       return astree_propogate_errnode_v(assignment, 2, dest, src);
     } else if (src->symbol == TOK_TYPE_ERROR) {
@@ -787,12 +777,12 @@ ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src) {
       return astree_create_errnode(astree_adopt(assignment, 2, dest, src),
                                    BCC_TERR_EXPECTED_LVAL, 2, assignment, dest);
     }
-    assignment->attributes |=
-        src->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITH);
-
-    assignment->type = dest->type;
-    return astree_adopt(assignment, 2, dest, src);
   }
+  assignment->attributes |=
+      src->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITH);
+
+  assignment->type = dest->type;
+  return astree_adopt(assignment, 2, dest, src);
 }
 
 ASTree *define_symbol(ASTree *declaration, ASTree *declarator,
