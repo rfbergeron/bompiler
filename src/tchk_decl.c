@@ -1014,15 +1014,18 @@ ASTree *finalize_tag_def(ASTree *tag) {
     errnode = tag;
     tag = astree_get(tag, 0);
   }
-  if (tag->symbol != TOK_ENUM) {
-    int status = state_pop_table(state);
-  }
-  AuxSpec *struct_aux = llist_back(&tag->type->auxspecs);
-  TagValue *tagval = struct_aux->data.tag.val;
+  AuxSpec *tag_aux = llist_back(&tag->type->auxspecs);
+  TagValue *tagval = tag_aux->data.tag.val;
   tagval->is_defined = 1;
   int status = typespec_destroy((TypeSpec *)tag->type);
   free((TypeSpec *)tag->type);
   tag->type = &SPEC_EMPTY;
+  if (tagval->tag != TAG_ENUM) {
+    assert(!state_pop_table(state));
+    /* pad aggregate so that it can tile an array */
+    size_t padding = tagval->alignment - (tagval->width % tagval->alignment);
+    if (padding != tagval->alignment) tagval->width += padding;
+  }
   return errnode == NULL ? tag : errnode;
 }
 
@@ -1146,17 +1149,20 @@ ASTree *define_struct_member(ASTree *struct_, ASTree *member) {
   /* skip first child, which is the typespec list */
   for (i = 1; i < astree_count(member); ++i) {
     ASTree *declarator = astree_get(member, i);
-    SymbolValue *symval = sym_from_type((TypeSpec *)declarator->type);
-    if (tagval->alignment < symval->type.alignment) {
-      tagval->alignment = symval->type.alignment;
+    TypeSpec *spec = (TypeSpec *)declarator->type;
+    SymbolValue *symval = sym_from_type(spec);
+    size_t member_alignment = typespec_get_alignment(spec);
+    size_t member_width = typespec_get_width(spec);
+    if (tagval->alignment < member_alignment) {
+      tagval->alignment = member_alignment;
     }
     if (tagval->tag == TAG_STRUCT) {
+      size_t padding = member_alignment - (tagval->width % member_alignment);
+      if (padding != member_alignment) tagval->width += padding;
       sprintf(symval->obj_loc, "%%s+%lu", tagval->width);
-      size_t padding =
-          symval->type.alignment - (tagval->width % symval->type.alignment);
-      tagval->width += padding + symval->type.width;
-    } else if (tagval->width < symval->type.width) {
-      tagval->width = symval->type.width;
+      tagval->width += member_width;
+    } else if (tagval->width < member_width) {
+      tagval->width = member_width;
     }
     llist_push_back(member_list, symval);
   }
