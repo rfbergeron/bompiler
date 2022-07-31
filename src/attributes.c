@@ -1,5 +1,6 @@
 #include "attributes.h"
 
+#include "assert.h"
 #include "badllist.h"
 #include "badmap.h"
 #include "stdio.h"
@@ -352,6 +353,32 @@ int typespec_copy(TypeSpec *dest, const TypeSpec *src) {
   memset(&dest->auxspecs, 0, sizeof(dest->auxspecs));
   llist_copy(&dest->auxspecs, (LinkedList *)&src->auxspecs);
   return 0;
+}
+
+size_t typespec_get_width(TypeSpec *spec) {
+  if (!llist_empty(&spec->auxspecs)) {
+    AuxSpec *aux = llist_front(&spec->auxspecs);
+    if (aux->aux == AUX_ARRAY) {
+      TypeSpec temp_spec;
+      assert(!strip_aux_type(&temp_spec, spec));
+      size_t member_width = typespec_get_width(&temp_spec);
+      assert(!typespec_destroy(&temp_spec));
+      return aux->data.memory_loc.length * member_width;
+    } else if (aux->aux == AUX_POINTER || aux->aux == AUX_FUNCTION) {
+      return X64_SIZEOF_LONG;
+    }
+  }
+  return spec->width;
+}
+
+size_t typespec_get_alignment(TypeSpec *spec) {
+  if (!llist_empty(&spec->auxspecs)) {
+    AuxSpec *aux = llist_front(&spec->auxspecs);
+    if (aux->aux == AUX_POINTER || aux->aux == AUX_FUNCTION) {
+      return X64_ALIGNOF_LONG;
+    }
+  }
+  return spec->alignment;
 }
 
 int typespec_append_auxspecs(TypeSpec *dest, TypeSpec *src) {
