@@ -83,9 +83,12 @@ int symbol_value_print(const SymbolValue *symbol, char *buffer, size_t size) {
   location_to_string(&symbol->loc, locstr, LINESIZE);
   char typestr[LINESIZE];
   type_to_string(&symbol->type, typestr, LINESIZE);
+  size_t sym_width = typespec_get_width((TypeSpec *)&symbol->type);
+  size_t sym_align = typespec_get_alignment((TypeSpec *)&symbol->type);
 
   /* TODO(Robert): check size without snprintf */
-  return sprintf(buffer, "{%s} {%s}", locstr, typestr);
+  return sprintf(buffer, "{%s} {%s} {width: %lu, align: %lu}", locstr, typestr,
+                 sym_width, sym_align);
 }
 #endif
 
