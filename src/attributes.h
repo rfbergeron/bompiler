@@ -240,6 +240,8 @@ int auxspec_copy(AuxSpec *dest, const AuxSpec *src);
 int typespec_init(TypeSpec *spec);
 int typespec_destroy(TypeSpec *spec);
 int typespec_copy(TypeSpec *dst, const TypeSpec *src);
+size_t typespec_get_width(TypeSpec *spec);
+size_t typespec_get_alignment(TypeSpec *spec);
 int typespec_append_auxspecs(TypeSpec *dest, TypeSpec *src);
 int strip_aux_type(TypeSpec *dest, const TypeSpec *src);
 
