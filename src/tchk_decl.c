@@ -646,6 +646,113 @@ ASTree *typecheck_struct_initializer(ASTree *equal_sign, ASTree *declarator,
   }
 }
 
+size_t count_agg_members(TypeSpec *spec) {
+  assert(typespec_is_array(spec) || typespec_is_union(spec) ||
+         typespec_is_struct(spec));
+  if (typespec_is_array(spec)) {
+    AuxSpec *array_aux = llist_front(&spec->auxspecs);
+    /* TODO(Robert): handle deduced array sizes, if necessary */
+    return array_aux->data.memory_loc.length;
+  } else if (typespec_is_struct(spec)) {
+    AuxSpec *struct_aux = llist_front(&spec->auxspecs);
+    TagValue *tagval = struct_aux->data.tag.val;
+    return llist_size(&tagval->data.members.in_order);
+  } else {
+    return 1;
+  }
+}
+
+TypeSpec *get_agg_member_spec(TypeSpec *spec, size_t index) {
+  assert(typespec_is_array(spec) || typespec_is_union(spec) ||
+         typespec_is_struct(spec));
+  if (typespec_is_array(spec)) {
+    TypeSpec *ret_spec = malloc(sizeof(TypeSpec));
+    assert(!strip_aux_type(ret_spec, spec));
+    return ret_spec;
+  } else {
+    assert(typespec_is_struct(spec) || index == 0);
+    AuxSpec *struct_aux = llist_front(&spec->auxspecs);
+    LinkedList *member_list = &struct_aux->data.tag.val->data.members.in_order;
+    TypeSpec *member_spec = llist_get(member_list, index);
+    /* must be copied so that we can call typespec_destroy/free on it */
+    TypeSpec *copy_spec = malloc(sizeof(TypeSpec));
+    assert(!typespec_copy(copy_spec, member_spec));
+    return copy_spec;
+  }
+}
+
+void cleanup_agg_member_spec(TypeSpec *spec) {
+  assert(!typespec_destroy(spec));
+  free(spec);
+}
+
+ASTree *validate_initializer(TypeSpec *dest_spec, ASTree *initializer) {
+  if (initializer->symbol == TOK_INIT_LIST) {
+    if (astree_count(initializer) > 1) {
+      return astree_create_errnode(initializer, BCC_TERR_EXCESS_INITIALIZERS, 1,
+                                   initializer);
+    } else {
+      return validate_initializer(dest_spec, astree_get(initializer, 0));
+    }
+  } else {
+    return (convert_type(perform_pointer_conv(initializer), dest_spec));
+  }
+}
+
+/* assumes that dest_spec has aggregate type */
+ASTree *validate_init_list(TypeSpec *dest_spec, ASTree *init_list) {
+  struct agg_entry {
+    TypeSpec *spec;
+    size_t index;
+  };
+  size_t initializer_index = 0;
+  LinkedList agg_stack;
+  int status =
+      llist_init(&agg_stack, (void (*)(void *))cleanup_agg_member_spec, NULL);
+  if (status) abort();
+  struct agg_entry *first_entry = malloc(sizeof(struct agg_entry));
+  first_entry->spec = dest_spec;
+  first_entry->index = 0;
+  status = llist_push_front(&agg_stack, first_entry);
+  if (status) abort();
+  ASTree *errnode = NULL;
+  while (!llist_empty(&agg_stack)) {
+    struct agg_entry *entry = llist_front(&agg_stack);
+    TypeSpec *member_spec = get_agg_member_spec(entry->spec, entry->index);
+    ASTree *initializer = astree_get(init_list, initializer_index);
+    if (!typespec_is_struct(member_spec) && !typespec_is_array(member_spec) &&
+        !typespec_is_union(member_spec)) {
+      errnode = validate_initializer(member_spec, initializer);
+      ++initializer_index;
+      ++entry->index;
+    } else if (initializer->symbol == TOK_INIT_LIST) {
+      errnode = validate_init_list(member_spec, initializer);
+      ++initializer_index;
+      ++entry->index;
+    } else {
+      struct agg_entry *new_entry = malloc(sizeof(struct agg_entry));
+      new_entry->index = 0;
+      new_entry->spec = member_spec;
+      int status = llist_push_front(&agg_stack, new_entry);
+      if (status) abort();
+    }
+    if (errnode && errnode->symbol == TOK_TYPE_ERROR) {
+      (void)astree_remove(errnode, 0);
+      return astree_adopt(errnode, 1, init_list);
+    }
+    if (entry->index >= count_agg_members(entry->spec)) {
+      cleanup_agg_member_spec(llist_pop_front(&agg_stack));
+    } else if (initializer_index >= astree_count(init_list)) {
+      break;
+    }
+  }
+  if (initializer_index != astree_count(init_list)) {
+    return astree_create_errnode(init_list, BCC_TERR_EXCESS_INITIALIZERS, 1,
+                                 init_list);
+  }
+  return init_list;
+}
+
 ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src) {
   if (src->symbol == TOK_INIT_LIST) {
     const TypeSpec *decl_type = dest->type;

@@ -104,6 +104,146 @@ such that there would be more right braces than left braces, so if the stack
 happens to be empty when a right brace is seen, it is indicative of a bug and
 the compiler will abort.
 
+### Implementation
+The aggregate stack needs to be ready to go before the parser productions for
+declarations with initializer lists are executed. So, the production rules for
+structures and arrays need to push entries to the stack. These are the last
+production rules fired before the production rules for initializer lists are
+used, and therefore the last time the type information for the declarator that
+the initializer list is for will be seen.
+
+### Version with less globals
+A less intrusive way to solve this problem would be to provide a function that
+does the same thing, but with fewer globals. The reason I didn't pick this as
+my first choice was because it requires traversing the tree again.
+
+This solution will make use of two functions: `validate_initializer` and
+`validate_init_list`. The first will be the base case, called when the
+initializer is no longer an init list.
+
+Both of these functions will have two arguments: the `TypeSpec*` for the
+destination type, and a `ASTree*` for the initializer.
+
+Here, since unions, pointers, and objects of arithmetic type may be initialized
+with a single expression of appropriate type enclosed in braces, we will treat
+these destinations as though they were aggregate types with a single member, and
+refer to them as aggregate types when their initializer is enclosed in braces.
+
+To begin, the type of the first member of the aggregate type (or just the type
+itself, for other types) is compared to the type of the first initializer in the
+list:
+- If the destination is not of aggregate type and the initializer is not of
+  aggregate type, `validate_initializer` is called. If the return value
+  indicates an error, this function terminates and returns this error code.
+- If the destination is not of aggregate type and the initializer is an
+  initializer list, `validate_init_list` is called, the arguments being the
+  current member type and its corresponding initializer list. If the return
+  value indicates an error, the function terminates and returns this error code.
+- If the destination is of aggregate type and the initializer is not of
+  aggregate type, `validate_init_list` is called, the arguments being the
+  current member type and the initializer list provided to this call.
+- If the destination is of aggregate type and the initializer is an init list,
+  `validate_init_list` is called, the arguments being the current member type
+  and its corresponding init list.
+
+When `validate_init_list` has consumed all of the initializers in the init list
+that the given type needs, it returns the number of initializers consumed to the
+caller. If the caller was `validate_init_list`, the caller adds this number to
+its own count of the number of processed initializers, and continues. If the
+caller was anyone else, this indicates that the init list contained too many
+initializers and is semantically invalid, and should return an error.
+
+If `validate_init_list` runs out of initializers, that is fine, and the number
+of initializers in the init list is returned. The intermediate language
+generator will make sure that the remaining members are zero initialized.
+
+### Stack based solution
+`validate_init_list` need to return two values: the number of initializers
+consumed and an optional error code. These two values will not fit within a
+single 64-bit register, so returning these two in a struct by value is not the
+greatest idea.
+
+This could be fixed by using stacks instead of recursion to track state. The
+stack(s) would need to track the following:
+- initializer nodes
+- type that the initializer node is for
+- index in the initializer/type that is being operated on
+- offset into the initializer list
+
+This version of `validate_init_list` would proceed as follows:
+
+The first entry on the stack is created using the arguments passed to the
+function and an index and offset of zero.
+
+During each iteration, the destination type is compared to the initializer:
+- If the destination is not of aggregate type, `validate_initializer` is called
+  with the current destination type and initializer as arguments.
+  `validate_initializer` will accept init lists as an argument, so long as the
+  init list only has one child. The index for the entry on top of the stack is
+  incremented.
+- If the destination is of aggregate type and the initializer is not an init
+  list, the destination type is pushed onto the stack with the initializer
+  already present on top of the stack. The offset for this entry is equal to
+  the index of the previous entry, and its index is zero.
+- If the destination is of aggregate type and the initializer is an init list,
+  the member at the index in the entry and its corresponding initializer are
+  pushed to the stack with a count and offset of zero.
+
+Then, the index of the current entry is compared to the destination type and
+initializer:
+- If the index equals the number of members of the destination type, the
+  destination cannot consume any more initializers. If the entry below shares
+  the same initializer list, their indices are added and 
+
+When `validate_init_list` has consumed all of the initializers in the init list
+that the given type needs, it returns the number of initializers consumed to the
+caller. If the caller was `validate_init_list`, the caller adds this number to
+its own count of the number of processed initializers, and continues. If the
+caller was anyone else, this indicates that the init list contained too many
+initializers and is semantically invalid, and should return an error.
+
+If `validate_init_list` runs out of initializers, that is fine, and the number
+of initializers in the init list is returned. The intermediate language
+generator will make sure that the remaining members are zero initialized.
+
+### Hybrid solution
+Based on what I've brainstormed, the neatest solution would make use of a stack
+and recursion. Recursion is used for nested initializer lists, while the stack
+is for flat initializer lists for aggregate types with aggregate members.
+
+Entries on this stack include a type and a count indicating which member of the
+type is to be compared. There is an additional counter, not on the stack, which
+tracks which initializer is being compared. The function starts by pushing the
+type provided as an argument with an index of zero, then setting the initializer
+counter to zero as well.
+
+During each iteration, the member of the type at the top of the stack at the
+index at the top of the stack is compared to the child of the init list at
+the counter:
+- If the destination is not of aggregate type, `validate_initializer` is called
+  with the current destination type and initializer as arguments.
+  `validate_initializer` will accept init lists as an argument, so long as the
+  init list only has one child. The index for the entry on top of the stack is
+  incremented.
+- If the destination is of aggregate type and the initializer is not an init
+  list, the destination type is pushed onto the stack with an index of zero.
+- If the destination is of aggregate type and the initializer is an init list,
+  `validate_initializer` is called, with the destination type and init list
+  as arguments.
+
+The index at the top of the stack is compared to the number of members of the
+aggregate at the top of the stack. If the index at the top of the stack equals
+the number of members of the aggregate at the top of the stack, the entry is
+popped from the stack. If the stack is empty and the initializer counter does
+not equal the number of children of the init list, too many initializers were
+provided, and an error code is returned.
+
+The initializer counter is compared to the number of children of the init list.
+If the initializer counter equals the number of children of the init list, the
+stack is cleaned up and the function returns, indicating success. The
+intermediate language generator will ensure that the other members are zero-
+initialized.
+
 ## Single pass to intermediate language
 With all the changes made to the type checker and parser, it is now possible to
 generate the intermediate code in a single pass. Since the behavior of the code
