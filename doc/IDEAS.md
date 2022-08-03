@@ -66,6 +66,75 @@ However, to accomplish this, we need to add more global state. It is a single
 `TagValue*`, pointing at the entry of the tag being defined. It is set in
 `validate_tag_def` and unset in `finalize_tag_def`
 
+## Constant expression evaluation
+The rules defining constant expressions are complicated; there are many
+restrictions, which are used in various combinations depending on the type of
+constant expression the grammar is referring to.
+
+The most lax category allows two "forms" of constant expressions: those that
+can be reduced/evaluated to a single constant, or those that can be reduced to
+a memory address (represented in assembly as a label) +/- a constant value. This
+type of constant expression is used in brace-enclosed initializers.
+
+The next category allows only expressions that can be evaluated to a single
+constant at compile time. The expression may not modify any objects and, I
+think, may not have any side effects in general. Pointers and arrays and
+operations upon them may not be used. This category has a subcategory that
+requires that the expression be of integral type. The standard is wordy here;
+but it seems like as long as the final result is of integral type, the same
+rules apply. The operand of `sizeof` also technically falls into this category.
+For my own sake, I will just allow any expression whose resulting size is known
+at compile time as an argument. The argument isn't even evaluated, anyways.
+
+The final category is used in the preprocessor; it is the strictest, allowing
+only integer, character, and floating constants. No casts are allowed, nor
+is `sizeof`, nor are enumerators; only arithmetic, bitwise, comparison and
+conditional operations are allowed. Since this category is used by the
+preprocessor, we do not care if a constant expression falls into this category.
+
+### Engine
+Syntax tree nodes will have a new member added to them. This member will be a
+pointer to struct that holds the result of the node, if the node represents an
+expression and the expression can be evaluated at compile time.
+
+This struct will have two members. The first will be a union of `uintmax_t` and
+`intmax_t`, to hold the result of arithmetic expressions. The second will be a
+`const char *`, which holds the name of a `static` or `extern` object.
+
+Additionally, there will be a new attribute added that indicates whether or not
+the arithmetic component of the constant expression should be subtracted from
+the label/address component, if present.
+
+The evaluation engine works by checking the children of a given expression node.
+- if both nodes hold a label, the expression cannot be evaluated
+- if either node does not have any value, the expression cannot be evaluated
+- if both nodes have an arithmetic value, the operation of the current node is
+  applied to the values and the result is stored in the current node
+- if one of the nodes holds a label (and optionally holds an arithmetc value),
+  and the other node holds an arithmetic value:
+  - if the label is on the right hand side of the subtraction operator, the
+    expression cannot be evaluated (can't negate label value)
+  - if the operation to be performed is an addition or subtraction, the
+    operation is applied to the arithmetic expression (if present), and the
+    result is stored in the current node, along with the label. ensure that the
+    `ATTR_CONST_SUB` attribute is set, if necessary
+
+The type of the operands is determined from the `TypeSpec*` member, and the
+value of the operands is cast to this value before the operation is applied to
+them. Then, the result is cast to the result type, and then written to either
+`uintmax_t` or `intmax_t`, depending on the signedness. If an integer constant
+is cast to a pointer and then used as an operand in a constant expression, the
+integer constant is cast to `void*`, rather than to the specific pointer type.
+
+Arithmetic constants will be evaluated and their value stored on their node.
+Enumeration constants will have their value assigned. Identifiers for static
+and global objects will evaluate to their storage location (their name/label),
+for use in initializers.
+
+### Modifications to existing code
+Support for static and extern objects must be added in order to implement
+constant expressions involving addresses/labels.
+
 ## Simpler init list handling
 Initializer list handling could be simplified as well, again using global state.
 In this case, the state would need to be more complicated, since the way nested

@@ -21,7 +21,9 @@ enum attribute {
   ATTR_EXPR_ARITH =
       1 << 2, /* expression, and any below it, have arithmetic values */
   ATTR_STMT_DEFAULT =
-      1 << 3 /* indicates that a switch statement has a default label */
+      1 << 3, /* indicates that a switch statement has a default label */
+  ATTR_CONST_SUB =
+      1 << 4 /* subtract arithmetic part of const expression from label */
 };
 
 typedef enum base_type {
