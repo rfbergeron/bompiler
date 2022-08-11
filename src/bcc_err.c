@@ -220,6 +220,8 @@ int erraux_to_string(AuxSpec *erraux, char *buf, size_t size) {
       return sprintf(buf, "Semantic error: expected return value expression");
     case BCC_TERR_EXPECTED_LVAL:
       return expected_err_to_string(erraux, "lvalue", buf, size);
+    case BCC_TERR_EXPECTED_NONZERO:
+      return expected_err_to_string(erraux, "nonzero integer", buf, size);
     case BCC_TERR_UNEXPECTED_LIST: {
       ASTree *dest = erraux->data.err.info[0];
       char dest_buf[LINESIZE];
