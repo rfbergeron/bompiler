@@ -55,6 +55,9 @@ that has does not do most of the things that I thought:
   are treated as if they were declared as pointers (pointer/pointer to function)
 - You can only implicitly convert between `void*` and other pointer types, not
   any other kind of void pointer (for example `void**`).
+- Struct and union members may not have storage class specifiers
+- Tags and enumeration constants declared as struct and union members are
+  "hoisted" up into the enclosing scope
 
 ## Simpler structure handling
 Structure handling could be simplified, removing the need to have a second pass
@@ -65,6 +68,64 @@ width and alignment accounted for when they are declared.
 However, to accomplish this, we need to add more global state. It is a single
 `TagValue*`, pointing at the entry of the tag being defined. It is set in
 `validate_tag_def` and unset in `finalize_tag_def`
+
+## Mistake regarding struct/union members and enumeration constants
+There are two mistakes I made in the way I handle struct and union member
+declarations:
+1. Struct and union members may not have storage class specifiers.
+2. Struct, union, and enum tag definitions, as well as enumeration constants,
+   declared inside of a struct or union definition, are "hoisted" out into
+   the enclosing block scope.
+
+The latter is an important consequence of the fact that struct and union members
+have their own namespace, NOT their own scope, so the "scope" of member
+declarations is still the enclosing block/file/function scope. The former makes
+intuitive sense, and conveniently means I do not have to care about how to treat
+typedefs defined inside of structs and unions.
+
+I did not realize this until it was mentioned in passing in a cppconf/ndc talk.
+
+## Scope/name space fix
+To better mirror the language of the standard, it may be best to split the
+`SymbolTable` stack up, and change some names. A new union will be created,
+referred to using the typedef name `NameSpace`. A `NameSpace` will consist of
+an enum identifying the type of name space. Other name spaces will have
+additional members, based on their needs:
+- `LabelNameSpace` just has a single `SymbolTable`
+- `DefaultNameSpace` has a stack
+- `TagNameSpace` also has a stack
+- `MemberNameSpace` also has a stack
+
+These stacks are manipulated as follows:
+- At the beginning of a translation unit, one entry is pushed to the default and
+  tag name spaces. This entry is popped at the end of the translation unit.
+- At the beginning of a function declaration, one entry is pushed to the default,
+  tag, and label namespaces. These entries are popped at the end of the
+  declaration, or at the end of the definition, if the declaration is also a
+  definition.
+- At the beginning of a struct or union definition, one entry is pushed to the
+  member name space stack, which is popped at the end of the definition.
+- At the beginning of a block, one entry is push to the default and tag name
+  spaces, which is popped at the end of the block.
+
+Unless special measures are taken, getting and inserting symbols from a given
+name space always searches the table at the top of the stack first, followed by
+the table below, and so on. The only exception to this is the label name space,
+since there can only ever be one table.
+
+## Constant expression flags
+Currently, there are two flags used to identify constant expressions: `CONST`
+and `ARITH`. These aren't very good, since `ARITH` has no use on its own, and is
+only used to identify that an expression is an arithmetic constant expression,
+given that it is already a constant expression (ie, that `CONST` is true).
+
+I could make better and clearer use by combining the two flags into a two-bit
+value, indicating levels or types of constness:
+- "00": not any form of constant
+- "01": weakest form of constant expression, used in initializers
+- "10": required by array bounds, enum constants, and `case`
+- "11": required for preprocessor `#if` statements. Will be used when/if I
+  implement my own preprocessor.
 
 ## Constant expression evaluation
 The rules defining constant expressions are complicated; there are many
@@ -89,51 +150,24 @@ at compile time as an argument. The argument isn't even evaluated, anyways.
 The final category is used in the preprocessor; it is the strictest, allowing
 only integer, character, and floating constants. No casts are allowed, nor
 is `sizeof`, nor are enumerators; only arithmetic, bitwise, comparison and
-conditional operations are allowed. Since this category is used by the
-preprocessor, we do not care if a constant expression falls into this category.
+conditional operations are allowed.
 
-### Engine
-Syntax tree nodes will have a new member added to them. This member will be a
-pointer to struct that holds the result of the node, if the node represents an
-expression and the expression can be evaluated at compile time.
+The standard says nothing about whether or not these expressions must be
+evaluated at compile time. Evaluating expressions involving the addresses of
+static and extern objects and functions is difficult. The conversion is simple,
+but I am unsure of how and when to prevent over/underflow and when to indicate
+that the offset is meant to be subtracted from the address, rather than added.
 
-This struct will have two members. The first will be a union of `uintmax_t` and
-`intmax_t`, to hold the result of arithmetic expressions. The second will be a
-`const char *`, which holds the name of a `static` or `extern` object.
+However, evaluating expressions involving only arithmetic/character/enumeration
+constants is not as difficult, and is necessary in order to determine the width
+of and typecheck arrays.
 
-Additionally, there will be a new attribute added that indicates whether or not
-the arithmetic component of the constant expression should be subtracted from
-the label/address component, if present.
-
-The evaluation engine works by checking the children of a given expression node.
-- if both nodes hold a label, the expression cannot be evaluated
-- if either node does not have any value, the expression cannot be evaluated
-- if both nodes have an arithmetic value, the operation of the current node is
-  applied to the values and the result is stored in the current node
-- if one of the nodes holds a label (and optionally holds an arithmetc value),
-  and the other node holds an arithmetic value:
-  - if the label is on the right hand side of the subtraction operator, the
-    expression cannot be evaluated (can't negate label value)
-  - if the operation to be performed is an addition or subtraction, the
-    operation is applied to the arithmetic expression (if present), and the
-    result is stored in the current node, along with the label. ensure that the
-    `ATTR_CONST_SUB` attribute is set, if necessary
-
-The type of the operands is determined from the `TypeSpec*` member, and the
-value of the operands is cast to this value before the operation is applied to
-them. Then, the result is cast to the result type, and then written to either
-`uintmax_t` or `intmax_t`, depending on the signedness. If an integer constant
-is cast to a pointer and then used as an operand in a constant expression, the
-integer constant is cast to `void*`, rather than to the specific pointer type.
-
-Arithmetic constants will be evaluated and their value stored on their node.
-Enumeration constants will have their value assigned. Identifiers for static
-and global objects will evaluate to their storage location (their name/label),
-for use in initializers.
-
-### Modifications to existing code
+### Implementation
 Support for static and extern objects must be added in order to implement
-constant expressions involving addresses/labels.
+constant expressions involving addresses/labels. `ASTree` must have a new field
+added, which will be a `unsigned long`. Conversion from a signed integer to
+unsigned and back preserves the value, so there is no need for a union so long
+as the value is cast appropriately when the expressions are evaluated.
 
 ## Simpler init list handling
 Initializer list handling could be simplified as well, again using global state.

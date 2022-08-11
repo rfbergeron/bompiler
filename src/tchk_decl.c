@@ -387,8 +387,7 @@ ASTree *validate_array_size(ASTree *array, ASTree *expr) {
     return astree_propogate_errnode(array, expr);
   }
   if (!typespec_is_integer(expr->type) ||
-      (expr->attributes & ATTR_EXPR_CONST) == 0 ||
-      (expr->attributes & ATTR_EXPR_ARITH) == 0) {
+      (expr->attributes & ATTR_EXPR_CONST2) == 0) {
     return astree_create_errnode(astree_adopt(array, 1, expr),
                                  BCC_TERR_EXPECTED_INTCONST, 2, array, expr);
   }
@@ -778,8 +777,6 @@ ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src) {
                                    BCC_TERR_EXPECTED_LVAL, 2, assignment, dest);
     }
   }
-  assignment->attributes |=
-      src->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITH);
 
   assignment->type = dest->type;
   return astree_adopt(assignment, 2, dest, src);
@@ -1108,8 +1105,7 @@ ASTree *define_enumerator(ASTree *enum_, ASTree *ident_node, ASTree *equal_sign,
        */
       return astree_propogate_errnode(enum_, errnode);
     }
-    if ((expr->attributes & ATTR_EXPR_ARITH) == 0 ||
-        (expr->attributes & ATTR_EXPR_CONST) == 0) {
+    if ((expr->attributes & ATTR_EXPR_CONST2) == 0) {
       astree_adopt(left_brace, 1,
                    astree_adopt(equal_sign, 2, ident_node, expr));
       return astree_create_errnode(enum_, BCC_TERR_EXPECTED_ARITHCONST, 2,
@@ -1159,7 +1155,7 @@ ASTree *define_struct_member(ASTree *struct_, ASTree *member) {
     if (tagval->tag == TAG_STRUCT) {
       size_t padding = member_alignment - (tagval->width % member_alignment);
       if (padding != member_alignment) tagval->width += padding;
-      sprintf(symval->obj_loc, "%%s+%lu", tagval->width);
+      symval->offset = tagval->width;
       tagval->width += member_width;
     } else if (tagval->width < member_width) {
       tagval->width = member_width;

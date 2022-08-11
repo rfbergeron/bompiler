@@ -34,8 +34,6 @@ enum string_int_index {
   INDEX_FROM_INT(SIGNED, CHAR)
 };
 
-static const size_t NUM_ATTRIBUTES = 6;
-static const size_t NUM_TYPES = 4;
 const size_t MAX_IDENT_LEN = 31;
 
 /* TODO(Robert): Implement "long long" integer type. For now, the type checker
@@ -105,7 +103,7 @@ const TypeSpec SPEC_SCHAR = SPECIFY_INT(SIGNED, CHAR);
 
 const char type_map[][16] = {"void", "int", "float", "struct"};
 
-const char attr_map[][16] = {"LVAL", "CONST", "ARITH", "DEFAULT", "CONST_SUB"};
+const char attr_map[][16] = {"LVAL", "DEFAULT", "CONST1", "CONST2"};
 
 /* Precedence for conversions:
  * 1. long double
@@ -355,15 +353,20 @@ int typespec_copy(TypeSpec *dest, const TypeSpec *src) {
   return 0;
 }
 
+size_t typespec_member_width(TypeSpec *spec) {
+  assert(!llist_empty(&spec->auxspecs));
+  TypeSpec temp_spec;
+  assert(!strip_aux_type(&temp_spec, spec));
+  size_t member_width = typespec_get_width(&temp_spec);
+  assert(!typespec_destroy(&temp_spec));
+  return member_width;
+}
+
 size_t typespec_get_width(TypeSpec *spec) {
   if (!llist_empty(&spec->auxspecs)) {
     AuxSpec *aux = llist_front(&spec->auxspecs);
     if (aux->aux == AUX_ARRAY) {
-      TypeSpec temp_spec;
-      assert(!strip_aux_type(&temp_spec, spec));
-      size_t member_width = typespec_get_width(&temp_spec);
-      assert(!typespec_destroy(&temp_spec));
-      return aux->data.memory_loc.length * member_width;
+      return aux->data.memory_loc.length * typespec_member_width(spec);
     } else if (aux->aux == AUX_POINTER || aux->aux == AUX_FUNCTION) {
       return X64_SIZEOF_LONG;
     }
