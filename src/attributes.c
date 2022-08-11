@@ -183,9 +183,7 @@ int type_to_string(const TypeSpec *type, char *buf, size_t size) {
     size_t j;
     switch (auxspec->aux) {
       case AUX_ARRAY:
-        /* TODO(Robert): no special case for -1 >:( */
-        if (auxspec->data.memory_loc.length > 0 &&
-            auxspec->data.memory_loc.length != (size_t)-1L) {
+        if (auxspec->data.memory_loc.length > 0) {
           ret += sprintf((buf + ret), "array of size %lu of ",
                          auxspec->data.memory_loc.length);
         } else {
