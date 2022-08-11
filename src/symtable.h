@@ -26,7 +26,8 @@ typedef struct symbol_value {
   Location loc;     /* declaration location */
   TypeSpec type;    /* type of symbol */
   int flags;        /* flags, as enumerated above */
-  char obj_loc[64]; /* location, represented as a string */
+  char obj_loc[64]; /* DEPRECATE THIS AND REMOVE FROM ASMGEN */
+  size_t offset;    /* offset in stack/struct */
 } SymbolValue;
 
 typedef enum tag_type { TAG_STRUCT = 0, TAG_UNION, TAG_ENUM } TagType;

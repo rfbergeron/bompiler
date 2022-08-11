@@ -8,3 +8,6 @@ or the meaning of the C standard.
 - https://stackoverflow.com/questions/679979/how-to-make-a-variadic-macro-variable-number-of-arguments
 - https://blog.microjoe.org/2017/unit-tests-c-cmocka-coverage-cmake.html
 - https://api.cmocka.org/group__cmocka__alloc.html
+- https://stackoverflow.com/questions/4317677/c-c-preprocessor-single-quote
+- https://stackoverflow.com/questions/11442708/type-punning-and-unions-in-c
+- https://stackoverflow.com/questions/12164855/common-initial-sequence-in-structures-nested-within-union-definition-in-c-stan

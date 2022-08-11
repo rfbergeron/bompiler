@@ -1,63 +1,18 @@
 #include "tchk_expr.h"
 
 #include "ctype.h"
+#include "evaluate.h"
 #include "inttypes.h"
 #include "state.h"
 #include "stdlib.h"
 #include "tchk_common.h"
 #include "yyparse.h"
 
-ASTree *validate_intcon(ASTree *intcon) {
-  DEBUGS('t', "Validating integer constant %s", intcon->lexinfo);
-  int status = 0;
-  long signed_value = strtol(intcon->lexinfo, NULL, 10);
-  /* TODO(Robert): I should define the compiler's own size of min and max
-   * values; this would be necessary for cross-compilation from an
-   * architecture with different sizes of integer types.
-   */
-  if (signed_value == LONG_MIN) {
-    return astree_create_errnode(intcon, BCC_TERR_CONST_TOO_SMALL, 1, intcon);
-  } else if (signed_value == LONG_MAX) {
-    unsigned long unsigned_value = strtoul(intcon->lexinfo, NULL, 10);
-    if (unsigned_value == UINT64_MAX) {
-      return astree_create_errnode(intcon, BCC_TERR_CONST_TOO_LARGE, 1, intcon);
-    } else {
-      intcon->type = &SPEC_ULONG;
-    }
-  } else if (signed_value > INT8_MIN && signed_value < INT8_MAX) {
-    intcon->type = &SPEC_SCHAR;
-  } else if (signed_value > INT16_MIN && signed_value < INT16_MAX) {
-    intcon->type = &SPEC_SHRT;
-  } else if (signed_value > INT32_MIN && signed_value < INT32_MAX) {
-    intcon->type = &SPEC_INT;
-  } else {
-    intcon->type = &SPEC_LONG;
-  }
-
-  intcon->attributes |= ATTR_EXPR_CONST | ATTR_EXPR_ARITH;
-  return intcon;
-}
+ASTree *validate_intcon(ASTree *intcon) { return evaluate_intcon(intcon); }
 
 ASTree *validate_charcon(ASTree *charcon) {
-  const char *const_str = charcon->lexinfo + 1;
-  size_t const_str_len = strlen(const_str) - 1;
-  /* TODO(Robert): validate constant information (during assembly generation?)
-   */
-  if (const_str[0] == '\\') {
-    if (const_str[1] == 'x') {
-      /* hex number */
-    } else if (isalpha(const_str[1])) {
-      /* ASCII control sequence */
-    } else if (isdigit(const_str[1])) {
-      /* octal number */
-    } else {
-      /* \?, \", \', or \\ */
-    }
-  } else {
-  }
   charcon->type = &SPEC_CHAR;
-  charcon->attributes |= ATTR_EXPR_CONST | ATTR_EXPR_ARITH;
-  return charcon;
+  return evaluate_charcon(charcon);
 }
 
 ASTree *validate_stringcon(ASTree *stringcon) {
@@ -76,7 +31,6 @@ ASTree *validate_stringcon(ASTree *stringcon) {
   array_aux->data.memory_loc.length = strlen(stringcon->lexinfo) - 1;
 
   stringcon->type = stringcon_type;
-  stringcon->attributes |= ATTR_EXPR_CONST;
   return stringcon;
 }
 
@@ -218,10 +172,8 @@ ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
         false_expr->type);
   }
 
-  qmark->attributes |=
-      true_expr->attributes & false_expr->attributes & ATTR_EXPR_ARITH;
-
-  return astree_adopt(qmark, 3, condition, true_expr, false_expr);
+  return evaluate_conditional(
+      astree_adopt(qmark, 3, condition, true_expr, false_expr));
 }
 
 ASTree *validate_comma(ASTree *comma, ASTree *left_expr, ASTree *right_expr) {
@@ -232,8 +184,6 @@ ASTree *validate_comma(ASTree *comma, ASTree *left_expr, ASTree *right_expr) {
   if (right_expr->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(comma, 2, left_expr, right_expr);
   }
-  comma->attributes |=
-      right_expr->attributes & (ATTR_EXPR_ARITH | ATTR_EXPR_CONST);
 
   comma->type = right_expr->type;
   return astree_adopt(comma, 2, left_expr, right_expr);
@@ -255,8 +205,7 @@ ASTree *validate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
                                  type_name->type, expr->type);
   } else {
     cast->type = type_name->type;
-    cast->attributes |= expr->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITH);
-    return astree_adopt(cast, 2, declaration, expr);
+    return evaluate_cast(astree_adopt(cast, 2, declaration, expr));
   }
 }
 
@@ -513,11 +462,8 @@ ASTree *validate_binop(ASTree *operator, ASTree * left_operand,
           BCC_TERR_UNEXPECTED_TOKEN, 1, operator);
   }
 
-  unsigned int result_attrs =
-      UNWRAP(left_operand)->attributes & UNWRAP(right_operand)->attributes;
-  UNWRAP(result)->attributes |=
-      result_attrs & (ATTR_EXPR_CONST | ATTR_EXPR_ARITH);
-  return result;
+  if (result->symbol == TOK_TYPE_ERROR) return result;
+  return evaluate_binop(result);
 }
 
 int is_increment(const int symbol) {
@@ -548,7 +494,7 @@ ASTree *validate_unop(ASTree *operator, ASTree * operand) {
   } else if (operator->symbol == '!') {
     if (typespec_is_scalar(operand_type)) {
       operator->type = & SPEC_INT;
-      return astree_adopt(operator, 1, operand);
+      return evaluate_unop(astree_adopt(operator, 1, operand));
     } else {
       return astree_create_errnode(astree_adopt(operator, 1, operand),
                                    BCC_TERR_EXPECTED_SCALAR, 2, operand,
@@ -570,8 +516,7 @@ ASTree *validate_unop(ASTree *operator, ASTree * operand) {
     if (operand->symbol == TOK_TYPE_ERROR) {
       return astree_propogate_errnode(operator, operand);
     }
-    operator->attributes |= operand->attributes & ATTR_EXPR_ARITH;
-    return astree_adopt(operator, 1, operand);
+    return evaluate_unop(astree_adopt(operator, 1, operand));
   }
 }
 
@@ -635,8 +580,7 @@ ASTree *validate_sizeof(ASTree *sizeof_, ASTree *type_node) {
    * platform
    */
   sizeof_->type = &SPEC_ULONG;
-  sizeof_->attributes |= (ATTR_EXPR_CONST | ATTR_EXPR_ARITH);
-  return astree_adopt(sizeof_, 1, type_node);
+  return evaluate_unop(astree_adopt(sizeof_, 1, type_node));
 }
 
 ASTree *validate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
