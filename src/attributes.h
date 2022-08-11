@@ -16,14 +16,12 @@
 enum attribute {
   ATTR_NONE = 0,           /* no attributes set */
   ATTR_EXPR_LVAL = 1 << 0, /* refers to an assignable location */
-  ATTR_EXPR_CONST =
-      1 << 1, /* expression, and any below it, have constant values */
-  ATTR_EXPR_ARITH =
-      1 << 2, /* expression, and any below it, have arithmetic values */
   ATTR_STMT_DEFAULT =
-      1 << 3, /* indicates that a switch statement has a default label */
-  ATTR_CONST_SUB =
-      1 << 4 /* subtract arithmetic part of const expression from label */
+      1 << 1, /* indicates that a switch statement has a default label */
+  ATTR_EXPR_CONST1 = 1 << 2,
+  ATTR_EXPR_CONST2 = 1 << 3,
+  NUM_ATTRIBUTES = 4, /* number of attribute flags */
+  ATTR_EXPR_CONST3 = ATTR_EXPR_CONST1 | ATTR_EXPR_CONST2
 };
 
 typedef enum base_type {
@@ -242,6 +240,7 @@ int auxspec_copy(AuxSpec *dest, const AuxSpec *src);
 int typespec_init(TypeSpec *spec);
 int typespec_destroy(TypeSpec *spec);
 int typespec_copy(TypeSpec *dst, const TypeSpec *src);
+size_t typespec_member_width(TypeSpec *spec);
 size_t typespec_get_width(TypeSpec *spec);
 size_t typespec_get_alignment(TypeSpec *spec);
 int typespec_append_auxspecs(TypeSpec *dest, TypeSpec *src);

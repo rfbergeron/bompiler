@@ -45,6 +45,7 @@ ASTree *astree_init(int symbol, const Location location, const char *info) {
    * type of a pointer argument */
   llist_init(&tree->children, (void (*)(void *))(astree_destroy), NULL);
   tree->symbol_table = NULL;
+  tree->constval = 0UL;
   return tree;
 }
 
@@ -230,8 +231,17 @@ int astree_to_string(ASTree *tree, char *buffer, size_t size) {
   if (characters_printed < 0) return characters_printed;
 
   if (strlen(tname) > 4) tname += 4;
-  return sprintf(buffer, "%s \"%s\" {%s} {%s} {%s}", tname, tree->lexinfo,
-                 locstr, typestr, attrstr);
+  if (!(tree->attributes & ATTR_EXPR_CONST2)) {
+    return sprintf(buffer, "%s \"%s\" {%s} {%s} {%s}", tname, tree->lexinfo,
+                   locstr, typestr, attrstr);
+  } else if (tree->type->base == TYPE_SIGNED) {
+    return sprintf(buffer, "%s \"%s\" {%s} {%s} {%s} { %li }", tname,
+                   tree->lexinfo, locstr, typestr, attrstr,
+                   (long)tree->constval);
+  } else {
+    return sprintf(buffer, "%s \"%s\" {%s} {%s} {%s} { %lu }", tname,
+                   tree->lexinfo, locstr, typestr, attrstr, tree->constval);
+  }
 }
 
 int astree_print_tree(ASTree *tree, FILE *out, int depth) {
