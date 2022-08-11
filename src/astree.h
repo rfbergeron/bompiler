@@ -5,13 +5,15 @@
 #include "badllist.h"
 #include "badmap.h"
 #include "debug.h"
+#include "stdint.h"
 #include "symtable.h"
 
 typedef struct astree {
   const TypeSpec *type;      /* type info */
   const char *lexinfo;       /* lexical information */
   SymbolTable *symbol_table; /* symbol table for scope, if applicable */
-  Location loc;              /* source location */
+  unsigned long constval;
+  Location loc; /* source location */
   size_t jump_id;
   size_t case_id;
   LinkedList children;     /* children of this n-way node */
@@ -19,8 +21,11 @@ typedef struct astree {
   unsigned int attributes; /* node-specific attributes */
 } ASTree;
 
-#define EMPTY_EXPR_VALUE \
-  { &SPEC_EMPTY, ";", NULL, LOC_EMPTY, 0, 0, BLIB_LLIST_EMPTY, ';', ATTR_NONE }
+#define EMPTY_EXPR_VALUE                                                 \
+  {                                                                      \
+    &SPEC_EMPTY, ";", NULL, 0UL, LOC_EMPTY, 0, 0, BLIB_LLIST_EMPTY, ';', \
+        ATTR_NONE                                                        \
+  }
 #define UNWRAP(node) \
   (node->symbol == TOK_TYPE_ERROR ? astree_get(node, 0) : node)
 extern ASTree EMPTY_EXPR;

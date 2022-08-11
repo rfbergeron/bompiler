@@ -1,5 +1,6 @@
 #include "tchk_common.h"
 
+#include "evaluate.h"
 #include "stdlib.h"
 #include "yyparse.h"
 
@@ -44,7 +45,6 @@ ASTree *perform_pointer_conv(ASTree *expr) {
     }
     ASTree *cast = astree_init(TOK_CAST, expr->loc, "_cast");
     cast->type = pointer_spec;
-    cast->attributes |= expr->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITH);
     return astree_adopt(cast, 1, expr);
   }
 }
@@ -73,8 +73,7 @@ ASTree *convert_type(ASTree *expr, const TypeSpec *type) {
   }
   ASTree *cast = astree_init(TOK_CAST, expr->loc, "_cast");
   cast->type = cast_spec;
-  cast->attributes |= expr->attributes & (ATTR_EXPR_CONST | ATTR_EXPR_ARITH);
-  return expr;
+  return evaluate_cast(astree_adopt(cast, 1, expr));
 }
 
 int compare_params(LinkedList *dests, LinkedList *srcs) {

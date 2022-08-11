@@ -217,8 +217,7 @@ ASTree *validate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
 
   const TypeSpec *case_const_spec = expr->type;
   if (!typespec_is_integer(case_const_spec) ||
-      !(expr->attributes & ATTR_EXPR_CONST) ||
-      !(expr->attributes & ATTR_EXPR_ARITH)) {
+      !(expr->attributes & ATTR_EXPR_CONST2)) {
     return astree_create_errnode(astree_adopt(case_, 2, expr, stmt),
                                  BCC_TERR_EXPECTED_INTCONST, 2, case_, expr);
   }
