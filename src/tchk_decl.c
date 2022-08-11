@@ -391,6 +391,10 @@ ASTree *validate_array_size(ASTree *array, ASTree *expr) {
     return astree_create_errnode(astree_adopt(array, 1, expr),
                                  BCC_TERR_EXPECTED_INTCONST, 2, array, expr);
   }
+  if (expr->constval == 0) {
+    return astree_create_errnode(astree_adopt(array, 1, expr),
+                                 BCC_TERR_EXPECTED_NONZERO, 2, array, expr);
+  }
   return astree_adopt(array, 1, expr);
 }
 
@@ -463,9 +467,12 @@ ASTree *define_array(ASTree *declarator, ASTree *array) {
   }
   AuxSpec *aux_array = calloc(1, sizeof(*aux_array));
   aux_array->aux = AUX_ARRAY;
-  /* TODO(Robert): evaluate array size during three address code generation */
-  /* set array size to any nonzero value, for now */
-  aux_array->data.memory_loc.length = -1;
+  if (astree_count(array) == 0) {
+    aux_array->data.memory_loc.length = 0;
+  } else {
+    ASTree *expr = astree_get(array, 0);
+    aux_array->data.memory_loc.length = expr->constval;
+  }
   int status = llist_push_back(&spec->auxspecs, aux_array);
   if (status) {
     free(aux_array);
