@@ -111,12 +111,14 @@ TagValue *tag_value_init(TagType tag) {
     /* TODO(Robert): cleanup data on error */
     if (status) return NULL;
   } else if (tag == TAG_ENUM) {
-    /* this map only stores possibly enumerator values; it is not responsible
-     * for freeing them
+    /* this map stores (char*, int*) pairs, which are the names of enumeration
+     * constants and their values, respectively. it is responsible for freeing
+     * the resources allocated to store the constants, but not the strings
      */
-    int status = map_init(&tagval->data.enumerators, DEFAULT_MAP_SIZE, NULL,
-                          NULL, strncmp_wrapper);
+    int status = map_init(&tagval->data.enumerators.by_name, DEFAULT_MAP_SIZE,
+                          NULL, free, strncmp_wrapper);
     if (status) return NULL;
+    tagval->data.enumerators.last_value = 0;
   } else {
     /* error: invalid tag type */
     fprintf(stderr, "ERROR: invalid tag type\n");
