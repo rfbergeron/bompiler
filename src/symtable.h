@@ -36,7 +36,10 @@ typedef struct tag_value {
   size_t width;     /* struct/enum width */
   size_t alignment; /* struct/enum alignment */
   union {
-    Map enumerators; /* mapping from names to string constants */
+    struct {
+      Map by_name;    /* mapping from names to string constants */
+      int last_value; /* value of last enum constant */
+    } enumerators;
     struct {
       SymbolTable *by_name; /* struct members by name */
       LinkedList in_order;  /* struct members in declaration order */

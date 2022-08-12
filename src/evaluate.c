@@ -151,6 +151,17 @@ ASTree *evaluate_charcon(ASTree *charcon) {
   return charcon;
 }
 
+ASTree *evaluate_ident(ASTree *ident) {
+  if (ident->attributes & ATTR_EXPR_CONST2) {
+    AuxSpec *enum_aux = llist_back(&ident->type->auxspecs);
+    TagValue *tagval = enum_aux->data.tag.val;
+    int *value = map_get(&tagval->data.enumerators.by_name,
+                         (char *)ident->lexinfo, strlen(ident->lexinfo));
+    ident->constval = *value;
+  }
+  return ident;
+}
+
 ASTree *evaluate_addition(ASTree *addition) {
   ASTree *left_op = astree_get(addition, 0);
   ASTree *right_op = astree_get(addition, 1);
