@@ -4,6 +4,7 @@
 #include "astree.h"
 ASTree *evaluate_intcon(ASTree *intcon);
 ASTree *evaluate_charcon(ASTree *charcon);
+ASTree *evaluate_ident(ASTree *ident);
 ASTree *evaluate_addition(ASTree *addition);
 ASTree *evaluate_subtraction(ASTree *subtraction);
 ASTree *evaluate_shiftl(ASTree *shiftl);
