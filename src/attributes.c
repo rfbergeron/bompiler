@@ -307,6 +307,7 @@ int auxspec_copy(AuxSpec *dest, const AuxSpec *src) {
       break;
     case AUX_UNION:
     case AUX_STRUCT:
+    case AUX_ENUM:
       dest->data.tag = src->data.tag;
       break;
     case AUX_FUNCTION:
@@ -321,7 +322,6 @@ int auxspec_copy(AuxSpec *dest, const AuxSpec *src) {
       memcpy(dest->data.err.info, src->data.err.info,
              dest->data.err.info_count * sizeof(void *));
       break;
-    case AUX_ENUM:
     case AUX_NONE:
       break;
   }

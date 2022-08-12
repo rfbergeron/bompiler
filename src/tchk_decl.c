@@ -983,7 +983,10 @@ ASTree *validate_tag_def(ASTree *tag_type_node, ASTree *tag_name_node,
         tag_aux->data.tag.val = exists;
         status = llist_push_back((LinkedList *)&tag_type_node->type->auxspecs,
                                  tag_aux);
-        if (tag_type != TAG_ENUM) {
+        if (tag_type == TAG_ENUM) {
+          exists->width = 4;
+          exists->alignment = 4;
+        } else {
           int status = state_push_table(state, exists->data.members.by_name);
         }
         return astree_adopt(tag_type_node, 2, tag_name_node, left_brace);
@@ -1003,7 +1006,10 @@ ASTree *validate_tag_def(ASTree *tag_type_node, ASTree *tag_name_node,
     tag_aux->data.tag.val = tagval;
     status =
         llist_push_back((LinkedList *)&tag_type_node->type->auxspecs, tag_aux);
-    if (tag_type != TAG_ENUM) {
+    if (tag_type == TAG_ENUM) {
+      tagval->width = 4;
+      tagval->alignment = 4;
+    } else {
       int status = state_push_table(state, tagval->data.members.by_name);
     }
     return astree_adopt(tag_type_node, 2, tag_name_node, left_brace);
@@ -1085,7 +1091,11 @@ ASTree *define_enumerator(ASTree *enum_, ASTree *ident_node, ASTree *equal_sign,
 
   AuxSpec *enum_aux = calloc(1, sizeof(*enum_aux));
   enum_aux->aux = AUX_ENUM;
-  enum_aux->data.tag.name = (astree_get(enum_, 0))->lexinfo;
+  const char *tag_name = astree_get(enum_, 0)->lexinfo;
+  enum_aux->data.tag.name = tag_name;
+  TagValue *tagval = NULL;
+  (void)state_get_tag(state, tag_name, strlen(tag_name), &tagval);
+  enum_aux->data.tag.val = tagval;
   llist_push_back(&symval->type.auxspecs, enum_aux);
 
   status = state_insert_symbol(state, ident, ident_len, symval);
@@ -1118,9 +1128,19 @@ ASTree *define_enumerator(ASTree *enum_, ASTree *ident_node, ASTree *equal_sign,
       return astree_create_errnode(enum_, BCC_TERR_EXPECTED_ARITHCONST, 2,
                                    equal_sign, expr);
     }
+    int *value = malloc(sizeof(int));
+    *value = tagval->data.enumerators.last_value = expr->constval;
+    int status = map_insert(&tagval->data.enumerators.by_name, (char *)ident,
+                            ident_len, value);
+    assert(status == 0);
     astree_adopt(left_brace, 1, astree_adopt(equal_sign, 2, ident_node, expr));
     return enum_;
   } else {
+    int *value = malloc(sizeof(int));
+    *value = ++tagval->data.enumerators.last_value;
+    int status = map_insert(&tagval->data.enumerators.by_name, (char *)ident,
+                            ident_len, value);
+    assert(status == 0);
     astree_adopt(left_brace, 1, ident_node);
     return enum_;
   }
