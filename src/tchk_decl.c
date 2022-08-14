@@ -399,7 +399,7 @@ ASTree *validate_array_size(ASTree *array, ASTree *expr) {
 }
 
 ASTree *validate_param_list(ASTree *param_list) {
-  param_list->symbol_table = symbol_table_init();
+  param_list->symbol_table = symbol_table_init(FUNCTION_TABLE);
   int status = state_push_table(state, param_list->symbol_table);
   if (status)
     return astree_create_errnode(param_list, BCC_TERR_LIBRARY_FAILURE, 0);
