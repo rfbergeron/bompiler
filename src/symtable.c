@@ -118,6 +118,9 @@ TagValue *tag_value_init(TagType tag) {
     int status = map_init(&tagval->data.enumerators.by_name, DEFAULT_MAP_SIZE,
                           NULL, free, strncmp_wrapper);
     if (status) return NULL;
+    status =
+        llist_init(&tagval->data.enumerators.struct_name_spaces, NULL, NULL);
+    if (status) return NULL;
     tagval->data.enumerators.last_value = 0;
   } else {
     /* error: invalid tag type */
@@ -141,6 +144,11 @@ int tag_value_destroy(TagValue *tagval) {
     }
   } else if (tagval->tag == TAG_ENUM) {
     int status = map_destroy(&tagval->data.enumerators.by_name);
+    if (status) {
+      fprintf(stderr, "your data structures library sucks\n");
+      abort();
+    }
+    status = llist_destroy(&tagval->data.enumerators.struct_name_spaces);
     if (status) {
       fprintf(stderr, "your data structures library sucks\n");
       abort();
