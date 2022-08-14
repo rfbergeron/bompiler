@@ -280,10 +280,10 @@ int astree_print_symbols(ASTree *tree, FILE *out) {
     LinkedList symnames = BLIB_LLIST_EMPTY;
     int status = llist_init(&symnames, NULL, NULL);
     if (status) return status;
-    status = map_keys(&tree->symbol_table->primary_namespace, &symnames);
+    status = map_keys(tree->symbol_table->primary_namespace, &symnames);
     if (status) return status;
     DEBUGS('a', "Printing %lu symbols",
-           map_size(&tree->symbol_table->primary_namespace));
+           map_size(tree->symbol_table->primary_namespace));
     const char *tname = parser_get_tname(tree->symbol);
     char locstr[LINESIZE];
     location_to_string(&tree->loc, locstr, LINESIZE);
@@ -294,7 +294,7 @@ int astree_print_symbols(ASTree *tree, FILE *out) {
     size_t i;
     for (i = 0; i < llist_size(&symnames); ++i) {
       const char *symname = llist_get(&symnames, i);
-      SymbolValue *symval = map_get(&tree->symbol_table->primary_namespace,
+      SymbolValue *symval = map_get(tree->symbol_table->primary_namespace,
                                     (char *)symname, strlen(symname));
       char symval_str[LINESIZE];
       int characters_printed = symbol_value_print(symval, symval_str, LINESIZE);

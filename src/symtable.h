@@ -7,11 +7,19 @@
 
 #define DEFAULT_MAP_SIZE 100
 
+typedef enum table_type {
+  TRANS_UNIT_TABLE,
+  BLOCK_TABLE,
+  MEMBER_TABLE,
+  FUNCTION_TABLE
+} TableType;
+
 typedef struct symbol_table {
-  Map primary_namespace;
+  Map *primary_namespace;
   Map *tag_namespace;
   Map *label_namespace;
   LinkedList *control_stack;
+  TableType type;
 } SymbolTable;
 
 typedef enum symbol_flag {
@@ -78,7 +86,7 @@ TagValue *tag_value_init(TagType tag);
 int tag_value_destroy(TagValue *tagval);
 
 /* symbol table functions */
-SymbolTable *symbol_table_init();
+SymbolTable *symbol_table_init(TableType type);
 int symbol_table_destroy(SymbolTable *table);
 int symbol_table_insert(SymbolTable *table, const char *ident,
                         const size_t ident_len, SymbolValue *symval);

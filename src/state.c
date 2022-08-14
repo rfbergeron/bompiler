@@ -128,19 +128,14 @@ size_t state_get_sequence(CompilerState *state) {
 
 int state_get_tag(CompilerState *state, const char *ident,
                   const size_t ident_len, TagValue **out) {
+  *out = NULL;
   size_t i;
   for (i = 0; i < llist_size(&state->table_stack); ++i) {
     SymbolTable *current = llist_get(&state->table_stack, i);
-    TagValue *tagval = symbol_table_get_tag(current, ident, ident_len);
-    if (tagval != NULL) {
-      *out = tagval;
-      break;
+    if (current->tag_namespace != NULL) {
+      *out = symbol_table_get_tag(current, ident, ident_len);
+      if (*out != NULL) break;
     }
-  }
-
-  if (i >= llist_size(&state->table_stack)) {
-    /* set out to NULL if tag could not be found */
-    *out = NULL;
   }
 
   /* return whether or not tag is in current scope */
@@ -149,7 +144,14 @@ int state_get_tag(CompilerState *state, const char *ident,
 
 int state_insert_tag(CompilerState *state, const char *ident,
                      const size_t ident_len, TagValue *tagval) {
-  SymbolTable *top_scope = llist_front(&state->table_stack);
+  SymbolTable *top_scope = NULL;
+  size_t i;
+  for (i = 0; i < llist_size(&state->table_stack); ++i) {
+    top_scope = llist_get(&state->table_stack, i);
+    if (top_scope->tag_namespace != NULL) break;
+  }
+
+  if (top_scope->tag_namespace == NULL) return -1;
   TagValue *exists = symbol_table_get_tag(top_scope, ident, ident_len);
   if (exists) {
     /* TODO(Robert): allow redefinition of tags in certain circumstances */
@@ -164,7 +166,7 @@ LabelValue *state_get_label(CompilerState *state, const char *ident,
                             const size_t ident_len) {
   SymbolTable *function_table =
       llist_get(&state->table_stack, llist_size(&state->table_stack) - 2);
-  if (function_table == NULL) {
+  if (function_table == NULL || function_table->label_namespace == NULL) {
     fprintf(stderr, "ERROR: attempt to get label at top level.\n");
     return NULL;
   }
@@ -175,7 +177,7 @@ int state_insert_label(CompilerState *state, const char *ident,
                        const size_t ident_len, LabelValue *labval) {
   SymbolTable *function_table =
       llist_get(&state->table_stack, llist_size(&state->table_stack) - 2);
-  if (function_table == NULL) {
+  if (function_table == NULL || function_table->label_namespace == NULL) {
     fprintf(stderr, "ERROR: attempt to insert label at top level.\n");
     return -1;
   }
