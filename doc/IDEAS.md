@@ -88,6 +88,8 @@ I did not realize this until it was mentioned in passing in a cppconf/ndc talk.
 ## Scope/name space fix
 
 ### Incremental Solution
+
+#### Tag declaration/definition fix
 An enum member will be added to the symbol table. This enum must be set by a
 parameter to `symbol_table_init`. It indicates what kind of symbol table is
 being created. Valid enumeration constants will be:
@@ -106,6 +108,21 @@ on which enumeration constant was passed as a parameter.
 The `state.c` functions will search down the table stack until they find a
 symbol table with the appropriate map initialized. If they are unable to find
 one, they will return failure.
+
+#### Enumeration constant fix
+Since the primary name space is used for struct and union members as well as
+objects, functions, enumeration constants and typedef names, there needs to be
+a way to bypass struct and union "scopes" so that enumeration constants can be
+hoisted into the enclosing scope.
+
+To preserve existing code, this will be implemented by popping all symbol tables
+with type `MEMBER_TABLE` and storing them temporarily in the enum tag. When this
+tag is finalized, they will be put back on the stack.
+
+This should work without issue since enumeration constants shouldn't be
+referring to objects or functions of any sort in their definition, and to do so
+would be an error anyways. Error messages will be less helpful, however.
+`TagValue` will also look a lot uglier.
 
 ### Refactoring
 To better mirror the language of the standard, it may be best to split the

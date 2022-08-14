@@ -165,7 +165,7 @@ void lexer_fatal_error(const char *msg) { errx(1, "%s", msg); }
 
 void lexer_error(const char *message) {
   assert(llist_size(&lexer_filenames) != 0);
-  fprintf(stderr, "%s:%lu.%lu: %s", lexer_filename(lexer_loc.filenr),
+  fprintf(stderr, "%s:%lu.%lu: %s\n", lexer_filename(lexer_loc.filenr),
           lexer_loc.linenr, lexer_loc.offset, message);
 }
 
