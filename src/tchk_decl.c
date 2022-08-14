@@ -1007,13 +1007,36 @@ ASTree *validate_tag_def(ASTree *tag_type_node, ASTree *tag_name_node,
     status =
         llist_push_back((LinkedList *)&tag_type_node->type->auxspecs, tag_aux);
     if (tag_type == TAG_ENUM) {
+      /* remove struct/union member tables from scope stack */
+      SymbolTable *top_scope = state_peek_table(state);
+      while (top_scope->type == MEMBER_TABLE) {
+        assert(!llist_push_back(&tagval->data.enumerators.struct_name_spaces,
+                                top_scope));
+        assert(!state_pop_table(state));
+        top_scope = state_peek_table(state);
+      }
       tagval->width = 4;
       tagval->alignment = 4;
     } else {
       int status = state_push_table(state, tagval->data.members.by_name);
     }
     return astree_adopt(tag_type_node, 2, tag_name_node, left_brace);
+  } else if (exists == NULL && tag_type != TAG_ENUM) {
+    /* TODO(Robert): error handling */
+    TagValue *tagval = tag_value_init(tag_type);
+    int status = state_insert_tag(state, tag_name, tag_name_len, tagval);
+    tag_type_node->type = calloc(1, sizeof(TypeSpec));
+    status = typespec_init((TypeSpec *)tag_type_node->type);
+    AuxSpec *tag_aux = calloc(1, sizeof(AuxSpec));
+    tag_aux->aux = aux_from_tag(tag_type);
+    tag_aux->data.tag.name = tag_name;
+    tag_aux->data.tag.val = tagval;
+    status =
+        llist_push_back((LinkedList *)&tag_type_node->type->auxspecs, tag_aux);
+    return astree_adopt(tag_type_node, 1, tag_name_node);
   } else {
+    /* do not insert enum tag; enum must declare their constants; error will be
+     * caught in validate_tag_typespec */
     return astree_adopt(tag_type_node, 1, tag_name_node);
   }
 }
@@ -1030,11 +1053,21 @@ ASTree *finalize_tag_def(ASTree *tag) {
   int status = typespec_destroy((TypeSpec *)tag->type);
   free((TypeSpec *)tag->type);
   tag->type = &SPEC_EMPTY;
-  if (tagval->tag != TAG_ENUM) {
+  if (tagval->tag == TAG_ENUM) {
+    /* push struct/union member tables back onto the scope stack */
+    while (!llist_empty(&tagval->data.enumerators.struct_name_spaces)) {
+      SymbolTable *member_scope =
+          llist_pop_back(&tagval->data.enumerators.struct_name_spaces);
+      assert(member_scope != NULL);
+      assert(!state_push_table(state, member_scope));
+    }
+  } else {
     assert(!state_pop_table(state));
     /* pad aggregate so that it can tile an array */
-    size_t padding = tagval->alignment - (tagval->width % tagval->alignment);
-    if (padding != tagval->alignment) tagval->width += padding;
+    if (tagval->alignment != 0) {
+      size_t padding = tagval->alignment - (tagval->width % tagval->alignment);
+      if (padding != tagval->alignment) tagval->width += padding;
+    }
   }
   return errnode == NULL ? tag : errnode;
 }
