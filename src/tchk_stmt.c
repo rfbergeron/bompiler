@@ -279,7 +279,7 @@ ASTree *validate_break(ASTree *break_) {
 }
 
 ASTree *validate_block(ASTree *block) {
-  block->symbol_table = symbol_table_init();
+  block->symbol_table = symbol_table_init(BLOCK_TABLE);
   int status = state_push_table(state, block->symbol_table);
   if (status) {
     return astree_create_errnode(block, BCC_TERR_LIBRARY_FAILURE, 0);

@@ -86,6 +86,28 @@ typedefs defined inside of structs and unions.
 I did not realize this until it was mentioned in passing in a cppconf/ndc talk.
 
 ## Scope/name space fix
+
+### Incremental Solution
+An enum member will be added to the symbol table. This enum must be set by a
+parameter to `symbol_table_init`. It indicates what kind of symbol table is
+being created. Valid enumeration constants will be:
+- `MEMBER_TABLE`
+- `TRANS_UNIT_TABLE`
+- `FUNCTION_TABLE`
+- `BLOCK_TABLE`
+
+Roughly corresponding to the types of scope. Members technically occupy a
+separate name space, not scope, but this namespace only holds functions and
+objects, so for now we will continue treating it as a scope.
+
+The separate name spaces in each symbol table will be initialized conditionally
+on which enumeration constant was passed as a parameter.
+
+The `state.c` functions will search down the table stack until they find a
+symbol table with the appropriate map initialized. If they are unable to find
+one, they will return failure.
+
+### Refactoring
 To better mirror the language of the standard, it may be best to split the
 `SymbolTable` stack up, and change some names. A new union will be created,
 referred to using the typedef name `NameSpace`. A `NameSpace` will consist of

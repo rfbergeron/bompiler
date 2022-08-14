@@ -301,7 +301,7 @@ ASTree *parser_make_root() {
   Location root_loc = {lexer_get_filenr(), 0, 0};
   ASTree *root = astree_init(TOK_ROOT, root_loc, "_root");
   DEBUGS('t', "Making symbol table");
-  root->symbol_table = symbol_table_init();
+  root->symbol_table = symbol_table_init(TRANS_UNIT_TABLE);
   state_push_table(state, root->symbol_table);
   return root;
 }

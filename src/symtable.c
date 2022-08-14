@@ -103,7 +103,7 @@ TagValue *tag_value_init(TagType tag) {
   tagval->alignment = 0;
   tagval->is_defined = 0;
   if (tag == TAG_STRUCT || tag == TAG_UNION) {
-    tagval->data.members.by_name = symbol_table_init();
+    tagval->data.members.by_name = symbol_table_init(MEMBER_TABLE);
     if (tagval->data.members.by_name == NULL)
       /* TODO(Robert): cleanup data on error */
       return NULL;
@@ -140,7 +140,7 @@ int tag_value_destroy(TagValue *tagval) {
       abort();
     }
   } else if (tagval->tag == TAG_ENUM) {
-    int status = map_destroy(&tagval->data.enumerators);
+    int status = map_destroy(&tagval->data.enumerators.by_name);
     if (status) {
       fprintf(stderr, "your data structures library sucks\n");
       abort();
@@ -170,7 +170,7 @@ int tag_value_print(const TagValue *tagval, char *buffer, size_t size) {
     LinkedList symnames = BLIB_LLIST_EMPTY;
     /* TODO(Robert): handle blib errors */
     int status = llist_init(&symnames, NULL, NULL);
-    Map *symbols = &tagval->data.members.by_name->primary_namespace;
+    Map *symbols = tagval->data.members.by_name->primary_namespace;
     status = map_keys(symbols, &symnames);
     size_t i;
     for (i = 0; i < llist_size(&symnames); ++i) {
@@ -192,39 +192,47 @@ int tag_value_print(const TagValue *tagval, char *buffer, size_t size) {
 /*
  * SymbolTable functions
  */
-SymbolTable *symbol_table_init() {
+SymbolTable *symbol_table_init(TableType type) {
   SymbolTable *table = malloc(sizeof(*table));
-  table->tag_namespace = table->label_namespace = NULL;
-  table->control_stack = NULL;
-  int status =
-      map_init(&table->primary_namespace, DEFAULT_MAP_SIZE, NULL,
-               (void (*)(void *))symbol_value_destroy, strncmp_wrapper);
-  if (status) {
-    fprintf(stderr, "fuck you\n");
-    abort();
+  table->type = type;
+  switch (type) {
+    case FUNCTION_TABLE:
+      table->label_namespace = malloc(sizeof(Map));
+      assert(!map_init(table->label_namespace, DEFAULT_MAP_SIZE, NULL, free,
+                       strncmp_wrapper));
+      /* fallthrough */
+    case TRANS_UNIT_TABLE:
+    case BLOCK_TABLE:
+      table->tag_namespace = malloc(sizeof(Map));
+      assert(!map_init(table->tag_namespace, DEFAULT_MAP_SIZE, NULL,
+                       (void (*)(void *))tag_value_destroy, strncmp_wrapper));
+      /* fallthrough */
+    case MEMBER_TABLE:
+      table->primary_namespace = malloc(sizeof(Map));
+      assert(!map_init(table->primary_namespace, DEFAULT_MAP_SIZE, NULL,
+                       (void (*)(void *))symbol_value_destroy,
+                       strncmp_wrapper));
+      break;
   }
-
   return table;
 }
 
 int symbol_table_destroy(SymbolTable *table) {
   DEBUGS('t', "Freeing symbol table");
-  int status = map_destroy(&table->primary_namespace);
-  if (status) return status;
-  if (table->tag_namespace != NULL) {
-    int status = map_destroy(table->tag_namespace);
-    if (status) return status;
-    free(table->tag_namespace);
-  }
-  if (table->label_namespace != NULL) {
-    int status = map_destroy(table->label_namespace);
-    if (status) return status;
-    free(table->label_namespace);
-  }
-  if (table->control_stack != NULL) {
-    int status = llist_destroy(table->control_stack);
-    if (status) return status;
-    free(table->control_stack);
+  switch (table->type) {
+    case FUNCTION_TABLE:
+      assert(!map_destroy(table->label_namespace));
+      free(table->label_namespace);
+      /* fallthrough */
+    case TRANS_UNIT_TABLE:
+    case BLOCK_TABLE:
+      assert(!map_destroy(table->tag_namespace));
+      free(table->tag_namespace);
+      /* fallthrough */
+    case MEMBER_TABLE:
+      assert(!map_destroy(table->primary_namespace));
+      free(table->primary_namespace);
+      break;
   }
   free(table);
   return 0;
@@ -232,24 +240,16 @@ int symbol_table_destroy(SymbolTable *table) {
 
 int symbol_table_insert(SymbolTable *table, const char *ident,
                         const size_t ident_len, SymbolValue *symval) {
-  return map_insert(&table->primary_namespace, (char *)ident, ident_len,
-                    symval);
+  return map_insert(table->primary_namespace, (char *)ident, ident_len, symval);
 }
 
 SymbolValue *symbol_table_get(SymbolTable *table, const char *ident,
                               const size_t ident_len) {
-  return map_get(&table->primary_namespace, (char *)ident, ident_len);
+  return map_get(table->primary_namespace, (char *)ident, ident_len);
 }
 
 int symbol_table_insert_tag(SymbolTable *table, const char *ident,
                             const size_t ident_len, TagValue *tagval) {
-  if (table == NULL) {
-    return -1;
-  } else if (table->tag_namespace == NULL) {
-    table->tag_namespace = malloc(sizeof(Map));
-    int status = map_init(table->tag_namespace, DEFAULT_MAP_SIZE, NULL,
-                          (void (*)(void *))tag_value_destroy, strncmp_wrapper);
-  }
   return map_insert(table->tag_namespace, (char *)ident, ident_len, tagval);
 }
 
@@ -260,12 +260,6 @@ TagValue *symbol_table_get_tag(SymbolTable *table, const char *ident,
 
 int symbol_table_insert_label(SymbolTable *table, const char *ident,
                               const size_t ident_len, LabelValue *labval) {
-  if (table->label_namespace == NULL) {
-    table->label_namespace = malloc(sizeof(Map));
-    int status = map_init(table->label_namespace, DEFAULT_MAP_SIZE, NULL, free,
-                          strncmp_wrapper);
-    if (status) return status;
-  }
   return map_insert(table->label_namespace, (char *)ident, ident_len, labval);
 }
 
