@@ -1,6 +1,7 @@
 #include "tchk_decl.h"
 
 #include "assert.h"
+#include "badalist.h"
 #include "state.h"
 #include "stdlib.h"
 #include "tchk_common.h"
@@ -900,14 +901,13 @@ ASTree *finalize_function(ASTree *function) {
   ASTree *body = astree_get(UNWRAP(function), 2);
   ASTree *ret = function;
   if (body->symbol_table->label_namespace != NULL) {
-    LinkedList label_strs;
-    int status = llist_init(&label_strs, NULL, NULL);
-    if (status) abort();
-    status = map_keys(body->symbol_table->label_namespace, &label_strs);
-    if (status) abort();
+    ArrayList label_strs;
+    assert(!alist_init(&label_strs,
+                       map_size(body->symbol_table->label_namespace)));
+    assert(!map_keys(body->symbol_table->label_namespace, &label_strs));
     size_t i;
-    for (i = 0; i < llist_size(&label_strs); ++i) {
-      const char *label_str = llist_get(&label_strs, i);
+    for (i = 0; i < alist_size(&label_strs); ++i) {
+      const char *label_str = alist_get(&label_strs, i);
       size_t label_str_len = strlen(label_str);
       LabelValue *labval = state_get_label(state, label_str, label_str_len);
       if (!labval->is_defined) {
@@ -915,8 +915,7 @@ ASTree *finalize_function(ASTree *function) {
                                     labval->tree);
       }
     }
-    status = llist_destroy(&label_strs);
-    if (status) abort();
+    assert(!alist_destroy(&label_strs, NULL));
   }
   SymbolValue *symval = state_get_function(state);
   symval->flags |= SYMFLAG_FUNCTION_DEFINED;

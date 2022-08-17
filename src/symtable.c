@@ -3,6 +3,7 @@
 #include "assert.h"
 #include "astree.h"
 #include "attributes.h"
+#include "badalist.h"
 #include "badllist.h"
 #include "badmap.h"
 #include "bcc_err.h"
@@ -175,15 +176,15 @@ int tag_value_print(const TagValue *tagval, char *buffer, size_t size) {
   /* TODO(Robert): check buffer_offset for snprintf errors */
   /* TODO(Robert): print tags defined within struct and union tags */
   if (tagval->tag == TAG_STRUCT || tagval->tag == TAG_UNION) {
-    LinkedList symnames = BLIB_LLIST_EMPTY;
     /* TODO(Robert): handle blib errors */
-    int status = llist_init(&symnames, NULL, NULL);
     Map *symbols = tagval->data.members.by_name->primary_namespace;
-    status = map_keys(symbols, &symnames);
+    ArrayList symnames;
+    assert(!alist_init(&symnames, map_size(symbols)));
+    assert(!map_keys(symbols, &symnames));
     size_t i;
-    for (i = 0; i < llist_size(&symnames); ++i) {
+    for (i = 0; i < alist_size(&symnames); ++i) {
       char symbuf[LINESIZE];
-      const char *symname = llist_get(&symnames, i);
+      const char *symname = alist_get(&symnames, i);
       SymbolValue *symval = map_get(symbols, (char *)symname, strlen(symname));
       int status = symbol_value_print(symval, symbuf, LINESIZE);
       if (status) return status;
@@ -191,6 +192,7 @@ int tag_value_print(const TagValue *tagval, char *buffer, size_t size) {
           sprintf(buffer + buffer_offset, "%s: %s, ", symname, symbuf);
       buffer_offset += characters_printed;
     }
+    assert(!alist_destroy(&symnames, NULL));
   }
 
   return sprintf(buffer + buffer_offset, "}");

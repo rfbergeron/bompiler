@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "attributes.h"
+#include "badalist.h"
 #include "badllist.h"
 #include "bcc_err.h"
 #include "debug.h"
@@ -275,13 +276,43 @@ int astree_print_tree(ASTree *tree, FILE *out, int depth) {
   return 0;
 }
 
+/*
+int astree_psym(ASTree *block, FILE *out, int depth) {
+  int ret;
+  size_t numspaces = depth * 2;
+  char indent[LINESIZE];
+  memset(indent, ' ', numspaces);
+  indent[numspaces] = 0;
+  const char *tname = parser_get_tname(tree->symbol);
+  char locstr[LINESIZE];
+  location_to_string(&tree->loc, locstr, LINESIZE);
+  if (strlen(tname) > 4) tname += 4;
+  fprintf(out, "%s%s \"%s\" {%s}\n", indent, parser_get_tname(tree->symbol),
+          tree->lexinfo, locstr);
+
+  size_t i;
+  for (i = 0; i < llist_size(&tree->children); ++i) {
+    DEBUGS('t', "    %p", llist_get(&tree->children, i));
+  }
+
+  for (i = 0; i < llist_size(&tree->children); ++i) {
+    ASTree *child = (ASTree *)llist_get(&tree->children, i);
+
+    if (child != NULL) {
+      int status = astree_print_tree(child, out, depth + 1);
+      if (status) return status;
+    }
+  }
+  return 0;
+}
+*/
+
 int astree_print_symbols(ASTree *tree, FILE *out) {
   if (tree->symbol_table != NULL) {
-    LinkedList symnames = BLIB_LLIST_EMPTY;
-    int status = llist_init(&symnames, NULL, NULL);
-    if (status) return status;
-    status = map_keys(tree->symbol_table->primary_namespace, &symnames);
-    if (status) return status;
+    ArrayList symnames;
+    assert(!alist_init(&symnames,
+                       map_size(tree->symbol_table->primary_namespace)));
+    assert(!map_keys(tree->symbol_table->primary_namespace, &symnames));
     DEBUGS('a', "Printing %lu symbols",
            map_size(tree->symbol_table->primary_namespace));
     const char *tname = parser_get_tname(tree->symbol);
@@ -292,8 +323,8 @@ int astree_print_symbols(ASTree *tree, FILE *out) {
     fprintf(out, "%s \"%s\" {%s}\n", parser_get_tname(tree->symbol),
             tree->lexinfo, locstr);
     size_t i;
-    for (i = 0; i < llist_size(&symnames); ++i) {
-      const char *symname = llist_get(&symnames, i);
+    for (i = 0; i < alist_size(&symnames); ++i) {
+      const char *symname = alist_get(&symnames, i);
       SymbolValue *symval = map_get(tree->symbol_table->primary_namespace,
                                     (char *)symname, strlen(symname));
       char symval_str[LINESIZE];
@@ -303,11 +334,11 @@ int astree_print_symbols(ASTree *tree, FILE *out) {
                 "ERROR: failed to print symbol table associated with "
                 "astree node, symbol: %s, lexinfo: %s\n",
                 parser_get_tname(tree->symbol), tree->lexinfo);
-        return status;
+        return characters_printed;
       }
       fprintf(out, "  %s: %s\n", symname, symval_str);
     }
-    llist_destroy(&symnames);
+    assert(!alist_destroy(&symnames, NULL));
   }
   size_t i;
   for (i = 0; i < astree_count(tree); ++i) {

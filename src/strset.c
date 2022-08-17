@@ -1,10 +1,12 @@
 #include "strset.h"
 
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "attributes.h"
+#include "badalist.h"
 #include "badmap.h"
 #include "debug.h"
 
@@ -63,20 +65,18 @@ const char *string_set_intern(const char *string) {
 
 int string_set_print(FILE *out) {
   DEBUGS('s', "Printing string set");
-  LinkedList key_list = BLIB_LLIST_EMPTY;
-  int status = llist_init(&key_list, NULL, NULL);
-  if (status) return status;
-  status = map_keys(&string_set, &key_list);
-  if (status) return status;
+  ArrayList key_list;
+  assert(!alist_init(&key_list, map_size(&string_set)));
+  assert(!map_keys(&string_set, &key_list));
 
   size_t i;
-  for (i = 0; i < llist_size(&key_list); ++i) {
-    char *key = llist_get(&key_list, i);
+  for (i = 0; i < alist_size(&key_list); ++i) {
+    char *key = alist_get(&key_list, i);
     size_t map_location[] = {-1, -1};
     map_find(&string_set, key, strlen(key), map_location);
     fprintf(out, "string_set[%4lu,%4lu]: %p->\"%s\"\n", map_location[0],
             map_location[1], (void *)key, key);
   }
-  llist_destroy(&key_list);
+  assert(!alist_destroy(&key_list, NULL));
   return 0;
 }
