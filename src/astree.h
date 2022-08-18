@@ -45,5 +45,5 @@ ASTree *astree_propogate_errnode_a(ASTree *parent, size_t count,
 size_t astree_count(ASTree *parent);
 int astree_to_string(ASTree *astree, char *buffer, size_t size);
 int astree_print_tree(ASTree *tree, FILE *out, int depth);
-int astree_print_symbols(ASTree *tree, FILE *out);
+int astree_print_symbols(ASTree *tree, FILE *out, int depth);
 #endif
