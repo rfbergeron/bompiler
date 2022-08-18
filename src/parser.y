@@ -321,8 +321,7 @@ ASTree *parser_make_spec_list(ASTree *first_specifier) {
 }
 
 ASTree *parser_make_declaration(ASTree *spec_list) {
-  ASTree *declaration =
-      astree_init(TOK_DECLARATION, spec_list->loc, "_declaration");
+  ASTree *declaration = astree_init(TOK_DECLARATION, LOC_EMPTY, "_declaration");
   spec_list = validate_typespec_list(spec_list);
   if (spec_list->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(declaration, spec_list);

@@ -289,6 +289,21 @@ int compare_symval_pairs(MapPair *pair1, MapPair *pair2) {
   return location_ge(&symval1->loc, &symval2->loc);
 }
 
+const char *table_type_to_str(TableType type) {
+  switch (type) {
+    case FUNCTION_TABLE:
+      return "FUNCTION SCOPE";
+    case BLOCK_TABLE:
+      return "BLOCK SCOPE";
+    case MEMBER_TABLE:
+      /* currently unused */
+      return "MEMBER NAMESPACE";
+    case TRANS_UNIT_TABLE:
+      /* currently unused */
+      return "TRANSLATION UNIT SCOPE";
+  }
+}
+
 int print_sym_child_helper(ASTree *tree, FILE *out, int depth) {
   ASTree *block = NULL;
   switch (tree->symbol) {
@@ -303,13 +318,23 @@ int print_sym_child_helper(ASTree *tree, FILE *out, int depth) {
     case TOK_FOR:
       /* fallthrough */
     case TOK_IF:
+      /* fallthrough */
+    case TOK_CASE:
+      /* fallthrough */
+    case TOK_LABEL:
       block = astree_get(tree, 1);
       break;
     case TOK_DO:
+      /* fallthrough */
+    case TOK_DEFAULT:
       block = astree_get(tree, 0);
       break;
     case TOK_DECLARATION:
-      if (astree_count(tree) == 3) block = astree_get(tree, 2);
+      if (astree_count(tree) == 3) {
+        block = astree_get(tree, 2);
+        /* set tree to declarator/identifier for nicer output */
+        tree = astree_get(tree, 1);
+      }
       break;
   }
   if (block != NULL && block->symbol == TOK_BLOCK) {
@@ -319,12 +344,12 @@ int print_sym_child_helper(ASTree *tree, FILE *out, int depth) {
     if (characters_printed < 0) return characters_printed;
     if (strlen(tname) > 4) tname += 4;
     int padding_plus_tname = strlen(tname) + depth * 2;
-    characters_printed = fprintf(out, "%*s \"%s\" {%s} {\n", padding_plus_tname,
-                                 tname, tree->lexinfo, locstr);
+    characters_printed = fprintf(
+        out, "%*s \"%s\" {%s} {%s}:\n", padding_plus_tname, tname,
+        tree->lexinfo, locstr, table_type_to_str(block->symbol_table->type));
     if (characters_printed < 0) return characters_printed;
     int status = astree_print_symbols(block, out, depth + 1);
-    if (status) return -1;
-    return fprintf(out, "%*s}\n", depth * 2, "");
+    return status < 0 ? status : 0;
   } else {
     return 0;
   }
