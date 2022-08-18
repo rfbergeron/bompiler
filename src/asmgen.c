@@ -1,5 +1,6 @@
 #include "asmgen.h"
 
+#include "assert.h"
 #include "astree.h"
 #include "attributes.h"
 #include "badalist.h"
@@ -8,108 +9,143 @@
 #include "state.h"
 #include "symtable.h"
 
-#define MAX_INSTRUCTION_LENGTH 8
-#define MAX_OP_LENGTH 32
+#define MAX_OPCODE_LENGTH 8
+#define MAX_OPERAND_LENGTH 32
 #define MAX_LABEL_LENGTH 32
 
-/* macros used to generate string constants for instructions */
-#define FOREACH_INSTRUCTION(GENERATOR) \
-  /* arithmetic */                     \
-  GENERATOR(ADD)                       \
-  GENERATOR(SUB)                       \
-  GENERATOR(MUL)                       \
-  GENERATOR(DIV)                       \
-  GENERATOR(INC)                       \
-  GENERATOR(DEC)                       \
-  GENERATOR(NEG)                       \
-  GENERATOR(IMUL)                      \
-  GENERATOR(IDIV)                      \
-  /* compare and test */               \
-  GENERATOR(TEST)                      \
-  GENERATOR(CMP)                       \
-  GENERATOR(SETE)                      \
-  GENERATOR(SETNE)                     \
-  GENERATOR(SETG)                      \
-  GENERATOR(SETGE)                     \
-  GENERATOR(SETL)                      \
-  GENERATOR(SETLE)                     \
-  GENERATOR(SETA)                      \
-  GENERATOR(SETAE)                     \
-  GENERATOR(SETB)                      \
-  GENERATOR(SETBE)                     \
-  GENERATOR(SETZ)                      \
-  GENERATOR(SETNZ)                     \
-  /* jump */                           \
-  GENERATOR(JMP)                       \
-  GENERATOR(JE)                        \
-  GENERATOR(JNE)                       \
-  GENERATOR(JG)                        \
-  GENERATOR(JGE)                       \
-  GENERATOR(JL)                        \
-  GENERATOR(JLE)                       \
-  GENERATOR(JA)                        \
-  GENERATOR(JAE)                       \
-  GENERATOR(JB)                        \
-  GENERATOR(JBE)                       \
-  GENERATOR(JZ)                        \
-  GENERATOR(JNZ)                       \
-  /* logical and bitwise */            \
-  GENERATOR(NOT)                       \
-  GENERATOR(OR)                        \
-  GENERATOR(AND)                       \
-  GENERATOR(LEA)                       \
-  GENERATOR(XOR)                       \
-  /* shifts */                         \
-  GENERATOR(SHL)                       \
-  GENERATOR(SHR)                       \
-  GENERATOR(SAR)                       \
-  /* code movement */                  \
-  GENERATOR(MOV)                       \
-  GENERATOR(MOVZX)                     \
-  GENERATOR(MOVSX)                     \
-  GENERATOR(PUSH)                      \
-  GENERATOR(POP)                       \
-  GENERATOR(CALL)                      \
-  GENERATOR(LEAVE)                     \
-  GENERATOR(RET)                       \
-  GENERATOR(NOP)                       \
-  /* data section definitions */       \
-  GENERATOR(DB)                        \
-  GENERATOR(DW)                        \
-  GENERATOR(DD)                        \
-  GENERATOR(DQ)                        \
-  /* bss section definitions */        \
-  GENERATOR(RESB)                      \
-  GENERATOR(RESW)                      \
-  GENERATOR(RESD)                      \
-  GENERATOR(RESQ)                      \
-  /* pseudo-ops; should not be present \
-   * in generated code                 \
-   */                                  \
-  GENERATOR(POINC)                     \
-  GENERATOR(PODEC)                     \
-  GENERATOR(MOD)
+/* macros used to generate string constants for OPCODES */
+#define FOREACH_OPCODE(GENERATOR) \
+  /* arithmetic */                \
+  GENERATOR(ADD)                  \
+  GENERATOR(SUB)                  \
+  GENERATOR(MUL)                  \
+  GENERATOR(DIV)                  \
+  GENERATOR(INC)                  \
+  GENERATOR(DEC)                  \
+  GENERATOR(NEG)                  \
+  GENERATOR(IMUL)                 \
+  GENERATOR(IDIV)                 \
+  /* compare and test */          \
+  GENERATOR(TEST)                 \
+  GENERATOR(CMP)                  \
+  GENERATOR(SETE)                 \
+  GENERATOR(SETNE)                \
+  GENERATOR(SETG)                 \
+  GENERATOR(SETGE)                \
+  GENERATOR(SETL)                 \
+  GENERATOR(SETLE)                \
+  GENERATOR(SETA)                 \
+  GENERATOR(SETAE)                \
+  GENERATOR(SETB)                 \
+  GENERATOR(SETBE)                \
+  GENERATOR(SETZ)                 \
+  GENERATOR(SETNZ)                \
+  /* jump */                      \
+  GENERATOR(JMP)                  \
+  GENERATOR(JE)                   \
+  GENERATOR(JNE)                  \
+  GENERATOR(JG)                   \
+  GENERATOR(JGE)                  \
+  GENERATOR(JL)                   \
+  GENERATOR(JLE)                  \
+  GENERATOR(JA)                   \
+  GENERATOR(JAE)                  \
+  GENERATOR(JB)                   \
+  GENERATOR(JBE)                  \
+  GENERATOR(JZ)                   \
+  GENERATOR(JNZ)                  \
+  /* logical and bitwise */       \
+  GENERATOR(NOT)                  \
+  GENERATOR(OR)                   \
+  GENERATOR(AND)                  \
+  GENERATOR(LEA)                  \
+  GENERATOR(XOR)                  \
+  /* shifts */                    \
+  GENERATOR(SHL)                  \
+  GENERATOR(SHR)                  \
+  GENERATOR(SAR)                  \
+  /* code movement */             \
+  GENERATOR(MOV)                  \
+  GENERATOR(MOVZX)                \
+  GENERATOR(MOVSX)                \
+  GENERATOR(PUSH)                 \
+  GENERATOR(POP)                  \
+  GENERATOR(CALL)                 \
+  GENERATOR(LEAVE)                \
+  GENERATOR(RET)                  \
+  GENERATOR(NOP)                  \
+  /* data section definitions */  \
+  GENERATOR(DB)                   \
+  GENERATOR(DW)                   \
+  GENERATOR(DD)                   \
+  GENERATOR(DQ)                   \
+  /* bss section definitions */   \
+  GENERATOR(RESB)                 \
+  GENERATOR(RESW)                 \
+  GENERATOR(RESD)                 \
+  GENERATOR(RESQ)
 
-#define GENERATE_ENUM(ENUM) INSTR_##ENUM,
+#define GENERATE_ENUM(ENUM) OP_##ENUM,
 #define GENERATE_STRING(STRING) #STRING,
 
-typedef struct vreg_entry {
-  char *object_name;
-  TypeSpec *object_type;
-  size_t vreg_num;
-  struct llist assigned_vregs;
-} VregEntry;
+typedef enum opcode { FOREACH_OPCODE(GENERATE_ENUM) } Opcode;
+
+typedef enum address_mode {
+  MODE_NONE,
+  MODE_IMMEDIATE,
+  MODE_DIRECT,
+  MODE_INDIRECT,
+  MODE_SCALE_1,
+  MODE_SCALE_2,
+  MODE_SCALE_4,
+  MODE_SCALE_8, /* decimal 7, binary 111 */
+  MODE_REG_Q = 0,
+  MODE_REG_D = 1 << 3, /* decimal 8, binary 1000 */
+  MODE_REG_W = 1 << 4, /* decimal 16, binary 10000 */
+  MODE_REG_B = 3 << 3, /* decimal 24, binary 11000 */
+  MODE_BASE_Q = 0,
+  MODE_BASE_D = 1 << 3,
+  MODE_BASE_W = 1 << 4,
+  MODE_BASE_B = 3 << 3,
+  MODE_INDEX_Q = 0,
+  MODE_INDEX_D = 1 << 5, /* decimal 32, binary 100000 */
+  MODE_INDEX_W = 1 << 6, /* decimal 64, binary 1000000 */
+  MODE_INDEX_B = 3 << 5  /* decimal 96, binary 1100000 */
+} AddressMode;
+
+typedef union operand {
+  struct opall {
+    AddressMode mode;
+  } all;
+  struct opimm {
+    AddressMode mode;
+    uintmax_t val;
+  } imm;
+  struct opdir {
+    AddressMode mode;
+    intmax_t disp;
+    const char *lab;
+  } dir;
+  struct opind {
+    AddressMode mode;
+    intmax_t disp;
+    size_t num;
+  } ind;
+  struct opsca {
+    AddressMode mode;
+    intmax_t disp;
+    size_t base;
+    size_t index;
+  } sca;
+} Operand;
+typedef struct opall Opall;
 
 typedef struct instruction_data {
-  const char *instruction;
-  char label[MAX_LABEL_LENGTH];
-  char dest_operand[MAX_OP_LENGTH];
-  char src_operand[MAX_OP_LENGTH];
+  Opcode opcode;
+  unsigned int flags;
+  Operand dest;
+  Operand src;
 } InstructionData;
-
-typedef enum instruction_enum {
-  FOREACH_INSTRUCTION(GENERATE_ENUM)
-} InstructionEnum;
 
 /* rbx, rsp, rbp, r12-r15 are preserved across function calls in the System V
  * ABI; Microsoft's ABI additionally preserves rdi and rsi
@@ -120,8 +156,7 @@ enum instruction_flag {
   WANT_ADDR = 1 << 2 /* result should be object address, not value */
 };
 
-const char instructions[][MAX_INSTRUCTION_LENGTH] = {
-    FOREACH_INSTRUCTION(GENERATE_STRING)};
+const char OPCODES[][MAX_OPCODE_LENGTH] = {FOREACH_OPCODE(GENERATE_STRING)};
 
 /* Base and index are registers; scale is limited to {1, 2, 4, 8}, and offset
  * is a signed 32-bit integer. Having unnecessary offsets and scales shouldn't
@@ -179,88 +214,82 @@ static int translate_block(ASTree *block, CompilerState *state);
 static int translate_expr(ASTree *tree, CompilerState *state,
                           InstructionData *data, unsigned int flags);
 
-int assign_space(SymbolValue *symval, const char *location) {
-  size_t required_padding =
-      symval->type.alignment - (stack_window % symval->type.alignment);
-  stack_window += required_padding;
-  sprintf(symval->obj_loc, "%s+%lu", location, stack_window);
-  stack_window += symval->type.width;
-  return 0;
+/* assigns space for a symbol given an existing offset. inserts padding as
+ * needed and returns the sum of the previous offset, the padding and the width
+ * of the symbol
+ */
+size_t assign_space(SymbolValue *symval, size_t offset) {
+  size_t alignment = typespec_get_alignment(&symval->type);
+  size_t width = typespec_get_width(&symval->type);
+  size_t padding = alignment - (offset % alignment);
+  if (padding != alignment) offset += padding;
+  symval->offset = offset;
+  offset += width;
+  return offset;
 }
 
-/* TODO(Robert): use flags to assign specific numbers for instructions which
+/* TODO(Robert): use flags to assign specific numbers for opcodes which
  * use specific registers as their source or destination to make register
  * allocation easier
  */
-int assign_vreg(const TypeSpec *type, char *dest, const size_t vreg_num) {
-  char reg_width = 0;
-
-  if (type->base == TYPE_VOID) {
-    /* do not attempt to assign vreg to void type */
-    dest[0] = 0;
-    return 0;
-  } else {
-    switch (type->width) {
-      case X64_SIZEOF_LONG:
-        reg_width = 'q';
-        break;
-      case X64_SIZEOF_INT:
-        reg_width = 'd';
-        break;
-      case X64_SIZEOF_SHORT:
-        reg_width = 'w';
-        break;
-      case X64_SIZEOF_CHAR:
-        reg_width = 'b';
-        break;
-      default:
-        fprintf(stderr, "ERROR: unable to assign vreg of width %lu\n",
-                type->width);
-        return -1;
-        break;
-    }
+void assign_vreg(TypeSpec *type, Operand *operand, size_t vreg_num) {
+  assert(type->base != TYPE_VOID);
+  size_t width = typespec_get_width(type);
+  assert(width == X64_SIZEOF_LONG || width == X64_SIZEOF_INT ||
+         width == X64_SIZEOF_SHORT || width == X64_SIZEOF_CHAR);
+  operand->ind.num = vreg_num;
+  switch (type->width) {
+    case X64_SIZEOF_LONG:
+      return;
+    case X64_SIZEOF_INT:
+      operand->ind.mode |= MODE_REG_D;
+      return;
+    case X64_SIZEOF_SHORT:
+      operand->ind.mode |= MODE_REG_W;
+      return;
+    case X64_SIZEOF_CHAR:
+      operand->ind.mode |= MODE_REG_B;
+      return;
   }
-
-  sprintf(dest, VREG_FMT, vreg_num, reg_width);
-  return 0;
 }
 
-int resolve_object(CompilerState *state, const char *ident, char *dest,
-                   const char *fmt) {
+void resolve_object(CompilerState *state, Operand *operand, const char *ident) {
   SymbolValue *symval = NULL;
   state_get_symbol(state, ident, strlen(ident), &symval);
-  if (symval == NULL) {
-    fprintf(stderr, "ERROR: unable to resolve symbol %s\n", ident);
-    return -1;
+  assert(symval != NULL);
+  if (symval->reg == 0) {
+    operand->dir.mode = MODE_DIRECT;
+    operand->dir.lab = ident;
+    operand->dir.disp = symval->offset;
+  } else {
+    operand->ind.mode = MODE_INDIRECT;
+    operand->ind.num = symval->reg;
+    operand->ind.disp = symval->offset;
   }
-
-  sprintf(dest, fmt, symval->obj_loc);
-  return 0;
 }
 
-int save_registers(size_t start, size_t count) {
+void save_registers(size_t start, size_t count) {
   size_t i;
   for (i = 0; i < count; ++i) {
     DEBUGS('g', "Saving register %lu to stack", start + i);
     InstructionData *data = calloc(1, sizeof(InstructionData));
-    data->instruction = instructions[INSTR_PUSH];
-    int status = assign_vreg(&SPEC_ULONG, data->src_operand, start + i);
-    llist_push_back(text_section, data);
+    assert(data != NULL);
+    data->opcode = OP_PUSH;
+    assign_vreg((TypeSpec *)&SPEC_ULONG, &data->dest, start + i);
+    assert(!llist_push_back(text_section, data));
   }
-  return 0;
 }
 
-int restore_registers(size_t start, size_t count) {
+void restore_registers(size_t start, size_t count) {
   size_t i;
   for (i = 1; i <= count; ++i) {
     DEBUGS('g', "Restoring register %lu from stack", start + (count - i));
     InstructionData *data = calloc(1, sizeof(InstructionData));
-    data->instruction = instructions[INSTR_POP];
-    int status =
-        assign_vreg(&SPEC_ULONG, data->src_operand, start + (count - i));
-    llist_push_back(text_section, data);
+    assert(data != NULL);
+    data->opcode = OP_POP;
+    assign_vreg((TypeSpec *)&SPEC_ULONG, &data->dest, start + (count - i));
+    assert(!llist_push_back(text_section, data));
   }
-  return 0;
 }
 
 int translate_ident(ASTree *ident, CompilerState *state, InstructionData *data,
@@ -272,12 +301,12 @@ int translate_ident(ASTree *ident, CompilerState *state, InstructionData *data,
   AuxSpec *ident_aux = llist_back(&ident_type->auxspecs);
   if (flags & WANT_ADDR || (ident_aux && (ident_aux->aux == AUX_FUNCTION ||
                                           ident_aux->aux == AUX_ARRAY))) {
-    data->instruction = instructions[INSTR_LEA];
+    data->opcode = OPCODES[OP_LEA];
     /* TODO(Robert): define pointer type constant */
     int status = assign_vreg(&SPEC_ULONG, data->dest_operand, vreg_count++);
     if (status) return status;
   } else {
-    data->instruction = instructions[INSTR_MOV];
+    data->opcode = OPCODES[OP_MOV];
     int status = assign_vreg(ident->type, data->dest_operand, vreg_count++);
     if (status) return status;
   }
@@ -328,19 +357,19 @@ int translate_conversion(ASTree *operator, CompilerState * state,
   if (source_aux &&
       (source_aux->aux == AUX_ARRAY || source_aux->aux == AUX_FUNCTION)) {
     /* functions and arrays have special conversion rules */
-    data->instruction = instructions[INSTR_MOV];
+    data->opcode = OPCODES[OP_MOV];
   } else if (source_type->width > target_type->width) {
-    data->instruction = instructions[INSTR_MOV];
+    data->opcode = OPCODES[OP_MOV];
   } else if (source_type->width == target_type->width) {
-    data->instruction = instructions[INSTR_NOP];
+    data->opcode = OPCODES[OP_NOP];
   } else if (source_type->base == TYPE_SIGNED) {
     if (target_type->base == TYPE_SIGNED) {
-      data->instruction = instructions[INSTR_MOVSX];
+      data->opcode = OPCODES[OP_MOVSX];
     } else if (target_type->base == TYPE_UNSIGNED) {
-      data->instruction = instructions[INSTR_MOVZX];
+      data->opcode = OPCODES[OP_MOVZX];
     }
   } else if (source_type->base == TYPE_UNSIGNED) {
-    data->instruction = instructions[INSTR_MOVZX];
+    data->opcode = OPCODES[OP_MOVZX];
   } else {
     fprintf(stderr, "ERROR: unable to determine conversion\n");
     return -1;
@@ -356,7 +385,7 @@ int translate_intcon(ASTree *constant, InstructionData *data,
     int status = assign_vreg(constant->type, data->dest_operand, vreg_count++);
     if (status) return status;
     strcpy(data->src_operand, constant->lexinfo);
-    data->instruction = instructions[INSTR_MOV];
+    data->opcode = OPCODES[OP_MOV];
   } else {
     /* result does not need to be in a register */
     strcpy(data->dest_operand, constant->lexinfo);
@@ -386,12 +415,12 @@ int translate_logical_not(ASTree *tree, CompilerState *state,
 
   /* TEST operand with itself */
   InstructionData *test_data = calloc(1, sizeof(InstructionData));
-  test_data->instruction = instructions[INSTR_TEST];
+  test_data->opcode = OPCODES[OP_TEST];
   strcpy(test_data->dest_operand, tree_data->dest_operand);
   strcpy(test_data->src_operand, tree_data->dest_operand);
   llist_push_back(text_section, test_data);
 
-  data->instruction = instructions[INSTR_SETZ];
+  data->opcode = OPCODES[OP_SETZ];
   return assign_vreg(&SPEC_INT, data->dest_operand, vreg_count++);
 }
 
@@ -410,16 +439,16 @@ int translate_logical(ASTree *operator, CompilerState * state,
   llist_push_back(text_section, first_data);
 
   InstructionData *test_first_data = calloc(1, sizeof(InstructionData));
-  test_first_data->instruction = instructions[INSTR_TEST];
+  test_first_data->opcode = OPCODES[OP_TEST];
   strcpy(test_first_data->dest_operand, first_data->dest_operand);
   strcpy(test_first_data->src_operand, first_data->dest_operand);
   llist_push_back(text_section, test_first_data);
 
   InstructionData *jmp_first_data = calloc(1, sizeof(InstructionData));
   if (operator->symbol == TOK_AND)
-    jmp_first_data->instruction = instructions[INSTR_JZ];
+    jmp_first_data->opcode = OPCODES[OP_JZ];
   else if (operator->symbol == TOK_OR)
-    jmp_first_data->instruction = instructions[INSTR_JNZ];
+    jmp_first_data->opcode = OPCODES[OP_JNZ];
   strcpy(jmp_first_data->dest_operand, label_data->label);
   llist_push_back(text_section, jmp_first_data);
 
@@ -430,7 +459,7 @@ int translate_logical(ASTree *operator, CompilerState * state,
   llist_push_back(text_section, second_data);
 
   InstructionData *test_second_data = calloc(1, sizeof(InstructionData));
-  test_second_data->instruction = instructions[INSTR_TEST];
+  test_second_data->opcode = OPCODES[OP_TEST];
   strcpy(test_second_data->dest_operand, second_data->dest_operand);
   strcpy(test_second_data->src_operand, second_data->dest_operand);
   llist_push_back(text_section, test_second_data);
@@ -439,7 +468,7 @@ int translate_logical(ASTree *operator, CompilerState * state,
   llist_push_back(text_section, label_data);
 
   /* result will always be the truth value of the last evaluated expression */
-  data->instruction = instructions[INSTR_SETNZ];
+  data->opcode = OPCODES[OP_SETNZ];
   return assign_vreg(&SPEC_INT, data->dest_operand, vreg_count++);
 }
 
@@ -463,12 +492,12 @@ int translate_comparison(ASTree *operator, CompilerState * state,
   llist_push_back(text_section, second_data);
 
   InstructionData *cmp_data = calloc(1, sizeof(InstructionData));
-  cmp_data->instruction = instructions[INSTR_CMP];
+  cmp_data->opcode = OPCODES[OP_CMP];
   strcpy(cmp_data->dest_operand, first_data->dest_operand);
   strcpy(cmp_data->src_operand, second_data->dest_operand);
   llist_push_back(text_section, cmp_data);
 
-  data->instruction = instructions[num];
+  data->opcode = OPCODES[num];
   status = assign_vreg(&SPEC_INT, data->dest_operand, vreg_count++);
   return status;
 }
@@ -485,7 +514,7 @@ int translate_indirection(ASTree *indirection, CompilerState *state,
   sprintf(data->src_operand, INDIRECT_FMT, src_data->dest_operand);
   status = assign_vreg(indirection->type, data->dest_operand, vreg_count++);
   if (status) return status;
-  data->instruction = instructions[INSTR_MOV];
+  data->opcode = OPCODES[OP_MOV];
   return 0;
 }
 
@@ -501,7 +530,7 @@ int translate_addrof(ASTree *addrof, CompilerState *state,
 int translate_inc_dec(ASTree *operator, CompilerState * state,
                       InstructionData *data, InstructionEnum num,
                       unsigned int flags) {
-  DEBUGS('g', "Translating increment/decrement: %s", instructions[num]);
+  DEBUGS('g', "Translating increment/decrement: %s", OPCODES[num]);
   InstructionData *mov_data = NULL;
   InstructionData *inc_dec_data = NULL;
   InstructionData *to_push_data = NULL;
@@ -521,7 +550,7 @@ int translate_inc_dec(ASTree *operator, CompilerState * state,
       translate_expr(astree_get(operator, 0), state, mov_data, NO_INSTR_FLAGS);
   if (status) return status;
 
-  inc_dec_data->instruction = instructions[num];
+  inc_dec_data->opcode = OPCODES[num];
   strcpy(inc_dec_data->dest_operand, mov_data->src_operand);
 
   llist_push_back(text_section, to_push_data);
@@ -531,7 +560,7 @@ int translate_inc_dec(ASTree *operator, CompilerState * state,
 int translate_unop(ASTree *operator, CompilerState * state,
                    InstructionData *data, InstructionEnum num,
                    unsigned int flags) {
-  DEBUGS('g', "Translating unary operation: %s", instructions[num]);
+  DEBUGS('g', "Translating unary operation: %s", OPCODES[num]);
   InstructionData *dest_data = calloc(1, sizeof(*dest_data));
   /* put value in register so that it is not modified in place */
   int status =
@@ -539,7 +568,7 @@ int translate_unop(ASTree *operator, CompilerState * state,
   if (status) return status;
   llist_push_back(text_section, dest_data);
 
-  data->instruction = instructions[num];
+  data->opcode = OPCODES[num];
   strcpy(data->dest_operand, dest_data->dest_operand);
   return 0;
 }
@@ -547,7 +576,7 @@ int translate_unop(ASTree *operator, CompilerState * state,
 int translate_binop(ASTree *operator, CompilerState * state,
                     InstructionData *data, InstructionEnum num,
                     unsigned int flags) {
-  DEBUGS('g', "Translating binary operation: %s", instructions[num]);
+  DEBUGS('g', "Translating binary operation: %s", OPCODES[num]);
   InstructionData *dest_data = calloc(1, sizeof(*dest_data));
   int status =
       translate_expr(astree_get(operator, 0), state, dest_data, USE_REG);
@@ -562,7 +591,7 @@ int translate_binop(ASTree *operator, CompilerState * state,
 
   strcpy(data->dest_operand, dest_data->dest_operand);
   strcpy(data->src_operand, src_data->dest_operand);
-  data->instruction = instructions[num];
+  data->opcode = OPCODES[num];
   return 0;
 }
 
@@ -577,7 +606,7 @@ int translate_mul_div_mod(ASTree *operator, CompilerState * state,
     int status = translate_binop(operator, state, remainder_data, num, flags);
     if (status) return status;
     llist_push_back(text_section, remainder_data);
-    data->instruction = instructions[INSTR_NOP];
+    data->opcode = OPCODES[OP_NOP];
     return assign_vreg(operator->type, data->dest_operand, vreg_count++);
   } else {
     int status = translate_binop(operator, state, data, num, flags);
@@ -617,7 +646,7 @@ int translate_assignment(ASTree *assignment, CompilerState *state,
 
   strcpy(data->dest_operand, dest_data->dest_operand);
   strcpy(data->src_operand, src_data->dest_operand);
-  data->instruction = instructions[INSTR_MOV];
+  data->opcode = OPCODES[OP_MOV];
 
   return 0;
 }
@@ -639,7 +668,7 @@ int translate_subscript(ASTree *subscript, CompilerState *state,
   if (status) return status;
   llist_push_back(text_section, index_data);
 
-  data->instruction = instructions[INSTR_MOV];
+  data->opcode = OPCODES[OP_MOV];
   sprintf(data->src_operand, INDEX_FMT, pointer_data->dest_operand,
           index_data->dest_operand, subscript->type->width, 0);
   return assign_vreg(subscript->type, data->dest_operand, vreg_count++);
@@ -668,25 +697,25 @@ int translate_reference(ASTree *reference, CompilerState *state,
                                   : llist_front(&struct_->type->auxspecs);
   if (struct_aux->aux == AUX_STRUCT) {
     if (flags & WANT_ADDR)
-      data->instruction = instructions[INSTR_LEA];
+      data->opcode = OPCODES[OP_LEA];
     else
-      data->instruction = instructions[INSTR_MOV];
+      data->opcode = OPCODES[OP_MOV];
     SymbolTable *member_table = struct_aux->data.tag.val->data.members.by_name;
     const char *member_name = astree_get(reference, 1)->lexinfo;
     size_t member_name_len = strlen(member_name);
     SymbolValue *member_symbol =
         symbol_table_get(member_table, member_name, member_name_len);
-    char temp[MAX_OP_LENGTH];
+    char temp[MAX_OPERAND_LENGTH];
     sprintf(temp, member_symbol->obj_loc, struct_data->dest_operand);
     sprintf(data->src_operand, INDIRECT_FMT, temp);
     return assign_vreg(reference->type, data->dest_operand, vreg_count++);
   } else if (flags & WANT_ADDR) {
     /* use nop to communicate address to parent expression */
-    data->instruction = instructions[INSTR_NOP];
+    data->opcode = OPCODES[OP_NOP];
     strcpy(data->dest_operand, struct_data->dest_operand);
     return 0;
   } else {
-    data->instruction = instructions[INSTR_MOV];
+    data->opcode = OPCODES[OP_MOV];
     sprintf(data->src_operand, INDIRECT_FMT, struct_data->dest_operand);
     return assign_vreg(reference->type, data->dest_operand, vreg_count++);
   }
@@ -711,7 +740,7 @@ int translate_call(ASTree *call, CompilerState *state, InstructionData *data,
      */
     /* mov parameter to argument register */
     InstructionData *mov_data = calloc(1, sizeof(*mov_data));
-    mov_data->instruction = instructions[INSTR_MOV];
+    mov_data->opcode = OPCODES[OP_MOV];
     status = assign_vreg(param->type, mov_data->dest_operand, i);
     if (status) return status;
     strcpy(mov_data->src_operand, param_data->dest_operand);
@@ -729,14 +758,14 @@ int translate_call(ASTree *call, CompilerState *state, InstructionData *data,
   llist_push_back(text_section, function_data);
 
   InstructionData *call_data = calloc(1, sizeof(*call_data));
-  call_data->instruction = instructions[INSTR_CALL];
+  call_data->opcode = OPCODES[OP_CALL];
   strcpy(call_data->dest_operand, function_data->dest_operand);
   llist_push_back(text_section, call_data);
 
   /* mov result to any other register if return type isn't void */
   if (call->type->base != TYPE_VOID) {
     InstructionData *mov_data = calloc(1, sizeof(*mov_data));
-    mov_data->instruction = instructions[INSTR_MOV];
+    mov_data->opcode = OPCODES[OP_MOV];
     int status = assign_vreg(call->type, mov_data->src_operand, RETURN_VREG);
     if (status) return status;
     status = assign_vreg(call->type, mov_data->dest_operand, vreg_count++);
@@ -746,7 +775,7 @@ int translate_call(ASTree *call, CompilerState *state, InstructionData *data,
   }
 
   /* only give the parent recursive call the result register, if applicable */
-  data->instruction = instructions[INSTR_NOP];
+  data->opcode = OPCODES[OP_NOP];
 
   return restore_registers(VOLATILE_START, VOLATILE_COUNT);
 }
@@ -774,7 +803,7 @@ int translate_param(ASTree *param, CompilerState *state,
   status = resolve_object(state, param_ident->lexinfo, data->dest_operand,
                           INDIRECT_FMT);
   if (status) return status;
-  data->instruction = instructions[INSTR_MOV];
+  data->opcode = OPCODES[OP_MOV];
   return 0;
 }
 
@@ -782,7 +811,7 @@ int translate_list_initialization(ASTree *declarator, ASTree *init_list,
                                   CompilerState *state) {
   DEBUGS('g', "Transating struct initiazation by initializer list");
   InstructionData *struct_data = calloc(1, sizeof(InstructionData));
-  struct_data->instruction = instructions[INSTR_LEA];
+  struct_data->opcode = OPCODES[OP_LEA];
   ASTree *struct_ident = declarator;
   int status = resolve_object(state, struct_ident->lexinfo,
                               struct_data->dest_operand, INDIRECT_FMT);
@@ -806,10 +835,10 @@ int translate_list_initialization(ASTree *declarator, ASTree *init_list,
       llist_push_back(text_section, initializer_data);
 
       InstructionData *assignment_data = calloc(1, sizeof(InstructionData));
-      assignment_data->instruction = instructions[INSTR_MOV];
+      assignment_data->opcode = OPCODES[OP_MOV];
       strcpy(assignment_data->src_operand, initializer_data->dest_operand);
       SymbolValue *member_symbol = llist_get(member_symbols, i);
-      char temp[MAX_OP_LENGTH];
+      char temp[MAX_OPERAND_LENGTH];
       sprintf(temp, member_symbol->obj_loc, struct_data->dest_operand);
       sprintf(assignment_data->dest_operand, INDIRECT_FMT, temp);
       llist_push_back(text_section, assignment_data);
@@ -864,7 +893,7 @@ int translate_local_decl(ASTree *declaration, CompilerState *state,
         llist_push_back(text_section, value_data);
 
         strcpy(data->src_operand, value_data->dest_operand);
-        data->instruction = instructions[INSTR_MOV];
+        data->opcode = OPCODES[OP_MOV];
         ++i;
       }
     }
@@ -876,95 +905,95 @@ static int translate_expr(ASTree *tree, CompilerState *state,
                           InstructionData *out, unsigned int flags) {
   int status = 0;
 
-  /* TODO(Robert): make a mapping from symbols to instructions so that most
+  /* TODO(Robert): make a mapping from symbols to OPCODES so that most
    * of the case statements can be collapsed together
    */
   switch (tree->symbol) {
     /* arithmetic operators */
     case '+':
-      status = translate_binop(tree, state, out, INSTR_ADD, flags);
+      status = translate_binop(tree, state, out, OP_ADD, flags);
       break;
     case '-':
-      status = translate_binop(tree, state, out, INSTR_SUB, flags);
+      status = translate_binop(tree, state, out, OP_SUB, flags);
       break;
     case '*':
       if (astree_get(tree, 0)->type->base == TYPE_SIGNED)
-        status = translate_mul_div_mod(tree, state, out, INSTR_IMUL, flags);
+        status = translate_mul_div_mod(tree, state, out, OP_IMUL, flags);
       else
-        status = translate_mul_div_mod(tree, state, out, INSTR_MUL, flags);
+        status = translate_mul_div_mod(tree, state, out, OP_MUL, flags);
       break;
     case '/':
     case '%':
       if (astree_get(tree, 0)->type->base == TYPE_SIGNED)
-        status = translate_mul_div_mod(tree, state, out, INSTR_IDIV, flags);
+        status = translate_mul_div_mod(tree, state, out, OP_IDIV, flags);
       else
-        status = translate_mul_div_mod(tree, state, out, INSTR_DIV, flags);
+        status = translate_mul_div_mod(tree, state, out, OP_DIV, flags);
       break;
     case TOK_INC:
     case TOK_POST_INC:
-      status = translate_inc_dec(tree, state, out, INSTR_INC, flags);
+      status = translate_inc_dec(tree, state, out, OP_INC, flags);
       break;
     case TOK_DEC:
     case TOK_POST_DEC:
-      status = translate_inc_dec(tree, state, out, INSTR_DEC, flags);
+      status = translate_inc_dec(tree, state, out, OP_DEC, flags);
       break;
     case TOK_NEG:
-      status = translate_unop(tree, state, out, INSTR_NEG, flags);
+      status = translate_unop(tree, state, out, OP_NEG, flags);
       break;
     case TOK_POS:
       status = translate_conversion(tree, state, out, flags);
       break;
     /* bitwise operators */
     case '&':
-      status = translate_binop(tree, state, out, INSTR_AND, flags);
+      status = translate_binop(tree, state, out, OP_AND, flags);
       break;
     case '|':
-      status = translate_binop(tree, state, out, INSTR_OR, flags);
+      status = translate_binop(tree, state, out, OP_OR, flags);
       break;
     case '^':
-      status = translate_binop(tree, state, out, INSTR_XOR, flags);
+      status = translate_binop(tree, state, out, OP_XOR, flags);
       break;
     case '~':
-      status = translate_unop(tree, state, out, INSTR_NOT, flags);
+      status = translate_unop(tree, state, out, OP_NOT, flags);
       break;
     /* shifts */
     case TOK_SHL:
-      status = translate_binop(tree, state, out, INSTR_SHL, flags);
+      status = translate_binop(tree, state, out, OP_SHL, flags);
       break;
     case TOK_SHR:
       if (astree_get(tree, 0)->type->base == TYPE_SIGNED)
-        status = translate_binop(tree, state, out, INSTR_SAR, flags);
+        status = translate_binop(tree, state, out, OP_SAR, flags);
       else
-        status = translate_binop(tree, state, out, INSTR_SHR, flags);
+        status = translate_binop(tree, state, out, OP_SHR, flags);
       break;
     /* comparison operators */
     case '>':
-      status = translate_comparison(tree, state, out, INSTR_SETG, flags);
+      status = translate_comparison(tree, state, out, OP_SETG, flags);
       break;
     case TOK_GE:
-      status = translate_comparison(tree, state, out, INSTR_SETGE, flags);
+      status = translate_comparison(tree, state, out, OP_SETGE, flags);
       break;
     case '<':
-      status = translate_comparison(tree, state, out, INSTR_SETL, flags);
+      status = translate_comparison(tree, state, out, OP_SETL, flags);
       break;
     case TOK_LE:
-      status = translate_comparison(tree, state, out, INSTR_SETLE, flags);
+      status = translate_comparison(tree, state, out, OP_SETLE, flags);
       break;
     case TOK_EQ:
-      status = translate_comparison(tree, state, out, INSTR_SETE, flags);
+      status = translate_comparison(tree, state, out, OP_SETE, flags);
       break;
     case TOK_NE:
-      status = translate_comparison(tree, state, out, INSTR_SETNE, flags);
+      status = translate_comparison(tree, state, out, OP_SETNE, flags);
       break;
     /* logical operators */
     case '!':
       status = translate_logical_not(astree_get(tree, 0), state, out);
       break;
     case TOK_AND:
-      status = translate_logical(tree, state, out, INSTR_AND, flags);
+      status = translate_logical(tree, state, out, OP_AND, flags);
       break;
     case TOK_OR:
-      status = translate_logical(tree, state, out, INSTR_OR, flags);
+      status = translate_logical(tree, state, out, OP_OR, flags);
       break;
     /* constants */
     case TOK_INTCON:
@@ -1016,13 +1045,13 @@ static int translate_ifelse(ASTree *ifelse, CompilerState *state) {
   llist_push_back(text_section, cond_data);
   /* check if condition is zero and jump if it is */
   InstructionData *test_data = calloc(1, sizeof(*test_data));
-  test_data->instruction = instructions[INSTR_TEST];
+  test_data->opcode = OPCODES[OP_TEST];
   strcpy(test_data->dest_operand, cond_data->dest_operand);
   strcpy(test_data->src_operand, cond_data->dest_operand);
   llist_push_back(text_section, test_data);
 
   InstructionData *test_jmp_data = calloc(1, sizeof(*test_jmp_data));
-  test_jmp_data->instruction = instructions[INSTR_JZ];
+  test_jmp_data->opcode = OPCODES[OP_JZ];
   sprintf(test_jmp_data->dest_operand, END_FMT, current_branch);
   llist_push_back(text_section, test_jmp_data);
   /* translate if body */
@@ -1085,13 +1114,13 @@ static int translate_while(ASTree *while_, CompilerState *state) {
   llist_push_back(text_section, cond_data);
   /* check if condition is zero */
   InstructionData *test_data = calloc(1, sizeof(*test_data));
-  test_data->instruction = instructions[INSTR_TEST];
+  test_data->opcode = OPCODES[OP_TEST];
   strcpy(test_data->dest_operand, cond_data->dest_operand);
   strcpy(test_data->src_operand, cond_data->dest_operand);
   llist_push_back(text_section, test_data);
   /* emit jump to end of loop */
   InstructionData *test_jmp_data = calloc(1, sizeof(*test_jmp_data));
-  test_jmp_data->instruction = instructions[INSTR_JZ];
+  test_jmp_data->opcode = OPCODES[OP_JZ];
   sprintf(test_jmp_data->dest_operand, END_FMT, current_branch);
   llist_push_back(text_section, test_jmp_data);
   /* emit label at beginning of body */
@@ -1113,7 +1142,7 @@ static int translate_while(ASTree *while_, CompilerState *state) {
   if (status) return status;
   /* emit jump to condition */
   InstructionData *cond_jmp_data = calloc(1, sizeof(*cond_jmp_data));
-  cond_jmp_data->instruction = instructions[INSTR_JMP];
+  cond_jmp_data->opcode = OPCODES[OP_JMP];
   sprintf(cond_jmp_data->dest_operand, COND_FMT, current_branch);
   llist_push_back(text_section, cond_jmp_data);
   /* emit label at end of statement */
@@ -1149,13 +1178,13 @@ static int translate_for(ASTree *for_, CompilerState *state) {
     llist_push_back(text_section, cond_data);
     /* check if condition is zero */
     InstructionData *test_data = calloc(1, sizeof(*test_data));
-    test_data->instruction = instructions[INSTR_TEST];
+    test_data->opcode = OPCODES[OP_TEST];
     strcpy(test_data->dest_operand, cond_data->dest_operand);
     strcpy(test_data->src_operand, cond_data->dest_operand);
     llist_push_back(text_section, test_data);
     /* emit jump to end of loop */
     InstructionData *test_jmp_data = calloc(1, sizeof(*test_jmp_data));
-    test_jmp_data->instruction = instructions[INSTR_JZ];
+    test_jmp_data->opcode = OPCODES[OP_JZ];
     sprintf(test_jmp_data->dest_operand, END_FMT, current_branch);
     llist_push_back(text_section, test_jmp_data);
   }
@@ -1189,7 +1218,7 @@ static int translate_for(ASTree *for_, CompilerState *state) {
 
   /* emit jump to condition */
   InstructionData *cond_jmp_data = calloc(1, sizeof(*cond_jmp_data));
-  cond_jmp_data->instruction = instructions[INSTR_JMP];
+  cond_jmp_data->opcode = OPCODES[OP_JMP];
   sprintf(cond_jmp_data->dest_operand, COND_FMT, current_branch);
   llist_push_back(text_section, cond_jmp_data);
   /* emit label at end of statement */
@@ -1229,13 +1258,13 @@ static int translate_do(ASTree *do_, CompilerState *state) {
   llist_push_back(text_section, cond_data);
   /* check if condition is one */
   InstructionData *test_data = calloc(1, sizeof(*test_data));
-  test_data->instruction = instructions[INSTR_TEST];
+  test_data->opcode = OPCODES[OP_TEST];
   strcpy(test_data->dest_operand, cond_data->dest_operand);
   strcpy(test_data->src_operand, cond_data->dest_operand);
   llist_push_back(text_section, test_data);
   /* emit jump to beginning of body */
   InstructionData *test_jmp_data = calloc(1, sizeof(*test_jmp_data));
-  test_jmp_data->instruction = instructions[INSTR_JNZ];
+  test_jmp_data->opcode = OPCODES[OP_JNZ];
   sprintf(test_jmp_data->dest_operand, STMT_FMT, current_branch);
   llist_push_back(text_section, test_jmp_data);
   /* emit label at end of statement */
@@ -1270,7 +1299,7 @@ int translate_return(ASTree *ret, CompilerState *state, InstructionData *data) {
     llist_push_back(text_section, value_data);
 
     InstructionData *mov_data = calloc(1, sizeof(*mov_data));
-    mov_data->instruction = instructions[INSTR_MOV];
+    mov_data->opcode = OPCODES[OP_MOV];
     strcpy(mov_data->src_operand, value_data->dest_operand);
 
     SymbolValue *function_symval = state_get_function(state);
@@ -1291,7 +1320,7 @@ int translate_return(ASTree *ret, CompilerState *state, InstructionData *data) {
   int status = restore_registers(NONVOLATILE_START, NONVOLATILE_COUNT);
   if (status) return status;
 
-  data->instruction = instructions[INSTR_RET];
+  data->opcode = OPCODES[OP_RET];
   return 0;
 }
 
@@ -1304,7 +1333,7 @@ static int translate_continue(ASTree *continue_, CompilerState *state) {
   } else {
     /* emit jump to condition */
     InstructionData *cond_jmp_data = calloc(1, sizeof(*cond_jmp_data));
-    cond_jmp_data->instruction = instructions[INSTR_JMP];
+    cond_jmp_data->opcode = OPCODES[OP_JMP];
     JumpEntry *current_entry = state_get_iteration(state);
     if (current_entry == NULL) return -1;
     strcpy(cond_jmp_data->dest_operand,
@@ -1323,7 +1352,7 @@ static int translate_break(ASTree *break_, CompilerState *state) {
   } else {
     /* emit jump to end of loop */
     InstructionData *end_jmp_data = calloc(1, sizeof(*end_jmp_data));
-    end_jmp_data->instruction = instructions[INSTR_JMP];
+    end_jmp_data->opcode = OPCODES[OP_JMP];
     JumpEntry *current_entry = state_get_jump(state);
     if (current_entry == NULL) return -1;
     strcpy(end_jmp_data->dest_operand, current_entry->end_label);
@@ -1343,7 +1372,7 @@ static int translate_goto(ASTree *goto_, CompilerState *state) {
   } else {
     /* emit jump to label */
     InstructionData *jmp_data = calloc(1, sizeof(*jmp_data));
-    jmp_data->instruction = instructions[INSTR_JMP];
+    jmp_data->opcode = OPCODES[OP_JMP];
     strcpy(jmp_data->dest_operand, ident_str);
     llist_push_back(text_section, jmp_data);
     return 0;
@@ -1380,13 +1409,13 @@ static int translate_case(ASTree *case_, CompilerState *state) {
   if (status) return status;
   /* compare constant to control value */
   InstructionData *cmp_data = calloc(1, sizeof(*cmp_data));
-  cmp_data->instruction = instructions[INSTR_CMP];
+  cmp_data->opcode = OPCODES[OP_CMP];
   strcpy(cmp_data->dest_operand, data->dest_operand);
   strcpy(cmp_data->src_operand, switch_entry->data.switch_.control_register);
   llist_push_back(text_section, cmp_data);
   /* jump to next case statement if not equal */
   InstructionData *jmp_data = calloc(1, sizeof(*jmp_data));
-  jmp_data->instruction = instructions[INSTR_JNE];
+  jmp_data->opcode = OPCODES[OP_JNE];
   sprintf(jmp_data->dest_operand, COND_FMT,
           switch_entry->data.switch_.next_case);
   llist_push_back(text_section, jmp_data);
@@ -1512,16 +1541,16 @@ int translate_global_decl(ASTree *declaration, InstructionData *data) {
 
       switch (ident->type->width) {
         case X64_SIZEOF_LONG:
-          data->instruction = instructions[INSTR_DQ];
+          data->opcode = OPCODES[OP_DQ];
           break;
         case X64_SIZEOF_INT:
-          data->instruction = instructions[INSTR_DD];
+          data->opcode = OPCODES[OP_DD];
           break;
         case X64_SIZEOF_SHORT:
-          data->instruction = instructions[INSTR_DW];
+          data->opcode = OPCODES[OP_DW];
           break;
         case X64_SIZEOF_CHAR:
-          data->instruction = instructions[INSTR_DB];
+          data->opcode = OPCODES[OP_DB];
           break;
         default:
           fprintf(stderr,
@@ -1537,16 +1566,16 @@ int translate_global_decl(ASTree *declaration, InstructionData *data) {
       data->dest_operand[1] = 0;
       switch (ident->type->width) {
         case X64_SIZEOF_LONG:
-          data->instruction = instructions[INSTR_RESQ];
+          data->opcode = OPCODES[OP_RESQ];
           break;
         case X64_SIZEOF_INT:
-          data->instruction = instructions[INSTR_RESD];
+          data->opcode = OPCODES[OP_RESD];
           break;
         case X64_SIZEOF_SHORT:
-          data->instruction = instructions[INSTR_RESW];
+          data->opcode = OPCODES[OP_RESW];
           break;
         case X64_SIZEOF_CHAR:
-          data->instruction = instructions[INSTR_RESB];
+          data->opcode = OPCODES[OP_RESB];
           break;
         default:
           fprintf(stderr,
@@ -1615,7 +1644,7 @@ int translate_function(ASTree *function, CompilerState *state,
 
   /* insert return in case function did not have one */
   InstructionData *return_data = calloc(1, sizeof(*return_data));
-  return_data->instruction = instructions[INSTR_RET];
+  return_data->opcode = OPCODES[OP_RET];
   llist_push_back(text_section, return_data);
   return 0;
 }
@@ -1668,33 +1697,31 @@ int write_instruction(InstructionData *data, FILE *out) {
    * fields in the generated assembly
    */
 
-  if (data->instruction == NULL && strlen(data->label) > 0) {
+  if (data->opcode == NULL && strlen(data->label) > 0) {
     /* only a label */
     fprintf(out, LABEL_FMT, data->label);
-  } else if (data->instruction != NULL) {
+  } else if (data->opcode != NULL) {
     /* instruction, possible with a label */
     int instruction_type =
         (!!data->dest_operand[0]) | (!!data->src_operand[0] << 1);
-    if (data->instruction == instructions[INSTR_NOP]) instruction_type = 0;
+    if (data->opcode == OPCODES[OP_NOP]) instruction_type = 0;
     switch (instruction_type) {
       case 0:
         /* nullary */
-        fprintf(out, NULLOP_FMT, data->label, data->instruction);
+        fprintf(out, NULLOP_FMT, data->label, data->opcode);
         break;
       case 1:
         /* unary, destination */
-        fprintf(out, UNOP_FMT, data->label, data->instruction,
-                data->dest_operand);
+        fprintf(out, UNOP_FMT, data->label, data->opcode, data->dest_operand);
         break;
       case 2:
         /* unary, source */
-        fprintf(out, UNOP_FMT, data->label, data->instruction,
-                data->src_operand);
+        fprintf(out, UNOP_FMT, data->label, data->opcode, data->src_operand);
         break;
       case 3:
         /* binary operation */
-        fprintf(out, BINOP_FMT, data->label, data->instruction,
-                data->dest_operand, data->src_operand);
+        fprintf(out, BINOP_FMT, data->label, data->opcode, data->dest_operand,
+                data->src_operand);
         break;
       default:
         break;
