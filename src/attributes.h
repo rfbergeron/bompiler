@@ -227,8 +227,10 @@ extern const TypeSpec SPEC_SHRT;
 extern const TypeSpec SPEC_UCHAR;
 extern const TypeSpec SPEC_SCHAR;
 
-#define LOC_EMPTY \
+#define LOC_EMPTY_VALUE \
   { 0, 0, 0, 0 }
+
+extern const Location LOC_EMPTY;
 
 int attributes_to_string(const unsigned int attributes, char *buf, size_t size);
 int location_to_string(const Location *loc, char *buf, size_t size);
