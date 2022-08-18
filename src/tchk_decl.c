@@ -282,14 +282,22 @@ ASTree *validate_typespec_list(ASTree *spec_list) {
   }
 }
 
+int location_is_empty(Location *loc) {
+  return loc->filenr == 0 && loc->linenr == 0 && loc->offset == 0;
+}
 /*
  * Combines type specifier and declarator information and inserts symbol value
- * into the table at the current scope. Returns the declarator node passed in
+ * into the table at the current scope. Sets source location of the declaration
+ * to the source location of the first declarator, which is convenient when
+ * sorting symbol values and block scopes. Returns the declarator node passed in
  * as the second argument, or an error node enclosing this node. Can be safely
  * called with error nodes as arguments.
  */
 ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
   DEBUGS('t', "Making object entry for value %s", declarator->lexinfo);
+  if (location_is_empty(&UNWRAP(declaration)->loc)) {
+    UNWRAP(declaration)->loc = UNWRAP(declarator)->loc;
+  }
   if (declaration->symbol == TOK_TYPE_ERROR ||
       declarator->symbol == TOK_TYPE_ERROR) {
     return declarator;
@@ -845,8 +853,12 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
   assert(param_list->symbol == TOK_PARAM_LIST);
   /* treat body like a normal block statement, but move param table to body node
    * and define function before entering body scope */
-  body->symbol_table = param_list->symbol_table;
-  param_list->symbol_table = NULL;
+  if (param_list->symbol_table == NULL) {
+    body->symbol_table = symbol_table_init(FUNCTION_TABLE);
+  } else {
+    body->symbol_table = param_list->symbol_table;
+    param_list->symbol_table = NULL;
+  }
   int status = state_push_table(state, body->symbol_table);
   if (status) {
     return astree_create_errnode(astree_adopt(declaration, 2, declarator, body),
