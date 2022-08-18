@@ -208,7 +208,7 @@ int main(int argc, char **argv) {
   }
 
   string_set_print(strfile);
-  astree_print_symbols(UNWRAP(parser_root), symfile);
+  astree_print_symbols(UNWRAP(parser_root), symfile, 0);
   astree_print_tree(UNWRAP(parser_root), astfile, 0);
 
   if (skip_asm || skip_type_check) goto cleanup;
