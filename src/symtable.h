@@ -35,6 +35,7 @@ typedef struct symbol_value {
   TypeSpec type;    /* type of symbol */
   int flags;        /* flags, as enumerated above */
   char obj_loc[64]; /* DEPRECATE THIS AND REMOVE FROM ASMGEN */
+  size_t reg;       /* register this symbol is located wrt */
   size_t offset;    /* offset in stack/struct */
 } SymbolValue;
 

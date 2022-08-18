@@ -59,6 +59,21 @@ that has does not do most of the things that I thought:
 - Tags and enumeration constants declared as struct and union members are
   "hoisted" up into the enclosing scope
 
+## Intermediate Language Generator Refactor
+I will not be generating the elaborate language or three-address code that has
+been described in `INTLANG.md` or `TAC.md`. Instead, I will continue to generate
+what is for the most part AMD64 assembly with an infinite number of registers.
+
+However, the code that accomplishes this will need to be changed to accomodate
+recent changes to the symbol table, constant expressions, and jumps. At the same
+time, I would like to reimplement the way that instruction data is stored.
+
+### Instruction Data
+Instruction data is currently stored largely as formatted strings. While
+convenient for printing, it makes determining what kind an operand is difficult.
+Instructions and operands should be stored as numbers and unions of the
+different addressing modes.
+
 ## Simpler structure handling
 Structure handling could be simplified, removing the need to have a second pass
 over the declarators of a structure's members. In this scheme, the members of a
