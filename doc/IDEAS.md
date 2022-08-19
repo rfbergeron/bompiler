@@ -101,8 +101,9 @@ flags that indicate the width of the registers in the indirect and scale modes.
 These flags will be stored in bits 3 and 4 for the base/single register, and in
 bits 5 and 6 for the index register.
 
-The low three bits (0, 1, and 2) being zero indicates that no addressing mode
-was selected. This indicates an invalid state or a freshly initialized operand.
+The low three bits (0, 1, and 2) being zero indicates that register mode has
+been selected. Virtual register numbers are assigned starting from one, so if
+the register member is also zero, this indicates an invalid instruction.
 
 ### Addressing Struct/Union Members
 The `offset` member of `SymbolValue` is already used to represent the offset of
