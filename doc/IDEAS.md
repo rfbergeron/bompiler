@@ -74,6 +74,47 @@ convenient for printing, it makes determining what kind an operand is difficult.
 Instructions and operands should be stored as numbers and unions of the
 different addressing modes.
 
+The new format will be a union whose members are structs which roughly
+correspond to the different addressing modes under AMD64. These members are:
+
+#### `MODE_IMMEDIATE`
+Operand will be an immediate value, stored as a `uintmax_t`.
+
+#### `MODE_DIRECT`
+Operand will be a label/address, with an offset. Offset will be zero if no
+offset is necessary.
+
+#### `MODE_INDIRECT`
+Operand will be a single register, with an offset. Offset will be zero if no
+offset is necessary.
+
+#### `MODE_SCALE_X`
+Operand will be two registers, a base and a scaled index, along with an offset.
+Offset will be zero if no offset is necessary. `X` indicates what value the
+index will be scaled by.
+
+The enum member that indicates the addressing mode will also have a number of
+flags that indicate the width of the registers in the indirect and scale modes.
+These flags will be stored in bits 3 and 4 for the base/single register, and in
+bits 5 and 6 for the index register.
+
+The low three bits (0, 1, and 2) being zero indicates that no addressing mode
+was selected. This indicates an invalid state or a freshly initialized operand.
+
+### Addressing Struct/Union Members
+The `offset` member of `SymbolValue` is already used to represent the offset of
+the members of structs and unions. This usage is fine and can be used as-is to
+address members of global structs that are not nested, but is unsuitable for
+accessing members of structs on the stack or for accessing members of nested
+structs in any case.
+
+We could use one `mov`/`lea` per arrow/struct reference operator, or we could
+collapse these moves into a single instruction by taking the sum of the offsets
+at generation time. This would require its own separate function.
+
+Perhaps at a later date I will perform the offset calculation at generation
+time as an optimization, but for now multiple instructions are fine.
+
 ## Simpler structure handling
 Structure handling could be simplified, removing the need to have a second pass
 over the declarators of a structure's members. In this scheme, the members of a

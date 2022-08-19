@@ -212,7 +212,7 @@ static char *translate_type(void *type, int flags);
 static int translate_stmt(ASTree *stmt, CompilerState *state);
 static int translate_block(ASTree *block, CompilerState *state);
 static int translate_expr(ASTree *tree, CompilerState *state,
-                          InstructionData *data, unsigned int flags);
+                          InstructionData *data);
 
 /* assigns space for a symbol given an existing offset. inserts padding as
  * needed and returns the sum of the previous offset, the padding and the width
@@ -232,9 +232,9 @@ size_t assign_space(SymbolValue *symval, size_t offset) {
  * use specific registers as their source or destination to make register
  * allocation easier
  */
-void assign_vreg(TypeSpec *type, Operand *operand, size_t vreg_num) {
+void assign_vreg(const TypeSpec *type, Operand *operand, size_t vreg_num) {
   assert(type->base != TYPE_VOID);
-  size_t width = typespec_get_width(type);
+  size_t width = typespec_get_width((TypeSpec *)type);
   assert(width == X64_SIZEOF_LONG || width == X64_SIZEOF_INT ||
          width == X64_SIZEOF_SHORT || width == X64_SIZEOF_CHAR);
   operand->ind.num = vreg_num;
@@ -292,23 +292,20 @@ void restore_registers(size_t start, size_t count) {
   }
 }
 
-int translate_ident(ASTree *ident, CompilerState *state, InstructionData *data,
-                    unsigned int flags) {
-  int status =
-      resolve_object(state, ident->lexinfo, data->src_operand, INDIRECT_FMT);
-  if (status) return status;
+int translate_ident(ASTree *ident, CompilerState *state,
+                    InstructionData *data) {
+  resolve_object(state, &data->src, ident->lexinfo);
   const TypeSpec *ident_type = ident->type;
   AuxSpec *ident_aux = llist_back(&ident_type->auxspecs);
-  if (flags & WANT_ADDR || (ident_aux && (ident_aux->aux == AUX_FUNCTION ||
-                                          ident_aux->aux == AUX_ARRAY))) {
-    data->opcode = OPCODES[OP_LEA];
+  if (data->flags & WANT_ADDR ||
+      (ident_aux &&
+       (ident_aux->aux == AUX_FUNCTION || ident_aux->aux == AUX_ARRAY))) {
+    data->opcode = OP_LEA;
     /* TODO(Robert): define pointer type constant */
-    int status = assign_vreg(&SPEC_ULONG, data->dest_operand, vreg_count++);
-    if (status) return status;
+    assign_vreg(&SPEC_ULONG, &data->dest, vreg_count++);
   } else {
-    data->opcode = OPCODES[OP_MOV];
-    int status = assign_vreg(ident->type, data->dest_operand, vreg_count++);
-    if (status) return status;
+    data->opcode = OP_MOV;
+    assign_vreg(ident->type, &data->dest, vreg_count++);
   }
   return 0;
 }
@@ -324,31 +321,23 @@ int translate_ident(ASTree *ident, CompilerState *state, InstructionData *data,
  * any int -> any int of same width: nop
  */
 int translate_conversion(ASTree *operator, CompilerState * state,
-                         InstructionData *data, unsigned int flags) {
+                         InstructionData *data) {
   DEBUGS('g', "Translating conversion");
+  assert(astree_count(operator) <= 2);
 
   InstructionData *src_data = calloc(1, sizeof(*src_data));
   ASTree *converted_expr = NULL;
   if (astree_count(operator) == 1) {
     converted_expr = astree_get(operator, 0);
-  } else if (astree_count(operator) == 2) {
-    converted_expr = astree_get(operator, 1);
-  } else if (astree_count(operator) == 3) {
-    converted_expr = astree_get(operator, 2);
   } else {
-    fprintf(
-        stderr,
-        "ERROR: unable to perform conversion on node which has %lu children\n",
-        astree_count(operator));
-    return -1;
+    converted_expr = astree_get(operator, 1);
   }
 
-  int status = translate_expr(converted_expr, state, src_data, NO_INSTR_FLAGS);
+  int status = translate_expr(converted_expr, state, src_data);
   if (status) return status;
   llist_push_back(text_section, src_data);
-  strcpy(data->src_operand, src_data->dest_operand);
-  status = assign_vreg(operator->type, data->dest_operand, vreg_count++);
-  if (status) return status;
+  data->src = src_data->dest;
+  assign_vreg(operator->type, &data->dest, vreg_count++);
 
   const TypeSpec *target_type = operator->type;
   const TypeSpec *source_type = converted_expr->type;
@@ -356,20 +345,19 @@ int translate_conversion(ASTree *operator, CompilerState * state,
 
   if (source_aux &&
       (source_aux->aux == AUX_ARRAY || source_aux->aux == AUX_FUNCTION)) {
-    /* functions and arrays have special conversion rules */
-    data->opcode = OPCODES[OP_MOV];
+    data->opcode = OP_MOV;
   } else if (source_type->width > target_type->width) {
-    data->opcode = OPCODES[OP_MOV];
+    data->opcode = OP_MOV;
   } else if (source_type->width == target_type->width) {
-    data->opcode = OPCODES[OP_NOP];
+    data->opcode = OP_NOP;
   } else if (source_type->base == TYPE_SIGNED) {
     if (target_type->base == TYPE_SIGNED) {
-      data->opcode = OPCODES[OP_MOVSX];
+      data->opcode = OP_MOVSX;
     } else if (target_type->base == TYPE_UNSIGNED) {
-      data->opcode = OPCODES[OP_MOVZX];
+      data->opcode = OP_MOVZX;
     }
   } else if (source_type->base == TYPE_UNSIGNED) {
-    data->opcode = OPCODES[OP_MOVZX];
+    data->opcode = OP_MOVZX;
   } else {
     fprintf(stderr, "ERROR: unable to determine conversion\n");
     return -1;
@@ -378,17 +366,17 @@ int translate_conversion(ASTree *operator, CompilerState * state,
   return 0;
 }
 
-int translate_intcon(ASTree *constant, InstructionData *data,
-                     unsigned int flags) {
+int translate_intcon(ASTree *constant, InstructionData *data) {
   DEBUGS('g', "Translating integer constant");
-  if (flags & USE_REG) {
-    int status = assign_vreg(constant->type, data->dest_operand, vreg_count++);
-    if (status) return status;
-    strcpy(data->src_operand, constant->lexinfo);
-    data->opcode = OPCODES[OP_MOV];
+  if (data->flags & USE_REG) {
+    assign_vreg(constant->type, &data->dest, vreg_count++);
+    data->src.imm.mode = MODE_IMMEDIATE;
+    data->src.imm.val = constant->constval;
+    data->opcode = OP_MOV;
   } else {
     /* result does not need to be in a register */
-    strcpy(data->dest_operand, constant->lexinfo);
+    data->dest.imm.mode = MODE_IMMEDIATE;
+    data->dest.imm.val = constant->constval;
   }
   return 0;
 }
