@@ -143,6 +143,7 @@ typedef struct opall Opall;
 typedef struct instruction_data {
   Opcode opcode;
   unsigned int flags;
+  char label[MAX_LABEL_LENGTH];
   Operand dest;
   Operand src;
 } InstructionData;
@@ -390,74 +391,74 @@ int translate_intcon(ASTree *constant, InstructionData *data) {
  */
 int translate_logical_not(ASTree *tree, CompilerState *state,
                           InstructionData *data) {
-  /* TODO(Robert): add attribute indicating when the result of an expression
-   * is boolean so that we can skip doing all of this if we don't need to, or
-   * maybe even add a whole boolean type, though that may be overkill
-   */
-
   /* evaluate operand */
   InstructionData *tree_data = calloc(1, sizeof(InstructionData));
-  int status = translate_expr(tree, state, tree_data, USE_REG);
+  tree_data->flags |= USE_REG;
+  int status = translate_expr(tree, state, tree_data);
   if (status) return status;
   llist_push_back(text_section, tree_data);
 
   /* TEST operand with itself */
   InstructionData *test_data = calloc(1, sizeof(InstructionData));
-  test_data->opcode = OPCODES[OP_TEST];
-  strcpy(test_data->dest_operand, tree_data->dest_operand);
-  strcpy(test_data->src_operand, tree_data->dest_operand);
+  test_data->opcode = OP_TEST;
+  test_data->dest = tree_data->dest;
+  test_data->src = tree_data->dest;
   llist_push_back(text_section, test_data);
 
-  data->opcode = OPCODES[OP_SETZ];
-  return assign_vreg(&SPEC_INT, data->dest_operand, vreg_count++);
+  data->opcode = OP_SETZ;
+  assign_vreg(&SPEC_INT, &data->dest, vreg_count++);
+  return 0;
 }
 
 int translate_logical(ASTree *operator, CompilerState * state,
-                      InstructionData *data, InstructionEnum num,
-                      unsigned int flags) {
+                      InstructionData *data) {
   /* create label used to skip second operand */
   InstructionData *label_data = calloc(1, sizeof(InstructionData));
   sprintf(label_data->label, BOOL_FMT, branch_count++);
 
   /* test first operand; jump on false for && and true for || */
   InstructionData *first_data = calloc(1, sizeof(InstructionData));
-  int status =
-      translate_expr(astree_get(operator, 0), state, first_data, USE_REG);
+  first_data->flags |= USE_REG;
+  int status = translate_expr(astree_get(operator, 0), state, first_data);
   if (status) return status;
   llist_push_back(text_section, first_data);
 
   InstructionData *test_first_data = calloc(1, sizeof(InstructionData));
-  test_first_data->opcode = OPCODES[OP_TEST];
-  strcpy(test_first_data->dest_operand, first_data->dest_operand);
-  strcpy(test_first_data->src_operand, first_data->dest_operand);
+  test_first_data->opcode = OP_TEST;
+  test_first_data->dest = first_data->dest;
+  test_first_data->src = first_data->dest;
   llist_push_back(text_section, test_first_data);
 
   InstructionData *jmp_first_data = calloc(1, sizeof(InstructionData));
-  if (operator->symbol == TOK_AND)
-    jmp_first_data->opcode = OPCODES[OP_JZ];
-  else if (operator->symbol == TOK_OR)
-    jmp_first_data->opcode = OPCODES[OP_JNZ];
-  strcpy(jmp_first_data->dest_operand, label_data->label);
+  if (operator->symbol == TOK_AND) {
+    jmp_first_data->opcode = OP_JZ;
+  } else {
+    jmp_first_data->opcode = OP_JNZ;
+  }
+  jmp_first_data->dest.dir.mode = MODE_IMMEDIATE;
+  jmp_first_data->dest.dir.lab = label_data->label;
   llist_push_back(text_section, jmp_first_data);
 
   /* test second operand; no need to jump afterwards */
   InstructionData *second_data = calloc(1, sizeof(InstructionData));
-  status = translate_expr(astree_get(operator, 1), state, second_data, USE_REG);
+  second_data->flags |= USE_REG;
+  status = translate_expr(astree_get(operator, 1), state, second_data);
   if (status) return status;
   llist_push_back(text_section, second_data);
 
   InstructionData *test_second_data = calloc(1, sizeof(InstructionData));
-  test_second_data->opcode = OPCODES[OP_TEST];
-  strcpy(test_second_data->dest_operand, second_data->dest_operand);
-  strcpy(test_second_data->src_operand, second_data->dest_operand);
+  test_second_data->opcode = OP_TEST;
+  test_second_data->dest = second_data->dest;
+  test_second_data->src = second_data->dest;
   llist_push_back(text_section, test_second_data);
 
   /* write label used to skip second operand */
   llist_push_back(text_section, label_data);
 
   /* result will always be the truth value of the last evaluated expression */
-  data->opcode = OPCODES[OP_SETNZ];
-  return assign_vreg(&SPEC_INT, data->dest_operand, vreg_count++);
+  data->opcode = OP_SETNZ;
+  assign_vreg(&SPEC_INT, &data->dest, vreg_count++);
+  return 0;
 }
 
 /* TODO(Robert): check location of result of first subexpression, and require
@@ -978,10 +979,10 @@ static int translate_expr(ASTree *tree, CompilerState *state,
       status = translate_logical_not(astree_get(tree, 0), state, out);
       break;
     case TOK_AND:
-      status = translate_logical(tree, state, out, OP_AND, flags);
+      status = translate_logical(tree, state, out);
       break;
     case TOK_OR:
-      status = translate_logical(tree, state, out, OP_OR, flags);
+      status = translate_logical(tree, state, out);
       break;
     /* constants */
     case TOK_INTCON:
