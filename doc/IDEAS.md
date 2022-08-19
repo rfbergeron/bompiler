@@ -80,6 +80,9 @@ correspond to the different addressing modes under AMD64. These members are:
 #### `MODE_IMMEDIATE`
 Operand will be an immediate value, stored as a `uintmax_t`.
 
+#### `MODE_REGISTER`
+Operand will be a single register.
+
 #### `MODE_DIRECT`
 Operand will be a label/address, with an offset. Offset will be zero if no
 offset is necessary.
