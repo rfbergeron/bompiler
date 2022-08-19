@@ -465,29 +465,25 @@ int translate_logical(ASTree *operator, CompilerState * state,
  * second subexpression to place result in a register if the first was not
  */
 int translate_comparison(ASTree *operator, CompilerState * state,
-                         InstructionData *data, InstructionEnum num,
-                         unsigned int flags) {
+                         InstructionData *data) {
   /* CMP operands, then SETG/SETGE/SETL/SETLE/SETE/SETNE */
   InstructionData *first_data = calloc(1, sizeof(*first_data));
-  int status = translate_expr(astree_get(operator, 0), state, first_data,
-                              NO_INSTR_FLAGS);
+  int status = translate_expr(astree_get(operator, 0), state, first_data);
   if (status) return status;
   llist_push_back(text_section, first_data);
 
   InstructionData *second_data = calloc(1, sizeof(*second_data));
-  status = translate_expr(astree_get(operator, 1), state, second_data,
-                          NO_INSTR_FLAGS);
+  status = translate_expr(astree_get(operator, 1), state, second_data);
   if (status) return status;
   llist_push_back(text_section, second_data);
 
   InstructionData *cmp_data = calloc(1, sizeof(InstructionData));
-  cmp_data->opcode = OPCODES[OP_CMP];
-  strcpy(cmp_data->dest_operand, first_data->dest_operand);
-  strcpy(cmp_data->src_operand, second_data->dest_operand);
+  cmp_data->opcode = OP_CMP;
+  cmp_data->dest = first_data->dest;
+  cmp_data->src = second_data->dest;
   llist_push_back(text_section, cmp_data);
 
-  data->opcode = OPCODES[num];
-  status = assign_vreg(&SPEC_INT, data->dest_operand, vreg_count++);
+  assign_vreg(&SPEC_INT, &data->dest, vreg_count++);
   return status;
 }
 
@@ -957,22 +953,28 @@ static int translate_expr(ASTree *tree, CompilerState *state,
       break;
     /* comparison operators */
     case '>':
-      status = translate_comparison(tree, state, out, OP_SETG, flags);
+      out->opcode = OP_SETG;
+      status = translate_comparison(tree, state, out);
       break;
     case TOK_GE:
-      status = translate_comparison(tree, state, out, OP_SETGE, flags);
+      out->opcode = OP_SETGE;
+      status = translate_comparison(tree, state, out);
       break;
     case '<':
-      status = translate_comparison(tree, state, out, OP_SETL, flags);
+      out->opcode = OP_SETL;
+      status = translate_comparison(tree, state, out);
       break;
     case TOK_LE:
-      status = translate_comparison(tree, state, out, OP_SETLE, flags);
+      out->opcode = OP_SETLE;
+      status = translate_comparison(tree, state, out);
       break;
     case TOK_EQ:
-      status = translate_comparison(tree, state, out, OP_SETE, flags);
+      out->opcode = OP_SETE;
+      status = translate_comparison(tree, state, out);
       break;
     case TOK_NE:
-      status = translate_comparison(tree, state, out, OP_SETNE, flags);
+      out->opcode = OP_SETNE;
+      status = translate_comparison(tree, state, out);
       break;
     /* logical operators */
     case '!':
