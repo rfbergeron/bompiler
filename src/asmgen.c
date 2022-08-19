@@ -62,6 +62,7 @@
   GENERATOR(XOR)                  \
   /* shifts */                    \
   GENERATOR(SHL)                  \
+  GENERATOR(SAL)                  \
   GENERATOR(SHR)                  \
   GENERATOR(SAR)                  \
   /* code movement */             \
@@ -592,16 +593,15 @@ int translate_reference(ASTree *reference, CompilerState *state,
   return 0;
 }
 
-int translate_inc_dec(ASTree *operator, CompilerState * state,
-                      InstructionData *data, InstructionEnum num,
-                      unsigned int flags) {
-  DEBUGS('g', "Translating increment/decrement: %s", OPCODES[num]);
+int translate_inc_dec(ASTree *inc_dec, CompilerState *state,
+                      InstructionData *data) {
+  DEBUGS('g', "Translating increment/decrement: %s", OPCODES[data->opcode]);
   InstructionData *mov_data = NULL;
   InstructionData *inc_dec_data = NULL;
   InstructionData *to_push_data = NULL;
 
   /* change which instruction gets pushed first depending on pofx vs prfx */
-  if (operator->symbol == TOK_INC || operator->symbol == TOK_DEC) {
+  if (inc_dec->symbol == TOK_INC || inc_dec->symbol == TOK_DEC) {
     inc_dec_data = calloc(1, sizeof(*mov_data));
     mov_data = data;
     to_push_data = inc_dec_data;
@@ -611,70 +611,62 @@ int translate_inc_dec(ASTree *operator, CompilerState * state,
     to_push_data = mov_data;
   }
 
-  int status =
-      translate_expr(astree_get(operator, 0), state, mov_data, NO_INSTR_FLAGS);
+  int status = translate_expr(astree_get(inc_dec, 0), state, mov_data);
   if (status) return status;
 
-  inc_dec_data->opcode = OPCODES[num];
-  strcpy(inc_dec_data->dest_operand, mov_data->src_operand);
-
+  inc_dec_data->dest = mov_data->src;
   llist_push_back(text_section, to_push_data);
   return 0;
 }
 
 int translate_unop(ASTree *operator, CompilerState * state,
-                   InstructionData *data, InstructionEnum num,
-                   unsigned int flags) {
-  DEBUGS('g', "Translating unary operation: %s", OPCODES[num]);
+                   InstructionData *data) {
+  DEBUGS('g', "Translating unary operation: %s", OPCODES[data->opcode]);
   InstructionData *dest_data = calloc(1, sizeof(*dest_data));
-  /* put value in register so that it is not modified in place */
-  int status =
-      translate_expr(astree_get(operator, 0), state, dest_data, USE_REG);
+  dest_data->flags |= USE_REG;
+  int status = translate_expr(astree_get(operator, 0), state, dest_data);
   if (status) return status;
   llist_push_back(text_section, dest_data);
 
-  data->opcode = OPCODES[num];
-  strcpy(data->dest_operand, dest_data->dest_operand);
+  data->dest = dest_data->dest;
   return 0;
 }
 
 int translate_binop(ASTree *operator, CompilerState * state,
-                    InstructionData *data, InstructionEnum num,
-                    unsigned int flags) {
-  DEBUGS('g', "Translating binary operation: %s", OPCODES[num]);
+                    InstructionData *data) {
+  DEBUGS('g', "Translating binary operation: %s", OPCODES[data->opcode]);
   InstructionData *dest_data = calloc(1, sizeof(*dest_data));
-  int status =
-      translate_expr(astree_get(operator, 0), state, dest_data, USE_REG);
+  dest_data->flags |= USE_REG;
+  int status = translate_expr(astree_get(operator, 0), state, dest_data);
   if (status) return status;
   llist_push_back(text_section, dest_data);
 
   InstructionData *src_data = calloc(1, sizeof(*src_data));
-  status =
-      translate_expr(astree_get(operator, 1), state, src_data, NO_INSTR_FLAGS);
+  status = translate_expr(astree_get(operator, 1), state, src_data);
   if (status) return status;
   llist_push_back(text_section, src_data);
 
-  strcpy(data->dest_operand, dest_data->dest_operand);
-  strcpy(data->src_operand, src_data->dest_operand);
-  data->opcode = OPCODES[num];
+  data->dest = dest_data->dest;
+  data->src = src_data->dest;
   return 0;
 }
 
 int translate_mul_div_mod(ASTree *operator, CompilerState * state,
-                          InstructionData *data, InstructionEnum num,
-                          unsigned int flags) {
+                          InstructionData *data) {
   /* TODO(Robert): designate vregs for quotient/lo bits and remainder/hi bits
    */
   if (operator->symbol == '%') {
     /* return remainder instead of quotient */
     InstructionData *remainder_data = calloc(1, sizeof(*remainder_data));
-    int status = translate_binop(operator, state, remainder_data, num, flags);
+    remainder_data->flags = data->flags;
+    int status = translate_binop(operator, state, remainder_data);
     if (status) return status;
     llist_push_back(text_section, remainder_data);
-    data->opcode = OPCODES[OP_NOP];
-    return assign_vreg(operator->type, data->dest_operand, vreg_count++);
+    data->opcode = OP_NOP;
+    assign_vreg(operator->type, &data->dest, vreg_count++);
+    return 0;
   } else {
-    int status = translate_binop(operator, state, data, num, flags);
+    int status = translate_binop(operator, state, data);
     if (status) return status;
     /* use up another vreg for the remainder/high-order bits */
     ++vreg_count;
@@ -906,76 +898,104 @@ static int translate_expr(ASTree *tree, CompilerState *state,
   switch (tree->symbol) {
     /* arithmetic operators */
     case '+':
-      status = translate_binop(tree, state, out, OP_ADD, flags);
+      out->opcode = OP_ADD;
+      status = translate_binop(tree, state, out);
       break;
     case '-':
-      status = translate_binop(tree, state, out, OP_SUB, flags);
+      out->opcode = OP_SUB;
+      status = translate_binop(tree, state, out);
       break;
     case '*':
       if (astree_get(tree, 0)->type->base == TYPE_SIGNED)
-        status = translate_mul_div_mod(tree, state, out, OP_IMUL, flags);
+        out->opcode = OP_IMUL;
       else
-        status = translate_mul_div_mod(tree, state, out, OP_MUL, flags);
+        out->opcode = OP_MUL;
+      status = translate_mul_div_mod(tree, state, out);
       break;
     case '/':
     case '%':
       if (astree_get(tree, 0)->type->base == TYPE_SIGNED)
-        status = translate_mul_div_mod(tree, state, out, OP_IDIV, flags);
+        out->opcode = OP_IDIV;
       else
-        status = translate_mul_div_mod(tree, state, out, OP_DIV, flags);
+        out->opcode = OP_DIV;
+      status = translate_mul_div_mod(tree, state, out);
       break;
     case TOK_INC:
     case TOK_POST_INC:
-      status = translate_inc_dec(tree, state, out, OP_INC, flags);
+      out->opcode = OP_INC;
+      status = translate_inc_dec(tree, state, out);
       break;
     case TOK_DEC:
     case TOK_POST_DEC:
-      status = translate_inc_dec(tree, state, out, OP_DEC, flags);
+      out->opcode = OP_DEC;
+      status = translate_inc_dec(tree, state, out);
       break;
     case TOK_NEG:
-      status = translate_unop(tree, state, out, OP_NEG, flags);
+      out->opcode = OP_NEG;
+      status = translate_unop(tree, state, out);
       break;
     case TOK_POS:
-      status = translate_conversion(tree, state, out, flags);
+      status = translate_conversion(tree, state, out);
       break;
     /* bitwise operators */
     case '&':
-      status = translate_binop(tree, state, out, OP_AND, flags);
+      out->opcode = OP_AND;
+      status = translate_binop(tree, state, out);
       break;
     case '|':
-      status = translate_binop(tree, state, out, OP_OR, flags);
+      out->opcode = OP_OR;
+      status = translate_binop(tree, state, out);
       break;
     case '^':
-      status = translate_binop(tree, state, out, OP_XOR, flags);
+      out->opcode = OP_XOR;
+      status = translate_binop(tree, state, out);
       break;
     case '~':
-      status = translate_unop(tree, state, out, OP_NOT, flags);
+      out->opcode = OP_NOT;
+      status = translate_unop(tree, state, out);
       break;
     /* shifts */
     case TOK_SHL:
-      status = translate_binop(tree, state, out, OP_SHL, flags);
+      if (astree_get(tree, 0)->type->base == TYPE_SIGNED)
+        out->opcode = OP_SAL;
+      else
+        out->opcode = OP_SHL;
+      status = translate_binop(tree, state, out);
       break;
     case TOK_SHR:
       if (astree_get(tree, 0)->type->base == TYPE_SIGNED)
-        status = translate_binop(tree, state, out, OP_SAR, flags);
+        out->opcode = OP_SAR;
       else
-        status = translate_binop(tree, state, out, OP_SHR, flags);
+        out->opcode = OP_SHR;
+      status = translate_binop(tree, state, out);
       break;
     /* comparison operators */
     case '>':
-      out->opcode = OP_SETG;
+      if (astree_get(tree, 0)->type->base == TYPE_SIGNED)
+        out->opcode = OP_SETG;
+      else
+        out->opcode = OP_SETA;
       status = translate_comparison(tree, state, out);
       break;
     case TOK_GE:
-      out->opcode = OP_SETGE;
+      if (astree_get(tree, 0)->type->base == TYPE_SIGNED)
+        out->opcode = OP_SETGE;
+      else
+        out->opcode = OP_SETAE;
       status = translate_comparison(tree, state, out);
       break;
     case '<':
-      out->opcode = OP_SETL;
+      if (astree_get(tree, 0)->type->base == TYPE_SIGNED)
+        out->opcode = OP_SETL;
+      else
+        out->opcode = OP_SETB;
       status = translate_comparison(tree, state, out);
       break;
     case TOK_LE:
-      out->opcode = OP_SETLE;
+      if (astree_get(tree, 0)->type->base == TYPE_SIGNED)
+        out->opcode = OP_SETLE;
+      else
+        out->opcode = OP_SETBE;
       status = translate_comparison(tree, state, out);
       break;
     case TOK_EQ:
@@ -1004,29 +1024,29 @@ static int translate_expr(ASTree *tree, CompilerState *state,
       break;
     /* miscellaneous */
     case TOK_ADDROF:
-      status = translate_addrof(tree, state, out, flags);
+      status = translate_addrof(tree, state, out);
       break;
     case TOK_INDIRECTION:
-      status = translate_indirection(tree, state, out, flags);
+      status = translate_indirection(tree, state, out);
       break;
     case TOK_IDENT:
-      status = translate_ident(tree, state, out, flags);
+      status = translate_ident(tree, state, out);
       break;
     case '=':
       status = translate_assignment(tree, state, out, flags);
       break;
     case TOK_CAST:
-      status = translate_conversion(tree, state, out, flags);
+      status = translate_conversion(tree, state, out);
       break;
     case TOK_CALL:
       status = translate_call(tree, state, out, flags);
       break;
     case TOK_SUBSCRIPT:
-      status = translate_subscript(tree, state, out, flags);
+      status = translate_subscript(tree, state, out);
       break;
     case '.':
     case TOK_ARROW:
-      status = translate_reference(tree, state, out, flags);
+      status = translate_reference(tree, state, out);
       break;
     default:
       fprintf(stderr, "ERROR: Unimplemented token: %s, lexinfo: %s\n",
