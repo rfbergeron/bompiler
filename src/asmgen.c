@@ -488,28 +488,111 @@ int translate_comparison(ASTree *operator, CompilerState * state,
 }
 
 int translate_indirection(ASTree *indirection, CompilerState *state,
-                          InstructionData *data, unsigned int flags) {
+                          InstructionData *data) {
   DEBUGS('g', "Translating indirection operation.");
   InstructionData *src_data = calloc(1, sizeof(*src_data));
-  int status =
-      translate_expr(astree_get(indirection, 0), state, src_data, USE_REG);
+  src_data->flags |= USE_REG;
+  int status = translate_expr(astree_get(indirection, 0), state, src_data);
   if (status) return status;
   llist_push_back(text_section, src_data);
 
-  sprintf(data->src_operand, INDIRECT_FMT, src_data->dest_operand);
-  status = assign_vreg(indirection->type, data->dest_operand, vreg_count++);
-  if (status) return status;
-  data->opcode = OPCODES[OP_MOV];
+  data->opcode = OP_MOV;
+  data->src.ind.mode = MODE_INDIRECT;
+  data->src.ind.num = src_data->dest.ind.num;
+  assign_vreg(indirection->type, &data->dest, vreg_count++);
   return 0;
 }
 
 int translate_addrof(ASTree *addrof, CompilerState *state,
-                     InstructionData *data, unsigned int flags) {
+                     InstructionData *data) {
   DEBUGS('g', "Translating address operation.");
   /* TODO(Robert): handle other types of lvalues, like struct and union
    * members
    */
-  return translate_expr(astree_get(addrof, 0), state, data, WANT_ADDR);
+  data->flags |= WANT_ADDR;
+  return translate_expr(astree_get(addrof, 0), state, data);
+}
+
+int translate_subscript(ASTree *subscript, CompilerState *state,
+                        InstructionData *data) {
+  DEBUGS('g', "Translating pointer subscript");
+  /* both the pointer and index must be in a register so that the offset and
+   * scale addressing mode can be used
+   */
+  InstructionData *pointer_data = calloc(1, sizeof(*pointer_data));
+  pointer_data->flags |= USE_REG;
+  int status = translate_expr(astree_get(subscript, 0), state, pointer_data);
+  if (status) return status;
+  llist_push_back(text_section, pointer_data);
+
+  InstructionData *index_data = calloc(1, sizeof(*index_data));
+  index_data->flags |= USE_REG;
+  status = translate_expr(astree_get(subscript, 1), state, index_data);
+  if (status) return status;
+  llist_push_back(text_section, index_data);
+
+  InstructionData *mul_data = calloc(1, sizeof(*mul_data));
+  mul_data->dest.ind.mode = MODE_INDIRECT;
+  mul_data->dest.ind.num = index_data->dest.ind.num;
+  mul_data->src.imm.mode = MODE_IMMEDIATE;
+  mul_data->src.imm.val = typespec_get_width((TypeSpec *)subscript->type);
+  llist_push_back(text_section, mul_data);
+
+  data->src.sca.mode = MODE_SCALE_1;
+  data->src.sca.base = pointer_data->dest.ind.num;
+  data->src.sca.index = index_data->dest.ind.num;
+
+  data->dest.ind.mode = MODE_INDIRECT;
+  if (data->flags & WANT_ADDR) {
+    data->opcode = OP_LEA;
+    /* TODO(Robert): define pointer type constant */
+    assign_vreg(&SPEC_ULONG, &data->dest, vreg_count++);
+  } else {
+    data->opcode = OP_MOV;
+    assign_vreg(subscript->type, &data->dest, vreg_count++);
+  }
+  return 0;
+}
+
+/* When fetching a struct member, we must be able to return either the
+ * location or value of the symbol, depending on the presence of WANT_ADDR.
+ *
+ * Because of the way structures are used, it may make the most sense to have
+ * expressions of structure value always result in the address of the
+ * structure.
+ */
+int translate_reference(ASTree *reference, CompilerState *state,
+                        InstructionData *data) {
+  DEBUGS('g', "Translating reference operator");
+  ASTree *struct_ = astree_get(reference, 0);
+  InstructionData *struct_data = calloc(1, sizeof(*struct_data));
+  struct_data->flags |=
+      reference->symbol == TOK_ARROW ? USE_REG : USE_REG | WANT_ADDR;
+  int status = translate_expr(struct_, state, struct_data);
+  if (status) return status;
+  llist_push_back(text_section, struct_data);
+
+  data->src.ind.mode = MODE_INDIRECT;
+  data->src.ind.num = struct_data->dest.ind.num;
+  if (data->flags & WANT_ADDR) {
+    data->opcode = OP_LEA;
+    /* TODO(Robert): define pointer type constant */
+    assign_vreg(&SPEC_ULONG, &data->dest, vreg_count++);
+  } else {
+    data->opcode = OP_MOV;
+    assign_vreg(reference->type, &data->dest, vreg_count++);
+  }
+
+  AuxSpec *struct_aux = reference->symbol == TOK_ARROW
+                            ? llist_get(&struct_->type->auxspecs, 1)
+                            : llist_front(&struct_->type->auxspecs);
+  SymbolTable *member_table = struct_aux->data.tag.val->data.members.by_name;
+  const char *member_name = astree_get(reference, 1)->lexinfo;
+  size_t member_name_len = strlen(member_name);
+  SymbolValue *member_symbol =
+      symbol_table_get(member_table, member_name, member_name_len);
+  data->src.ind.disp = member_symbol->offset;
+  return 0;
 }
 
 int translate_inc_dec(ASTree *operator, CompilerState * state,
@@ -634,76 +717,6 @@ int translate_assignment(ASTree *assignment, CompilerState *state,
   data->opcode = OPCODES[OP_MOV];
 
   return 0;
-}
-
-int translate_subscript(ASTree *subscript, CompilerState *state,
-                        InstructionData *data, unsigned int flags) {
-  DEBUGS('g', "Translating pointer subscript");
-  /* both the pointer and index must be in a register so that the offset and
-   * scale addressing mode can be used
-   */
-  InstructionData *pointer_data = calloc(1, sizeof(*pointer_data));
-  int status =
-      translate_expr(astree_get(subscript, 0), state, pointer_data, USE_REG);
-  if (status) return status;
-  llist_push_back(text_section, pointer_data);
-
-  InstructionData *index_data = calloc(1, sizeof(*index_data));
-  status = translate_expr(astree_get(subscript, 1), state, index_data, USE_REG);
-  if (status) return status;
-  llist_push_back(text_section, index_data);
-
-  data->opcode = OPCODES[OP_MOV];
-  sprintf(data->src_operand, INDEX_FMT, pointer_data->dest_operand,
-          index_data->dest_operand, subscript->type->width, 0);
-  return assign_vreg(subscript->type, data->dest_operand, vreg_count++);
-}
-
-/* When fetching a struct member, we must be able to return either the
- * location or value of the symbol, depending on the presence of WANT_ADDR.
- *
- * Because of the way structures are used, it may make the most sense to have
- * expressions of structure value always result in the address of the
- * structure.
- */
-int translate_reference(ASTree *reference, CompilerState *state,
-                        InstructionData *data, unsigned int flags) {
-  DEBUGS('g', "Translating reference operator");
-  ASTree *struct_ = astree_get(reference, 0);
-  InstructionData *struct_data = calloc(1, sizeof(*struct_data));
-  unsigned int struct_flags =
-      reference->symbol == TOK_ARROW ? USE_REG : USE_REG | WANT_ADDR;
-  int status = translate_expr(struct_, state, struct_data, struct_flags);
-  if (status) return status;
-  llist_push_back(text_section, struct_data);
-
-  const AuxSpec *struct_aux = reference->symbol == TOK_ARROW
-                                  ? llist_get(&struct_->type->auxspecs, 1)
-                                  : llist_front(&struct_->type->auxspecs);
-  if (struct_aux->aux == AUX_STRUCT) {
-    if (flags & WANT_ADDR)
-      data->opcode = OPCODES[OP_LEA];
-    else
-      data->opcode = OPCODES[OP_MOV];
-    SymbolTable *member_table = struct_aux->data.tag.val->data.members.by_name;
-    const char *member_name = astree_get(reference, 1)->lexinfo;
-    size_t member_name_len = strlen(member_name);
-    SymbolValue *member_symbol =
-        symbol_table_get(member_table, member_name, member_name_len);
-    char temp[MAX_OPERAND_LENGTH];
-    sprintf(temp, member_symbol->obj_loc, struct_data->dest_operand);
-    sprintf(data->src_operand, INDIRECT_FMT, temp);
-    return assign_vreg(reference->type, data->dest_operand, vreg_count++);
-  } else if (flags & WANT_ADDR) {
-    /* use nop to communicate address to parent expression */
-    data->opcode = OPCODES[OP_NOP];
-    strcpy(data->dest_operand, struct_data->dest_operand);
-    return 0;
-  } else {
-    data->opcode = OPCODES[OP_MOV];
-    sprintf(data->src_operand, INDIRECT_FMT, struct_data->dest_operand);
-    return assign_vreg(reference->type, data->dest_operand, vreg_count++);
-  }
 }
 
 int translate_call(ASTree *call, CompilerState *state, InstructionData *data,
