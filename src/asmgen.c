@@ -91,7 +91,7 @@
 typedef enum opcode { FOREACH_OPCODE(GENERATE_ENUM) } Opcode;
 
 typedef enum address_mode {
-  MODE_NONE,
+  MODE_REGISTER,
   MODE_IMMEDIATE,
   MODE_DIRECT,
   MODE_INDIRECT,
@@ -117,6 +117,10 @@ typedef union operand {
   struct opall {
     AddressMode mode;
   } all;
+  struct opreg {
+    AddressMode mode;
+    size_t num;
+  } reg;
   struct opimm {
     AddressMode mode;
     uintmax_t val;
@@ -238,7 +242,8 @@ void assign_vreg(const TypeSpec *type, Operand *operand, size_t vreg_num) {
   size_t width = typespec_get_width((TypeSpec *)type);
   assert(width == X64_SIZEOF_LONG || width == X64_SIZEOF_INT ||
          width == X64_SIZEOF_SHORT || width == X64_SIZEOF_CHAR);
-  operand->ind.num = vreg_num;
+  operand->reg.mode = MODE_REGISTER;
+  operand->reg.num = vreg_num;
   switch (type->width) {
     case X64_SIZEOF_LONG:
       return;
@@ -369,16 +374,10 @@ int translate_conversion(ASTree *operator, CompilerState * state,
 
 int translate_intcon(ASTree *constant, InstructionData *data) {
   DEBUGS('g', "Translating integer constant");
-  if (data->flags & USE_REG) {
-    assign_vreg(constant->type, &data->dest, vreg_count++);
-    data->src.imm.mode = MODE_IMMEDIATE;
-    data->src.imm.val = constant->constval;
-    data->opcode = OP_MOV;
-  } else {
-    /* result does not need to be in a register */
-    data->dest.imm.mode = MODE_IMMEDIATE;
-    data->dest.imm.val = constant->constval;
-  }
+  assign_vreg(constant->type, &data->dest, vreg_count++);
+  data->src.imm.mode = MODE_IMMEDIATE;
+  data->src.imm.val = constant->constval;
+  data->opcode = OP_MOV;
   return 0;
 }
 
@@ -435,7 +434,7 @@ int translate_logical(ASTree *operator, CompilerState * state,
   } else {
     jmp_first_data->opcode = OP_JNZ;
   }
-  jmp_first_data->dest.dir.mode = MODE_IMMEDIATE;
+  jmp_first_data->dest.dir.mode = MODE_DIRECT;
   jmp_first_data->dest.dir.lab = label_data->label;
   llist_push_back(text_section, jmp_first_data);
 
@@ -496,10 +495,16 @@ int translate_indirection(ASTree *indirection, CompilerState *state,
   if (status) return status;
   llist_push_back(text_section, src_data);
 
-  data->opcode = OP_MOV;
   data->src.ind.mode = MODE_INDIRECT;
   data->src.ind.num = src_data->dest.ind.num;
-  assign_vreg(indirection->type, &data->dest, vreg_count++);
+  if (data->flags & WANT_ADDR) {
+    data->opcode = OP_LEA;
+    /* TODO(Robert): define pointer type constant */
+    assign_vreg(&SPEC_ULONG, &data->dest, vreg_count++);
+  } else {
+    data->opcode = OP_MOV;
+    assign_vreg(indirection->type, &data->dest, vreg_count++);
+  }
   return 0;
 }
 
@@ -532,17 +537,16 @@ int translate_subscript(ASTree *subscript, CompilerState *state,
   llist_push_back(text_section, index_data);
 
   InstructionData *mul_data = calloc(1, sizeof(*mul_data));
-  mul_data->dest.ind.mode = MODE_INDIRECT;
-  mul_data->dest.ind.num = index_data->dest.ind.num;
+  mul_data->dest.reg.mode = MODE_REGISTER;
+  mul_data->dest.reg.num = index_data->dest.ind.num;
   mul_data->src.imm.mode = MODE_IMMEDIATE;
   mul_data->src.imm.val = typespec_get_width((TypeSpec *)subscript->type);
   llist_push_back(text_section, mul_data);
 
   data->src.sca.mode = MODE_SCALE_1;
   data->src.sca.base = pointer_data->dest.ind.num;
-  data->src.sca.index = index_data->dest.ind.num;
+  data->src.sca.index = mul_data->dest.ind.num;
 
-  data->dest.ind.mode = MODE_INDIRECT;
   if (data->flags & WANT_ADDR) {
     data->opcode = OP_LEA;
     /* TODO(Robert): define pointer type constant */
@@ -554,13 +558,6 @@ int translate_subscript(ASTree *subscript, CompilerState *state,
   return 0;
 }
 
-/* When fetching a struct member, we must be able to return either the
- * location or value of the symbol, depending on the presence of WANT_ADDR.
- *
- * Because of the way structures are used, it may make the most sense to have
- * expressions of structure value always result in the address of the
- * structure.
- */
 int translate_reference(ASTree *reference, CompilerState *state,
                         InstructionData *data) {
   DEBUGS('g', "Translating reference operator");
