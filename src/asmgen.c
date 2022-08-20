@@ -685,86 +685,76 @@ int translate_cast(ASTree *cast, InstructionData *data) {
 }
 
 int translate_assignment(ASTree *assignment, CompilerState *state,
-                         InstructionData *data, unsigned int flags) {
+                         InstructionData *data) {
   DEBUGS('g', "Translating assignment");
 
   InstructionData *src_data = calloc(1, sizeof(*src_data));
-  /* place result in register since destination will be a memory location */
-  int status =
-      translate_expr(astree_get(assignment, 1), state, src_data, USE_REG);
+  src_data->flags |= USE_REG;
+  int status = translate_expr(astree_get(assignment, 1), state, src_data);
   if (status) return status;
   llist_push_back(text_section, src_data);
 
   InstructionData *dest_data = calloc(1, sizeof(*dest_data));
-  status = translate_expr(astree_get(assignment, 0), state, dest_data,
-                          NO_INSTR_FLAGS);
+  dest_data->flags |= WANT_ADDR | USE_REG;
+  status = translate_expr(astree_get(assignment, 0), state, dest_data);
   if (status) return status;
   llist_push_back(text_section, dest_data);
 
-  strcpy(data->dest_operand, dest_data->dest_operand);
-  strcpy(data->src_operand, src_data->dest_operand);
-  data->opcode = OPCODES[OP_MOV];
-
+  data->dest.ind.mode = MODE_INDIRECT;
+  data->dest.ind.num = dest_data->dest.reg.num;
+  data->src = src_data->dest;
+  data->opcode = OP_MOV;
   return 0;
 }
 
-int translate_call(ASTree *call, CompilerState *state, InstructionData *data,
-                   unsigned int flags) {
+int translate_call(ASTree *call, CompilerState *state, InstructionData *data) {
   DEBUGS('g', "Translating function call");
-
   size_t i;
   for (i = 1; i < astree_count(call); ++i) {
     DEBUGS('g', "Translating parameter %i", i);
     /* compute parameter */
-    ASTree *param = astree_get(call, i);
-    InstructionData *param_data = calloc(1, sizeof(*param_data));
-    int status = translate_expr(param, state, param_data, NO_INSTR_FLAGS);
+    ASTree *arg = astree_get(call, i);
+    InstructionData *arg_data = calloc(1, sizeof(*arg_data));
+    int status = translate_expr(arg, state, arg_data);
     if (status) return status;
-    llist_push_back(text_section, param_data);
+    llist_push_back(text_section, arg_data);
 
     /* TODO(Robert): temporarily restrict number of arguments to 4 until I
-     * have implemented passing subroutine parameters on the stack
+     * have implemented passing subroutine arguments on the stack
      */
-    /* mov parameter to argument register */
+    /* mov to argument register */
     InstructionData *mov_data = calloc(1, sizeof(*mov_data));
-    mov_data->opcode = OPCODES[OP_MOV];
-    status = assign_vreg(param->type, mov_data->dest_operand, i);
-    if (status) return status;
-    strcpy(mov_data->src_operand, param_data->dest_operand);
+    mov_data->opcode = OP_MOV;
+    mov_data->src = arg_data->dest;
+    assign_vreg(arg->type, &mov_data->dest, i);
     llist_push_back(text_section, mov_data);
   }
 
-  int status = save_registers(VOLATILE_START, VOLATILE_COUNT);
-  if (status) return status;
+  save_registers(VOLATILE_START, VOLATILE_COUNT);
 
   /* compute function pointer value */
   InstructionData *function_data = calloc(1, sizeof(InstructionData));
-  ASTree *function_expr = astree_get(call, 0);
-  status = translate_expr(function_expr, state, function_data, USE_REG);
+  function_data->flags |= USE_REG;
+  int status = translate_expr(astree_get(call, 0), state, function_data);
   if (status) return status;
   llist_push_back(text_section, function_data);
 
   InstructionData *call_data = calloc(1, sizeof(*call_data));
-  call_data->opcode = OPCODES[OP_CALL];
-  strcpy(call_data->dest_operand, function_data->dest_operand);
+  call_data->opcode = OP_CALL;
+  call_data->dest = function_data->dest;
   llist_push_back(text_section, call_data);
 
   /* mov result to any other register if return type isn't void */
   if (call->type->base != TYPE_VOID) {
-    InstructionData *mov_data = calloc(1, sizeof(*mov_data));
-    mov_data->opcode = OPCODES[OP_MOV];
-    int status = assign_vreg(call->type, mov_data->src_operand, RETURN_VREG);
-    if (status) return status;
-    status = assign_vreg(call->type, mov_data->dest_operand, vreg_count++);
-    if (status) return status;
-    llist_push_back(text_section, mov_data);
-    strcpy(data->dest_operand, mov_data->dest_operand);
+    data->opcode = OP_MOV;
+    assign_vreg(call->type, &data->src, RETURN_VREG);
+    assign_vreg(call->type, &data->dest, vreg_count++);
+  } else {
+    data->opcode = OP_NOP;
   }
 
-  /* only give the parent recursive call the result register, if applicable */
-  data->opcode = OPCODES[OP_NOP];
-
-  return restore_registers(VOLATILE_START, VOLATILE_COUNT);
+  restore_registers(VOLATILE_START, VOLATILE_COUNT);
+  return 0;
 }
 
 int translate_param(ASTree *param, CompilerState *state,
