@@ -217,8 +217,7 @@ static char *translate_reg_type(ASTree *);
 static char *translate_type(void *type, int flags);
 static int translate_stmt(ASTree *stmt, CompilerState *state);
 static int translate_block(ASTree *block, CompilerState *state);
-static int translate_expr(ASTree *tree, CompilerState *state,
-                          InstructionData *data);
+int translate_expr(ASTree *tree, CompilerState *state, InstructionData *data);
 
 /* assigns space for a symbol given an existing offset. inserts padding as
  * needed and returns the sum of the previous offset, the padding and the width
@@ -775,48 +774,39 @@ int translate_param(ASTree *param, CompilerState *state,
 
 int translate_list_initialization(ASTree *declarator, ASTree *init_list,
                                   CompilerState *state) {
-  DEBUGS('g', "Transating struct initiazation by initializer list");
+  DEBUGS('g', "Translating struct initialization by initializer list");
   InstructionData *struct_data = calloc(1, sizeof(InstructionData));
-  struct_data->opcode = OPCODES[OP_LEA];
-  ASTree *struct_ident = declarator;
-  int status = resolve_object(state, struct_ident->lexinfo,
-                              struct_data->dest_operand, INDIRECT_FMT);
-  if (status) return status;
-  const TypeSpec *struct_type = declarator->type;
-  status = assign_vreg(&SPEC_ULONG, struct_data->dest_operand, vreg_count++);
-  if (status) return status;
+  resolve_object(state, &struct_data->src, declarator->lexinfo);
+  assign_vreg(&SPEC_ULONG, &struct_data->dest, vreg_count++);
+  struct_data->opcode = OP_LEA;
   llist_push_back(text_section, struct_data);
 
-  AuxSpec *struct_aux = llist_back(&struct_type->auxspecs);
+  /* TODO(Robert): initialize unset struct members and array elements to
+   * zero if the object is static
+   */
+  /* TODO(Robert): handle array initializers here or create a separate function
+   * to handle them
+   */
+  AuxSpec *struct_aux = llist_back(&declarator->type->auxspecs);
   const LinkedList *member_symbols =
       &struct_aux->data.tag.val->data.members.in_order;
   size_t i;
-  for (i = 0; i < llist_size(member_symbols); ++i) {
-    if (i < astree_count(init_list)) {
-      ASTree *initializer = astree_get(init_list, i);
-      InstructionData *initializer_data = calloc(1, sizeof(InstructionData));
-      int status =
-          translate_expr(initializer, state, initializer_data, USE_REG);
-      if (status) return status;
-      llist_push_back(text_section, initializer_data);
+  for (i = 0; i < astree_count(init_list); ++i) {
+    ASTree *initializer = astree_get(init_list, i);
+    InstructionData *initializer_data = calloc(1, sizeof(InstructionData));
+    initializer_data->flags |= USE_REG;
+    int status = translate_expr(initializer, state, initializer_data);
+    if (status) return status;
+    llist_push_back(text_section, initializer_data);
 
-      InstructionData *assignment_data = calloc(1, sizeof(InstructionData));
-      assignment_data->opcode = OPCODES[OP_MOV];
-      strcpy(assignment_data->src_operand, initializer_data->dest_operand);
-      SymbolValue *member_symbol = llist_get(member_symbols, i);
-      char temp[MAX_OPERAND_LENGTH];
-      sprintf(temp, member_symbol->obj_loc, struct_data->dest_operand);
-      sprintf(assignment_data->dest_operand, INDIRECT_FMT, temp);
-      llist_push_back(text_section, assignment_data);
-    } else if (struct_aux->aux == AUX_UNION) {
-      /* do not initialize other members of the union */
-      break;
-    } else {
-      /* TODO(Robert): initialize unset struct members and array elements to
-       * zero if the object is static
-       */
-      break;
-    }
+    InstructionData *mov_data = calloc(1, sizeof(InstructionData));
+    mov_data->src = initializer_data->dest;
+    SymbolValue *member_symbol = llist_get(member_symbols, i);
+    mov_data->dest.ind.mode = MODE_INDIRECT;
+    mov_data->dest.ind.num = struct_data->dest.reg.num;
+    mov_data->dest.ind.disp = member_symbol->offset;
+    mov_data->opcode = OP_MOV;
+    llist_push_back(text_section, mov_data);
   }
   return 0;
 }
@@ -858,11 +848,9 @@ int translate_local_decl(ASTree *declaration, CompilerState *state) {
   return 0;
 }
 
-static int translate_expr(ASTree *tree, CompilerState *state,
-                          InstructionData *out, unsigned int flags) {
+int translate_expr(ASTree *tree, CompilerState *state, InstructionData *out) {
   int status = 0;
-
-  /* TODO(Robert): make a mapping from symbols to OPCODES so that most
+  /* TODO(Robert): make a mapping from symbols to opcodes so that most
    * of the case statements can be collapsed together
    */
   switch (tree->symbol) {
@@ -988,7 +976,7 @@ static int translate_expr(ASTree *tree, CompilerState *state,
       break;
     /* constants */
     case TOK_INTCON:
-      status = translate_intcon(tree, out, flags);
+      status = translate_intcon(tree, out);
       break;
     case TOK_CHARCON:
       break;
@@ -1003,13 +991,13 @@ static int translate_expr(ASTree *tree, CompilerState *state,
       status = translate_ident(tree, state, out);
       break;
     case '=':
-      status = translate_assignment(tree, state, out, flags);
+      status = translate_assignment(tree, state, out);
       break;
     case TOK_CAST:
       status = translate_conversion(tree, state, out);
       break;
     case TOK_CALL:
-      status = translate_call(tree, state, out, flags);
+      status = translate_call(tree, state, out);
       break;
     case TOK_SUBSCRIPT:
       status = translate_subscript(tree, state, out);
