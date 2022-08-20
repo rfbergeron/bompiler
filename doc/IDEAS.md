@@ -119,6 +119,35 @@ at generation time. This would require its own separate function.
 Perhaps at a later date I will perform the offset calculation at generation
 time as an optimization, but for now multiple instructions are fine.
 
+### Instruction flags and their meaning
+The `InstructionData` struct has a `flags` member which is used to pass
+information to the function called to populate it. This relation describes what
+the caller expects/requires the populated struct to look like once its done.
+
+Currently, the only things the caller can ask for are that the destination
+register is using register addressing mode, and that the caller wants an object
+(as described in the standard), rather than a value.
+
+The former flag has two uses:
+1. if the caller is performing an operation that should not modify any objects,
+   it can request that the left expression place its result in a register
+2. if the caller is populating an instruction that takes two arguments and knows
+   that one of its arguments is already using indirect, displacement, or scaled-
+   index addressing modes, it can request that the other expression place its
+   result in a register, so that it may produce a valid instruction
+
+The latter flag is used to indicate that an lvalue expression should produce the
+object that the lvalue refers to, not the value stored within the object. This
+is used for assignment, the address operator, and the struct reference operator,
+but not the arrow operator.
+
+Currently, using the two at the same time does not make sense/is not necessary.
+This is because in all situations where `WANT_ADDR` is provided and respected by
+the callee, the effect is that the `LEA` operation is used. The second operand
+of an `LEA` must be in indirect, displacement, or scaled-index mode, so the
+first operand can only ever be in register mode, which is the effect of the
+`USE_REG` flag.
+
 ## Simpler structure handling
 Structure handling could be simplified, removing the need to have a second pass
 over the declarators of a structure's members. In this scheme, the members of a
