@@ -224,12 +224,13 @@ static int translate_expr(ASTree *tree, CompilerState *state,
  * needed and returns the sum of the previous offset, the padding and the width
  * of the symbol
  */
-size_t assign_space(SymbolValue *symval, size_t offset) {
+size_t assign_space(SymbolValue *symval, size_t reg, size_t offset) {
   size_t alignment = typespec_get_alignment(&symval->type);
   size_t width = typespec_get_width(&symval->type);
   size_t padding = alignment - (offset % alignment);
   if (padding != alignment) offset += padding;
   symval->offset = offset;
+  symval->reg = reg;
   offset += width;
   return offset;
 }
@@ -761,26 +762,14 @@ int translate_param(ASTree *param, CompilerState *state,
                     InstructionData *data) {
   DEBUGS('g', "Translating parameter");
   ASTree *declarator = astree_get(param, 1);
-  ASTree *param_ident = declarator;
-  int status = assign_vreg(param_ident->type, data->src_operand, vreg_count++);
-  if (status) return status;
   SymbolValue *symval = NULL;
-  int is_param = state_get_symbol(state, param_ident->lexinfo,
-                                  strlen(param_ident->lexinfo), &symval);
-  if (symval == NULL) {
-    fprintf(stderr, "ERROR: unable to resolve symbol %s\n",
-            param_ident->lexinfo);
-    return -1;
-  } else if (!is_param) {
-    fprintf(stderr, "ERROR: resolved symbol %s was not a function parameter.\n",
-            param_ident->lexinfo);
-  }
-  status = assign_space(symval, STACK_POINTER_STRING);
-  if (status) return status;
-  status = resolve_object(state, param_ident->lexinfo, data->dest_operand,
-                          INDIRECT_FMT);
-  if (status) return status;
-  data->opcode = OPCODES[OP_MOV];
+  assert(state_get_symbol(state, declarator->lexinfo,
+                          strlen(declarator->lexinfo), &symval));
+  assert(symval);
+  stack_window = assign_space(symval, STACK_POINTER_VREG, stack_window);
+  resolve_object(state, &data->dest, declarator->lexinfo);
+  assign_vreg(declarator->type, &data->src, vreg_count++);
+  data->opcode = OP_MOV;
   return 0;
 }
 
@@ -832,46 +821,37 @@ int translate_list_initialization(ASTree *declarator, ASTree *init_list,
   return 0;
 }
 
-int translate_local_decl(ASTree *declaration, CompilerState *state,
-                         InstructionData *data) {
+int translate_local_decl(ASTree *declaration, CompilerState *state) {
   DEBUGS('g', "Translating local declaration");
   size_t i;
   /* skip typespec list */
   for (i = 1; i < astree_count(declaration); ++i) {
-    ASTree *declarator = astree_get(declaration, i);
-    ASTree *ident = declarator;
+    ASTree *child = astree_get(declaration, i);
+    ASTree *declarator = child->symbol == '=' ? astree_get(child, 0) : child;
+    ASTree *initializer = child->symbol == '=' ? astree_get(child, 1) : NULL;
     SymbolValue *symval = NULL;
-    state_get_symbol(state, (char *)ident->lexinfo, strlen(ident->lexinfo),
-                     &symval);
-    if (symval == NULL) {
-      fprintf(stderr, "ERROR: unable to resolve symbol %s\n", ident->lexinfo);
-      return -1;
-    }
-    int status = assign_space(symval, STACK_POINTER_STRING);
-    if (status) return status;
+    assert(state_get_symbol(state, (char *)declarator->lexinfo,
+                            strlen(declarator->lexinfo), &symval));
+    assert(symval);
+    stack_window = assign_space(symval, STACK_POINTER_VREG, stack_window);
 
-    /* check if next child is an initializer */
-    if (i < astree_count(declaration) - 1) {
-      ASTree *next_child = astree_get(declaration, i + 1);
-      if (next_child->symbol == TOK_INIT_LIST) {
+    if (initializer != NULL) {
+      if (initializer->symbol == TOK_INIT_LIST) {
         int status =
-            translate_list_initialization(declarator, next_child, state);
+            translate_list_initialization(declarator, initializer, state);
         if (status) return status;
-        ++i;
-      } else if (next_child->symbol !=
-                 TOK_IDENT) { /* TODO(Robert): this used to be TOK_DECLARATOR;
-                                 check that it is correct */
-        int status = resolve_object(state, ident->lexinfo, data->dest_operand,
-                                    INDIRECT_FMT);
-        if (status) return status;
+      } else {
         InstructionData *value_data = calloc(1, sizeof(*value_data));
-        status = translate_expr(next_child, state, value_data, USE_REG);
+        value_data->flags |= USE_REG;
+        int status = translate_expr(initializer, state, value_data);
         if (status) return status;
         llist_push_back(text_section, value_data);
 
-        strcpy(data->src_operand, value_data->dest_operand);
-        data->opcode = OPCODES[OP_MOV];
-        ++i;
+        InstructionData *mov_data = calloc(1, sizeof(*mov_data));
+        resolve_object(state, &mov_data->dest, declarator->lexinfo);
+        mov_data->src = value_data->dest;
+        mov_data->opcode = OP_MOV;
+        llist_push_back(text_section, mov_data);
       }
     }
   }
