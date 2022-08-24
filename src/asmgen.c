@@ -149,6 +149,7 @@ typedef struct instruction_data {
   Opcode opcode;
   unsigned int flags;
   char label[MAX_LABEL_LENGTH];
+  char comment[MAX_LABEL_LENGTH];
   Operand dest;
   Operand src;
 } InstructionData;
@@ -1491,82 +1492,87 @@ static int translate_stmt(ASTree *stmt, CompilerState *state) {
   return status;
 }
 
+int translate_global_init(ASTree *declarator, ASTree *initializer,
+                          InstructionData *data) {
+  if (typespec_is_array(declarator->type)) {
+    data->opcode = OP_NOP;
+    strcpy(data->comment, "Array init");
+    return 0;
+  } else if (typespec_is_union(declarator->type) ||
+             typespec_is_struct(declarator->type)) {
+    data->opcode = OP_NOP;
+    strcpy(data->comment, "Struct init");
+    return 0;
+  } else {
+    size_t width = typespec_get_width(declarator->type);
+    switch (width) {
+      case X64_SIZEOF_LONG:
+        data->opcode = OP_DQ;
+        goto dx_common_case;
+      case X64_SIZEOF_INT:
+        data->opcode = OP_DD;
+        goto dx_common_case;
+      case X64_SIZEOF_SHORT:
+        data->opcode = OP_DW;
+        goto dx_common_case;
+      case X64_SIZEOF_CHAR:
+        data->opcode = OP_DB;
+      common_case:
+        data->dest.imm.mode = MODE_IMMEDIATE;
+        data->dest.imm.val = initializer->constval;
+        break;
+      default:
+        fprintf(stderr,
+                "ERROR: cannot initialize non-aggregate type with width %lu\n",
+                width);
+        abort();
+    }
+    assert(!llist_push_back(data_section, data));
+    return 0;
+  }
+}
+
 int translate_global_decl(ASTree *declaration, InstructionData *data) {
   DEBUGS('g', "Translating global declaration");
   size_t i;
-  /* skip typespec list */
   for (i = 1; i < astree_count(declaration); ++i) {
-    ASTree *declarator = astree_get(declaration, i);
-    ASTree *ident = declarator;
-    sprintf(data->label, "%s:", ident->lexinfo);
-
-    /* TODO(Robert): indicate somehow in the tree or symbol table that this
-     * is a global variable and should be referenced by its name, as
-     * opposed to a stack offset
-     */
-    /* TODO(Robert): figure out how to initialize data for a struct or any
-     * type wider than a quadword
-     */
-    /* TODO(Robert): have the compiler evaluate compile-time constants
-     */
-
-    /* check if next child is an initializer */
-    if (i < astree_count(declaration) - 1 &&
-        astree_get(declaration, i + 1)->symbol !=
-            TOK_IDENT) { /* TODO(Robert): this used to be TOK_DECLARATOR */
+    ASTree *child = astree_get(declaration, i);
+    ASTree *declarator = child->symbol == '=' ? astree_get(child, 0) : child;
+    ASTree *initializer = child->symbol == '=' ? astree_get(child, 1) : NULL;
+    strcpy(data->label, declarator->lexinfo);
+    if (initializer != NULL) {
       /* put in data section */
-      ASTree *init_value = astree_get(declarator, ++i);
-      strcpy(data->dest_operand, "COMPILE-TIME CONSTANT");
-
-      switch (ident->type->width) {
-        case X64_SIZEOF_LONG:
-          data->opcode = OPCODES[OP_DQ];
-          break;
-        case X64_SIZEOF_INT:
-          data->opcode = OPCODES[OP_DD];
-          break;
-        case X64_SIZEOF_SHORT:
-          data->opcode = OPCODES[OP_DW];
-          break;
-        case X64_SIZEOF_CHAR:
-          data->opcode = OPCODES[OP_DB];
-          break;
-        default:
-          fprintf(stderr,
-                  "ERROR: unable to determine instruction for initialized"
-                  " data of width %lu for symbol %s\n",
-                  ident->type->width, ident->lexinfo);
-          return -1;
-          break;
-      }
+      return translate_global_init(declarator, initializer, data);
     } else {
       /* put in bss/uninitialized data section */
-      data->dest_operand[0] = '1';
-      data->dest_operand[1] = 0;
-      switch (ident->type->width) {
-        case X64_SIZEOF_LONG:
-          data->opcode = OPCODES[OP_RESQ];
+      size_t width = typespec_get_width(declarator->type);
+      size_t align = typespec_get_alignment(declarator->type);
+      size_t res_count = width / align;
+      data->dest.imm.mode = MODE_IMMEDIATE;
+      data->dest.imm.val = res_count;
+      switch (align) {
+        case X64_ALIGNOF_LONG:
+          data->opcode = OP_RESQ;
           break;
-        case X64_SIZEOF_INT:
-          data->opcode = OPCODES[OP_RESD];
+        case X64_ALIGNOF_INT:
+          data->opcode = OP_RESD;
           break;
-        case X64_SIZEOF_SHORT:
-          data->opcode = OPCODES[OP_RESW];
+        case X64_ALIGNOF_SHORT:
+          data->opcode = OP_RESW;
           break;
-        case X64_SIZEOF_CHAR:
-          data->opcode = OPCODES[OP_RESB];
+        case X64_ALIGNOF_CHAR:
+          data->opcode = OP_RESB;
           break;
         default:
           fprintf(stderr,
-                  "ERROR: unable to determine instruction for uninitialized"
-                  " data of width %lu for symbol %s\n",
-                  ident->type->width, ident->lexinfo);
-          return -1;
-          break;
+                  "ERROR: cannot reserve space for object with alignment %lu\n",
+                  align);
+          abort();
       }
+      assert(!llist_push_back(bss_section, data));
+      return 0;
     }
   }
-  return 0;
 }
 
 int translate_function(ASTree *function, CompilerState *state,

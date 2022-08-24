@@ -148,6 +148,25 @@ of an `LEA` must be in indirect, displacement, or scaled-index mode, so the
 first operand can only ever be in register mode, which is the effect of the
 `USE_REG` flag.
 
+### List initialization and constant values
+List initializers are required to have their components be a constant
+expression. The rules defining what is legal in an initializer list constant
+expression effectively limit the value of the constant expression to one of two
+things under x86: an arithmetic constant or a label which represents the address
+of a static or extern object.
+
+This means that the initialization of aggregate types, and initialization by
+constant expression in general, could potentially take as little as one
+instruction.
+
+There should be a helper function called to initialize persistent objects. The
+arguments to this function would be a little different from others.
+
+Translating list initializations will require duplicating the code for
+traversing initializer lists that is present in `tchk_decl.c`. I could avoid
+the complexity and mistakes that arise from this by having the current traversal
+create a list of the values of each member of the struct.
+
 ## Simpler structure handling
 Structure handling could be simplified, removing the need to have a second pass
 over the declarators of a structure's members. In this scheme, the members of a
