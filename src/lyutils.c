@@ -154,6 +154,12 @@ int lexer_switch(void) {
   return TOK_SWITCH;
 }
 
+int lexer_if(void) {
+  (void)lexer_token(TOK_IF);
+  yylval->jump_id = state_next_jump_id(state);
+  return TOK_IF;
+}
+
 int lexer_bad_token(int symbol) {
   char buffer[1024];
   sprintf(buffer, "Invalid token (%s)\n", yytext);

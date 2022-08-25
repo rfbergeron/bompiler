@@ -1017,29 +1017,31 @@ int translate_expr(ASTree *tree, CompilerState *state, InstructionData *out) {
 }
 
 static int translate_ifelse(ASTree *ifelse, CompilerState *state) {
-  size_t current_branch = branch_count++;
   /* translate conditional expression */
   InstructionData *cond_data = calloc(1, sizeof(*cond_data));
-  int status = translate_expr(astree_get(ifelse, 0), state, cond_data, USE_REG);
+  cond_data->flags |= USE_REG;
+  int status = translate_expr(astree_get(ifelse, 0), state, cond_data);
   if (status) return status;
   llist_push_back(text_section, cond_data);
   /* check if condition is zero and jump if it is */
   InstructionData *test_data = calloc(1, sizeof(*test_data));
-  test_data->opcode = OPCODES[OP_TEST];
-  strcpy(test_data->dest_operand, cond_data->dest_operand);
-  strcpy(test_data->src_operand, cond_data->dest_operand);
+  test_data->opcode = OP_TEST;
+  test_data->dest = cond_data->dest;
+  test_data->src = cond_data->dest;
   llist_push_back(text_section, test_data);
-
+  /* create end of statement label */
+  InstructionData *end_label = calloc(1, sizeof(*end_label));
+  sprintf(end_label->label, END_FMT, ifelse->jump_id);
+  /* emit conditional jump */
   InstructionData *test_jmp_data = calloc(1, sizeof(*test_jmp_data));
-  test_jmp_data->opcode = OPCODES[OP_JZ];
-  sprintf(test_jmp_data->dest_operand, END_FMT, current_branch);
+  test_jmp_data->opcode = OP_JZ;
+  test_jmp_data->dest.dir.mode = MODE_DIRECT;
+  test_jmp_data->dest.dir.lab = end_label->label;
   llist_push_back(text_section, test_jmp_data);
   /* translate if body */
   status = translate_stmt(astree_get(ifelse, 1), state);
   if (status) return status;
-  /* emit label at end of statement */
-  InstructionData *end_label = calloc(1, sizeof(*end_label));
-  sprintf(end_label->label, END_FMT, current_branch);
+  /* emit end of statement label */
   llist_push_back(text_section, end_label);
   /* translate else body if present */
   if (astree_count(ifelse) == 3) {
