@@ -1131,78 +1131,73 @@ static int translate_while(ASTree *while_, CompilerState *state) {
 }
 
 static int translate_for(ASTree *for_, CompilerState *state) {
-  size_t current_branch = branch_count++;
   ASTree *for_exprs = astree_get(for_, 0);
   /* translate initialization expression, if present */
   ASTree *init_expr = astree_get(for_exprs, 0);
   if (init_expr->symbol != ';') {
     InstructionData *init_data = calloc(1, sizeof(*init_data));
-    int status = translate_expr(init_expr, state, init_data, NO_INSTR_FLAGS);
+    int status = translate_expr(init_expr, state, init_data);
     if (status) return status;
     llist_push_back(text_section, init_data);
   }
 
   /* emit label at beginning of condition */
-  InstructionData *cond_label = calloc(1, sizeof(*cond_label));
-  sprintf(cond_label->label, COND_FMT, current_branch);
-  llist_push_back(text_section, cond_label);
+  InstructionData *cond_lab_data = calloc(1, sizeof(*cond_lab_data));
+  sprintf(cond_lab_data->label, COND_FMT, for_->jump_id);
+  cond_lab_data->opcode = OP_NOP;
+  llist_push_back(text_section, cond_lab_data);
+  /* create label at end of statement, but do not emit */
+  InstructionData *end_lab_data = calloc(1, sizeof(*end_lab_data));
+  sprintf(end_lab_data->label, END_FMT, for_->jump_id);
+  end_lab_data->opcode = OP_NOP;
   /* translate conditional expression, if present */
   ASTree *cond_expr = astree_get(for_exprs, 1);
   if (cond_expr->symbol != ';') {
     /* translate conditional expression */
     InstructionData *cond_data = calloc(1, sizeof(*cond_data));
-    int status = translate_expr(cond_expr, state, cond_data, USE_REG);
+    cond_data->flags |= USE_REG;
+    int status = translate_expr(cond_expr, state, cond_data);
     if (status) return status;
     llist_push_back(text_section, cond_data);
     /* check if condition is zero */
     InstructionData *test_data = calloc(1, sizeof(*test_data));
-    test_data->opcode = OPCODES[OP_TEST];
-    strcpy(test_data->dest_operand, cond_data->dest_operand);
-    strcpy(test_data->src_operand, cond_data->dest_operand);
+    test_data->dest = cond_data->dest;
+    test_data->src = cond_data->src;
+    test_data->opcode = OP_TEST;
     llist_push_back(text_section, test_data);
     /* emit jump to end of loop */
     InstructionData *test_jmp_data = calloc(1, sizeof(*test_jmp_data));
-    test_jmp_data->opcode = OPCODES[OP_JZ];
-    sprintf(test_jmp_data->dest_operand, END_FMT, current_branch);
+    test_jmp_data->dest.dir.mode = MODE_DIRECT;
+    test_jmp_data->dest.dir.lab = end_lab_data->label;
+    test_jmp_data->opcode = OP_JZ;
     llist_push_back(text_section, test_jmp_data);
   }
 
   /* emit label at beginning of body */
-  InstructionData *body_label = calloc(1, sizeof(*body_label));
-  sprintf(body_label->label, STMT_FMT, current_branch);
-  llist_push_back(text_section, body_label);
-  /* create and push jump stack entry */
-  JumpEntry jump_entry;
-  jump_entry.type = JUMP_ITERATION;
-  sprintf(jump_entry.data.iteration.cond_label, COND_FMT, current_branch);
-  sprintf(jump_entry.data.iteration.stmt_label, STMT_FMT, current_branch);
-  sprintf(jump_entry.end_label, END_FMT, current_branch);
-  int status = state_push_jump(state, &jump_entry);
+  InstructionData *body_lab_data = calloc(1, sizeof(*body_lab_data));
+  sprintf(body_lab_data->label, STMT_FMT, for_->jump_id);
+  body_lab_data->opcode = OP_NOP;
+  llist_push_back(text_section, body_lab_data);
   /* translate for body */
-  status = translate_stmt(astree_get(for_, 1), state);
-  if (status) return status;
-  /* pop jump stack entry */
-  status = state_pop_jump(state);
+  int status = translate_stmt(astree_get(for_, 1), state);
   if (status) return status;
   /* translate re-initialization, if present */
   ASTree *reinit_expr = astree_get(for_exprs, 2);
   if (reinit_expr->symbol != ';' && reinit_expr->symbol != ')') {
     InstructionData *reinit_data = calloc(1, sizeof(*reinit_data));
-    int status =
-        translate_expr(reinit_expr, state, reinit_data, NO_INSTR_FLAGS);
+    int status = translate_expr(reinit_expr, state, reinit_data);
     if (status) return status;
     llist_push_back(text_section, reinit_data);
   }
 
   /* emit jump to condition */
   InstructionData *cond_jmp_data = calloc(1, sizeof(*cond_jmp_data));
-  cond_jmp_data->opcode = OPCODES[OP_JMP];
-  sprintf(cond_jmp_data->dest_operand, COND_FMT, current_branch);
+  cond_jmp_data->dest.dir.mode = MODE_DIRECT;
+  cond_jmp_data->dest.dir.lab = cond_lab_data->label;
+  cond_jmp_data->opcode = OP_JMP;
   llist_push_back(text_section, cond_jmp_data);
-  /* emit label at end of statement */
-  InstructionData *end_label = calloc(1, sizeof(*end_label));
-  sprintf(end_label->label, END_FMT, current_branch);
-  llist_push_back(text_section, end_label);
+  /* emit label at end of loop */
+  llist_push_back(text_section, end_lab_data);
   return 0;
 }
 
