@@ -42,6 +42,7 @@ int lexer_token(int symbol);
 int lexer_ident(void);
 int lexer_iteration(int symbol);
 int lexer_switch(void);
+int lexer_if(void);
 int lexer_bad_token(int symbol);
 void lexer_fatal_error(const char *msg);
 void lexer_error(const char *msg);

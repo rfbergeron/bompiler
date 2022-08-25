@@ -51,7 +51,7 @@ NOTSTRING       (\"[^"]*)
 "char"          { return lexer_token (TOK_CHAR); }
 "signed"        { return lexer_token (TOK_SIGNED); }
 "unsigned"      { return lexer_token (TOK_UNSIGNED); }
-"if"            { return lexer_token (TOK_IF); }
+"if"            { return lexer_if (); }
 "else"          { return lexer_token (TOK_ELSE); }
 "switch"        { return lexer_switch(); }
 "do"            { return lexer_iteration (TOK_DO); }
