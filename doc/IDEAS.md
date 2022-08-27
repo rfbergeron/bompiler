@@ -386,6 +386,47 @@ stack is cleaned up and the function returns, indicating success. The
 intermediate language generator will ensure that the other members are zero-
 initialized.
 
+## Linkage, `static`, and `extern`
+In order to implement constant expressions, the compiler must first be aware of
+the linkage of symbols, so that it may determine which symbols may have their
+address taken in a constant expression.
+
+The default linkage of symbols, and their linkage when declared with the
+`static` or `extern` keyword, is determined by their scope.
+
+Also important is that `static` and `extern` can change linkage and storage
+class, which are two different things. Linkage can be internal, external, or
+none, and storage class can be static, automatic, or external.
+
+For external declarations:
+- external linkage, static storage class by default
+- `static` gives the symbol internal linkage
+- `extern` gives the symbol external storage class; this has no effect on
+  functions but causes no storage to be allocated for objects
+- `auto` and `register` are illegal
+
+If an external symbol is to have internal linkage, the `static` specifier must
+be given in the first declaration, and all subsequent declarations must also
+have the `static` keyword.
+
+For all other declarations:
+- no linkage, automatic storage class by default for objects and external
+  linkage, external storage class for functions
+- `auto` and `register` do nothing to objects, but are illegal for functions
+- `static` gives the symbol static storage class. objects are zero initialized
+  if no initializer is given. illegal for use on functions.
+- `extern` does one of two things:
+  - if the symbol is defined in an outer scope, this declaration basically does
+    nothing: the linkage matches that of the outer symbol, and this symbol uses
+    the same storage as the outer symbol
+  - if the symbol is not defined in an outer scope, give the symbol external
+    linkage and external storage class
+
+## External declarations
+External declarations behave differently from internal declarations. External
+symbols may be declared multiple times so long as they are defined at most once,
+and the types of the declarations are considered equivalent.
+
 ## Single pass to intermediate language
 With all the changes made to the type checker and parser, it is now possible to
 generate the intermediate code in a single pass. Since the behavior of the code
