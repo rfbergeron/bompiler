@@ -167,6 +167,58 @@ traversing initializer lists that is present in `tchk_decl.c`. I could avoid
 the complexity and mistakes that arise from this by having the current traversal
 create a list of the values of each member of the struct.
 
+## Single pass refactor
+Intermediate language generation will be performed in the same pass as lexing,
+parsing, and type checking. This will require a couple changes to the global
+state and also possibly to `ASTree`.
+
+### Jump statement tracking
+The break, continue, and selection stacks in the global state will store more
+information as follows:
+
+The continue/iteration stack will store:
+- the jump id of the statement it manipulates
+- a pointer to the label its jump targets
+
+The break stack will store:
+- the jump id of the statement it manipulates
+- a pointer to the end label its jump targets
+
+The selection/switch stack will store:
+- the jump id of the selection
+- a count of the number of case statements belonging to the switch statement
+- a pointer to the label of its default statement
+- a pointer to the label of the next case statement
+- the `TypeSpec*` for its controlling statement
+- a set containing all values of its case statements
+
+The reason the labels are included is so that the labels are not duplicated for
+each instruction that uses them. The label is malloced once and responsibility
+for the resource is passed on to the instruction holding the end and condition
+labels, to the case statement, or to the default statement.
+
+The latter two entries don't have anything to do with intermediate language
+generation, but are necessary for the compiler to operate according to the
+standard. Currently the compiler does not convert the constant expressions for
+case statements to the type of the controlling statement, nor does it report an
+error when multiple case statements have the same value after promotion.
+
+Including type information with switch statement entries will require a minor
+change to the parser to get the type of the controlling expression before the
+body of the switch statement is parsed.
+
+### `lyutils` additions
+Rather than have the parser call type checker functions, which then call
+intermediate language generation functions depending on the success or failure
+of the type checker, more functions will be introduced to `lyutils` and to the
+end of `parser.y` which call the type checker and assembly generator depending
+on command line flags and the success of the individual components.
+
+The names of these functions will have the form `produce_XXX`. These functions
+will respect the command line flags for skipping type checking and intermediate
+language generation. Intermediate language code will not be generated if type
+checking fails.
+
 ## Simpler structure handling
 Structure handling could be simplified, removing the need to have a second pass
 over the declarators of a structure's members. In this scheme, the members of a
@@ -311,10 +363,16 @@ of and typecheck arrays.
 
 ### Implementation
 Support for static and extern objects must be added in order to implement
-constant expressions involving addresses/labels. `ASTree` must have a new field
-added, which will be a `unsigned long`. Conversion from a signed integer to
-unsigned and back preserves the value, so there is no need for a union so long
-as the value is cast appropriately when the expressions are evaluated.
+constant expressions involving addresses/labels. `ASTree` must have new fields
+added, which will be a `const char *` and a `unsigned long`.
+
+The `const char *` is optional and points to the label of a static or extern
+object. The `unsigned long` holds integral values.
+
+Based on the output of clang and gcc, I have decided that offsets from static
+and extern objects will always be treated as though they are signed 64-bit
+values. When the integral component is not an offset, the sign of the stored
+value will be determined from the type member of the syntax tree node.
 
 ## Simpler init list handling
 Initializer list handling could be simplified as well, again using global state.
