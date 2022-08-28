@@ -59,6 +59,74 @@ that has does not do most of the things that I thought:
 - Tags and enumeration constants declared as struct and union members are
   "hoisted" up into the enclosing scope
 
+## Minor type checker refactor
+I think part of the reason I get so confused when going through the type checker
+code, particularly for expressions, is because functions like `types_compatible`
+and `determine_conversion` are poorly named and not terribly useful. Many of the
+type checker functions for operators do their own checks on the validity of the
+types of their operands, so having a function check the compatibility of the
+common type they are converted to after the fact is unnecessary.
+
+### `types_compatible`
+`types_compatible` should be replaced with a `types_equivalent` function, that
+determines type equivalence as defined in the standard, and returns a boolean
+as opposed an enum representing the "degree" of compatibility.
+
+A new function will be added which determines compatibility as required by the
+assignment operator, for use in the assignment operator and also for function
+call arguments.
+
+Initialization will have its own dedicated function for determining
+compatibility between symbols and their initializers. This function may use the
+function(s) for determining compatibility for assigment and function call
+arguments in simple cases, but those functions are not to be dependent on any
+of the functions for type checking initializers.
+
+In all other places where `types_compatible` was previously used, the logic for
+determining the compatibility of expressions will be written directly.
+
+### `determine_conversion`
+`determine_conversion` should be removed completely. Operators which may operate
+on more than just arithmetic types have their own special rules as to the type
+of the result, and the behavior is too complicated to be encoded in a single
+function.
+
+Functions which operate only on arithmetic types will have a function that
+performs the usual conversions. This function will assume that both of its input
+types are arithmetic.
+
+## Declaration refactor
+To accomodate storage class and linkage, the functions handling declarations
+must be fixed to better reflect the language of the standard and to make them
+easier to understand.
+
+For now, I will attempt to use `types_compatible` to determine equivalence of
+two types, but I am not sure that this function will produce the correct result.
+Type equivalence in the standard only takes into account type specifiers, not
+type qualifiers or storage class specifiers, so those should be compared
+separately.
+
+### External declarations
+External symbols may be declared multiple times, so long as they are defined
+at most once and their types are considered equivalent. If a an external symbol
+is meant to have internal linkage, the first declaration of the symbol must have
+the `static` keyword, and so must all subsequent declarations. Declarations of
+symbols with and without the `extern` keyword may be mixed arbitrarily, with the
+only restriction that an `extern` object must have storage allocated in exactly
+one other translation unit.
+
+### Block declarations
+Block symbols may be declared at most once in their scope. The exception to this
+rule is that block symbols with the `extern` keyword may be declared multiple
+times, but each declaration must use the `extern` keyword.
+
+### Initialization
+Currently, type checking for initilization reuses the code for type checking
+assignments. This seemed like a good idea at the time, but the type checking for
+initialization is actually much more complicated than for assignments, so the
+code would probably be considerably more understandable if I further separated
+the logic.
+
 ## Simpler structure handling
 Structure handling could be simplified, removing the need to have a second pass
 over the declarators of a structure's members. In this scheme, the members of a
