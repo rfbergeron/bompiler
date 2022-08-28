@@ -147,15 +147,29 @@ ASTree *validate_tag_typespec(ASTree *spec_list, ASTree *tag) {
   return astree_adopt(spec_list, 1, tag);
 }
 
-ASTree *validate_typedef_typespec(ASTree *spec_list, ASTree *typedef_) {
+ASTree *validate_qualifier(ASTree *spec_list, ASTree *qualifier,
+                           enum typespec_flag flag) {
+  TypeSpec *out = (TypeSpec *)spec_list->type;
+  if (out->flags & (TYPESPEC_FLAG_CONST | TYPESPEC_FLAG_VOLATILE)) {
+    return astree_create_errnode(astree_adopt(spec_list, 1, qualifier),
+                                 BCC_TERR_INCOMPATIBLE_SPEC, 2, spec_list,
+                                 qualifier);
+  } else {
+    out->flags |= flag;
+    return astree_adopt(spec_list, 1, qualifier);
+  }
+}
+
+ASTree *validate_storage_class(ASTree *spec_list, ASTree *storage_class,
+                               enum typespec_flag flag) {
   TypeSpec *out = (TypeSpec *)spec_list->type;
   if (out->flags & TYPESPEC_FLAGS_STORAGE_CLASS) {
-    return astree_create_errnode(astree_adopt(spec_list, 1, typedef_),
+    return astree_create_errnode(astree_adopt(spec_list, 1, storage_class),
                                  BCC_TERR_INCOMPATIBLE_SPEC, 2, spec_list,
-                                 typedef_);
+                                 storage_class);
   } else {
-    out->flags |= TYPESPEC_FLAG_TYPEDEF;
-    return astree_adopt(spec_list, 1, typedef_);
+    out->flags |= flag;
+    return astree_adopt(spec_list, 1, storage_class);
   }
 }
 
@@ -246,14 +260,22 @@ ASTree *validate_typespec(ASTree *spec_list, ASTree *spec) {
     case TOK_STRUCT:
     case TOK_ENUM:
       return validate_tag_typespec(spec_list, spec);
-    case TOK_CONST:
-      /* fallthrough */
-    case TOK_VOLATILE:
-      return astree_adopt(spec_list, 1, spec);
     case TOK_TYPEDEF_NAME:
       return validate_type_id_typespec(spec_list, spec);
+    case TOK_CONST:
+      return validate_qualifier(spec_list, spec, TYPESPEC_FLAG_CONST);
+    case TOK_VOLATILE:
+      return validate_qualifier(spec_list, spec, TYPESPEC_FLAG_VOLATILE);
     case TOK_TYPEDEF:
-      return validate_typedef_typespec(spec_list, spec);
+      return validate_storage_class(spec_list, spec, TYPESPEC_FLAG_TYPEDEF);
+    case TOK_AUTO:
+      return validate_storage_class(spec_list, spec, TYPESPEC_FLAG_AUTO);
+    case TOK_REGISTER:
+      return validate_storage_class(spec_list, spec, TYPESPEC_FLAG_REGISTER);
+    case TOK_STATIC:
+      return validate_storage_class(spec_list, spec, TYPESPEC_FLAG_STATIC);
+    case TOK_EXTERN:
+      return validate_storage_class(spec_list, spec, TYPESPEC_FLAG_EXTERN);
     default:
       return astree_create_errnode(astree_adopt(spec_list, 1, spec),
                                    BCC_TERR_FAILURE, 0);
@@ -285,6 +307,7 @@ ASTree *validate_typespec_list(ASTree *spec_list) {
 int location_is_empty(Location *loc) {
   return loc->filenr == 0 && loc->linenr == 0 && loc->offset == 0;
 }
+
 /*
  * Combines type specifier and declarator information and inserts symbol value
  * into the table at the current scope. Sets source location of the declaration
@@ -843,7 +866,7 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
   } else if (!typespec_is_function(&symval->type)) {
     return astree_create_errnode(astree_adopt(declaration, 2, declarator, body),
                                  BCC_TERR_EXPECTED_FUNCTION, 1, declarator);
-  } else if (symval->flags & SYMFLAG_FUNCTION_DEFINED) {
+  } else if (symval->flags & SYMFLAG_DEFINED) {
     return astree_create_errnode(astree_adopt(declaration, 2, declarator, body),
                                  BCC_TERR_REDEFINITION, 1, declarator);
   }
@@ -930,7 +953,7 @@ ASTree *finalize_function(ASTree *function) {
     assert(!alist_destroy(&label_strs, NULL));
   }
   SymbolValue *symval = state_get_function(state);
-  symval->flags |= SYMFLAG_FUNCTION_DEFINED;
+  symval->flags |= SYMFLAG_DEFINED;
   int status = state_unset_function(state);
   if (status) ret = astree_create_errnode(ret, BCC_TERR_FAILURE, 0);
   /* do not use finalize_block because it will put the error in an awkward place
