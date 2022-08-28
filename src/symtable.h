@@ -24,18 +24,27 @@ typedef struct symbol_table {
 
 typedef enum symbol_flag {
   SYMFLAG_NONE = 0,
-  SYMFLAG_FUNCTION_DEFINED,
-  SYMFLAG_ENUM_CONST,
-  SYMFLAG_INCOMPLETE
+  SYMFLAG_DEFINED = 1 << 0,
+  SYMFLAG_ENUM_CONST = 1 << 1,
+  SYMFLAG_INCOMPLETE = 1 << 2,
+  SYMFLAG_DECL_EXT = 1 << 3,
+  SYMFLAG_LINK_NONE = 1 << 4,
+  SYMFLAG_LINK_EXT = 1 << 5,
+  SYMFLAG_LINK_INT = 1 << 6,
+  SYMFLAG_STORE_AUTO = 1 << 7,
+  SYMFLAG_STORE_EXT = 1 << 8,
+  SYMFLAG_STORE_STAT = 1 << 9,
+  SYMFLAGS_STORE = SYMFLAG_STORE_EXT | SYMFLAG_STORE_AUTO | SYMFLAG_STORE_STAT,
+  SYMFLAGS_LINK = SYMFLAG_LINK_NONE | SYMFLAG_LINK_EXT | SYMFLAG_LINK_INT
 } SymbolFlag;
 
 typedef struct symbol_value {
-  size_t sequence;  /* used to order declarations in a given block */
-  Location loc;     /* declaration location */
-  TypeSpec type;    /* type of symbol */
-  int flags;        /* flags, as enumerated above */
-  char obj_loc[64]; /* DEPRECATE THIS AND REMOVE FROM ASMGEN */
-  size_t offset;    /* offset in stack/struct */
+  size_t sequence;    /* used to order declarations in a given block */
+  Location loc;       /* declaration location */
+  TypeSpec type;      /* type of symbol */
+  unsigned int flags; /* flags, as enumerated above */
+  char obj_loc[64];   /* DEPRECATE THIS AND REMOVE FROM ASMGEN */
+  size_t offset;      /* offset in stack/struct */
 } SymbolValue;
 
 typedef enum tag_type { TAG_STRUCT = 0, TAG_UNION, TAG_ENUM } TagType;
