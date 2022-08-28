@@ -67,15 +67,13 @@ const char STRING_INT_MAP[][32] = {
     "unsigned short int", "signed short int", "unsigned char", "signed char",
 };
 
-const char typespec_flag_string[][10] = {"int", "char", "short", "long",
-                                         "long long", "signed", "unsigned",
-                                         "void", "struct", "union", "enum",
-                                         /* storage class */
-                                         "register", "static", "extern", "auto",
-                                         /* qualifiers */
-                                         "const", "volatile",
-                                         /* function only */
-                                         "inline"};
+const char typespec_flag_string[][10] = {
+    "int", "char", "short", "long", "long long", "signed", "unsigned", "void",
+    "struct", "union", "enum",
+    /* storage class */
+    "register", "static", "extern", "auto", "typedef",
+    /* qualifiers */
+    "const", "volatile"};
 
 const char *STRING_ULONG = STRING_INT_MAP[INDEX_FROM_INT(UNSIGNED, LONG)];
 const char *STRING_LONG = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, LONG)];

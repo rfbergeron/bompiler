@@ -80,8 +80,6 @@ enum typespec_index {
   /* qualifiers */
   TYPESPEC_INDEX_CONST,
   TYPESPEC_INDEX_VOLATILE,
-  /* function only */
-  TYPESPEC_INDEX_INLINE,
   /* number of type specifiers */
   TYPESPEC_INDEX_COUNT
 };
@@ -107,9 +105,7 @@ enum typespec_flag {
   TYPESPEC_FLAG_TYPEDEF = 1 << TYPESPEC_INDEX_TYPEDEF,
   /* qualifiers */
   TYPESPEC_FLAG_CONST = 1 << TYPESPEC_INDEX_CONST,
-  TYPESPEC_FLAG_VOLATILE = 1 << TYPESPEC_INDEX_VOLATILE,
-  /* function only */
-  TYPESPEC_FLAG_INLINE = 1 << TYPESPEC_INDEX_INLINE
+  TYPESPEC_FLAG_VOLATILE = 1 << TYPESPEC_INDEX_VOLATILE
 };
 
 /* "char" is not included in any of these groups */
