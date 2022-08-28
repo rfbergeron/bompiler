@@ -41,10 +41,10 @@
 %token TOK_BLOCK TOK_ARRAY TOK_CAST TOK_POINTER TOK_LABEL TOK_INIT_LIST TOK_PARAM_LIST
 /* tokens constructed by lexer */
 %token TOK_VOID TOK_INT TOK_SHORT TOK_LONG TOK_CHAR TOK_UNSIGNED TOK_SIGNED
-%token TOK_CONST TOK_VOLATILE TOK_RESTRICT TOK_TYPEDEF TOK_SIZEOF
+%token TOK_CONST TOK_VOLATILE TOK_TYPEDEF TOK_STATIC TOK_EXTERN TOK_AUTO TOK_REGISTER
 %token TOK_IF TOK_ELSE TOK_SWITCH TOK_DO TOK_WHILE TOK_FOR TOK_STRUCT TOK_UNION TOK_ENUM
 %token TOK_RETURN TOK_CONTINUE TOK_BREAK TOK_GOTO TOK_CASE TOK_DEFAULT
-%token TOK_ARROW TOK_EQ TOK_NE TOK_LE TOK_GE TOK_SHL TOK_SHR TOK_AND TOK_OR TOK_INC TOK_DEC
+%token TOK_ARROW TOK_SIZEOF TOK_EQ TOK_NE TOK_LE TOK_GE TOK_SHL TOK_SHR TOK_AND TOK_OR TOK_INC TOK_DEC
 %token TOK_SUBEQ TOK_ADDEQ TOK_MULEQ TOK_DIVEQ TOK_REMEQ TOK_ANDEQ TOK_OREQ TOK_XOREQ TOK_SHREQ TOK_SHLEQ
 %token TOK_IDENT TOK_INTCON TOK_CHARCON TOK_STRINGCON TOK_TYPEDEF_NAME
 
@@ -110,6 +110,10 @@ typespec            : TOK_LONG                                          { $$ = b
                     | TOK_VOID                                          { $$ = bcc_yyval = $1; }
                     | TOK_TYPEDEF                                       { $$ = bcc_yyval = $1; }
                     | TOK_TYPEDEF_NAME                                  { $$ = bcc_yyval = $1; }
+                    | TOK_REGISTER                                      { $$ = bcc_yyval = $1; }
+                    | TOK_AUTO                                          { $$ = bcc_yyval = $1; }
+                    | TOK_STATIC                                        { $$ = bcc_yyval = $1; }
+                    | TOK_EXTERN                                        { $$ = bcc_yyval = $1; }
                     | struct_spec                                       { $$ = bcc_yyval = $1; }
                     | enum_spec                                         { $$ = bcc_yyval = $1; }
                     ;
