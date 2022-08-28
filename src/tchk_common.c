@@ -185,6 +185,69 @@ int types_compatible(const TypeSpec *type1, const TypeSpec *type2) {
   return compare_declspecs(type1, type2);
 }
 
+int types_equivalent(const TypeSpec *type1, const TypeSpec *type2);
+int params_equivalent(const AuxSpec *aux1, const AuxSpec *aux2) {
+  LinkedList *params1 = aux1->data.params;
+  LinkedList *params2 = aux2->data.params;
+  if (llist_size(params1) != llist_size(params2)) return 0;
+  size_t i;
+  for (i = 0; i < llist_size(params1); ++i) {
+    SymbolValue *symval1 = llist_get(params1, i);
+    SymbolValue *symval2 = llist_get(params2, i);
+    if (!types_equivalent(&symval1->type, &symval2->type)) return 0;
+  }
+  return 1;
+}
+
+int aux_equivalent(const AuxSpec *aux1, const AuxSpec *aux2) {
+  switch (aux1->aux) {
+    case AUX_FUNCTION:
+      return params_equivalent(aux1, aux2);
+    case AUX_ARRAY:
+      if (aux1->data.memory_loc.length == 0 ||
+          aux2->data.memory_loc.length == 0)
+        return 1;
+      else
+        return aux1->data.memory_loc.length == aux2->data.memory_loc.length;
+    case AUX_ENUM:
+    case AUX_STRUCT:
+    case AUX_UNION:
+      /* can't use name since redefinition is possible */
+      return aux1->data.tag.val == aux2->data.tag.val;
+    case AUX_POINTER:
+      return !!((aux1->data.memory_loc.qualifiers ^
+                 aux2->data.memory_loc.qualifiers) &
+                (TYPESPEC_FLAG_CONST | TYPESPEC_FLAG_VOLATILE));
+    default:
+      return 0;
+  }
+}
+
+/* TODO(Robert): comparing width, alignment, and base type isn't quite right,
+ * but given the limits of the current representation of types, it is the best
+ * that I can do.
+ */
+int types_equivalent(const TypeSpec *type1, const TypeSpec *type2) {
+  LinkedList *auxspecs1 = (LinkedList *)&type1->auxspecs;
+  LinkedList *auxspecs2 = (LinkedList *)&type2->auxspecs;
+  if (llist_size(auxspecs1) != llist_size(auxspecs2)) return 0;
+  size_t i;
+  for (i = 0; i < llist_size(auxspecs1); ++i) {
+    AuxSpec *aux1 = llist_get(auxspecs1, i);
+    AuxSpec *aux2 = llist_get(auxspecs2, i);
+
+    if (aux1->aux != aux2->aux) return 0;
+    if (!aux_equivalent(aux1, aux2)) return 0;
+  }
+  if (type1->base != type2->base) return 0;
+  if (type1->width != type2->width) return 0;
+  if (type1->alignment != type2->alignment) return 0;
+  unsigned int flags_diff = type1->flags ^ type2->flags;
+  if (flags_diff & TYPESPEC_FLAG_VOLATILE) return 0;
+  if (flags_diff & TYPESPEC_FLAG_CONST) return 0;
+  return 1;
+}
+
 /*
  * integer types, in order of priority, are as follows:
  * NOTE: long long won't be supported for the moment; words in parentheses are
