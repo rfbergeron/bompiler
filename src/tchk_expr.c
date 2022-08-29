@@ -213,31 +213,33 @@ ASTree *validate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
   }
 }
 
-ASTree *typecheck_addop(ASTree *operator, ASTree * left, ASTree *right) {
+ASTree *validate_addition(ASTree *operator, ASTree * left, ASTree *right) {
   if (left->symbol == TOK_TYPE_ERROR || right->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(operator, 2, left, right);
   }
+  pointer_conversions(left);
+  pointer_conversions(right);
   const TypeSpec *left_type = left->type;
   const TypeSpec *right_type = right->type;
 
   if (typespec_is_arithmetic(left_type) && typespec_is_arithmetic(right_type)) {
     arithmetic_conversions(operator, left->type, right->type);
-    return astree_adopt(operator, 2, left, right);
+    return evaluate_binop(astree_adopt(operator, 2, left, right));
   } else if (typespec_is_pointer(left_type) &&
              typespec_is_integer(right_type)) {
     operator->type = left_type;
-    return astree_adopt(operator, 2, left, right);
+    return evaluate_binop(astree_adopt(operator, 2, left, right));
   } else if (typespec_is_integer(left_type) &&
              typespec_is_pointer(right_type)) {
     operator->type = right_type;
-    return astree_adopt(operator, 2, left, right);
+    return evaluate_binop(astree_adopt(operator, 2, left, right));
   } else if (typespec_is_pointer(left_type) &&
              typespec_is_pointer(right_type) && operator->symbol == '-') {
     if (types_equivalent(left->type, right->type,
                          IGNORE_QUALIFIERS | IGNORE_STORAGE_CLASS)) {
       /* TODO(Robert): dedicated pointer difference type constant */
       operator->type = & SPEC_LONG;
-      return astree_adopt(operator, 2, left, right);
+      return evaluate_binop(astree_adopt(operator, 2, left, right));
     } else {
       return astree_create_errnode(astree_adopt(operator, 2, left, right),
                                    BCC_TERR_INCOMPATIBLE_TYPES, 3, operator,
@@ -250,13 +252,15 @@ ASTree *typecheck_addop(ASTree *operator, ASTree * left, ASTree *right) {
   }
 }
 
-ASTree *typecheck_logop(ASTree *operator, ASTree * left, ASTree *right) {
+ASTree *validate_logical(ASTree *operator, ASTree * left, ASTree *right) {
   if (left->symbol == TOK_TYPE_ERROR || right->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(operator, 2, left, right);
   }
+  pointer_conversions(left);
+  pointer_conversions(right);
   if (typespec_is_scalar(left->type) && typespec_is_scalar(right->type)) {
     operator->type = & SPEC_INT;
-    return astree_adopt(operator, 2, left, right);
+    return evaluate_binop(astree_adopt(operator, 2, left, right));
   } else {
     return astree_create_errnode(astree_adopt(operator, 2, left, right),
                                  BCC_TERR_EXPECTED_SCALAR, 3, operator, left,
@@ -272,21 +276,23 @@ int is_const_zero(ASTree *tree) {
   }
 }
 
-ASTree *typecheck_relop(ASTree *operator, ASTree * left, ASTree *right) {
+ASTree *validate_relational(ASTree *operator, ASTree * left, ASTree *right) {
   if (left->symbol == TOK_TYPE_ERROR || right->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(operator, 2, left, right);
   }
+  pointer_conversions(left);
+  pointer_conversions(right);
   const TypeSpec *left_type = left->type;
   const TypeSpec *right_type = right->type;
   operator->type = & SPEC_INT;
 
   if (typespec_is_arithmetic(left_type) && typespec_is_arithmetic(right_type)) {
-    return astree_adopt(operator, 2, left, right);
+    return evaluate_binop(astree_adopt(operator, 2, left, right));
   } else if (typespec_is_pointer(left_type) &&
              typespec_is_pointer(right_type)) {
     if (types_equivalent(left->type, right->type,
                          IGNORE_QUALIFIERS | IGNORE_STORAGE_CLASS)) {
-      return astree_adopt(operator, 2, left, right);
+      return evaluate_binop(astree_adopt(operator, 2, left, right));
     } else {
       return astree_create_errnode(astree_adopt(operator, 2, left, right),
                                    BCC_TERR_INCOMPATIBLE_TYPES, 3, operator,
@@ -299,7 +305,7 @@ ASTree *typecheck_relop(ASTree *operator, ASTree * left, ASTree *right) {
   }
 }
 
-ASTree *typecheck_equop(ASTree *operator, ASTree * left, ASTree *right) {
+ASTree *validate_equality(ASTree *operator, ASTree * left, ASTree *right) {
   if (left->symbol == TOK_TYPE_ERROR || right->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(operator, 2, left, right);
   }
@@ -308,24 +314,24 @@ ASTree *typecheck_equop(ASTree *operator, ASTree * left, ASTree *right) {
   operator->type = & SPEC_INT;
 
   if (typespec_is_arithmetic(left_type) && typespec_is_arithmetic(right_type)) {
-    return astree_adopt(operator, 2, left, right);
+    return evaluate_binop(astree_adopt(operator, 2, left, right));
   } else if (typespec_is_pointer(left_type) &&
              typespec_is_pointer(right_type)) {
     if (types_equivalent(left->type, right->type,
                          IGNORE_QUALIFIERS | IGNORE_STORAGE_CLASS)) {
-      return astree_adopt(operator, 2, left, right);
+      return evaluate_binop(astree_adopt(operator, 2, left, right));
     } else if (typespec_is_voidptr(left_type) ||
                typespec_is_voidptr(right_type)) {
-      return astree_adopt(operator, 2, left, right);
+      return evaluate_binop(astree_adopt(operator, 2, left, right));
     } else {
       return astree_create_errnode(astree_adopt(operator, 2, left, right),
                                    BCC_TERR_INCOMPATIBLE_TYPES, 3, operator,
                                    left->type, right->type);
     }
   } else if (typespec_is_pointer(right_type) && is_const_zero(left)) {
-    return astree_adopt(operator, 2, left, right);
+    return evaluate_binop(astree_adopt(operator, 2, left, right));
   } else if (typespec_is_pointer(left_type) && is_const_zero(right)) {
-    return astree_adopt(operator, 2, left, right);
+    return evaluate_binop(astree_adopt(operator, 2, left, right));
   } else {
     return astree_create_errnode(astree_adopt(operator, 2, left, right),
                                  BCC_TERR_INCOMPATIBLE_TYPES, 3, operator,
@@ -333,14 +339,14 @@ ASTree *typecheck_equop(ASTree *operator, ASTree * left, ASTree *right) {
   }
 }
 
-ASTree *typecheck_mulop(ASTree *operator, ASTree * left, ASTree *right) {
+ASTree *validate_multiply(ASTree *operator, ASTree * left, ASTree *right) {
   if (left->symbol == TOK_TYPE_ERROR || right->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(operator, 2, left, right);
   }
   if (typespec_is_arithmetic(left->type) &&
       typespec_is_arithmetic(right->type)) {
     arithmetic_conversions(operator, left->type, right->type);
-    return astree_adopt(operator, 2, left, right);
+    return evaluate_binop(astree_adopt(operator, 2, left, right));
   } else {
     return astree_create_errnode(astree_adopt(operator, 2, left, right),
                                  BCC_TERR_EXPECTED_ARITHMETIC, 3, operator,
@@ -348,13 +354,13 @@ ASTree *typecheck_mulop(ASTree *operator, ASTree * left, ASTree *right) {
   }
 }
 
-ASTree *typecheck_shfop(ASTree *operator, ASTree * left, ASTree *right) {
+ASTree *validate_shift(ASTree *operator, ASTree * left, ASTree *right) {
   if (left->symbol == TOK_TYPE_ERROR || right->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(operator, 2, left, right);
   }
   if (typespec_is_integer(left->type) && typespec_is_integer(right->type)) {
     arithmetic_conversions(operator, left->type, &SPEC_INT);
-    return astree_adopt(operator, 2, left, right);
+    return evaluate_binop(astree_adopt(operator, 2, left, right));
   } else {
     return astree_create_errnode(astree_adopt(operator, 2, left, right),
                                  BCC_TERR_EXPECTED_INTEGER, 3, operator, left,
@@ -362,68 +368,18 @@ ASTree *typecheck_shfop(ASTree *operator, ASTree * left, ASTree *right) {
   }
 }
 
-ASTree *typecheck_bitop(ASTree *operator, ASTree * left, ASTree *right) {
+ASTree *validate_bitwise(ASTree *operator, ASTree * left, ASTree *right) {
   if (left->symbol == TOK_TYPE_ERROR || right->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(operator, 2, left, right);
   }
   if (typespec_is_integer(left->type) && typespec_is_integer(right->type)) {
     arithmetic_conversions(operator, left->type, right->type);
-    return astree_adopt(operator, 2, left, right);
+    return evaluate_binop(astree_adopt(operator, 2, left, right));
   } else {
     return astree_create_errnode(astree_adopt(operator, 2, left, right),
                                  BCC_TERR_EXPECTED_INTEGER, 3, operator, left,
                                  right);
   }
-}
-
-ASTree *validate_binop(ASTree *operator, ASTree * left_operand,
-                       ASTree *right_operand) {
-  DEBUGS('t', "Validating binary operator %c", operator->symbol);
-  pointer_conversions(left_operand);
-  pointer_conversions(right_operand);
-
-  ASTree *result = NULL;
-  switch (operator->symbol) {
-    case TOK_SHL:
-    case TOK_SHR:
-      result = typecheck_shfop(operator, left_operand, right_operand);
-      break;
-    case '&':
-    case '|':
-    case '^':
-      result = typecheck_bitop(operator, left_operand, right_operand);
-      break;
-    case '*':
-    case '/':
-    case '%':
-      result = typecheck_mulop(operator, left_operand, right_operand);
-      break;
-    case '+':
-    case '-':
-      result = typecheck_addop(operator, left_operand, right_operand);
-      break;
-    case TOK_EQ:
-    case TOK_NE:
-      result = typecheck_equop(operator, left_operand, right_operand);
-      break;
-    case TOK_GE:
-    case TOK_LE:
-    case '>':
-    case '<':
-      result = typecheck_relop(operator, left_operand, right_operand);
-      break;
-    case TOK_AND:
-    case TOK_OR:
-      result = typecheck_logop(operator, left_operand, right_operand);
-      break;
-    default:
-      result = astree_create_errnode(
-          astree_adopt(operator, 2, left_operand, right_operand),
-          BCC_TERR_UNEXPECTED_TOKEN, 1, operator);
-  }
-
-  if (result->symbol == TOK_TYPE_ERROR) return result;
-  return evaluate_binop(result);
 }
 
 ASTree *validate_increment(ASTree *operator, ASTree * operand) {
