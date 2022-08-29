@@ -250,20 +250,20 @@ cast_expr           : '(' typespec_list abs_declarator')' unary_expr    { $$ = b
                     | unary_expr                                        { $$ = bcc_yyval = $1; }
                     ;
 unary_expr          : postfix_expr                                      { $$ = bcc_yyval = $1; }
-                    | TOK_INC unary_expr                                { $$ = bcc_yyval = validate_unop($1, $2); }
-                    | TOK_DEC unary_expr                                { $$ = bcc_yyval = validate_unop($1, $2); }
-                    | '!' unary_expr                                    { $$ = bcc_yyval = validate_unop($1, $2); }
-                    | '~' unary_expr                                    { $$ = bcc_yyval = validate_unop($1, $2); }
-                    | '+' unary_expr                                    { $$ = bcc_yyval = validate_unop(parser_new_sym($1, TOK_POS), $2); }
-                    | '-' unary_expr                                    { $$ = bcc_yyval = validate_unop(parser_new_sym($1, TOK_NEG), $2); }
+                    | TOK_INC unary_expr                                { $$ = bcc_yyval = validate_increment($1, $2); }
+                    | TOK_DEC unary_expr                                { $$ = bcc_yyval = validate_increment($1, $2); }
+                    | '!' unary_expr                                    { $$ = bcc_yyval = validate_not($1, $2); }
+                    | '~' unary_expr                                    { $$ = bcc_yyval = validate_complement($1, $2); }
+                    | '+' unary_expr                                    { $$ = bcc_yyval = validate_negation(parser_new_sym($1, TOK_POS), $2); }
+                    | '-' unary_expr                                    { $$ = bcc_yyval = validate_negation(parser_new_sym($1, TOK_NEG), $2); }
                     | '*' unary_expr                                    { $$ = bcc_yyval = validate_indirection(parser_new_sym($1, TOK_INDIRECTION), $2); }
                     | '&' unary_expr                                    { $$ = bcc_yyval = validate_addrof(parser_new_sym($1, TOK_ADDROF), $2); }
                     | TOK_SIZEOF unary_expr                             { $$ = bcc_yyval = validate_sizeof($1, $2); }
                     | TOK_SIZEOF '(' typespec_list abs_declarator')'    { $$ = bcc_yyval = parse_sizeof($1, $3, $4); parser_cleanup(2, $2, $5); }
                     ;
 postfix_expr        : primary_expr                                      { $$ = bcc_yyval = $1; }
-                    | postfix_expr TOK_INC                              { $$ = bcc_yyval = validate_unop(parser_new_sym($2, TOK_POST_INC), $1); }
-                    | postfix_expr TOK_DEC                              { $$ = bcc_yyval = validate_unop(parser_new_sym($2, TOK_POST_DEC), $1); }
+                    | postfix_expr TOK_INC                              { $$ = bcc_yyval = validate_increment(parser_new_sym($2, TOK_POST_INC), $1); }
+                    | postfix_expr TOK_DEC                              { $$ = bcc_yyval = validate_increment(parser_new_sym($2, TOK_POST_DEC), $1); }
                     | call                                              { $$ = bcc_yyval = $1; }
                     | postfix_expr '[' expr ']'                         { $$ = bcc_yyval = validate_subscript(parser_new_sym($2, TOK_SUBSCRIPT), $1, $3); parser_cleanup(1, $4); }
                     | postfix_expr '.' any_ident                        { $$ = bcc_yyval = validate_reference($2, $1, $3); }
