@@ -16,7 +16,10 @@ ASTree *validate_comma(ASTree *comma, ASTree *left_expr, ASTree *right_expr);
 ASTree *validate_cast(ASTree *cast, ASTree *declaration, ASTree *expr);
 ASTree *validate_binop(ASTree *operator, ASTree * left_operand,
                        ASTree *right_operand);
-ASTree *validate_unop(ASTree *operator, ASTree * operand);
+ASTree *validate_increment(ASTree *operator, ASTree * operand);
+ASTree *validate_not(ASTree *operator, ASTree * operand);
+ASTree *validate_complement(ASTree *operator, ASTree * operand);
+ASTree *validate_negation(ASTree *operator, ASTree * operand);
 ASTree *validate_indirection(ASTree *indirection, ASTree *operand);
 ASTree *validate_addrof(ASTree *addrof, ASTree *operand);
 ASTree *validate_sizeof(ASTree *sizeof_, ASTree *type_node);

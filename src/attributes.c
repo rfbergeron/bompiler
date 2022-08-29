@@ -416,12 +416,17 @@ int typespec_is_incomplete(const TypeSpec *type) {
   return is_void || is_struct || is_array;
 }
 
-int typespec_is_arithmetic(const TypeSpec *type) {
-  return (type->base == TYPE_SIGNED || type->base == TYPE_UNSIGNED);
+int typespec_is_integer(const TypeSpec *type) {
+  return (type->base == TYPE_SIGNED || type->base == TYPE_UNSIGNED) &&
+         llist_size(&type->auxspecs) == 0;
 }
 
-int typespec_is_integer(const TypeSpec *type) {
-  return (type->base == TYPE_SIGNED || type->base == TYPE_UNSIGNED);
+int typespec_is_arithmetic(const TypeSpec *type) {
+  return typespec_is_integer(type) || typespec_is_enum(type);
+}
+
+int typespec_is_void(const TypeSpec *type) {
+  return (type->base == TYPE_VOID) && llist_size(&type->auxspecs) == 0;
 }
 
 int typespec_is_aux(const TypeSpec *type, const AuxType aux,
