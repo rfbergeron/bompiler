@@ -106,7 +106,7 @@ ASTree *validate_call(ASTree *expr, ASTree *call) {
   if (call->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(call, expr);
   }
-  expr = perform_pointer_conv(expr);
+  pointer_conversions(expr);
   if (expr->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(call, expr);
   }
@@ -138,7 +138,7 @@ ASTree *validate_call(ASTree *expr, ASTree *call) {
 
 ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
                              ASTree *true_expr, ASTree *false_expr) {
-  condition = perform_pointer_conv(condition);
+  pointer_conversions(condition);
   if (condition->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(qmark, 3, condition, true_expr,
                                       false_expr);
@@ -150,13 +150,13 @@ ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
         BCC_TERR_EXPECTED_SCALAR, 2, qmark, condition);
   }
 
-  true_expr = perform_pointer_conv(true_expr);
+  pointer_conversions(true_expr);
   if (true_expr->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(qmark, 3, condition, true_expr,
                                       false_expr);
   }
 
-  false_expr = perform_pointer_conv(false_expr);
+  pointer_conversions(false_expr);
   if (false_expr->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(qmark, 3, condition, true_expr,
                                       false_expr);
@@ -183,7 +183,7 @@ ASTree *validate_comma(ASTree *comma, ASTree *left_expr, ASTree *right_expr) {
   if (left_expr->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(comma, 2, left_expr, right_expr);
   }
-  right_expr = perform_pointer_conv(right_expr);
+  pointer_conversions(right_expr);
   if (right_expr->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(comma, 2, left_expr, right_expr);
   }
@@ -193,7 +193,7 @@ ASTree *validate_comma(ASTree *comma, ASTree *left_expr, ASTree *right_expr) {
 }
 
 ASTree *validate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
-  expr = perform_pointer_conv(expr);
+  pointer_conversions(expr);
   if (declaration->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(cast, 2, declaration, expr);
   } else if (expr->symbol == TOK_TYPE_ERROR) {
@@ -424,8 +424,8 @@ ASTree *typecheck_bitop(ASTree *operator, ASTree * left, ASTree *right) {
 ASTree *validate_binop(ASTree *operator, ASTree * left_operand,
                        ASTree *right_operand) {
   DEBUGS('t', "Validating binary operator %c", operator->symbol);
-  left_operand = perform_pointer_conv(left_operand);
-  right_operand = perform_pointer_conv(right_operand);
+  pointer_conversions(left_operand);
+  pointer_conversions(right_operand);
 
   ASTree *result = NULL;
   switch (operator->symbol) {
@@ -505,7 +505,7 @@ ASTree *validate_unop(ASTree *operator, ASTree * operand) {
     }
   } else {
     if (!is_increment(operator->symbol)) {
-      operand = perform_pointer_conv(operand);
+      pointer_conversions(operand);
       if (operand->symbol == TOK_TYPE_ERROR) {
         return astree_propogate_errnode(operator, operand);
       }
@@ -524,7 +524,7 @@ ASTree *validate_unop(ASTree *operator, ASTree * operand) {
 }
 
 ASTree *validate_indirection(ASTree *indirection, ASTree *operand) {
-  operand = perform_pointer_conv(operand);
+  pointer_conversions(operand);
   if (operand->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(indirection, operand);
   }
@@ -587,12 +587,12 @@ ASTree *validate_sizeof(ASTree *sizeof_, ASTree *type_node) {
 }
 
 ASTree *validate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
-  pointer = perform_pointer_conv(pointer);
+  pointer_conversions(pointer);
   if (pointer->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(subscript, 2, pointer, index);
   }
 
-  index = perform_pointer_conv(index);
+  pointer_conversions(index);
   if (index->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(subscript, 2, pointer, index);
   }
@@ -652,7 +652,7 @@ ASTree *validate_reference(ASTree *reference, ASTree *struct_,
 
 ASTree *validate_arrow(ASTree *arrow, ASTree *struct_,
                        ASTree *member_name_node) {
-  struct_ = perform_pointer_conv(struct_);
+  pointer_conversions(struct_);
   if (struct_->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(arrow, 2, struct_, member_name_node);
   }

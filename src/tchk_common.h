@@ -11,7 +11,9 @@ enum type_checker_action {
   TCHK_E_NO_FLAGS
 };
 
-ASTree *perform_pointer_conv(ASTree *expr);
+enum types_equivalent_flags { IGNORE_QUALIFIERS, IGNORE_STORAGE_CLASS };
+
+void pointer_conversions(ASTree *expr);
 ASTree *convert_type(ASTree *expr, const TypeSpec *type);
 int compare_params(LinkedList *dests, LinkedList *srcs);
 int compare_members(LinkedList *dests, LinkedList *srcs);
