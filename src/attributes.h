@@ -246,8 +246,9 @@ int typespec_append_auxspecs(TypeSpec *dest, TypeSpec *src);
 int strip_aux_type(TypeSpec *dest, const TypeSpec *src);
 
 int typespec_is_incomplete(const TypeSpec *type);
-int typespec_is_arithmetic(const TypeSpec *type);
 int typespec_is_integer(const TypeSpec *type);
+int typespec_is_arithmetic(const TypeSpec *type);
+int typespec_is_void(const TypeSpec *type);
 int typespec_is_pointer(const TypeSpec *type);
 int typespec_is_array(const TypeSpec *type);
 int typespec_is_function(const TypeSpec *type);
