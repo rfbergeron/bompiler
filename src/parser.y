@@ -226,24 +226,24 @@ assign_expr         : assign_expr '=' cond_expr                         { $$ = b
 cond_expr           : binary_expr '?' expr ':' cond_expr                { $$ = bcc_yyval = validate_conditional($2, $1, $3, $5); astree_destroy($4); }
                     | binary_expr                                       { $$ = bcc_yyval = $1; }
                     ;
-binary_expr         : binary_expr '+' binary_expr                       { $$ = bcc_yyval = validate_binop($2, $1, $3); }
-                    | binary_expr '-' binary_expr                       { $$ = bcc_yyval = validate_binop($2, $1, $3); }
-                    | binary_expr '/' binary_expr                       { $$ = bcc_yyval = validate_binop($2, $1, $3); }
-                    | binary_expr '*' binary_expr                       { $$ = bcc_yyval = validate_binop($2, $1, $3); }
-                    | binary_expr '%' binary_expr                       { $$ = bcc_yyval = validate_binop($2, $1, $3); }
-                    | binary_expr '>' binary_expr                       { $$ = bcc_yyval = validate_binop($2, $1, $3); }
-                    | binary_expr '<' binary_expr                       { $$ = bcc_yyval = validate_binop($2, $1, $3); }
-                    | binary_expr TOK_LE binary_expr                    { $$ = bcc_yyval = validate_binop($2, $1, $3); }
-                    | binary_expr TOK_GE binary_expr                    { $$ = bcc_yyval = validate_binop($2, $1, $3); }
-                    | binary_expr TOK_EQ binary_expr                    { $$ = bcc_yyval = validate_binop($2, $1, $3); }
-                    | binary_expr TOK_NE binary_expr                    { $$ = bcc_yyval = validate_binop($2, $1, $3); }
-                    | binary_expr TOK_OR binary_expr                    { $$ = bcc_yyval = validate_binop($2, $1, $3); }
-                    | binary_expr TOK_AND binary_expr                   { $$ = bcc_yyval = validate_binop($2, $1, $3); }
-                    | binary_expr '|' binary_expr                       { $$ = bcc_yyval = validate_binop($2, $1, $3); }
-                    | binary_expr '&' binary_expr                       { $$ = bcc_yyval = validate_binop($2, $1, $3); }
-                    | binary_expr '^' binary_expr                       { $$ = bcc_yyval = validate_binop($2, $1, $3); }
-                    | binary_expr TOK_SHR binary_expr                   { $$ = bcc_yyval = validate_binop($2, $1, $3); }
-                    | binary_expr TOK_SHL binary_expr                   { $$ = bcc_yyval = validate_binop($2, $1, $3); }
+binary_expr         : binary_expr '+' binary_expr                       { $$ = bcc_yyval = validate_addition($2, $1, $3); }
+                    | binary_expr '-' binary_expr                       { $$ = bcc_yyval = validate_addition($2, $1, $3); }
+                    | binary_expr '/' binary_expr                       { $$ = bcc_yyval = validate_multiply($2, $1, $3); }
+                    | binary_expr '*' binary_expr                       { $$ = bcc_yyval = validate_multiply($2, $1, $3); }
+                    | binary_expr '%' binary_expr                       { $$ = bcc_yyval = validate_multiply($2, $1, $3); }
+                    | binary_expr '>' binary_expr                       { $$ = bcc_yyval = validate_relational($2, $1, $3); }
+                    | binary_expr '<' binary_expr                       { $$ = bcc_yyval = validate_relational($2, $1, $3); }
+                    | binary_expr TOK_LE binary_expr                    { $$ = bcc_yyval = validate_relational($2, $1, $3); }
+                    | binary_expr TOK_GE binary_expr                    { $$ = bcc_yyval = validate_relational($2, $1, $3); }
+                    | binary_expr TOK_EQ binary_expr                    { $$ = bcc_yyval = validate_equality($2, $1, $3); }
+                    | binary_expr TOK_NE binary_expr                    { $$ = bcc_yyval = validate_equality($2, $1, $3); }
+                    | binary_expr TOK_OR binary_expr                    { $$ = bcc_yyval = validate_logical($2, $1, $3); }
+                    | binary_expr TOK_AND binary_expr                   { $$ = bcc_yyval = validate_logical($2, $1, $3); }
+                    | binary_expr '|' binary_expr                       { $$ = bcc_yyval = validate_bitwise($2, $1, $3); }
+                    | binary_expr '&' binary_expr                       { $$ = bcc_yyval = validate_bitwise($2, $1, $3); }
+                    | binary_expr '^' binary_expr                       { $$ = bcc_yyval = validate_bitwise($2, $1, $3); }
+                    | binary_expr TOK_SHR binary_expr                   { $$ = bcc_yyval = validate_shift($2, $1, $3); }
+                    | binary_expr TOK_SHL binary_expr                   { $$ = bcc_yyval = validate_shift($2, $1, $3); }
                     | cast_expr                                         { $$ = bcc_yyval = $1; }
                     ;
 cast_expr           : '(' typespec_list abs_declarator')' unary_expr    { $$ = bcc_yyval = parser_make_cast($1, $2, $3, $5); parser_cleanup(1, $4); }

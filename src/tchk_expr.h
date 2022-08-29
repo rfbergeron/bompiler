@@ -14,8 +14,13 @@ ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
                              ASTree *true_expr, ASTree *false_expr);
 ASTree *validate_comma(ASTree *comma, ASTree *left_expr, ASTree *right_expr);
 ASTree *validate_cast(ASTree *cast, ASTree *declaration, ASTree *expr);
-ASTree *validate_binop(ASTree *operator, ASTree * left_operand,
-                       ASTree *right_operand);
+ASTree *validate_addition(ASTree *operator, ASTree * left, ASTree *right);
+ASTree *validate_logical(ASTree *operator, ASTree * left, ASTree *right);
+ASTree *validate_relational(ASTree *operator, ASTree * left, ASTree *right);
+ASTree *validate_equality(ASTree *operator, ASTree * left, ASTree *right);
+ASTree *validate_multiply(ASTree *operator, ASTree * left, ASTree *right);
+ASTree *validate_shift(ASTree *operator, ASTree * left, ASTree *right);
+ASTree *validate_bitwise(ASTree *operator, ASTree * left, ASTree *right);
 ASTree *validate_increment(ASTree *operator, ASTree * operand);
 ASTree *validate_not(ASTree *operator, ASTree * operand);
 ASTree *validate_complement(ASTree *operator, ASTree * operand);
