@@ -10,42 +10,41 @@
  * of expressions, at which point it is not possible to further nest scopes.
  */
 
+/* TODO(Robert): make sure that nodes which have had their type altered free the
+ * resulting type. it should work much the same as freeing types created by the
+ * address operator.
+ */
 /*
  * Performs automatic conversions from function and array types to pointer
- * types. Can be called safely without first checking for errors so that the
- * passed expression does not need to be checked twice.
+ * types. Replaces old type with appropriately converted type. Can safely be
+ * called when `expr` is an error.
  */
-ASTree *perform_pointer_conv(ASTree *expr) {
-  if (expr->symbol == TOK_TYPE_ERROR) return expr;
-  const TypeSpec *spec = expr->type;
-  if (!typespec_is_array(spec) && !typespec_is_function(spec)) {
-    return expr;
-  } else {
-    TypeSpec *pointer_spec = malloc(sizeof(*pointer_spec));
-    if (typespec_is_array(spec)) {
-      int status = strip_aux_type(pointer_spec, spec);
+void pointer_conversions(ASTree *expr) {
+  const TypeSpec *old_type = expr->type;
+  if (typespec_is_function(old_type) || typespec_is_array(old_type)) {
+    TypeSpec *pointer_type = malloc(sizeof(*pointer_type));
+    if (typespec_is_array(old_type)) {
+      int status = strip_aux_type(pointer_type, old_type);
       if (status) {
-        free(pointer_spec);
-        return astree_create_errnode(expr, BCC_TERR_LIBRARY_FAILURE, 0);
+        free(pointer_type);
+        abort();
       }
     } else {
-      int status = typespec_copy(pointer_spec, spec);
+      int status = typespec_copy(pointer_type, old_type);
       if (status) {
-        free(pointer_spec);
-        return astree_create_errnode(expr, BCC_TERR_LIBRARY_FAILURE, 0);
+        free(pointer_type);
+        abort();
       }
     }
     AuxSpec *pointer_aux = calloc(1, sizeof(*pointer_aux));
     pointer_aux->aux = AUX_POINTER;
-    int status = llist_push_front(&pointer_spec->auxspecs, pointer_aux);
+    int status = llist_push_front(&pointer_type->auxspecs, pointer_aux);
     if (status) {
-      llist_destroy(&pointer_spec->auxspecs);
-      free(pointer_spec);
-      return astree_create_errnode(expr, BCC_TERR_LIBRARY_FAILURE, 0);
+      llist_destroy(&pointer_type->auxspecs);
+      free(pointer_type);
+      abort();
     }
-    ASTree *cast = astree_init(TOK_CAST, expr->loc, "_cast");
-    cast->type = pointer_spec;
-    return astree_adopt(cast, 1, expr);
+    expr->type = pointer_type;
   }
 }
 
@@ -185,7 +184,8 @@ int types_compatible(const TypeSpec *type1, const TypeSpec *type2) {
   return compare_declspecs(type1, type2);
 }
 
-int types_equivalent(const TypeSpec *type1, const TypeSpec *type2);
+int types_equivalent(const TypeSpec *type1, const TypeSpec *type2,
+                     unsigned int flags);
 int params_equivalent(const AuxSpec *aux1, const AuxSpec *aux2) {
   LinkedList *params1 = aux1->data.params;
   LinkedList *params2 = aux2->data.params;
@@ -194,12 +194,14 @@ int params_equivalent(const AuxSpec *aux1, const AuxSpec *aux2) {
   for (i = 0; i < llist_size(params1); ++i) {
     SymbolValue *symval1 = llist_get(params1, i);
     SymbolValue *symval2 = llist_get(params2, i);
-    if (!types_equivalent(&symval1->type, &symval2->type)) return 0;
+    if (!types_equivalent(&symval1->type, &symval2->type, IGNORE_STORAGE_CLASS))
+      return 0;
   }
   return 1;
 }
 
-int aux_equivalent(const AuxSpec *aux1, const AuxSpec *aux2) {
+int aux_equivalent(const AuxSpec *aux1, const AuxSpec *aux2,
+                   unsigned int flags) {
   switch (aux1->aux) {
     case AUX_FUNCTION:
       return params_equivalent(aux1, aux2);
@@ -215,9 +217,12 @@ int aux_equivalent(const AuxSpec *aux1, const AuxSpec *aux2) {
       /* can't use name since redefinition is possible */
       return aux1->data.tag.val == aux2->data.tag.val;
     case AUX_POINTER:
-      return !!((aux1->data.memory_loc.qualifiers ^
-                 aux2->data.memory_loc.qualifiers) &
-                (TYPESPEC_FLAG_CONST | TYPESPEC_FLAG_VOLATILE));
+      if (flags & IGNORE_QUALIFIERS)
+        return 1;
+      else
+        return !!((aux1->data.memory_loc.qualifiers ^
+                   aux2->data.memory_loc.qualifiers) &
+                  (TYPESPEC_FLAG_CONST | TYPESPEC_FLAG_VOLATILE));
     default:
       return 0;
   }
@@ -227,7 +232,8 @@ int aux_equivalent(const AuxSpec *aux1, const AuxSpec *aux2) {
  * but given the limits of the current representation of types, it is the best
  * that I can do.
  */
-int types_equivalent(const TypeSpec *type1, const TypeSpec *type2) {
+int types_equivalent(const TypeSpec *type1, const TypeSpec *type2,
+                     unsigned int flags) {
   LinkedList *auxspecs1 = (LinkedList *)&type1->auxspecs;
   LinkedList *auxspecs2 = (LinkedList *)&type2->auxspecs;
   if (llist_size(auxspecs1) != llist_size(auxspecs2)) return 0;
@@ -237,15 +243,37 @@ int types_equivalent(const TypeSpec *type1, const TypeSpec *type2) {
     AuxSpec *aux2 = llist_get(auxspecs2, i);
 
     if (aux1->aux != aux2->aux) return 0;
-    if (!aux_equivalent(aux1, aux2)) return 0;
+    if (!aux_equivalent(aux1, aux2, flags)) return 0;
   }
   if (type1->base != type2->base) return 0;
   if (type1->width != type2->width) return 0;
   if (type1->alignment != type2->alignment) return 0;
+  if (flags & IGNORE_QUALIFIERS) goto ignore_qualifiers;
   unsigned int flags_diff = type1->flags ^ type2->flags;
   if (flags_diff & TYPESPEC_FLAG_VOLATILE) return 0;
   if (flags_diff & TYPESPEC_FLAG_CONST) return 0;
+ignore_qualifiers:
+  if (flags & IGNORE_STORAGE_CLASS) return 1;
+  if (flags_diff & TYPESPEC_FLAGS_STORAGE_CLASS) return 0;
   return 1;
+}
+
+void arithmetic_conversions(ASTree *operator, const TypeSpec * type1,
+                            const TypeSpec *type2) {
+  if ((type1->width < X64_SIZEOF_INT || type1->base == TYPE_ENUM) &&
+      (type2->width < X64_SIZEOF_INT || type2->base == TYPE_ENUM)) {
+    operator->type = & SPEC_INT;
+  } else if (type1->width > type2->width) {
+    operator->type = type1;
+  } else if (type1->width < type2->width) {
+    operator->type = type2;
+  } else if (type1->base == TYPE_UNSIGNED) {
+    operator->type = type1;
+  } else if (type2->base == TYPE_UNSIGNED) {
+    operator->type = type2;
+  } else {
+    operator->type = type1;
+  }
 }
 
 /*

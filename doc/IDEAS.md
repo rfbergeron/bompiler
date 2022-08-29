@@ -59,6 +59,13 @@ that has does not do most of the things that I thought:
 - Tags and enumeration constants declared as struct and union members are
   "hoisted" up into the enclosing scope
 
+## Enumeration constants and meaning of enum objects
+While most compilers will provide warnings when trying to assign an enum of a
+different type to another enum, they are not required to do so, since the
+standard says to evaluate enumeration constants and objects with enum type as
+if they were integers. Functions checking if a value is arithmetic, scalar, etc.
+should reflect this.
+
 ## Minor type checker refactor
 I think part of the reason I get so confused when going through the type checker
 code, particularly for expressions, is because functions like `types_compatible`
@@ -86,14 +93,26 @@ In all other places where `types_compatible` was previously used, the logic for
 determining the compatibility of expressions will be written directly.
 
 ### `determine_conversion`
-`determine_conversion` should be removed completely. Operators which may operate
-on more than just arithmetic types have their own special rules as to the type
-of the result, and the behavior is too complicated to be encoded in a single
-function.
+This function will be replaced with a much more limited version that only
+operates on arithmetic types. Operators that require behavior for non-arithmetic
+types should encode that behavior in their own functions. This replacement
+function is called `arithmetic_conversions`.
 
-Functions which operate only on arithmetic types will have a function that
-performs the usual conversions. This function will assume that both of its input
-types are arithmetic.
+### `perform_pointer_conv`
+This function will be renamed and repurposed much like `determine_conversion`.
+Instead of inserting nodes into the syntax tree, it will replace the type of
+nodes which need to be converted. This replacement is named
+`pointer_conversions`.
+
+The only thing to watch out for in this function is to make sure that the
+original type still exists somewhere and can be freed. The standard uses
+language that makes it possible for expressions besides identifiers to have
+array or function type, but I can see no way that this is possible.
+
+### `convert_type`
+Will also be removed and not replaced. The assembly generator would have to do
+much of the same work regardless of whether or not automatic conversions get
+their own dedicated node.
 
 ## Declaration refactor
 To accomodate storage class and linkage, the functions handling declarations
