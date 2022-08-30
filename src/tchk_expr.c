@@ -91,14 +91,12 @@ ASTree *validate_arg(ASTree *call, ASTree *arg) {
   DEBUGS('t', "Validating argument %d", param_index);
   SymbolValue *symval = llist_get(param_list, param_index);
   DEBUGS('t', "Comparing types");
-  int compatibility = types_compatible(&symval->type, arg->type);
-  if (compatibility == TCHK_INCOMPATIBLE ||
-      compatibility == TCHK_EXPLICIT_CAST) {
+  if (types_assignable(&symval->type, arg)) {
+    return astree_adopt(call, 1, arg);
+  } else {
     return astree_create_errnode(astree_adopt(call, 1, arg),
                                  BCC_TERR_INCOMPATIBLE_TYPES, 3, arg, arg->type,
                                  &symval->type);
-  } else {
-    return astree_adopt(call, 1, arg);
   }
 }
 
@@ -265,14 +263,6 @@ ASTree *validate_logical(ASTree *operator, ASTree * left, ASTree *right) {
     return astree_create_errnode(astree_adopt(operator, 2, left, right),
                                  BCC_TERR_EXPECTED_SCALAR, 3, operator, left,
                                  right);
-  }
-}
-
-int is_const_zero(ASTree *tree) {
-  if (tree->symbol != TOK_INTCON) {
-    return 0;
-  } else {
-    return strtol(tree->lexinfo, NULL, 0) == 0;
   }
 }
 
