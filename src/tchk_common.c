@@ -89,6 +89,44 @@ ignore_qualifiers:
   return 1;
 }
 
+int is_const_zero(ASTree *tree) {
+  if (tree->attributes & ATTR_EXPR_CONST2) {
+    /* TODO(Robert): if constant evaluation is skipped for debugging purposes,
+     * assume that the constant has value zero to suppress errors
+     */
+    return tree->constval == 0;
+  } else if (tree->symbol == TOK_INTCON && !strtol(tree->lexinfo, NULL, 0)) {
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+int types_assignable(const TypeSpec *dest_type, ASTree *src) {
+  if (typespec_is_arithmetic(dest_type) && typespec_is_arithmetic(src->type)) {
+    return 1;
+  } else if ((typespec_is_struct(dest_type) && typespec_is_struct(src->type)) ||
+             (typespec_is_union(dest_type) && typespec_is_union(src->type))) {
+    AuxSpec *dest_aux = llist_front(&dest_type->auxspecs);
+    AuxSpec *src_aux = llist_front(&src->type->auxspecs);
+    return dest_aux->data.tag.val == src_aux->data.tag.val;
+  } else if (typespec_is_pointer(dest_type) && typespec_is_pointer(src->type)) {
+    if (types_equivalent(dest_type, src->type,
+                         IGNORE_QUALIFIERS | IGNORE_STORAGE_CLASS)) {
+      return 1;
+    } else if (typespec_is_voidptr(dest_type) ||
+               typespec_is_voidptr(src->type)) {
+      return 1;
+    } else {
+      return 0;
+    }
+  } else if (typespec_is_pointer(dest_type) && is_const_zero(src)) {
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
 void arithmetic_conversions(ASTree *operator, const TypeSpec * type1,
                             const TypeSpec *type2) {
   if ((type1->width < X64_SIZEOF_INT || type1->base == TYPE_ENUM) &&
