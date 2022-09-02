@@ -94,7 +94,7 @@ int is_const_zero(ASTree *tree) {
     /* TODO(Robert): if constant evaluation is skipped for debugging purposes,
      * assume that the constant has value zero to suppress errors
      */
-    return tree->constval == 0;
+    return tree->constval.integral == 0;
   } else if (tree->symbol == TOK_INTCON && !strtol(tree->lexinfo, NULL, 0)) {
     return 1;
   } else {
