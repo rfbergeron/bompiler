@@ -59,6 +59,19 @@ that has does not do most of the things that I thought:
 - Tags and enumeration constants declared as struct and union members are
   "hoisted" up into the enclosing scope
 
+## Valid redeclarations
+The rules dictating when redeclarations are valid do not directly have to do
+with whether or not a symbol is external or block.
+
+If there is already at least one declaration for a symbol, subsequent
+declarations are only valid if the following are true:
+- neither symbol may have no linkage
+- if the symbol was declared with external linkage, it may not be redeclared
+  with internal linkage
+- if the symbol was declared with internal linkage, it may not be redeclared
+  with external linkage. as an exception, if the second declaration has external
+  storage class, then the declaration is valid
+
 ## Enumeration constants and meaning of enum objects
 While most compilers will provide warnings when trying to assign an enum of a
 different type to another enum, they are not required to do so, since the

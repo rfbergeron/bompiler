@@ -308,6 +308,57 @@ int location_is_empty(Location *loc) {
   return loc->filenr == 0 && loc->linenr == 0 && loc->offset == 0;
 }
 
+void set_link_and_store(SymbolValue *symval) {
+  if (llist_size(&state->table_stack) == 1) {
+    if (symval->type.flags & TYPESPEC_FLAG_EXTERN) {
+      symval->flags |= (SYMFLAG_LINK_EXT | SYMFLAG_STORE_EXT);
+    } else if (symval->type.flags & TYPESPEC_FLAG_STATIC) {
+      symval->flags |= (SYMFLAG_LINK_INT | SYMFLAG_STORE_STAT);
+    } else {
+      symval->flags |= (SYMFLAG_LINK_EXT | SYMFLAG_STORE_STAT);
+    }
+  } else if (symval->type.flags & TYPESPEC_FLAG_EXTERN) {
+    /* validate_declaration will handle extern block symbols */
+    symval->type.flags |= (SYMFLAG_LINK_EXT | SYMFLAG_STORE_EXT);
+  } else if (symval->type.flags & TYPESPEC_FLAG_STATIC) {
+    symval->flags |= (SYMFLAG_LINK_NONE | SYMFLAG_STORE_STAT);
+  } else {
+    symval->flags |= (SYMFLAG_LINK_NONE | SYMFLAG_STORE_AUTO);
+  }
+}
+
+int linkage_valid(SymbolValue *symval, SymbolValue *existing) {
+  if (symval->type.flags & existing->type.flags & TYPESPEC_FLAG_TYPEDEF)
+    return 0;
+  assert(symval->flags & SYMFLAGS_LINK);
+  assert(existing->flags & SYMFLAGS_LINK);
+  if ((symval->flags & SYMFLAG_LINK_NONE) ||
+      (existing->flags & SYMFLAG_LINK_NONE)) {
+    return 0;
+  } else if ((existing->flags & SYMFLAG_LINK_EXT) &&
+             (symval->flags & SYMFLAG_LINK_EXT)) {
+    return 1;
+  } else if (existing->flags & SYMFLAG_LINK_INT) {
+    if (symval->flags & SYMFLAG_LINK_INT) {
+      return 1;
+    } else if ((symval->flags & SYMFLAG_LINK_EXT) &&
+               (symval->flags & SYMFLAG_STORE_EXT)) {
+      return 1;
+    } else {
+      return 0;
+    }
+  } else {
+    return 0;
+  }
+}
+
+int combine_types(TypeSpec *dest, const TypeSpec *src) {
+  dest->base = src->base;
+  dest->alignment = src->alignment;
+  dest->width = src->width;
+  dest->flags = src->flags;
+  return typespec_append_auxspecs(dest, (TypeSpec *)src);
+}
 /*
  * Combines type specifier and declarator information and inserts symbol value
  * into the table at the current scope. Sets source location of the declaration
@@ -318,83 +369,55 @@ int location_is_empty(Location *loc) {
  */
 ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
   DEBUGS('t', "Making object entry for value %s", declarator->lexinfo);
-  if (location_is_empty(&UNWRAP(declaration)->loc)) {
+  if (location_is_empty(&UNWRAP(declaration)->loc))
     UNWRAP(declaration)->loc = UNWRAP(declarator)->loc;
-  }
   if (declaration->symbol == TOK_TYPE_ERROR ||
-      declarator->symbol == TOK_TYPE_ERROR) {
+      declarator->symbol == TOK_TYPE_ERROR)
     return declarator;
-  }
   ASTree *spec_list = astree_get(declaration, 0);
-  const TypeSpec *decl_specs = spec_list->type;
-  SymbolValue *symbol = sym_from_type((TypeSpec *)declarator->type);
-  symbol->type.base = decl_specs->base;
-  symbol->type.alignment = decl_specs->alignment;
-  symbol->type.width = decl_specs->width;
-  symbol->type.flags = decl_specs->flags;
-  int status = typespec_append_auxspecs(&symbol->type, (TypeSpec *)decl_specs);
-  if (status) {
+  int status = combine_types((TypeSpec *)declarator->type, spec_list->type);
+  if (status)
     return astree_create_errnode(declarator, BCC_TERR_LIBRARY_FAILURE, 0);
-  }
-
+  if (declarator->symbol == TOK_TYPE_NAME) return declarator;
+  SymbolValue *symval = sym_from_type((TypeSpec *)declarator->type);
+  set_link_and_store(symval);
   const char *identifier = declarator->lexinfo;
   size_t identifier_len = strlen(identifier);
   SymbolValue *exists = NULL;
-  int is_redefinition =
+  int is_redeclaration =
       state_get_symbol(state, identifier, identifier_len, &exists);
-  if (!is_redefinition) {
-    if (exists && (exists->type.flags & TYPESPEC_FLAG_TYPEDEF) &&
-        !spec_list_includes_type(astree_get(declaration, 0))) {
-      /* don't redeclare typedefs if type was not specified in declaration */
-      symbol_value_destroy(symbol);
+  if (is_redeclaration) {
+    if (types_equivalent(&symval->type, &exists->type, IGNORE_STORAGE_CLASS) &&
+        linkage_valid(symval, exists)) {
+      symbol_value_destroy(symval);
       declarator->type = &exists->type;
-      return declarator;
-    } else if (declarator->symbol == TOK_TYPE_NAME) {
-      /* type name in cast or sizeof; do not insert symbol */
-      /* TODO(Robert): copy and free the information in the symbol we just
-       * created so that the syntax tree node can free it later, or use fancy
-       * pointer math to get back the address in the heap of the SymbolValue
-       * that the type information is embedded in.
-       */
-      return declarator;
-    } else {
-      /* TODO(Robert): check for incomplete type */
-      int status =
-          state_insert_symbol(state, identifier, identifier_len, symbol);
-      if (status) {
-        symbol_value_destroy(symbol);
-        declarator->type = &SPEC_EMPTY;
-        return astree_create_errnode(declarator, BCC_TERR_LIBRARY_FAILURE, 0);
-      }
-      declarator->type = &symbol->type;
-      if (!typespec_is_function(declarator->type) &&
-          !(typespec_is_array(declarator->type)) &&
-          !(declarator->type->flags & TYPESPEC_FLAG_TYPEDEF)) {
-        declarator->attributes |= ATTR_EXPR_LVAL;
-      }
-      return declarator;
-    }
-  } else if ((typespec_is_function(&exists->type) &&
-              typespec_is_function(&symbol->type)) ||
-             ((exists->type.flags & TYPESPEC_FLAG_TYPEDEF) &&
-              (symbol->type.flags & TYPESPEC_FLAG_TYPEDEF))) {
-    int equivalent = types_equivalent(&exists->type, &symbol->type, 0);
-    symbol_value_destroy(symbol);
-    declarator->type = &SPEC_EMPTY;
-    if (equivalent) {
       return declarator;
     } else {
       return astree_create_errnode(declarator, BCC_TERR_REDEFINITION, 1,
                                    declarator);
     }
+  } else if (exists && (symval->type.flags & TYPESPEC_FLAG_EXTERN) &&
+             types_equivalent(&symval->type, &exists->type,
+                              IGNORE_STORAGE_CLASS)) {
+    /* extern symval in block with outer symval declares nothing */
+    symbol_value_destroy(symval);
+    declarator->type = &exists->type;
+    return declarator;
   } else {
-    /* TODO(Robert): allow redefinition of extern symbols so long as types
-     * are compatible
-     */
-    symbol_value_destroy(symbol);
-    declarator->type = &SPEC_EMPTY;
-    return astree_create_errnode(declarator, BCC_TERR_REDEFINITION, 1,
-                                 declarator);
+    if (typespec_is_incomplete(&symval->type)) {
+      symval->flags |= SYMFLAG_INCOMPLETE;
+    }
+    int status = state_insert_symbol(state, identifier, identifier_len, symval);
+    if (status) {
+      symbol_value_destroy(symval);
+      declarator->type = &SPEC_EMPTY;
+      return astree_create_errnode(declarator, BCC_TERR_LIBRARY_FAILURE, 0);
+    }
+    /* typedefs are not lvalues */
+    if (!(symval->type.flags & TYPESPEC_FLAG_TYPEDEF))
+      declarator->attributes |= ATTR_EXPR_LVAL;
+    declarator->type = &symval->type;
+    return declarator;
   }
 }
 
@@ -736,6 +759,13 @@ ASTree *define_symbol(ASTree *declaration, ASTree *declarator,
         declaration, 1,
         astree_propogate_errnode_v(equal_sign, 2, declarator, initializer));
   }
+  SymbolValue *symval = sym_from_type((TypeSpec *)declarator->type);
+  if (symval->flags & SYMFLAG_DEFINED)
+    return astree_create_errnode(
+        astree_adopt(declaration, 1,
+                     astree_adopt(equal_sign, 2, declarator, initializer)),
+        BCC_TERR_REDEFINITION, 1, declarator);
+  symval->flags |= SYMFLAG_DEFINED;
   equal_sign->type = declarator->type;
   if (typespec_is_struct(declarator->type) ||
       typespec_is_union(declarator->type)) {
