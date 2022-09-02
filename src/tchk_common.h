@@ -3,7 +3,10 @@
 
 #include "astree.h"
 
-enum types_equivalent_flags { IGNORE_QUALIFIERS, IGNORE_STORAGE_CLASS };
+enum types_equivalent_flags {
+  IGNORE_QUALIFIERS = 1 << 0,
+  IGNORE_STORAGE_CLASS = 1 << 1
+};
 
 int params_equivalent(const AuxSpec *aux1, const AuxSpec *aux2);
 int members_equivalent(const AuxSpec *aux1, const AuxSpec *aux2);

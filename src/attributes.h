@@ -260,4 +260,6 @@ int typespec_is_structptr(const TypeSpec *type);
 int typespec_is_union(const TypeSpec *type);
 int typespec_is_unionptr(const TypeSpec *type);
 int typespec_is_enum(const TypeSpec *type);
+int typespec_is_chararray(const TypeSpec *type);
+int typespec_is_const(const TypeSpec *type);
 #endif
