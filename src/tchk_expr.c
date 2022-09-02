@@ -137,44 +137,89 @@ ASTree *validate_call(ASTree *expr, ASTree *call) {
 
 ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
                              ASTree *true_expr, ASTree *false_expr) {
-  pointer_conversions(condition);
-  if (condition->symbol == TOK_TYPE_ERROR) {
+  if (condition->symbol == TOK_TYPE_ERROR ||
+      true_expr->symbol == TOK_TYPE_ERROR ||
+      false_expr->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(qmark, 3, condition, true_expr,
                                       false_expr);
   }
 
+  pointer_conversions(condition);
+  pointer_conversions(true_expr);
+  pointer_conversions(false_expr);
   if (!typespec_is_scalar(condition->type)) {
     return astree_create_errnode(
         astree_adopt(qmark, 3, condition, true_expr, false_expr),
         BCC_TERR_EXPECTED_SCALAR, 2, qmark, condition);
   }
 
-  pointer_conversions(true_expr);
-  if (true_expr->symbol == TOK_TYPE_ERROR) {
-    return astree_propogate_errnode_v(qmark, 3, condition, true_expr,
-                                      false_expr);
+  if (typespec_is_arithmetic(true_expr->type) &&
+      typespec_is_arithmetic(false_expr->type)) {
+    arithmetic_conversions(qmark, true_expr->type, false_expr->type);
+  } else if ((typespec_is_struct(true_expr->type) &&
+              typespec_is_struct(false_expr->type)) ||
+             (typespec_is_union(true_expr->type) &&
+              typespec_is_union(false_expr->type)) ||
+             (typespec_is_void(true_expr->type) &&
+              typespec_is_void(false_expr->type))) {
+    if (types_equivalent(true_expr->type, false_expr->type,
+                         IGNORE_QUALIFIERS | IGNORE_STORAGE_CLASS)) {
+      qmark->type = true_expr->type;
+    } else {
+      return astree_create_errnode(
+          astree_adopt(qmark, 3, condition, true_expr, false_expr),
+          BCC_TERR_INCOMPATIBLE_TYPES, 3, qmark, true_expr->type,
+          false_expr->type);
+    }
+  } else if (typespec_is_pointer(true_expr->type) &&
+             is_const_zero(false_expr)) {
+    qmark->type = true_expr->type;
+  } else if (is_const_zero(true_expr) &&
+             typespec_is_pointer(false_expr->type)) {
+    qmark->type = false_expr->type;
+  } else if (typespec_is_pointer(true_expr->type) &&
+             typespec_is_voidptr(false_expr->type)) {
+    TypeSpec *common_type = malloc(sizeof(*common_type));
+    /* remember to flip arguments so that the common type is a void ptr */
+    int status =
+        common_qualified_ptr(common_type, false_expr->type, true_expr->type);
+    if (status)
+      return astree_create_errnode(
+          astree_adopt(qmark, 3, condition, true_expr, false_expr),
+          BCC_TERR_FAILURE, 0);
+    /* TODO(Robert): free resources used to create new type/auxspec */
+    qmark->type = common_type;
+  } else if (typespec_is_voidptr(true_expr->type) &&
+             typespec_is_pointer(false_expr->type)) {
+    TypeSpec *common_type = malloc(sizeof(*common_type));
+    int status =
+        common_qualified_ptr(common_type, true_expr->type, false_expr->type);
+    if (status)
+      return astree_create_errnode(
+          astree_adopt(qmark, 3, condition, true_expr, false_expr),
+          BCC_TERR_FAILURE, 0);
+    /* TODO(Robert): free resources used to create new type/auxspec */
+    qmark->type = common_type;
+  } else if (typespec_is_pointer(true_expr->type) &&
+             typespec_is_pointer(false_expr->type)) {
+    if (types_equivalent(true_expr->type, false_expr->type,
+                         IGNORE_QUALIFIERS | IGNORE_STORAGE_CLASS)) {
+      TypeSpec *common_type = malloc(sizeof(*common_type));
+      int status =
+          common_qualified_ptr(common_type, true_expr->type, false_expr->type);
+      if (status)
+        return astree_create_errnode(
+            astree_adopt(qmark, 3, condition, true_expr, false_expr),
+            BCC_TERR_FAILURE, 0);
+      /* TODO(Robert): free resources used to create new type/auxspec */
+      qmark->type = common_type;
+    } else {
+      return astree_create_errnode(
+          astree_adopt(qmark, 3, condition, true_expr, false_expr),
+          BCC_TERR_INCOMPATIBLE_TYPES, 3, qmark, true_expr->type,
+          false_expr->type);
+    }
   }
-
-  pointer_conversions(false_expr);
-  if (false_expr->symbol == TOK_TYPE_ERROR) {
-    return astree_propogate_errnode_v(qmark, 3, condition, true_expr,
-                                      false_expr);
-  }
-
-  /* TODO(Robert): the rules for conversion on the output of the ternary
-   * operator are different from usual conversions and compatibility rules, and
-   * should have their own function
-   */
-  /*
-  int status =
-      determine_conversion(true_expr->type, false_expr->type, &qmark->type);
-  if (status) {
-    return astree_create_errnode(
-        astree_adopt(qmark, 3, condition, true_expr, false_expr),
-        BCC_TERR_INCOMPATIBLE_TYPES, 3, qmark, true_expr->type,
-        false_expr->type);
-  }
-  */
 
   return evaluate_conditional(
       astree_adopt(qmark, 3, condition, true_expr, false_expr));

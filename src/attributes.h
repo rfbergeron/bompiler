@@ -244,6 +244,8 @@ size_t typespec_get_width(TypeSpec *spec);
 size_t typespec_get_alignment(TypeSpec *spec);
 int typespec_append_auxspecs(TypeSpec *dest, TypeSpec *src);
 int strip_aux_type(TypeSpec *dest, const TypeSpec *src);
+int common_qualified_ptr(TypeSpec *dest, const TypeSpec *src1,
+                         const TypeSpec *src2);
 
 int typespec_is_incomplete(const TypeSpec *type);
 int typespec_is_integer(const TypeSpec *type);
