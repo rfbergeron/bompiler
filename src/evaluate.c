@@ -6,26 +6,29 @@
 #include "stdlib.h"
 #include "yyparse.h"
 
-#define GEN_CASE(symbol, operator)                                     \
-  case symbol:                                                         \
-    binop->attributes |=                                               \
-        left_op->attributes & right_op->attributes & ATTR_EXPR_CONST2; \
-    if ((binop->attributes & ATTR_EXPR_CONST2) != ATTR_EXPR_CONST2)    \
-      return binop;                                                    \
-    binop->constval = left_op->constval operator right_op->constval;   \
+#define GEN_CASE(symbol, operator)                                       \
+  case symbol:                                                           \
+    binop->attributes |=                                                 \
+        left_op->attributes & right_op->attributes & ATTR_EXPR_CONST2;   \
+    if ((binop->attributes & ATTR_EXPR_CONST2) != ATTR_EXPR_CONST2)      \
+      return binop;                                                      \
+    binop->constval.integral =                                           \
+        left_op->constval.integral operator right_op->constval.integral; \
     return binop;
-#define GEN_CASE_SIGNED(symbol, operator)                              \
-  case symbol:                                                         \
-    binop->attributes |=                                               \
-        left_op->attributes & right_op->attributes & ATTR_EXPR_CONST2; \
-    if ((binop->attributes & ATTR_EXPR_CONST2) != ATTR_EXPR_CONST2)    \
-      return binop;                                                    \
-    if (left_op->type->base == TYPE_SIGNED) {                          \
-      binop->constval =                                                \
-          (long)left_op->constval operator(long) right_op->constval;   \
-    } else {                                                           \
-      binop->constval = left_op->constval operator right_op->constval; \
-    }                                                                  \
+#define GEN_CASE_SIGNED(symbol, operator)                                  \
+  case symbol:                                                             \
+    binop->attributes |=                                                   \
+        left_op->attributes & right_op->attributes & ATTR_EXPR_CONST2;     \
+    if ((binop->attributes & ATTR_EXPR_CONST2) != ATTR_EXPR_CONST2)        \
+      return binop;                                                        \
+    if (left_op->type->base == TYPE_SIGNED) {                              \
+      binop->constval.integral =                                           \
+          (long)left_op->constval.integral operator(long)                  \
+              right_op->constval.integral;                                 \
+    } else {                                                               \
+      binop->constval.integral =                                           \
+          left_op->constval.integral operator right_op->constval.integral; \
+    }                                                                      \
     return binop;
 
 ASTree *evaluate_intcon(ASTree *intcon) {
@@ -42,11 +45,11 @@ ASTree *evaluate_intcon(ASTree *intcon) {
         return astree_create_errnode(intcon, BCC_TERR_CONST_TOO_SMALL, 1,
                                      intcon);
       } else {
-        intcon->constval = unsigned_value;
+        intcon->constval.integral = unsigned_value;
       }
     }
   } else {
-    intcon->constval = signed_value;
+    intcon->constval.integral = signed_value;
   }
 
   intcon->attributes |= ATTR_EXPR_CONST2;
@@ -101,52 +104,52 @@ ASTree *evaluate_charcon(ASTree *charcon) {
   if (const_str[0] == '\\') {
     if (const_str[1] == 'x') {
       /* hex number */
-      charcon->constval = strtol(&const_str[2], NULL, 16);
+      charcon->constval.integral = strtol(&const_str[2], NULL, 16);
     } else if (isdigit(const_str[1])) {
       /* octal number */
-      charcon->constval = strtol(&const_str[1], NULL, 8);
+      charcon->constval.integral = strtol(&const_str[1], NULL, 8);
     } else {
       /* ASCII control sequence, \?, \", \', or \\ */
       switch (const_str[1]) {
         case 'n':
-          charcon->constval = '\n';
+          charcon->constval.integral = '\n';
           break;
         case 't':
-          charcon->constval = '\t';
+          charcon->constval.integral = '\t';
           break;
         case 'v':
-          charcon->constval = '\v';
+          charcon->constval.integral = '\v';
           break;
         case 'b':
-          charcon->constval = '\b';
+          charcon->constval.integral = '\b';
           break;
         case 'r':
-          charcon->constval = '\r';
+          charcon->constval.integral = '\r';
           break;
         case 'f':
-          charcon->constval = '\f';
+          charcon->constval.integral = '\f';
           break;
         case 'a':
-          charcon->constval = '\a';
+          charcon->constval.integral = '\a';
           break;
         case '\\':
-          charcon->constval = '\\';
+          charcon->constval.integral = '\\';
           break;
         case '\?':
-          charcon->constval = '\?';
+          charcon->constval.integral = '\?';
           break;
         case '\'':
-          charcon->constval = '\'';
+          charcon->constval.integral = '\'';
           break;
         case '"':
-          charcon->constval = '"';
+          charcon->constval.integral = '"';
           break;
         default:
-          charcon->constval = '\0';
+          charcon->constval.integral = '\0';
       }
     }
   } else {
-    charcon->constval = const_str[0];
+    charcon->constval.integral = const_str[0];
   }
   return charcon;
 }
@@ -157,7 +160,7 @@ ASTree *evaluate_ident(ASTree *ident) {
     TagValue *tagval = enum_aux->data.tag.val;
     int *value = map_get(&tagval->data.enumerators.by_name,
                          (char *)ident->lexinfo, strlen(ident->lexinfo));
-    ident->constval = *value;
+    ident->constval.integral = *value;
   }
   return ident;
 }
@@ -170,9 +173,11 @@ ASTree *evaluate_addition(ASTree *addition) {
   if ((addition->attributes & ATTR_EXPR_CONST2) != ATTR_EXPR_CONST2)
     return addition;
   if (left_op->type->base == TYPE_SIGNED) {
-    addition->constval = (long)left_op->constval + (long)right_op->constval;
+    addition->constval.integral =
+        (long)left_op->constval.integral + (long)right_op->constval.integral;
   } else {
-    addition->constval = left_op->constval + right_op->constval;
+    addition->constval.integral =
+        left_op->constval.integral + right_op->constval.integral;
   }
   return addition;
 }
@@ -185,9 +190,11 @@ ASTree *evaluate_subtraction(ASTree *subtraction) {
   if ((subtraction->attributes & ATTR_EXPR_CONST2) != ATTR_EXPR_CONST2)
     return subtraction;
   if (left_op->type->base == TYPE_SIGNED) {
-    subtraction->constval = (long)left_op->constval - (long)right_op->constval;
+    subtraction->constval.integral =
+        (long)left_op->constval.integral - (long)right_op->constval.integral;
   } else {
-    subtraction->constval = left_op->constval - right_op->constval;
+    subtraction->constval.integral =
+        left_op->constval.integral - right_op->constval.integral;
   }
   return subtraction;
 }
@@ -200,9 +207,11 @@ ASTree *evaluate_shiftl(ASTree *shiftl) {
   if ((shiftl->attributes & ATTR_EXPR_CONST2) != ATTR_EXPR_CONST2)
     return shiftl;
   if (right_op->type->base == TYPE_SIGNED) {
-    shiftl->constval = left_op->constval << (long)right_op->constval;
+    shiftl->constval.integral = left_op->constval.integral
+                                << (long)right_op->constval.integral;
   } else {
-    shiftl->constval = left_op->constval << right_op->constval;
+    shiftl->constval.integral = left_op->constval.integral
+                                << right_op->constval.integral;
   }
   return shiftl;
 }
@@ -216,14 +225,18 @@ ASTree *evaluate_shiftr(ASTree *shiftr) {
     return shiftr;
   if (left_op->type->base == TYPE_SIGNED) {
     if (right_op->type->base == TYPE_SIGNED) {
-      shiftr->constval = (long)left_op->constval >> (long)right_op->constval;
+      shiftr->constval.integral =
+          (long)left_op->constval.integral >> (long)right_op->constval.integral;
     } else {
-      shiftr->constval = (long)left_op->constval >> right_op->constval;
+      shiftr->constval.integral =
+          (long)left_op->constval.integral >> right_op->constval.integral;
     }
   } else if (right_op->type->base == TYPE_UNSIGNED) {
-    shiftr->constval = left_op->constval >> (long)right_op->constval;
+    shiftr->constval.integral =
+        left_op->constval.integral >> (long)right_op->constval.integral;
   } else {
-    shiftr->constval = left_op->constval >> right_op->constval;
+    shiftr->constval.integral =
+        left_op->constval.integral >> right_op->constval.integral;
   }
   return shiftr;
 }
@@ -233,7 +246,7 @@ ASTree *evaluate_cast(ASTree *cast) {
   if (typespec_is_arithmetic(cast->type) &&
       (expr->attributes & ATTR_EXPR_CONST2)) {
     cast->attributes |= ATTR_EXPR_CONST2;
-    cast->constval = expr->constval;
+    cast->constval.integral = expr->constval.integral;
   }
   return cast;
 }
@@ -247,10 +260,10 @@ ASTree *evaluate_conditional(ASTree *conditional) {
                              condition->attributes & ATTR_EXPR_CONST2;
   if ((conditional->attributes & ATTR_EXPR_CONST2) != ATTR_EXPR_CONST2)
     return conditional;
-  if (condition->constval) {
-    conditional->constval = true_expr->constval;
+  if (condition->constval.integral) {
+    conditional->constval.integral = true_expr->constval.integral;
   } else {
-    conditional->constval = false_expr->constval;
+    conditional->constval.integral = false_expr->constval.integral;
   }
   return conditional;
 }
@@ -297,29 +310,29 @@ ASTree *evaluate_unop(ASTree *unop) {
       unop->attributes = operand->attributes & ATTR_EXPR_CONST2;
       if ((unop->attributes & ATTR_EXPR_CONST2) != ATTR_EXPR_CONST2)
         return unop;
-      unop->constval = -operand->constval;
+      unop->constval.integral = -operand->constval.integral;
       return unop;
     case TOK_POS:
       unop->attributes = operand->attributes & ATTR_EXPR_CONST2;
       if ((unop->attributes & ATTR_EXPR_CONST2) != ATTR_EXPR_CONST2)
         return unop;
-      unop->constval = operand->constval;
+      unop->constval.integral = operand->constval.integral;
       return unop;
     case '~':
       unop->attributes = operand->attributes & ATTR_EXPR_CONST2;
       if ((unop->attributes & ATTR_EXPR_CONST2) != ATTR_EXPR_CONST2)
         return unop;
-      unop->constval = ~operand->constval;
+      unop->constval.integral = ~operand->constval.integral;
       return unop;
     case '!':
       unop->attributes = operand->attributes & ATTR_EXPR_CONST2;
       if ((unop->attributes & ATTR_EXPR_CONST2) != ATTR_EXPR_CONST2)
         return unop;
-      unop->constval = !operand->constval;
+      unop->constval.integral = !operand->constval.integral;
       return unop;
     case TOK_SIZEOF:
       unop->attributes |= ATTR_EXPR_CONST2;
-      unop->constval = typespec_get_width((TypeSpec *)operand->type);
+      unop->constval.integral = typespec_get_width((TypeSpec *)operand->type);
       return unop;
     case TOK_POST_INC:
     case TOK_POST_DEC:

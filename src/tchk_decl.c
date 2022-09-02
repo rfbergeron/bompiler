@@ -423,7 +423,7 @@ ASTree *validate_array_size(ASTree *array, ASTree *expr) {
     return astree_create_errnode(astree_adopt(array, 1, expr),
                                  BCC_TERR_EXPECTED_INTCONST, 2, array, expr);
   }
-  if (expr->constval == 0) {
+  if (expr->constval.integral == 0) {
     return astree_create_errnode(astree_adopt(array, 1, expr),
                                  BCC_TERR_EXPECTED_NONZERO, 2, array, expr);
   }
@@ -503,7 +503,7 @@ ASTree *define_array(ASTree *declarator, ASTree *array) {
     aux_array->data.memory_loc.length = 0;
   } else {
     ASTree *expr = astree_get(array, 0);
-    aux_array->data.memory_loc.length = expr->constval;
+    aux_array->data.memory_loc.length = expr->constval.integral;
   }
   int status = llist_push_back(&spec->auxspecs, aux_array);
   if (status) {
@@ -1127,7 +1127,7 @@ ASTree *define_enumerator(ASTree *enum_, ASTree *ident_node, ASTree *equal_sign,
                                    equal_sign, expr);
     }
     int *value = malloc(sizeof(int));
-    *value = tagval->data.enumerators.last_value = expr->constval;
+    *value = tagval->data.enumerators.last_value = expr->constval.integral;
     int status = map_insert(&tagval->data.enumerators.by_name, (char *)ident,
                             ident_len, value);
     assert(status == 0);
