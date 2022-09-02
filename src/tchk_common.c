@@ -79,8 +79,8 @@ int types_equivalent(const TypeSpec *type1, const TypeSpec *type2,
   if (type1->base != type2->base) return 0;
   if (type1->width != type2->width) return 0;
   if (type1->alignment != type2->alignment) return 0;
-  if (flags & IGNORE_QUALIFIERS) goto ignore_qualifiers;
   unsigned int flags_diff = type1->flags ^ type2->flags;
+  if (flags & IGNORE_QUALIFIERS) goto ignore_qualifiers;
   if (flags_diff & TYPESPEC_FLAG_VOLATILE) return 0;
   if (flags_diff & TYPESPEC_FLAG_CONST) return 0;
 ignore_qualifiers:

@@ -403,6 +403,20 @@ int strip_aux_type(TypeSpec *dest, const TypeSpec *src) {
   return 0;
 }
 
+int common_qualified_ptr(TypeSpec *dest, const TypeSpec *src1,
+                         const TypeSpec *src2) {
+  int status = strip_aux_type(dest, src1);
+  if (status) return status;
+  AuxSpec *aux1 = llist_front(&src1->auxspecs);
+  AuxSpec *aux2 = llist_front(&src2->auxspecs);
+  AuxSpec *ptr_aux = calloc(1, sizeof(*ptr_aux));
+  ptr_aux->aux = AUX_POINTER;
+  ptr_aux->data.memory_loc.qualifiers =
+      aux1->data.memory_loc.qualifiers | aux2->data.memory_loc.qualifiers;
+  llist_push_front(&dest->auxspecs, ptr_aux);
+  return 0;
+}
+
 int typespec_is_incomplete(const TypeSpec *type) {
   int is_void = type->base == TYPE_VOID && llist_size(&type->auxspecs) == 0;
   int is_struct =
