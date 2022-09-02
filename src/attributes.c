@@ -479,3 +479,30 @@ int typespec_is_unionptr(const TypeSpec *type) {
 int typespec_is_enum(const TypeSpec *type) {
   return typespec_is_aux(type, AUX_ENUM, 0);
 }
+
+int typespec_is_chararray(const TypeSpec *type) {
+  return llist_size(&type->auxspecs) == 1 && typespec_is_array(type) &&
+         (type->flags & TYPESPEC_FLAG_CHAR);
+}
+
+int typespec_is_const(const TypeSpec *type) {
+  if (llist_empty(&type->auxspecs)) {
+    return !!(type->flags & TYPESPEC_FLAG_CONST);
+  } else {
+    AuxSpec *auxspec = llist_front(&type->auxspecs);
+    if (auxspec->aux == AUX_UNION || auxspec->aux == AUX_STRUCT) {
+      if (type->flags & TYPESPEC_FLAG_CONST) return 1;
+      LinkedList *members = &auxspec->data.tag.val->data.members.in_order;
+      size_t i;
+      for (i = 0; i < llist_size(members); ++i) {
+        SymbolValue *member = llist_get(members, i);
+        if (typespec_is_const(&member->type)) return 1;
+      }
+      return 0;
+    } else if (auxspec->aux == AUX_POINTER) {
+      return !!(auxspec->data.memory_loc.qualifiers & TYPESPEC_FLAG_CONST);
+    } else {
+      return 1;
+    }
+  }
+}

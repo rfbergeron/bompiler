@@ -76,6 +76,7 @@ ASTree *validate_arg(ASTree *call, ASTree *arg) {
   if (call->symbol == TOK_TYPE_ERROR || arg->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(call, arg);
   }
+  pointer_conversions(arg);
   /* functon subtree is the first child of the call node */
   ASTree *function = astree_get(call, 0);
   TypeSpec *function_spec = (TypeSpec *)function->type;
@@ -164,6 +165,7 @@ ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
    * operator are different from usual conversions and compatibility rules, and
    * should have their own function
    */
+  /*
   int status =
       determine_conversion(true_expr->type, false_expr->type, &qmark->type);
   if (status) {
@@ -172,20 +174,19 @@ ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
         BCC_TERR_INCOMPATIBLE_TYPES, 3, qmark, true_expr->type,
         false_expr->type);
   }
+  */
 
   return evaluate_conditional(
       astree_adopt(qmark, 3, condition, true_expr, false_expr));
 }
 
 ASTree *validate_comma(ASTree *comma, ASTree *left_expr, ASTree *right_expr) {
-  if (left_expr->symbol == TOK_TYPE_ERROR) {
+  if (left_expr->symbol == TOK_TYPE_ERROR ||
+      right_expr->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(comma, 2, left_expr, right_expr);
   }
+  pointer_conversions(left_expr);
   pointer_conversions(right_expr);
-  if (right_expr->symbol == TOK_TYPE_ERROR) {
-    return astree_propogate_errnode_v(comma, 2, left_expr, right_expr);
-  }
-
   comma->type = right_expr->type;
   return astree_adopt(comma, 2, left_expr, right_expr);
 }
@@ -299,6 +300,8 @@ ASTree *validate_equality(ASTree *operator, ASTree * left, ASTree *right) {
   if (left->symbol == TOK_TYPE_ERROR || right->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(operator, 2, left, right);
   }
+  pointer_conversions(left);
+  pointer_conversions(right);
   const TypeSpec *left_type = left->type;
   const TypeSpec *right_type = right->type;
   operator->type = & SPEC_INT;
@@ -592,5 +595,27 @@ ASTree *validate_arrow(ASTree *arrow, ASTree *struct_,
       arrow->attributes |= ATTR_EXPR_LVAL;
     }
     return astree_adopt(arrow, 2, struct_, member_name_node);
+  }
+}
+
+ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src) {
+  if (dest->symbol == TOK_TYPE_ERROR || src->symbol == TOK_TYPE_ERROR) {
+    return astree_propogate_errnode_v(assignment, 2, dest, src);
+  }
+  pointer_conversions(src);
+  if (typespec_is_array(dest->type) || typespec_is_function(dest->type) ||
+      typespec_is_incomplete(dest->type) || typespec_is_const(dest->type)) {
+    return astree_create_errnode(astree_adopt(assignment, 2, dest, src),
+                                 BCC_TERR_EXPECTED_LVAL, 2, assignment, dest);
+  } else if (!(dest->attributes & ATTR_EXPR_LVAL)) {
+    return astree_create_errnode(astree_adopt(assignment, 2, dest, src),
+                                 BCC_TERR_EXPECTED_LVAL, 2, assignment, dest);
+  } else if (types_assignable(dest->type, src)) {
+    assignment->type = dest->type;
+    return astree_adopt(assignment, 2, dest, src);
+  } else {
+    return astree_create_errnode(astree_adopt(assignment, 2, dest, src),
+                                 BCC_TERR_INCOMPATIBLE_TYPES, 3, assignment,
+                                 dest->type, src->type);
   }
 }

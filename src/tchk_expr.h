@@ -33,4 +33,5 @@ ASTree *validate_reference(ASTree *reference, ASTree *struct_,
                            ASTree *member_name_node);
 ASTree *validate_arrow(ASTree *arrow, ASTree *struct_,
                        ASTree *member_name_node);
+ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src);
 #endif
