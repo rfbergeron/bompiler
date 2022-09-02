@@ -378,14 +378,14 @@ ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
               typespec_is_function(&symbol->type)) ||
              ((exists->type.flags & TYPESPEC_FLAG_TYPEDEF) &&
               (symbol->type.flags & TYPESPEC_FLAG_TYPEDEF))) {
-    int compatibility = types_compatible(&exists->type, &symbol->type);
+    int equivalent = types_equivalent(&exists->type, &symbol->type, 0);
     symbol_value_destroy(symbol);
     declarator->type = &SPEC_EMPTY;
-    if (compatibility != TCHK_COMPATIBLE) {
+    if (equivalent) {
+      return declarator;
+    } else {
       return astree_create_errnode(declarator, BCC_TERR_REDEFINITION, 1,
                                    declarator);
-    } else {
-      return declarator;
     }
   } else {
     /* TODO(Robert): allow redefinition of extern symbols so long as types
@@ -563,127 +563,6 @@ ASTree *define_dirdecl(ASTree *declarator, ASTree *dirdecl) {
   }
 }
 
-/* TODO(Robert): handle more complicated (nested list) initializers */
-
-ASTree *typecheck_array_initializer(ASTree *equal_sign, ASTree *declarator,
-                                    ASTree *init_list) {
-  /* TODO(Robert): evaluate array size when generating three address code */
-  const TypeSpec *array_type = declarator->type;
-  TypeSpec element_type = SPEC_EMPTY;
-  int status = strip_aux_type(&element_type, array_type);
-  if (status) {
-    return astree_create_errnode(
-        astree_adopt(equal_sign, 2, declarator, init_list),
-        BCC_TERR_LIBRARY_FAILURE, 0);
-  }
-  ASTree *ret = astree_adopt(equal_sign, 2, declarator, init_list);
-  size_t i;
-  for (i = 0; i < astree_count(init_list); ++i) {
-    ASTree *initializer = astree_get(init_list, i);
-    ASTree *errnode = perform_pointer_conv(initializer);
-    errnode = convert_type(errnode, &element_type);
-    /* insert any successfully created conversion nodes into the tree, but do
-     * not insert the error node, since that goes at the top of the tree */
-    (void)astree_replace(init_list, i, UNWRAP(errnode));
-    if (errnode->symbol == TOK_TYPE_ERROR) {
-      /* remove initializer tree from errnode's list of children */
-      (void)llist_extract(&errnode->children, 0);
-      if (ret->symbol == TOK_TYPE_ERROR) {
-        int status = typespec_append_auxspecs((TypeSpec *)ret->type,
-                                              (TypeSpec *)errnode->type);
-        /* TODO(Robert): check for and indicate errors */
-        if (status) abort();
-        status = astree_destroy(errnode);
-        if (status) abort();
-      } else {
-        ret = astree_adopt(errnode, 1, ret);
-      }
-    }
-  }
-  return ret;
-}
-
-ASTree *typecheck_union_initializer(ASTree *equal_sign, ASTree *declarator,
-                                    ASTree *init_list) {
-  ASTree *identifier = declarator;
-  AuxSpec *union_aux = llist_front((LinkedList *)&identifier->type->auxspecs);
-  const char *tag_name = union_aux->data.tag.name;
-  TagValue *tagval = NULL;
-  state_get_tag(state, tag_name, strlen(tag_name), &tagval);
-  /* tag was found previously when the declarator was validated, so if it is not
-   * found now, there is a bug in the compiler, not the input.
-   */
-  assert(tagval != NULL);
-
-  const LinkedList *members = &tagval->data.members.in_order;
-  if (astree_count(init_list) > 1) {
-    return astree_create_errnode(
-        astree_adopt(equal_sign, 2, declarator, init_list),
-        BCC_TERR_EXCESS_INITIALIZERS, 1, declarator);
-  } else {
-    /* there should be one initializer of a type compatible with the type of the
-     * first member of the union
-     */
-    ASTree *initializer = astree_get(init_list, 0);
-    ASTree *errnode = perform_pointer_conv(initializer);
-    SymbolValue *member_symbol = llist_front((LinkedList *)members);
-    errnode = convert_type(errnode, &member_symbol->type);
-    (void)astree_replace(init_list, 0, UNWRAP(errnode));
-    if (errnode->symbol == TOK_TYPE_ERROR) {
-      (void)llist_extract(&errnode->children, 0);
-      return astree_adopt(errnode, 1,
-                          astree_adopt(equal_sign, 2, declarator, init_list));
-    } else {
-      return astree_adopt(equal_sign, 2, declarator, init_list);
-    }
-  }
-}
-
-ASTree *typecheck_struct_initializer(ASTree *equal_sign, ASTree *declarator,
-                                     ASTree *init_list) {
-  ASTree *identifier = declarator;
-  AuxSpec *struct_aux = llist_front((LinkedList *)&identifier->type->auxspecs);
-  const char *tag_name = struct_aux->data.tag.name;
-  TagValue *tagval = NULL;
-  state_get_tag(state, tag_name, strlen(tag_name), &tagval);
-  /* tag was found previously when the declarator was validated, so if it is not
-   * found now, there is a bug in the compiler, not the input.
-   */
-  assert(tagval != NULL);
-
-  const LinkedList *members = &tagval->data.members.in_order;
-  if (members->size < astree_count(init_list)) {
-    return astree_create_errnode(
-        astree_adopt(equal_sign, 2, declarator, init_list),
-        BCC_TERR_EXCESS_INITIALIZERS, 1, declarator);
-  } else {
-    ASTree *ret = astree_adopt(equal_sign, 2, declarator, init_list);
-    size_t i;
-    for (i = 0; i < astree_count(init_list); ++i) {
-      ASTree *initializer = astree_get(init_list, i);
-      ASTree *errnode = perform_pointer_conv(initializer);
-      SymbolValue *member_symbol = llist_get((LinkedList *)members, i);
-      errnode = convert_type(errnode, &member_symbol->type);
-      (void)astree_replace(init_list, i, UNWRAP(errnode));
-      if (errnode->symbol == TOK_TYPE_ERROR) {
-        /* remove initializer tree from errnode's list of children */
-        (void)llist_extract(&errnode->children, 0);
-        if (ret->symbol == TOK_TYPE_ERROR) {
-          int status = typespec_append_auxspecs((TypeSpec *)ret->type,
-                                                (TypeSpec *)errnode->type);
-          /* TODO(Robert): check for and indicate errors */
-          if (status) abort();
-          status = astree_destroy(errnode);
-          if (status) abort();
-        } else {
-          ret = astree_adopt(errnode, 1, ret);
-        }
-      }
-    }
-    return ret;
-  }
-}
-
 size_t count_agg_members(TypeSpec *spec) {
   assert(typespec_is_array(spec) || typespec_is_union(spec) ||
          typespec_is_struct(spec));
@@ -725,22 +604,11 @@ void cleanup_agg_member_spec(TypeSpec *spec) {
   free(spec);
 }
 
-ASTree *validate_initializer(TypeSpec *dest_spec, ASTree *initializer) {
-  if (initializer->symbol == TOK_INIT_LIST) {
-    if (astree_count(initializer) > 1) {
-      return astree_create_errnode(initializer, BCC_TERR_EXCESS_INITIALIZERS, 1,
-                                   initializer);
-    } else {
-      return validate_initializer(dest_spec, astree_get(initializer, 0));
-    }
-  } else {
-    return (convert_type(perform_pointer_conv(initializer), dest_spec));
-  }
-}
-
+ASTree *validate_scalar_init(TypeSpec *dest_type, ASTree *initializer);
 ASTree *validate_init_list(TypeSpec *dest_spec, ASTree *init_list) {
   assert(typespec_is_array(dest_spec) || typespec_is_union(dest_spec) ||
          typespec_is_struct(dest_spec));
+  if (init_list->symbol == TOK_TYPE_ERROR) return init_list;
   struct agg_entry {
     TypeSpec *spec;
     size_t index;
@@ -755,19 +623,30 @@ ASTree *validate_init_list(TypeSpec *dest_spec, ASTree *init_list) {
   first_entry->index = 0;
   status = llist_push_front(&agg_stack, first_entry);
   if (status) abort();
-  ASTree *errnode = NULL;
   while (!llist_empty(&agg_stack)) {
     struct agg_entry *entry = llist_front(&agg_stack);
     TypeSpec *member_spec = get_agg_member_spec(entry->spec, entry->index);
     ASTree *initializer = astree_get(init_list, initializer_index);
-    if (!typespec_is_struct(member_spec) && !typespec_is_array(member_spec) &&
-        !typespec_is_union(member_spec)) {
-      errnode = validate_initializer(member_spec, initializer);
+    if (typespec_is_scalar(member_spec)) {
+      ASTree *errnode = validate_scalar_init(member_spec, initializer);
+      if (errnode->symbol == TOK_TYPE_ERROR) {
+        llist_destroy(&agg_stack);
+        (void)astree_remove(errnode, 0);
+        return astree_adopt(errnode, 1, init_list);
+      }
       ++initializer_index;
       ++entry->index;
+      /* intentionally leak member type resources in case the member type needs
+       * to be printed in the error message
+       */
       cleanup_agg_member_spec(member_spec);
     } else if (initializer->symbol == TOK_INIT_LIST) {
-      errnode = validate_init_list(member_spec, initializer);
+      ASTree *errnode = validate_init_list(member_spec, initializer);
+      if (errnode->symbol == TOK_TYPE_ERROR) {
+        llist_destroy(&agg_stack);
+        (void)astree_remove(errnode, 0);
+        return astree_adopt(errnode, 1, init_list);
+      }
       ++initializer_index;
       ++entry->index;
       cleanup_agg_member_spec(member_spec);
@@ -778,16 +657,13 @@ ASTree *validate_init_list(TypeSpec *dest_spec, ASTree *init_list) {
       int status = llist_push_front(&agg_stack, new_entry);
       if (status) abort();
     }
-    if (errnode && errnode->symbol == TOK_TYPE_ERROR) {
-      (void)astree_remove(errnode, 0);
-      return astree_adopt(errnode, 1, init_list);
-    }
     if (entry->index >= count_agg_members(entry->spec)) {
       cleanup_agg_member_spec(llist_pop_front(&agg_stack));
     } else if (initializer_index >= astree_count(init_list)) {
       break;
     }
   }
+  llist_destroy(&agg_stack);
   if (initializer_index != astree_count(init_list)) {
     return astree_create_errnode(init_list, BCC_TERR_EXCESS_INITIALIZERS, 1,
                                  init_list);
@@ -795,45 +671,107 @@ ASTree *validate_init_list(TypeSpec *dest_spec, ASTree *init_list) {
   return init_list;
 }
 
-ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src) {
-  TypeSpec *dest_spec = (TypeSpec *)dest->type;
-  if ((typespec_is_array(dest_spec) || typespec_is_union(dest_spec) ||
-       typespec_is_struct(dest_spec)) &&
-      src->symbol == TOK_INIT_LIST) {
-    ASTree *errnode = validate_init_list(dest_spec, src);
-    if (errnode->symbol == TOK_TYPE_ERROR) {
-      (void)astree_remove(errnode, 0);
-      return astree_adopt(errnode, 1, astree_adopt(assignment, 2, dest, src));
+ASTree *validate_scalar_init(TypeSpec *dest_type, ASTree *initializer) {
+  if (initializer->symbol == TOK_TYPE_ERROR) return initializer;
+  pointer_conversions(initializer);
+  if (initializer->symbol == TOK_INIT_LIST) {
+    if (astree_count(initializer) > 1) {
+      return astree_create_errnode(initializer, BCC_TERR_EXCESS_INITIALIZERS, 1,
+                                   initializer);
+    } else if (astree_get(initializer, 0)->symbol == TOK_INIT_LIST) {
+      return astree_create_errnode(initializer, BCC_TERR_EXCESS_INITIALIZERS, 1,
+                                   initializer);
+    } else {
+      ASTree *real_initializer = astree_get(initializer, 0);
+      if (types_assignable(dest_type, real_initializer)) {
+        return initializer;
+        ;
+      } else {
+        return astree_create_errnode(initializer, BCC_TERR_INCOMPATIBLE_TYPES,
+                                     3, initializer, dest_type,
+                                     real_initializer->type);
+      }
     }
+  } else if (types_assignable(dest_type, initializer)) {
+    return initializer;
   } else {
-    src = validate_initializer(dest_spec, src);
-    if (dest->symbol == TOK_TYPE_ERROR) {
-      return astree_propogate_errnode_v(assignment, 2, dest, src);
-    } else if (src->symbol == TOK_TYPE_ERROR) {
-      return astree_propogate_errnode_v(assignment, 2, dest, src);
-    } else if (!(dest->attributes & ATTR_EXPR_LVAL)) {
-      return astree_create_errnode(astree_adopt(assignment, 2, dest, src),
-                                   BCC_TERR_EXPECTED_LVAL, 2, assignment, dest);
-    }
+    return astree_create_errnode(initializer, BCC_TERR_INCOMPATIBLE_TYPES, 3,
+                                 initializer, dest_type, initializer->type);
   }
+}
 
-  assignment->type = dest->type;
-  return astree_adopt(assignment, 2, dest, src);
+ASTree *validate_struct_init(TypeSpec *dest_type, ASTree *initializer) {
+  if (initializer->symbol == TOK_TYPE_ERROR) {
+    return initializer;
+  } else if (initializer->symbol == TOK_INIT_LIST) {
+    return validate_init_list(dest_type, initializer);
+  } else if (types_assignable(dest_type, initializer)) {
+    return initializer;
+  } else {
+    return astree_create_errnode(initializer, BCC_TERR_INCOMPATIBLE_TYPES, 3,
+                                 initializer, dest_type, initializer->type);
+  }
+}
+
+ASTree *validate_array_init(TypeSpec *dest_type, ASTree *initializer) {
+  if (initializer->symbol == TOK_TYPE_ERROR) {
+    return initializer;
+  } else if (initializer->symbol == TOK_INIT_LIST) {
+    return validate_init_list(dest_type, initializer);
+  } else if (typespec_is_chararray(dest_type) &&
+             initializer->symbol == TOK_STRINGCON) {
+    return initializer;
+  } else {
+    return astree_create_errnode(initializer, BCC_TERR_INCOMPATIBLE_TYPES, 3,
+                                 initializer, dest_type, initializer->type);
+  }
 }
 
 ASTree *define_symbol(ASTree *declaration, ASTree *declarator,
                       ASTree *equal_sign, ASTree *initializer) {
   declarator = validate_declaration(declaration, declarator);
-  if (declaration->symbol == TOK_TYPE_ERROR) {
+  if (declaration->symbol == TOK_TYPE_ERROR ||
+      declarator->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(
         declaration, 1,
         astree_propogate_errnode_v(equal_sign, 2, declarator, initializer));
   }
-  equal_sign = validate_assignment(equal_sign, declarator, initializer);
-  if (equal_sign->symbol == TOK_TYPE_ERROR) {
-    return astree_propogate_errnode(declaration, equal_sign);
+  equal_sign->type = declarator->type;
+  if (typespec_is_struct(declarator->type) ||
+      typespec_is_union(declarator->type)) {
+    initializer =
+        validate_struct_init((TypeSpec *)declarator->type, initializer);
+    if (initializer->symbol == TOK_TYPE_ERROR) {
+      return astree_propogate_errnode_v(
+          declaration, 1,
+          astree_propogate_errnode_v(equal_sign, 2, declarator, initializer));
+    } else {
+      return astree_adopt(declaration, 1,
+                          astree_adopt(equal_sign, 2, declarator, initializer));
+    }
+  } else if (typespec_is_array(declarator->type)) {
+    initializer =
+        validate_array_init((TypeSpec *)declarator->type, initializer);
+    if (initializer->symbol == TOK_TYPE_ERROR) {
+      return astree_propogate_errnode_v(
+          declaration, 1,
+          astree_propogate_errnode_v(equal_sign, 2, declarator, initializer));
+    } else {
+      return astree_adopt(declaration, 1,
+                          astree_adopt(equal_sign, 2, declarator, initializer));
+    }
+  } else {
+    initializer =
+        validate_scalar_init((TypeSpec *)declarator->type, initializer);
+    if (initializer->symbol == TOK_TYPE_ERROR) {
+      return astree_propogate_errnode_v(
+          declaration, 1,
+          astree_propogate_errnode_v(equal_sign, 2, declarator, initializer));
+    } else {
+      return astree_adopt(declaration, 1,
+                          astree_adopt(equal_sign, 2, declarator, initializer));
+    }
   }
-  return astree_adopt(declaration, 1, equal_sign);
 }
 
 int resolve_label(ASTree *ident_node) {
@@ -921,13 +859,6 @@ ASTree *validate_fnbody_content(ASTree *function, ASTree *fnbody_content) {
     } else {
       return astree_adopt(fnbody_content, 1, function);
     }
-  }
-
-  /* TODO(Robert): handle control flow statements even in the case of errors */
-  int status = merge_block_controls(fnbody, fnbody_content);
-  if (status) {
-    return astree_create_errnode(astree_adopt(fnbody, 1, fnbody_content),
-                                 BCC_TERR_LIBRARY_FAILURE, 0);
   }
   return function;
 }
