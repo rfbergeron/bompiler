@@ -149,15 +149,19 @@ initializer         : assign_expr                                       { $$ = b
 init_list           : init_list ',' initializer                         { $$ = bcc_yyval = astree_adopt($1, 1, $3); astree_destroy($2); } /* adopt */
                     | '{' initializer                                   { $$ = bcc_yyval = astree_adopt(parser_new_sym($1, TOK_INIT_LIST), 1, $2); } /* adopt */
                     ;
-declarator          : '*' declarator                                    { $$ = bcc_yyval = define_pointer($2, parser_new_sym($1, TOK_POINTER)); } /* define_pointer */
+declarator          : pointer declarator                                { $$ = bcc_yyval = define_pointer($2, $1); } /* define_pointer */
                     | TOK_IDENT                                         { $$ = bcc_yyval = validate_declarator($1); } /* validate_declarator */
                     | '(' declarator ')'                                { $$ = bcc_yyval = $2; parser_cleanup(2, $1, $3); } /* do nothing */
                     | declarator direct_decl                            { $$ = bcc_yyval = define_dirdecl($1, $2); } /* validate_dirdecl */
                     ;
-abs_declarator      : '*' abs_declarator                                { $$ = bcc_yyval = define_pointer($2, parser_new_sym($1, TOK_POINTER)); } /* define_pointer */
+abs_declarator      : pointer abs_declarator                            { $$ = bcc_yyval = define_pointer($2, $1); } /* define_pointer */
                     | '(' abs_declarator ')'                            { $$ = bcc_yyval = $2; parser_cleanup(2, $1, $3); } /* do nothing */
                     | abs_declarator direct_decl                        { $$ = bcc_yyval = define_dirdecl($1, $2); } /* validate_dirdecl */
                     | %empty                                            { $$ = bcc_yyval = parser_make_type_name(); }
+                    ;
+pointer             : '*'                                               { $$ = bcc_yyval = parser_new_sym($1, TOK_POINTER); }
+                    | pointer TOK_CONST                                 { $$ = bcc_yyval = astree_adopt($1, 1, $2); }
+                    | pointer TOK_VOLATILE                              { $$ = bcc_yyval = astree_adopt($1, 1, $2); }
                     ;
 direct_decl         : '[' ']'                                           { $$ = bcc_yyval = parser_new_sym($1, TOK_ARRAY); astree_destroy($2); } /* do nothing */
                     | '[' cond_expr   ']'                               { $$ = bcc_yyval = validate_array_size(parser_new_sym($1, TOK_ARRAY), $2); astree_destroy($3); } /* validate_array_size */

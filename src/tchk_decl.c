@@ -576,6 +576,27 @@ ASTree *define_pointer(ASTree *declarator, ASTree *pointer) {
   }
   AuxSpec *aux_pointer = calloc(1, sizeof(*aux_pointer));
   aux_pointer->aux = AUX_POINTER;
+  size_t i;
+  for (i = 0; i < astree_count(pointer); ++i) {
+    ASTree *qualifier = astree_get(pointer, i);
+    if (qualifier->symbol == TOK_CONST) {
+      if (aux_pointer->data.memory_loc.qualifiers & TYPESPEC_FLAG_CONST) {
+        return astree_create_errnode(astree_adopt(declarator, 1, pointer),
+                                     BCC_TERR_INCOMPATIBLE_SPEC, 2, declarator,
+                                     qualifier);
+      } else {
+        aux_pointer->data.memory_loc.qualifiers |= TYPESPEC_FLAG_CONST;
+      }
+    } else if (qualifier->symbol == TOK_VOLATILE) {
+      if (aux_pointer->data.memory_loc.qualifiers & TYPESPEC_FLAG_VOLATILE) {
+        return astree_create_errnode(astree_adopt(declarator, 1, pointer),
+                                     BCC_TERR_INCOMPATIBLE_SPEC, 2, declarator,
+                                     qualifier);
+      } else {
+        aux_pointer->data.memory_loc.qualifiers |= TYPESPEC_FLAG_VOLATILE;
+      }
+    }
+  }
   TypeSpec *spec = (TypeSpec *)declarator->type;
   int status = llist_push_back(&spec->auxspecs, aux_pointer);
   if (status) {
