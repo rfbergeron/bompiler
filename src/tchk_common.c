@@ -37,11 +37,7 @@ int aux_equivalent(const AuxSpec *aux1, const AuxSpec *aux2,
     case AUX_FUNCTION:
       return params_equivalent(aux1, aux2);
     case AUX_ARRAY:
-      if (aux1->data.memory_loc.length == 0 ||
-          aux2->data.memory_loc.length == 0)
-        return 1;
-      else
-        return aux1->data.memory_loc.length == aux2->data.memory_loc.length;
+      return aux1->data.memory_loc.length == aux2->data.memory_loc.length;
     case AUX_ENUM:
     case AUX_STRUCT:
     case AUX_UNION:
