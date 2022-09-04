@@ -137,6 +137,19 @@ int erraux_to_string(AuxSpec *erraux, char *buf, size_t size) {
                      "with specifier list %s",
                      spec->lexinfo, spec_list_buf);
     }
+    case BCC_TERR_INCOMPATIBLE_DECL: {
+      ASTree *declarator = erraux->data.err.info[0];
+      char declarator_buf[LINESIZE];
+      int chars_written =
+          astree_to_string(declarator, declarator_buf, LINESIZE);
+      ASTree *dirdecl = erraux->data.err.info[1];
+      char dirdecl_buf[LINESIZE];
+      chars_written = astree_to_string(dirdecl, dirdecl_buf, LINESIZE);
+      return sprintf(buf,
+                     "Semantic error: direct declarator %s incompatible "
+                     "with declarator %s",
+                     dirdecl_buf, declarator_buf);
+    }
     case BCC_TERR_EXPECTED_TAG: {
       ASTree *operator= erraux->data.err.info[0];
       char operator_buf[LINESIZE];

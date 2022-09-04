@@ -520,6 +520,12 @@ ASTree *finalize_param_list(ASTree *param_list) {
 }
 
 ASTree *define_params(ASTree *declarator, ASTree *param_list) {
+  TypeSpec *spec = (TypeSpec *)declarator->type;
+  if (typespec_is_array(spec)) {
+    return astree_create_errnode(astree_adopt(declarator, 1, param_list),
+                                 BCC_TERR_INCOMPATIBLE_DECL, 2, declarator,
+                                 param_list);
+  }
   AuxSpec *aux_function = calloc(1, sizeof(*aux_function));
   aux_function->aux = AUX_FUNCTION;
   aux_function->data.params = malloc(sizeof(*aux_function->data.params));
@@ -537,8 +543,7 @@ ASTree *define_params(ASTree *declarator, ASTree *param_list) {
                                    BCC_TERR_LIBRARY_FAILURE, 0);
     }
   }
-  TypeSpec *out = (TypeSpec *)declarator->type;
-  int status = llist_push_back(&out->auxspecs, aux_function);
+  int status = llist_push_back(&spec->auxspecs, aux_function);
   if (status) {
     return astree_create_errnode(astree_adopt(declarator, 1, param_list),
                                  BCC_TERR_LIBRARY_FAILURE, 0);
@@ -551,6 +556,10 @@ ASTree *define_array(ASTree *declarator, ASTree *array) {
   if (typespec_is_incomplete(spec)) {
     return astree_create_errnode(astree_adopt(declarator, 1, array),
                                  BCC_TERR_INCOMPLETE_TYPE, 2, array, spec);
+  } else if (typespec_is_function(spec)) {
+    return astree_create_errnode(astree_adopt(declarator, 1, array),
+                                 BCC_TERR_INCOMPATIBLE_DECL, 2, declarator,
+                                 array);
   }
   AuxSpec *aux_array = calloc(1, sizeof(*aux_array));
   aux_array->aux = AUX_ARRAY;
