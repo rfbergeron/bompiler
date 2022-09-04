@@ -205,6 +205,18 @@ int erraux_to_string(AuxSpec *erraux, char *buf, size_t size) {
           "refer to a type name",
           ident->lexinfo, spec_list_buf);
     }
+    case BCC_TERR_EXPECTED_DECLARATOR: {
+      ASTree *declarator = erraux->data.err.info[0];
+      char decl_buf[LINESIZE];
+      int chars_written = astree_to_string(declarator, decl_buf, LINESIZE);
+      ASTree *abs_declarator = erraux->data.err.info[1];
+      char abs_decl_buf[LINESIZE];
+      chars_written = astree_to_string(abs_declarator, abs_decl_buf, LINESIZE);
+      return sprintf(buf,
+                     "Semantic error: function declaration %s contains "
+                     "type name %s as parameter\n",
+                     decl_buf, abs_decl_buf);
+    }
     case BCC_TERR_EXPECTED_CONST:
       /* TODO(Robert): unused */
       return 0;

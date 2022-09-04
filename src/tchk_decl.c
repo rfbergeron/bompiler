@@ -904,6 +904,16 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
   /* param list should be first child for properly defined functions */
   ASTree *param_list = astree_get(declarator, 0);
   assert(param_list->symbol == TOK_PARAM_LIST);
+  size_t i;
+  for (i = 0; i < astree_count(param_list); ++i) {
+    ASTree *param = astree_get(param_list, i);
+    if (param->symbol == TOK_TYPE_NAME) {
+      return astree_create_errnode(
+          astree_adopt(declaration, 2, declarator, body),
+          BCC_TERR_EXPECTED_DECLARATOR, 2, declarator, param);
+    }
+  }
+
   /* treat body like a normal block statement, but move param table to body node
    * and define function before entering body scope */
   if (param_list->symbol_table == NULL) {
