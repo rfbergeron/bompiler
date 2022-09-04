@@ -359,6 +359,26 @@ int combine_types(TypeSpec *dest, const TypeSpec *src) {
   dest->flags = src->flags;
   return typespec_append_auxspecs(dest, (TypeSpec *)src);
 }
+
+int is_array_completion(SymbolValue *symval, SymbolValue *exists) {
+  int ret = 0;
+  AuxSpec *sym_array_aux = llist_front(&symval->type.auxspecs);
+  AuxSpec *exists_array_aux = llist_front(&symval->type.auxspecs);
+  if (sym_array_aux->data.memory_loc.length == 0 ||
+      exists_array_aux->data.memory_loc.length == 0) {
+    TypeSpec sym_type_temp;
+    TypeSpec exists_type_temp;
+    assert(!strip_aux_type(&sym_type_temp, &symval->type));
+    assert(!strip_aux_type(&exists_type_temp, &exists->type));
+    if (types_equivalent(&sym_type_temp, &exists_type_temp,
+                         IGNORE_STORAGE_CLASS))
+      ret = 1;
+    assert(!typespec_destroy(&sym_type_temp));
+    assert(!typespec_destroy(&exists_type_temp));
+  }
+  return ret;
+}
+
 /*
  * Combines type specifier and declarator information and inserts symbol value
  * into the table at the current scope. Sets source location of the declaration
@@ -387,15 +407,27 @@ ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
   int is_redeclaration =
       state_get_symbol(state, identifier, identifier_len, &exists);
   if (is_redeclaration) {
-    if (types_equivalent(&symval->type, &exists->type, IGNORE_STORAGE_CLASS) &&
-        linkage_valid(symval, exists)) {
-      symbol_value_destroy(symval);
-      declarator->type = &exists->type;
-      return declarator;
-    } else {
-      return astree_create_errnode(declarator, BCC_TERR_REDEFINITION, 1,
-                                   declarator);
+    if (linkage_valid(symval, exists)) {
+      if (types_equivalent(&symval->type, &exists->type,
+                           IGNORE_STORAGE_CLASS)) {
+        symbol_value_destroy(symval);
+        declarator->type = &exists->type;
+        return declarator;
+      } else if (typespec_is_array(&symval->type) &&
+                 typespec_is_array(&exists->type) &&
+                 is_array_completion(symval, exists)) {
+        if (typespec_is_incomplete(&exists->type)) {
+          TypeSpec temp = exists->type;
+          exists->type = symval->type;
+          symval->type = temp;
+        }
+        symbol_value_destroy(symval);
+        declarator->type = &exists->type;
+        return declarator;
+      }
     }
+    return astree_create_errnode(declarator, BCC_TERR_REDEFINITION, 1,
+                                 declarator);
   } else if (exists && (symval->type.flags & TYPESPEC_FLAG_EXTERN) &&
              types_equivalent(&symval->type, &exists->type,
                               IGNORE_STORAGE_CLASS)) {
