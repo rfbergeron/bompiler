@@ -20,6 +20,8 @@ ASTree *define_symbol(ASTree *declaration, ASTree *declarator,
 ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body);
 ASTree *validate_fnbody_content(ASTree *function, ASTree *fnbody_content);
 ASTree *finalize_function(ASTree *function);
+ASTree *validate_unique_tag(ASTree *tag_type_node, ASTree *left_brace);
+ASTree *validate_tag_decl(ASTree *tag_type_node, ASTree *tag_name_node);
 ASTree *validate_tag_def(ASTree *tag_type_node, ASTree *tag_name_node,
                          ASTree *left_brace);
 ASTree *finalize_tag_def(ASTree *tag);

@@ -59,6 +59,26 @@ that has does not do most of the things that I thought:
 - Tags and enumeration constants declared as struct and union members are
   "hoisted" up into the enclosing scope
 
+## Unique Identifier Construction
+It must be possible to create unnamed, unique structs, unions and enums. These
+values do not really need to go into the symbol table; none of the operations
+that use tags need any more information than a special value (like the empty
+string) indicating that the tag is unique.
+
+However, ownership of the resources allocated to store the tag's information
+becomes more difficult: the tag cannot go into the symbol table, so a tree
+node must be responsible for freeing the tag's resources.
+
+Similar complications happen when dealing with type names as function
+parameters, and type names used in casts and in the `sizeof` operator.
+
+I think a nice solution would be to construct unique names for these types that
+cannot conflict with other type names, and to put these types into the symbol
+table.
+
+Since the names aren't important beyond the fact that they need to be unique,
+they can be constructed from the source location and the type information.
+
 ## Valid redeclarations
 The rules dictating when redeclarations are valid do not directly have to do
 with whether or not a symbol is external or block.

@@ -5,7 +5,8 @@
 
 enum types_equivalent_flags {
   IGNORE_QUALIFIERS = 1 << 0,
-  IGNORE_STORAGE_CLASS = 1 << 1
+  IGNORE_STORAGE_CLASS = 1 << 1,
+  IGNORE_ARRAY_BOUNDS = 1 << 2
 };
 
 int params_equivalent(const AuxSpec *aux1, const AuxSpec *aux2);
