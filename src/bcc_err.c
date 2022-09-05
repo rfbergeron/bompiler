@@ -137,6 +137,19 @@ int erraux_to_string(AuxSpec *erraux, char *buf, size_t size) {
                      "with specifier list %s",
                      spec->lexinfo, spec_list_buf);
     }
+    case BCC_TERR_INCOMPATIBLE_DECL: {
+      ASTree *declarator = erraux->data.err.info[0];
+      char declarator_buf[LINESIZE];
+      int chars_written =
+          astree_to_string(declarator, declarator_buf, LINESIZE);
+      ASTree *dirdecl = erraux->data.err.info[1];
+      char dirdecl_buf[LINESIZE];
+      chars_written = astree_to_string(dirdecl, dirdecl_buf, LINESIZE);
+      return sprintf(buf,
+                     "Semantic error: direct declarator %s incompatible "
+                     "with declarator %s",
+                     dirdecl_buf, declarator_buf);
+    }
     case BCC_TERR_EXPECTED_TAG: {
       ASTree *operator= erraux->data.err.info[0];
       char operator_buf[LINESIZE];
@@ -191,6 +204,18 @@ int erraux_to_string(AuxSpec *erraux, char *buf, size_t size) {
           "Semantic error: identifier \"%s\" in specifier list %s does not "
           "refer to a type name",
           ident->lexinfo, spec_list_buf);
+    }
+    case BCC_TERR_EXPECTED_DECLARATOR: {
+      ASTree *declarator = erraux->data.err.info[0];
+      char decl_buf[LINESIZE];
+      int chars_written = astree_to_string(declarator, decl_buf, LINESIZE);
+      ASTree *abs_declarator = erraux->data.err.info[1];
+      char abs_decl_buf[LINESIZE];
+      chars_written = astree_to_string(abs_declarator, abs_decl_buf, LINESIZE);
+      return sprintf(buf,
+                     "Semantic error: function declaration %s contains "
+                     "type name %s as parameter\n",
+                     decl_buf, abs_decl_buf);
     }
     case BCC_TERR_EXPECTED_CONST:
       /* TODO(Robert): unused */

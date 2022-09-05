@@ -37,8 +37,7 @@ int aux_equivalent(const AuxSpec *aux1, const AuxSpec *aux2,
     case AUX_FUNCTION:
       return params_equivalent(aux1, aux2);
     case AUX_ARRAY:
-      if (aux1->data.memory_loc.length == 0 ||
-          aux2->data.memory_loc.length == 0)
+      if ((flags & IGNORE_ARRAY_BOUNDS) && aux1->data.memory_loc.length == 0)
         return 1;
       else
         return aux1->data.memory_loc.length == aux2->data.memory_loc.length;
@@ -111,8 +110,9 @@ int types_assignable(const TypeSpec *dest_type, ASTree *src) {
     AuxSpec *src_aux = llist_front(&src->type->auxspecs);
     return dest_aux->data.tag.val == src_aux->data.tag.val;
   } else if (typespec_is_pointer(dest_type) && typespec_is_pointer(src->type)) {
-    if (types_equivalent(dest_type, src->type,
-                         IGNORE_QUALIFIERS | IGNORE_STORAGE_CLASS)) {
+    if (types_equivalent(
+            dest_type, src->type,
+            IGNORE_QUALIFIERS | IGNORE_STORAGE_CLASS | IGNORE_ARRAY_BOUNDS)) {
       return 1;
     } else if (typespec_is_voidptr(dest_type) ||
                typespec_is_voidptr(src->type)) {
