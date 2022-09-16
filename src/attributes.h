@@ -16,8 +16,7 @@
 enum attribute {
   ATTR_NONE = 0,              /* no attributes set */
   ATTR_EXPR_LVAL = 1 << 0,    /* refers to an assignable location */
-  ATTR_LVAL_STAT = 1 << 1,    /* lval has static/extern storage */
-  ATTR_STMT_DEFAULT = 1 << 2, /* switch statement has a default label */
+  ATTR_STMT_DEFAULT = 1 << 1, /* switch statement has a default label */
   ATTR_EXPR_CONST = 1 << 2,   /* node refers to a valid constant expression */
   ATTR_CONST_INIT = 1 << 3,   /* constant expression is only for initializers */
   ATTR_CONST_ADDR = 1 << 4,   /* constant expression includes an address */

@@ -9,27 +9,33 @@
 
 #define GEN_CASE(symbol, operator)                                            \
   case symbol:                                                                \
-    if (!(binop->attributes & ATTR_EXPR_CONST) ||                             \
-        (binop->attributes & ATTR_CONST_ADDR))                                \
+    if (!(left_op->attributes & right_op->attributes & ATTR_EXPR_CONST) ||    \
+        (left_op->attributes & right_op->attributes & ATTR_CONST_ADDR))       \
       return binop;                                                           \
+    binop->attributes |=                                                      \
+        ATTR_EXPR_CONST |                                                     \
+        ((left_op->attributes | right_op->attributes) & ATTR_CONST_INIT);     \
     binop->constant.integral.value =                                          \
         left_op->constant.integral.value operator right_op->constant.integral \
             .value;                                                           \
     return binop;
-#define GEN_CASE_SIGNED(symbol, operator)                              \
-  case symbol:                                                         \
-    if (!(binop->attributes & ATTR_EXPR_CONST) ||                      \
-        (binop->attributes & ATTR_CONST_ADDR))                         \
-      return binop;                                                    \
-    if (left_op->type->base == TYPE_SIGNED) {                          \
-      binop->constant.integral.value =                                 \
-          (long)left_op->constant.integral.value operator(long)        \
-              right_op->constant.integral.value;                       \
-    } else {                                                           \
-      binop->constant.integral.value =                                 \
-          left_op->constant.integral.value operator right_op->constant \
-              .integral.value;                                         \
-    }                                                                  \
+#define GEN_CASE_SIGNED(symbol, operator)                                  \
+  case symbol:                                                             \
+    if (!(left_op->attributes & right_op->attributes & ATTR_EXPR_CONST) || \
+        (left_op->attributes & right_op->attributes & ATTR_CONST_ADDR))    \
+      return binop;                                                        \
+    binop->attributes |=                                                   \
+        ATTR_EXPR_CONST |                                                  \
+        ((left_op->attributes | right_op->attributes) & ATTR_CONST_INIT);  \
+    if (binop->type->base == TYPE_SIGNED) {                                \
+      binop->constant.integral.value =                                     \
+          (long)left_op->constant.integral.value operator(long)            \
+              right_op->constant.integral.value;                           \
+    } else {                                                               \
+      binop->constant.integral.value =                                     \
+          left_op->constant.integral.value operator right_op->constant     \
+              .integral.value;                                             \
+    }                                                                      \
     return binop;
 
 ASTree *evaluate_intcon(ASTree *intcon) {
@@ -186,22 +192,27 @@ ASTree *evaluate_addition(ASTree *addition) {
              (right_op->attributes & ATTR_EXPR_CONST)) {
     addition->attributes |= ATTR_EXPR_CONST | ATTR_CONST_ADDR | ATTR_CONST_INIT;
     addition->constant.address.label = left_op->constant.address.label;
-    addition->constant.address.offset =
-        left_op->constant.address.offset + right_op->constant.integral.value;
+    addition->constant.address.offset = (long)left_op->constant.address.offset +
+                                        (long)right_op->constant.integral.value;
     return addition;
   } else if ((left_op->attributes & ATTR_EXPR_CONST) &&
              (right_op->attributes & ATTR_CONST_ADDR)) {
     addition->attributes |= ATTR_EXPR_CONST | ATTR_CONST_ADDR | ATTR_CONST_INIT;
     addition->constant.address.label = right_op->constant.address.label;
-    addition->constant.address.offset =
-        left_op->constant.integral.value + right_op->constant.address.offset;
+    addition->constant.address.offset = (long)left_op->constant.integral.value +
+                                        (long)right_op->constant.address.offset;
     return addition;
   } else if (left_op->attributes & right_op->attributes & ATTR_EXPR_CONST) {
     addition->attributes |=
         ATTR_EXPR_CONST |
         ((left_op->attributes | right_op->attributes) & ATTR_CONST_INIT);
-    addition->constant.integral.value =
-        left_op->constant.integral.value + right_op->constant.integral.value;
+    if (addition->type->base == TYPE_SIGNED)
+      addition->constant.integral.value =
+          (long)left_op->constant.integral.value +
+          (long)right_op->constant.integral.value;
+    else
+      addition->constant.integral.value =
+          left_op->constant.integral.value + right_op->constant.integral.value;
     return addition;
   } else {
     return addition;
@@ -215,7 +226,8 @@ ASTree *evaluate_subtraction(ASTree *subtraction) {
       (left_op->constant.address.label == right_op->constant.address.label)) {
     subtraction->attributes |= ATTR_EXPR_CONST | ATTR_CONST_INIT;
     subtraction->constant.integral.value =
-        right_op->constant.address.offset - left_op->constant.address.offset;
+        (long)left_op->constant.address.offset -
+        (long)right_op->constant.address.offset;
   } else if ((left_op->attributes & ATTR_CONST_ADDR) &&
              (right_op->attributes & ATTR_EXPR_CONST) &&
              !(right_op->attributes & ATTR_CONST_ADDR)) {
@@ -223,15 +235,21 @@ ASTree *evaluate_subtraction(ASTree *subtraction) {
         ATTR_EXPR_CONST | ATTR_CONST_ADDR | ATTR_CONST_INIT;
     subtraction->constant.address.label = left_op->constant.address.label;
     subtraction->constant.address.offset =
-        left_op->constant.address.offset - right_op->constant.integral.value;
+        (long)left_op->constant.address.offset -
+        (long)right_op->constant.integral.value;
   } else if ((left_op->attributes & right_op->attributes & ATTR_EXPR_CONST) &&
              !((left_op->attributes | right_op->attributes) &
                ATTR_CONST_ADDR)) {
     subtraction->attributes |=
         ATTR_EXPR_CONST |
         ((left_op->attributes | right_op->attributes) & ATTR_CONST_INIT);
-    subtraction->constant.integral.value =
-        left_op->constant.integral.value - right_op->constant.integral.value;
+    if (subtraction->type->base == TYPE_SIGNED)
+      subtraction->constant.integral.value =
+          (long)left_op->constant.integral.value -
+          (long)right_op->constant.integral.value;
+    else
+      subtraction->constant.integral.value =
+          left_op->constant.integral.value - right_op->constant.integral.value;
   }
   return subtraction;
 }
@@ -321,8 +339,11 @@ ASTree *evaluate_relational(ASTree *relational) {
     relational->attributes |=
         ATTR_EXPR_CONST |
         ((right_op->attributes | left_op->attributes) & ATTR_CONST_INIT);
-    if (left_op->type->base == TYPE_SIGNED ||
-        typespec_is_pointer(left_op->type)) {
+    int signed_compare = (left_op->type->width < X64_SIZEOF_LONG &&
+                          right_op->type->width < X64_SIZEOF_LONG) ||
+                         (left_op->type->base != TYPE_UNSIGNED &&
+                          right_op->type->base != TYPE_UNSIGNED);
+    if (signed_compare) {
       switch (relational->symbol) {
         case '<':
           relational->constant.integral.value =
@@ -410,6 +431,30 @@ ASTree *evaluate_equality(ASTree *equality) {
   return equality;
 }
 
+ASTree *evaluate_logical(ASTree *logical) {
+  ASTree *left_op = astree_get(logical, 0);
+  ASTree *right_op = astree_get(logical, 1);
+  if (left_op->attributes & right_op->attributes & ATTR_EXPR_CONST) {
+    logical->attributes =
+        ATTR_EXPR_CONST |
+        ((left_op->attributes | right_op->attributes) & ATTR_CONST_INIT);
+    if (logical->symbol == TOK_OR) {
+      logical->constant.integral.value =
+          ((left_op->attributes & ATTR_CONST_ADDR) ||
+           left_op->constant.integral.value) ||
+          ((right_op->attributes & ATTR_CONST_ADDR) ||
+           right_op->constant.integral.value);
+    } else {
+      logical->constant.integral.value =
+          ((left_op->attributes & ATTR_CONST_ADDR) ||
+           left_op->constant.integral.value) &&
+          ((right_op->attributes & ATTR_CONST_ADDR) ||
+           right_op->constant.integral.value);
+    }
+  }
+  return logical;
+}
+
 ASTree *evaluate_cast(ASTree *cast) {
   ASTree *expr = astree_get(cast, astree_count(cast) == 1 ? 0 : 1);
   if (expr->attributes & ATTR_EXPR_CONST) {
@@ -453,11 +498,12 @@ ASTree *evaluate_binop(ASTree *binop) {
     GEN_CASE('&', &);
     GEN_CASE('|', |);
     GEN_CASE('^', ^);
-    GEN_CASE(TOK_AND, &&);
-    GEN_CASE(TOK_OR, ||);
     GEN_CASE_SIGNED('/', /);
     GEN_CASE_SIGNED('%', %);
     GEN_CASE_SIGNED('*', *);
+    case TOK_AND:
+    case TOK_OR:
+      return evaluate_logical(binop);
     case TOK_EQ:
     case TOK_NE:
       return evaluate_equality(binop);

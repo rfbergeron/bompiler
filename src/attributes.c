@@ -103,7 +103,8 @@ const Location LOC_EMPTY = LOC_EMPTY_VALUE;
 
 const char type_map[][16] = {"void", "int", "float", "struct"};
 
-const char attr_map[][16] = {"LVAL", "DEFAULT", "CONST1", "CONST2"};
+const char attr_map[][16] = {"LVAL", "DEFAULT", "CONST", "INITIALIZER",
+                             "ADDRESS"};
 
 /* Precedence for conversions:
  * 1. long double
