@@ -46,8 +46,8 @@ ASTree *astree_init(int symbol, const Location location, const char *info) {
    * type of a pointer argument */
   llist_init(&tree->children, (void (*)(void *))(astree_destroy), NULL);
   tree->symbol_table = NULL;
-  tree->constval.address.offset = 0UL;
-  tree->constval.address.label = NULL;
+  tree->constant.address.label = NULL;
+  tree->constant.address.offset = 0L;
   return tree;
 }
 
@@ -233,17 +233,17 @@ int astree_to_string(ASTree *tree, char *buffer, size_t size) {
   if (characters_printed < 0) return characters_printed;
 
   if (strlen(tname) > 4) tname += 4;
-  if (!(tree->attributes & ATTR_EXPR_CONST2)) {
+  if (!(tree->attributes & ATTR_EXPR_CONST)) {
     return sprintf(buffer, "%s \"%s\" {%s} {%s} {%s}", tname, tree->lexinfo,
                    locstr, typestr, attrstr);
   } else if (tree->type->base == TYPE_SIGNED) {
     return sprintf(buffer, "%s \"%s\" {%s} {%s} {%s} { %li }", tname,
                    tree->lexinfo, locstr, typestr, attrstr,
-                   (long)tree->constval.integral);
+                   (long)tree->constant.integral.value);
   } else {
     return sprintf(buffer, "%s \"%s\" {%s} {%s} {%s} { %lu }", tname,
                    tree->lexinfo, locstr, typestr, attrstr,
-                   tree->constval.integral);
+                   tree->constant.integral.value);
   }
 }
 

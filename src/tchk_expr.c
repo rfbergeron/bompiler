@@ -43,11 +43,9 @@ ASTree *validate_ident(ASTree *ident) {
   if (symval) {
     DEBUGS('t', "Assigning %s a symbol", id_str);
     ident->type = &(symval->type);
-    if (symval->flags & SYMFLAG_ENUM_CONST) {
-      ident->attributes |= ATTR_EXPR_CONST2;
-    } else if (!typespec_is_array(ident->type) &&
-               !typespec_is_function(ident->type) &&
-               !(ident->type->flags & TYPESPEC_FLAG_TYPEDEF)) {
+    if (!typespec_is_array(ident->type) && !typespec_is_function(ident->type) &&
+        !(ident->type->flags & TYPESPEC_FLAG_TYPEDEF) &&
+        !(symval->flags & SYMFLAG_ENUM_CONST)) {
       ident->attributes |= ATTR_EXPR_LVAL;
     }
     return evaluate_ident(ident);
@@ -257,6 +255,9 @@ ASTree *validate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
   }
 }
 
+/* logic:
+ * casts to pointer disqualify expressions from being arithmetic constants
+ */
 ASTree *validate_addition(ASTree *operator, ASTree * left, ASTree *right) {
   if (left->symbol == TOK_TYPE_ERROR || right->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(operator, 2, left, right);
@@ -275,8 +276,14 @@ ASTree *validate_addition(ASTree *operator, ASTree * left, ASTree *right) {
     return evaluate_binop(astree_adopt(operator, 2, left, right));
   } else if (typespec_is_integer(left_type) &&
              typespec_is_pointer(right_type)) {
-    operator->type = right_type;
-    return evaluate_binop(astree_adopt(operator, 2, left, right));
+    if (operator->symbol == '-') {
+      return astree_create_errnode(astree_adopt(operator, 2, left, right),
+                                   BCC_TERR_INCOMPATIBLE_TYPES, 3, operator,
+                                   left_type, right_type);
+    } else {
+      operator->type = right_type;
+      return evaluate_binop(astree_adopt(operator, 2, left, right));
+    }
   } else if (typespec_is_pointer(left_type) &&
              typespec_is_pointer(right_type) && operator->symbol == '-') {
     if (types_equivalent(left->type, right->type,
@@ -509,6 +516,8 @@ ASTree *validate_addrof(ASTree *addrof, ASTree *operand) {
   /* TODO(Robert): set constexpr attribute if operand is static/extern */
   if (operand->symbol == TOK_TYPE_ERROR)
     return astree_propogate_errnode(addrof, operand);
+  if (!(operand->attributes & ATTR_EXPR_LVAL)) {
+  }
   TypeSpec *addrof_spec = malloc(sizeof(*addrof_spec));
   int status = typespec_copy(addrof_spec, operand->type);
   if (status) {
