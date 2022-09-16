@@ -272,6 +272,100 @@ name space always searches the table at the top of the stack first, followed by
 the table below, and so on. The only exception to this is the label name space,
 since there can only ever be one table.
 
+## More constant expression stuff
+After working with the compiler again, I've noticed a few flaws with the way I
+have been handling constant expressions. The flags, as I am using them, are not
+adequate for representing all the possible states a constant expression can be
+in.
+
+It is possible for an initializer constant to consist of an operation involving
+the subtraction of two pointers, given that the two pointers lie in the same
+static or extern array. This expression does not have an address in its value;
+it is just an offset, but it is no longer a valid arithmetic constant
+expression.
+
+It is also possible for an initializer constant to be an integral value that has
+been cast to a pointer and vice versa. Under these circumstances, the type of
+the expression is not enough to determine which flags need to be checked on
+which nodes.
+
+The set of flags will indicate the following:
+- the node as being a constant expression
+- whether or not the node is an initializer constant
+- whether or not the node's value includes an address
+
+These three flags should be sufficient to determine how to compute the value of
+a constant expression, and whether or not the constant expression is valid.
+
+### General logic
+If any of the operands of a node have the initializer constant flag set, then
+the node should set the initializer constant flag.
+
+### Making things easier
+To make this easier to do, I could omit constant expression evaluation for
+initializer constants. Unlike constants for case statements and array bounds,
+which must be known at compile time to check for semantic correctness, the
+actual values of these expressions do not need to be known. The only thing
+that needs to be tracked to ensure correctness is the presence of an address
+component in an initializer constant expression, which can be checked without
+knowing the actual value of the expression.
+
+If we do it this way, the only things that need to be tracked to ensure validity
+are a flag indicating that a value is a constant expression and a flag indicating
+that the constant expression is a valid array initializer.
+
+When the initializer flag is set, the tracked value is just an address. This
+value is used to make sure that when multiple addresses are used in an
+initializer constant certain conditions are met, namely that when subtracting,
+both addresses are the same, and that the address component of arguments to
+relation operators are identical. If the address is zero, that is taken to mean
+that the current value of the constant expression does not, at that point,
+have an address component.
+
+### Making things "harder"
+I've come up with some simplifications and additions that should make it
+possible to do a reasonable job evaluating expressions at compile time.
+
+I have made the following decisions about how the compiler should behave when
+evaluating constant expressions:
+1. For the purposes of the conditional operator and logical operators, the
+address of a static or extern object plus or minus an offset is considered to
+always be nonzero and therefore true.
+2. Relational operations whose operands are pointers to different static or
+extern objects are not considered to be constant expressions.
+3. Equality and relational operations whose operands consist of one pointer plus
+or minus an offset and one nonzero integral constant are not considered to be
+constant expressions.
+
+Attributes will need to be redone:
+1. mark expression as a constant expression
+2. indicate that a constant expression can only be used for initialization
+3. indicate that the value of the constant expression includes an address
+
+Fortunately, it seems like I got the logic right when just taking into account
+the addresses of initializer constants, and not too much work needs to be done
+to include offset calculations in addition.
+
+### Addition/subtraction logic
+If both operands contain an address, the operator must be subtraction and both
+addresses must be identical, in which case the value of the constant expression
+is the difference between the offsets.
+
+If only the right operand contains an address, the operator may not be
+subtraction.
+
+### Mul/div/mod, shift, and bitwise logic
+If the operands to any of these expressions are a static/extern address that has
+been cast to an arithmetic type, the result is not a constant expression.
+Operands may only be arithmetic constants.
+
+### Logical logic
+Static/extern addresses without an offset are always taken to be true. The
+operands can be any combination of addresses, offsets, and integral values.
+
+If either operand is an address with an offset, the result can't be known, but
+the expression is still a valid initializer constant expression.
+
 ## Constant expression flags
 Currently, there are two flags used to identify constant expressions: `CONST`
 and `ARITH`. These aren't very good, since `ARITH` has no use on its own, and is

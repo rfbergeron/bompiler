@@ -89,16 +89,9 @@ ignore_qualifiers:
 }
 
 int is_const_zero(ASTree *tree) {
-  if (tree->attributes & ATTR_EXPR_CONST2) {
-    /* TODO(Robert): if constant evaluation is skipped for debugging purposes,
-     * assume that the constant has value zero to suppress errors
-     */
-    return tree->constval.integral == 0;
-  } else if (tree->symbol == TOK_INTCON && !strtol(tree->lexinfo, NULL, 0)) {
-    return 1;
-  } else {
-    return 0;
-  }
+  return (tree->attributes & ATTR_EXPR_CONST) &&
+         !(tree->attributes & ATTR_CONST_ADDR) &&
+         (tree->constant.integral.value == 0);
 }
 
 int types_assignable(const TypeSpec *dest_type, ASTree *src) {
