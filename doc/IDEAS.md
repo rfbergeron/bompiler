@@ -81,7 +81,8 @@ correspond to the different addressing modes under AMD64. These members are:
 Operand will be an immediate value, stored as a `uintmax_t`.
 
 #### `MODE_REGISTER`
-Operand will be a single register.
+Operand will be a single register. Width is specified using another struct
+member.
 
 #### `MODE_DIRECT`
 Operand will be a label/address, with an offset. Offset will be zero if no
@@ -91,19 +92,16 @@ offset is necessary.
 Operand will be a single register, with an offset. Offset will be zero if no
 offset is necessary.
 
-#### `MODE_SCALE_X`
+#### `MODE_SCALE`
 Operand will be two registers, a base and a scaled index, along with an offset.
-Offset will be zero if no offset is necessary. `X` indicates what value the
-index will be scaled by.
+Offset will be zero if no offset is necessary. Scale is specified using another
+struct member. Register width is assumed to be 64 bits.
 
-The enum member that indicates the addressing mode will also have a number of
-flags that indicate the width of the registers in the indirect and scale modes.
-These flags will be stored in bits 3 and 4 for the base/single register, and in
-bits 5 and 6 for the index register.
+There will additionally be a `MODE_NONE` with value zero. If an expected operand
+has this mode, the instruction is invalid. Can be used in asserts.
 
-The low three bits (0, 1, and 2) being zero indicates that register mode has
-been selected. Virtual register numbers are assigned starting from one, so if
-the register member is also zero, this indicates an invalid instruction.
+`InstructionData` structs will also be allocated by the function populating
+them, rather than their caller.
 
 ### Addressing Struct/Union Members
 The `offset` member of `SymbolValue` is already used to represent the offset of
@@ -119,34 +117,15 @@ at generation time. This would require its own separate function.
 Perhaps at a later date I will perform the offset calculation at generation
 time as an optimization, but for now multiple instructions are fine.
 
-### Instruction flags and their meaning
-The `InstructionData` struct has a `flags` member which is used to pass
-information to the function called to populate it. This relation describes what
-the caller expects/requires the populated struct to look like once its done.
+### No more flags
+Since intermediate language generation will be done on the same pass as lexical,
+syntactic, and semantic analysis, functions do not know whether their caller
+wants the value or location of identifiers, or whether or not their sibling
+operands placed their result in a register.
 
-Currently, the only things the caller can ask for are that the destination
-register is using register addressing mode, and that the caller wants an object
-(as described in the standard), rather than a value.
-
-The former flag has two uses:
-1. if the caller is performing an operation that should not modify any objects,
-   it can request that the left expression place its result in a register
-2. if the caller is populating an instruction that takes two arguments and knows
-   that one of its arguments is already using indirect, displacement, or scaled-
-   index addressing modes, it can request that the other expression place its
-   result in a register, so that it may produce a valid instruction
-
-The latter flag is used to indicate that an lvalue expression should produce the
-object that the lvalue refers to, not the value stored within the object. This
-is used for assignment, the address operator, and the struct reference operator,
-but not the arrow operator.
-
-Currently, using the two at the same time does not make sense/is not necessary.
-This is because in all situations where `WANT_ADDR` is provided and respected by
-the callee, the effect is that the `LEA` operation is used. The second operand
-of an `LEA` must be in indirect, displacement, or scaled-index mode, so the
-first operand can only ever be in register mode, which is the effect of the
-`USE_REG` flag.
+This is an easy fix. Expressions which produce lvalues will always return and
+address, and not a value. Expressions will always place their result in a
+register.
 
 ### List initialization and constant values
 List initializers are required to have their components be a constant
@@ -218,6 +197,26 @@ The names of these functions will have the form `produce_XXX`. These functions
 will respect the command line flags for skipping type checking and intermediate
 language generation. Intermediate language code will not be generated if type
 checking fails.
+
+### Parameters for translation functions
+Intermediate language translation functions currently take as arguments an
+`InstructionData` to place their output into, the compiler state, and a the
+syntax tree node to translate. The data for the instructions producing the
+operands are allocated by the function and populated by recursive calls to other
+translation functions.
+
+Without recursive calls, the functions will have to get data about their
+operands from their arguments. `ASTree` nodes will need to have a field added
+representing the instruction(s) that represent the subtree it is the root of.
+
+This will be accomplished using a new badlib structure, `llist_iter`, an
+iterator into a linked list. Iterators will just be a typedef of the llist
+`Node` struct. Tree nodes will store two iterators, one to the first instruction
+of the subtree, and one to the last instruction of the subtree.
+
+Parent nodes can then insert instructions before, after, or in between the
+instructions of their child nodes using these iterators. They can also use
+these iterators to add labels or modify the instructions.
 
 ## Simpler structure handling
 Structure handling could be simplified, removing the need to have a second pass
