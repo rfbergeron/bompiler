@@ -88,31 +88,41 @@
 
 #define GENERATE_ENUM(ENUM) OP_##ENUM,
 #define GENERATE_STRING(STRING) #STRING,
+#define DEST_IS_REG(tree) (((InstructionData*)liter_get(tree->last_instr)) \
+        ->dest.all.mode == MODE_REGISTER)
+#define FIX_LVAL(tree) (tree->attributes & ATTR_EXPR_LVAL \
+        ? ((status = resolve_lval(tree)) ? NULL : liter_get(tree->last_instr)) \
+        : liter_get(tree->last_instr))
+#define FIX_DEST(tree) (tree->attributes & ATTR_EXPR_LVAL \
+    ? ((status = resolve_lval(tree)) ? NULL : liter_get(tree->last_instr)) \
+    : (!DEST_IS_REG(tree) \
+            ? ((status = mov_to_reg(tree)) ? NULL : liter_get(tree->last_instr)) \
+            : liter_get(tree->last_instr)))
 
 typedef enum opcode { FOREACH_OPCODE(GENERATE_ENUM) } Opcode;
 
 typedef enum address_mode {
+  MODE_NONE,
   MODE_REGISTER,
   MODE_IMMEDIATE,
   MODE_DIRECT,
   MODE_INDIRECT,
-  MODE_SCALE_1,
-  MODE_SCALE_2,
-  MODE_SCALE_4,
-  MODE_SCALE_8, /* decimal 7, binary 111 */
-  MODE_REG_Q = 0,
-  MODE_REG_D = 1 << 3, /* decimal 8, binary 1000 */
-  MODE_REG_W = 1 << 4, /* decimal 16, binary 10000 */
-  MODE_REG_B = 3 << 3, /* decimal 24, binary 11000 */
-  MODE_BASE_Q = 0,
-  MODE_BASE_D = 1 << 3,
-  MODE_BASE_W = 1 << 4,
-  MODE_BASE_B = 3 << 3,
-  MODE_INDEX_Q = 0,
-  MODE_INDEX_D = 1 << 5, /* decimal 32, binary 100000 */
-  MODE_INDEX_W = 1 << 6, /* decimal 64, binary 1000000 */
-  MODE_INDEX_B = 3 << 5  /* decimal 96, binary 1100000 */
+  MODE_SCALE
 } AddressMode;
+typedef enum reg_width {
+  REG_NONE = 0,
+  REG_BYTE = 1,
+  REG_WORD = 2,
+  REG_DWORD = 4,
+  REG_QWORD = 8
+} RegWidth;
+typedef enum index_scale {
+  SCALE_NONE = 0,
+  SCALE_BYTE = 1,
+  SCALE_WORD = 2,
+  SCALE_DWORD = 4,
+  SCALE_QWORD = 8
+} IndexScale;
 
 typedef union operand {
   struct opall {
@@ -120,6 +130,7 @@ typedef union operand {
   } all;
   struct opreg {
     AddressMode mode;
+    RegWidth width;
     size_t num;
   } reg;
   struct opimm {
@@ -138,6 +149,7 @@ typedef union operand {
   } ind;
   struct opsca {
     AddressMode mode;
+    IndexScale scale;
     intmax_t disp;
     size_t base;
     size_t index;
@@ -147,7 +159,6 @@ typedef struct opall Opall;
 
 typedef struct instruction_data {
   Opcode opcode;
-  unsigned int flags;
   char label[MAX_LABEL_LENGTH];
   char comment[MAX_LABEL_LENGTH];
   Operand dest;
@@ -157,12 +168,6 @@ typedef struct instruction_data {
 /* rbx, rsp, rbp, r12-r15 are preserved across function calls in the System V
  * ABI; Microsoft's ABI additionally preserves rdi and rsi
  */
-enum instruction_flag {
-  NO_INSTR_FLAGS = 0,
-  USE_REG = 1 << 1,  /* result must be placed in a register */
-  WANT_ADDR = 1 << 2 /* result should be object address, not value */
-};
-
 const char OPCODES[][MAX_OPCODE_LENGTH] = {FOREACH_OPCODE(GENERATE_STRING)};
 
 /* Base and index are registers; scale is limited to {1, 2, 4, 8}, and offset
@@ -220,6 +225,61 @@ static int translate_stmt(ASTree *stmt, CompilerState *state);
 static int translate_block(ASTree *block, CompilerState *state);
 int translate_expr(ASTree *tree, CompilerState *state, InstructionData *data);
 
+Opcode opcode_from_operator(ASTree *tree) {
+  switch (tree->symbol) {
+    case TOK_NEG:
+      return OP_NEG;
+    case TOK_POST_INC:
+      /* fallthrough */
+    case TOK_INC:
+      return OP_INC;
+    case TOK_POST_DEC:
+      /* fallthrough */
+    case TOK_DEC:
+      return OP_DEC;
+    case '+':
+      return OP_ADD;
+    case '-':
+      return OP_SUB;
+    case '*':
+      return tree->type->base == TYPE_SIGNED ? OP_IMUL : OP_MUL;
+    case '%':
+      /* fallthrough */
+    case '/':
+      return tree->type->base == TYPE_SIGNED ? OP_IDIV : OP_DIV;
+    case '|':
+      return OP_OR;
+    case '&':
+      return OP_AND;
+    case '^':
+      return OP_XOR;
+    case '~':
+      return OP_NOT;
+    case TOK_SHL:
+      return tree->type->base == TYPE_SIGNED ? OP_SAL : OP_SHL;
+    case TOK_SHR:
+      return tree->type->base == TYPE_SIGNED ? OP_SAR : OP_SHR;
+    case TOK_GE:
+      return tree->type->base == TYPE_SIGNED ? OP_SETGE : OP_SETAE;
+    case TOK_LE:
+      return tree->type->base == TYPE_SIGNED ? OP_SETLE : OP_SETBE;
+    case '>':
+      return tree->type->base == TYPE_SIGNED ? OP_SETG : OP_SETA;
+    case '<':
+      return tree->type->base == TYPE_SIGNED ? OP_SETL : OP_SETB;
+    case TOK_EQ:
+      return OP_SETE;
+    case TOK_NE:
+      return OP_SETNE;
+    case TOK_OR:
+      return OP_JNZ;
+    case TOK_AND:
+      return OP_JZ;
+    default:
+      return OP_NOP;
+  }
+}
+
 /* assigns space for a symbol given an existing offset. inserts padding as
  * needed and returns the sum of the previous offset, the padding and the width
  * of the symbol
@@ -248,17 +308,56 @@ void assign_vreg(const TypeSpec *type, Operand *operand, size_t vreg_num) {
   operand->reg.num = vreg_num;
   switch (type->width) {
     case X64_SIZEOF_LONG:
+      operand->reg.width = REG_QWORD;
       return;
     case X64_SIZEOF_INT:
-      operand->ind.mode |= MODE_REG_D;
+      operand->reg.width = REG_DWORD;
       return;
     case X64_SIZEOF_SHORT:
-      operand->ind.mode |= MODE_REG_W;
+      operand->reg.width = REG_WORD;
       return;
     case X64_SIZEOF_CHAR:
-      operand->ind.mode |= MODE_REG_B;
+      operand->reg.width = REG_BYTE;
       return;
   }
+}
+
+void copy_lvalue(Operand *dest, const Operand *src) {
+  dest->ind.mode = MODE_INDIRECT;
+  dest->ind.disp = 0;
+  dest->ind.num = src->reg.num;
+}
+
+int resolve_lval(ASTree *lvalue_tree) {
+  InstructionData *lvalue_data = liter_get(lvalue_tree->last_instr);
+  InstructionData *mov_data = calloc(1, sizeof(InstructionData));
+  mov_data->opcode = OP_MOV;
+  copy_lvalue(&mov_data->src, &lvalue_data->dest);
+  assign_vreg(lvalue_tree->type, &mov_data->dest, vreg_count++);
+  int status = liter_ins_after(lvalue_tree->last_instr, mov_data);
+  if (status) {
+    free(mov_data);
+    return status;
+  }
+  status = liter_advance(lvalue_tree->last_instr, 1);
+  if (status) return status;
+  return 0;
+}
+
+int mov_to_reg(ASTree *tree) {
+  InstructionData *tree_data = liter_get(tree->last_instr);
+  InstructionData *mov_data = calloc(1, sizeof(InstructionData));
+  tree_data->opcode = OP_MOV;
+  mov_data->src = tree_data->dest;
+  assign_vreg(tree->type, &tree_data->dest, vreg_count++);
+  int status = liter_ins_after(tree->last_instr, tree_data);
+  if (status) {
+    free(mov_data);
+    return status;
+  }
+  status = liter_advance(tree->last_instr, 1);
+  if (status) return status;
+  return 0;
 }
 
 void resolve_object(CompilerState *state, Operand *operand, const char *ident) {

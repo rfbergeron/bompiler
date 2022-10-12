@@ -80,6 +80,10 @@ int astree_destroy(ASTree *tree) {
     }
   }
 
+  /* free instruction iterators */
+  free(tree->first_instr);
+  free(tree->last_instr);
+
   /* free one-off TypeSpec objects */
   if (!skip_type_check && tree->type != &SPEC_EMPTY) {
     switch (tree->symbol) {
