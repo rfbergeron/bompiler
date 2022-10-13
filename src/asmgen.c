@@ -13,6 +13,7 @@
 #define MAX_OPCODE_LENGTH 8
 #define MAX_OPERAND_LENGTH 32
 #define MAX_LABEL_LENGTH 32
+#define NO_DISP 0
 
 /* macros used to generate string constants for OPCODES */
 #define FOREACH_OPCODE(GENERATOR) \
@@ -102,7 +103,7 @@
        : (!DEST_IS_REG(tree)                                                  \
               ? ((status = mov_to_reg(tree)) ? NULL                           \
                                              : liter_get(tree->last_instr))   \
-              : liter_get(tree->last_instr)))
+              : (status = 0, liter_get(tree->last_instr))))
 
 typedef enum opcode { FOREACH_OPCODE(GENERATE_ENUM) } Opcode;
 
@@ -229,6 +230,44 @@ static char *translate_type(void *type, int flags);
 static int translate_stmt(ASTree *stmt, CompilerState *state);
 static int translate_block(ASTree *block, CompilerState *state);
 int translate_expr(ASTree *tree, CompilerState *state, InstructionData *data);
+
+InstructionData *instr_init(Opcode opcode) {
+  InstructionData *ret = calloc(1, sizeof(InstructionData));
+  ret->opcode = opcode;
+  return ret;
+}
+
+void set_op_reg(Operand *operand, RegWidth width, size_t num) {
+  operand->reg.mode = MODE_REGISTER;
+  operand->reg.width = width;
+  operand->reg.num = num;
+}
+
+void set_op_imm(Operand *operand, uintmax_t val) {
+  operand->imm.mode = MODE_IMMEDIATE;
+  operand->imm.val = val;
+}
+
+void set_op_dir(Operand *operand, intmax_t disp, const char *lab) {
+  operand->dir.mode = MODE_DIRECT;
+  operand->dir.disp = disp;
+  operand->dir.lab = lab;
+}
+
+void set_op_ind(Operand *operand, intmax_t disp, size_t num) {
+  operand->ind.mode = MODE_INDIRECT;
+  operand->ind.disp = disp;
+  operand->ind.num = num;
+}
+
+void set_op_sca(Operand *operand, IndexScale scale, intmax_t disp, size_t base,
+                size_t index) {
+  operand->sca.mode = MODE_SCALE;
+  operand->sca.scale = scale;
+  operand->sca.disp = disp;
+  operand->sca.base = base;
+  operand->sca.index = index;
+}
 
 Opcode opcode_from_operator(ASTree *tree) {
   switch (tree->symbol) {
@@ -968,36 +1007,50 @@ int translate_local_decl(ASTree *declaration, CompilerState *state) {
   return 0;
 }
 
-static int translate_ifelse(ASTree *ifelse, CompilerState *state) {
-  /* translate conditional expression */
-  InstructionData *cond_data = calloc(1, sizeof(*cond_data));
-  cond_data->flags |= USE_REG;
-  int status = translate_expr(astree_get(ifelse, 0), state, cond_data);
+static int translate_ifelse(ASTree *ifelse) {
+  ASTree *condition = astree_get(ifelse, 0);
+  int status;
+  InstructionData *condition_data = FIX_DEST(condition);
   if (status) return status;
-  llist_push_back(text_section, cond_data);
-  /* check if condition is zero and jump if it is */
-  InstructionData *test_data = calloc(1, sizeof(*test_data));
-  test_data->opcode = OP_TEST;
-  test_data->dest = cond_data->dest;
-  test_data->src = cond_data->dest;
-  llist_push_back(text_section, test_data);
-  /* create end of statement label */
-  InstructionData *end_label = calloc(1, sizeof(*end_label));
+
+  ifelse->first_instr = liter_copy(condition->first_instr);
+  if (ifelse->first_instr == NULL) return -1;
+
+  InstructionData *test_data = instr_init(OP_TEST);
+  test_data->dest = test_data->src = condition_data->dest;
+
+  InstructionData *end_label = instr_init(OP_NOP);
   sprintf(end_label->label, END_FMT, ifelse->jump_id);
-  /* emit conditional jump */
-  InstructionData *test_jmp_data = calloc(1, sizeof(*test_jmp_data));
-  test_jmp_data->opcode = OP_JZ;
-  test_jmp_data->dest.dir.mode = MODE_DIRECT;
-  test_jmp_data->dest.dir.lab = end_label->label;
-  llist_push_back(text_section, test_jmp_data);
-  /* translate if body */
-  status = translate_stmt(astree_get(ifelse, 1), state);
-  if (status) return status;
-  /* emit end of statement label */
-  llist_push_back(text_section, end_label);
-  /* translate else body if present */
+  ASTree *if_body = astree_get(ifelse, 1);
   if (astree_count(ifelse) == 3) {
-    translate_stmt(astree_get(ifelse, 2), state);
+    ASTree *else_body = astree_get(ifelse, 2);
+    InstructionData *else_label = instr_init(OP_NOP);
+    sprintf(else_label->label, STMT_FMT, ifelse->jump_id);
+    int status = liter_push_front(else_body->first_instr, NULL, 1, else_label);
+    if (status) return status;
+
+    InstructionData *test_jmp_data = instr_init(OP_JZ);
+    set_op_dir(&test_jmp_data->dest, NO_DISP, else_label->label);
+    status = liter_push_back(condition->last_instr, NULL, 2, test_data,
+                             test_jmp_data);
+    if (status) return status;
+
+    InstructionData *jmp_data = instr_init(OP_JMP);
+    set_op_dir(&jmp_data->dest, NO_DISP, end_label->label);
+    status = liter_push_back(if_body->last_instr, NULL, 1, jmp_data);
+    if (status) return status;
+    status = liter_push_back(else_body->last_instr, &ifelse->last_instr, 1,
+                             end_label);
+    if (status) return status;
+  } else {
+    InstructionData *test_jmp_data = instr_init(OP_JZ);
+    set_op_dir(&test_jmp_data->dest, NO_DISP, end_label->label);
+    status = liter_push_back(condition->last_instr, NULL, 2, test_data,
+                             test_jmp_data);
+    if (status) return status;
+    status =
+        liter_push_back(if_body->last_instr, &ifelse->last_instr, 1, end_label);
+    if (status) return status;
   }
   return 0;
 }
