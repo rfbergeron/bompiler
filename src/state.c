@@ -237,6 +237,14 @@ size_t state_get_case_id(CompilerState *state) {
   return ((SwitchInfo *)llist_front(&state->switch_stack))->case_id;
 }
 
+size_t state_get_control_reg(CompilerState *state) {
+  if (llist_empty(&state->switch_stack)) {
+    return (size_t)-1L;
+  }
+
+  return ((SwitchInfo *)llist_front(&state->switch_stack))->control_reg;
+}
+
 int state_get_selection_default(CompilerState *state) {
   if (llist_empty(&state->switch_stack)) abort();
   return ((SwitchInfo *)llist_front(&state->switch_stack))->has_default;
@@ -291,6 +299,7 @@ void state_push_selection(CompilerState *state, size_t id) {
   info->id = id;
   info->case_id = 0;
   info->has_default = 0;
+  info->control_reg = vreg_count++;
   llist_push_front(&state->switch_stack, info);
 }
 

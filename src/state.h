@@ -8,10 +8,12 @@
 
 DECLARE_STACK(size_t_stack, size_t)
 typedef struct size_t_stack SizetStack;
+extern size_t vreg_count;
 
 typedef struct switch_info {
   size_t id;
   size_t case_id;
+  size_t control_reg;
   int has_default;
 } SwitchInfo;
 
@@ -73,6 +75,7 @@ JumpEntry *state_get_switch(CompilerState *state);
 JumpEntry *state_get_jump(CompilerState *state);
 size_t state_get_selection_id(CompilerState *state);
 size_t state_get_case_id(CompilerState *state);
+size_t state_get_control_reg(CompilerState *state);
 int state_get_selection_default(CompilerState *state);
 size_t state_get_break_id(CompilerState *state);
 size_t state_get_continue_id(CompilerState *state);

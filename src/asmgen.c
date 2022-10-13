@@ -146,7 +146,7 @@ typedef union operand {
   struct opdir {
     AddressMode mode;
     intmax_t disp;
-    const char *lab;
+    char lab[MAX_LABEL_LENGTH];
   } dir;
   struct opind {
     AddressMode mode;
@@ -196,6 +196,9 @@ static const char END_FMT[] = ".E%lu";
 static const char STMT_FMT[] = ".S%lu";
 static const char LOOP_FMT[] = ".L%lu";
 static const char BOOL_FMT[] = ".B%lu";
+static const char DEF_FMT[] = ".D%lu";
+static const char CASE_FMT[] = ".S%luC%lu";
+static const char FALL_FMT[] = ".S%luF%lu";
 static const char SECTION_FMT[] = ".section %s\n";
 static const char EMPTY_FMT[] = "";
 
@@ -209,7 +212,7 @@ static const size_t RETURN_VREG = 0;
 static const char STACK_POINTER_STRING[] = "vr9q";
 
 static size_t branch_count = 0;
-static size_t vreg_count = 0;
+size_t vreg_count = 0;
 static size_t stack_window = 0;
 static char current_label[MAX_LABEL_LENGTH];
 
@@ -248,10 +251,13 @@ void set_op_imm(Operand *operand, uintmax_t val) {
   operand->imm.val = val;
 }
 
-void set_op_dir(Operand *operand, intmax_t disp, const char *lab) {
+void set_op_dir(Operand *operand, intmax_t disp, const char *format, ...) {
   operand->dir.mode = MODE_DIRECT;
   operand->dir.disp = disp;
-  operand->dir.lab = lab;
+  va_list args;
+  va_start(args, format);
+  vsprintf(operand->dir.lab, format, args);
+  va_end(args);
 }
 
 void set_op_ind(Operand *operand, intmax_t disp, size_t num) {
@@ -409,9 +415,7 @@ void resolve_object(CompilerState *state, Operand *operand, const char *ident) {
   state_get_symbol(state, ident, strlen(ident), &symval);
   assert(symval != NULL);
   if (symval->reg == 0) {
-    operand->dir.mode = MODE_DIRECT;
-    operand->dir.lab = ident;
-    operand->dir.disp = symval->offset;
+    set_op_dir(operand, symval->offset, ident);
   } else {
     operand->ind.mode = MODE_INDIRECT;
     operand->ind.num = symval->reg;
@@ -595,8 +599,7 @@ int translate_logical(ASTree *operator) {
 
   InstructionData *jmp_first_data = calloc(1, sizeof(InstructionData));
   jmp_first_data->opcode = opcode_from_operator(operator);
-  jmp_first_data->dest.dir.mode = MODE_DIRECT;
-  jmp_first_data->dest.dir.lab = setnz_data->label;
+  set_op_dir(&jmp_first_data->dest, NO_DISP, setnz_data->label);
 
   /* insert in reverse (correct) order */
   status = liter_ins_after(first->last_instr, jmp_first_data);
@@ -1056,35 +1059,43 @@ static int translate_ifelse(ASTree *ifelse) {
 }
 
 static int translate_switch(ASTree *switch_, CompilerState *state) {
-  InstructionData *cond_data = calloc(1, sizeof(*cond_data));
-  int status =
-      translate_expr(astree_get(switch_, 0), state, cond_data, USE_REG);
+  ASTree *condition = astree_get(switch_, 0);
+  int status;
+  InstructionData *cond_data = liter_get(condition->last_instr);
+  if (cond_data == NULL) return -1;
+
+  InstructionData *mov_data = instr_init(OP_MOV);
+  if (condition->attributes & ATTR_EXPR_LVAL)
+    copy_lvalue(&mov_data->src, &cond_data->dest);
+  else
+    mov_data->src = cond_data->dest;
+  /* we are casting all values to unsigned long since it does not really matter
+   * and communicating type information is annoying */
+  set_op_reg(&mov_data->dest, REG_QWORD, state_get_control_reg(state));
+  status = liter_push_back(condition->last_instr, NULL, 1, mov_data);
   if (status) return status;
 
-  size_t current_branch = branch_count++;
-  JumpEntry jump_entry;
-  jump_entry.type = JUMP_SWITCH;
-  jump_entry.data.switch_.next_case = current_branch;
-  strcpy(jump_entry.data.switch_.control_register, cond_data->dest_operand);
-  jump_entry.data.switch_.case_labels = malloc(sizeof(LinkedList));
-  status = llist_init(jump_entry.data.switch_.case_labels, NULL, NULL);
-  if (status) return status;
-  sprintf(jump_entry.end_label, END_FMT, current_branch);
-  status = state_push_jump(state, &jump_entry);
-
-  status = translate_stmt(astree_get(switch_, 1), state);
-  if (status) return status;
-
-  status = state_pop_jump(state);
-  if (status) return status;
-
-  InstructionData *default_label = calloc(1, sizeof(*default_label));
-  sprintf(default_label->label, COND_FMT, jump_entry.data.switch_.next_case);
-  llist_push_back(text_section, default_label);
-
-  InstructionData *end_label = calloc(1, sizeof(*end_label));
-  sprintf(end_label->label, END_FMT, current_branch);
-  llist_push_back(text_section, end_label);
+  /* switch epilogue */
+  ASTree *body = astree_get(switch_, 1);
+  InstructionData *end_label = instr_init(OP_NOP);
+  sprintf(end_label->label, END_FMT, switch_->jump_id);
+  InstructionData *jmp_end_data = instr_init(OP_JMP);
+  set_op_dir(&jmp_end_data->dest, NO_DISP, end_label->label);
+  InstructionData *dummy_case_label = instr_init(OP_NOP);
+  sprintf(dummy_case_label->label, CASE_FMT, switch_->jump_id,
+          state_get_case_id(state));
+  if (state_get_selection_default(state)) {
+    InstructionData *jmp_def_data = instr_init(OP_JMP);
+    set_op_dir(&jmp_def_data->dest, NO_DISP, DEF_FMT, switch_->jump_id);
+    int status =
+        liter_push_back(body->last_instr, &switch_->last_instr, 4, jmp_end_data,
+                        dummy_case_label, jmp_def_data, end_label);
+    if (status) return status;
+  } else {
+    int status = liter_push_back(body->last_instr, &switch_->last_instr, 3,
+                                 jmp_end_data, dummy_case_label, end_label);
+    if (status) return status;
+  }
   return 0;
 }
 
@@ -1361,60 +1372,50 @@ static int translate_label(ASTree *label, CompilerState *state) {
 }
 
 static int translate_case(ASTree *case_, CompilerState *state) {
-  /* get location of control value and case number */
-  JumpEntry *switch_entry = state_get_switch(state);
-  if (switch_entry == NULL) {
-    fprintf(stderr,
-            "ERROR: case statements must be enclosed in a switch statement.\n");
-    return -1;
+  ASTree *expr = astree_get(case_, 0);
+  InstructionData *expr_data = liter_get(expr->last_instr);
+  if (expr_data == NULL) return -1;
+
+  InstructionData *test_data = instr_init(OP_TEST);
+  set_op_reg(&test_data->dest, REG_QWORD, state_get_control_reg(state));
+  test_data->src = expr_data->dest;
+
+  InstructionData *jmp_data = instr_init(OP_JNE);
+  set_op_dir(&jmp_data->dest, NO_DISP, CASE_FMT, state_get_case_id(state));
+
+  if (case_->case_id != 0) {
+    InstructionData *fall_label = instr_init(OP_NOP);
+    sprintf(fall_label->label, FALL_FMT, case_->jump_id, case_->case_id);
+    InstructionData *case_label = instr_init(OP_NOP);
+    sprintf(case_label->label, CASE_FMT, case_->jump_id, case_->case_id);
+    InstructionData *fall_jmp_data = instr_init(OP_JMP);
+    set_op_dir(&fall_jmp_data->dest, NO_DISP, fall_label->label);
+    /* set first instr of case to fallthrough jump */
+    int status = liter_push_front(expr->first_instr, &case_->first_instr, 2,
+                                  fall_jmp_data, case_label);
+    if (status) return status;
+  } else {
+    /* set first instr of case to first instr of condition */
+    case_->first_instr = liter_copy(expr->first_instr);
+    if (case_->first_instr == NULL) return -1;
   }
-  /* reserve new case number for next case/default statement */
-  size_t current_branch = switch_entry->data.switch_.next_case;
-  switch_entry->data.switch_.next_case = branch_count++;
-  /* emit case label */
-  InstructionData *case_label = calloc(1, sizeof(*case_label));
-  sprintf(case_label->label, COND_FMT, current_branch);
-  llist_push_back(text_section, case_label);
-  /* evaluate case constant (should be optimized away later) */
-  InstructionData *data = calloc(1, sizeof(*data));
-  int status = translate_expr(astree_get(case_, 0), state, data, USE_REG);
+  int status = liter_push_back(expr->last_instr, NULL, 3, test_data, jmp_data,
+                               fall_label);
   if (status) return status;
-  /* compare constant to control value */
-  InstructionData *cmp_data = calloc(1, sizeof(*cmp_data));
-  cmp_data->opcode = OPCODES[OP_CMP];
-  strcpy(cmp_data->dest_operand, data->dest_operand);
-  strcpy(cmp_data->src_operand, switch_entry->data.switch_.control_register);
-  llist_push_back(text_section, cmp_data);
-  /* jump to next case statement if not equal */
-  InstructionData *jmp_data = calloc(1, sizeof(*jmp_data));
-  jmp_data->opcode = OPCODES[OP_JNE];
-  sprintf(jmp_data->dest_operand, COND_FMT,
-          switch_entry->data.switch_.next_case);
-  llist_push_back(text_section, jmp_data);
-  /* emit statement belonging to this case label */
-  return translate_stmt(astree_get(case_, 1), state);
+  return 0;
 }
 
 static int translate_default(ASTree *default_, CompilerState *state) {
-  /* get location of case number */
-  JumpEntry *switch_entry = state_get_switch(state);
-  if (switch_entry == NULL) {
-    fprintf(
-        stderr,
-        "ERROR: default statements must be enclosed in a switch statement.\n");
-    return -1;
-  }
-  /* reserve new case number for the default label that is always emitted by the
-   * switch translation routine, which is equivalent to the end label
-   */
-  size_t current_branch = switch_entry->data.switch_.next_case;
-  switch_entry->data.switch_.next_case = branch_count++;
-  /* emit case label */
-  InstructionData *case_label = calloc(1, sizeof(*case_label));
-  sprintf(case_label->label, COND_FMT, current_branch);
-  llist_push_back(text_section, case_label);
-  /* emit statement belonging to this case label */
-  return translate_stmt(astree_get(default_, 0), state);
+  InstructionData *def_label = instr_init(OP_NOP);
+  sprintf(def_label->label, DEF_FMT, default_->jump_id);
+
+  ASTree *stmt = astree_get(default_, 0);
+  int status =
+      liter_push_front(stmt->first_instr, &default_->first_instr, 1, def_label);
+  if (status) return status;
+  default_->last_instr = liter_copy(stmt->last_instr);
+  if (default_->last_instr == NULL) return -1;
+  return 0;
 }
 
 static int translate_stmt(ASTree *stmt, CompilerState *state) {
