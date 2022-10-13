@@ -380,28 +380,38 @@ void resolve_object(CompilerState *state, Operand *operand, const char *ident) {
   }
 }
 
-void save_registers(size_t start, size_t count) {
+int save_registers(size_t start, size_t count, ListIter *iter) {
+  int status = liter_advance(iter, 1);
+  if (status) return status;
   size_t i;
   for (i = 0; i < count; ++i) {
-    DEBUGS('g', "Saving register %lu to stack", start + i);
-    InstructionData *data = calloc(1, sizeof(InstructionData));
-    assert(data != NULL);
-    data->opcode = OP_PUSH;
-    assign_vreg((TypeSpec *)&SPEC_ULONG, &data->dest, start + i);
-    assert(!llist_push_back(text_section, data));
+    InstructionData *push_data = calloc(1, sizeof(InstructionData));
+    assert(push_data != NULL);
+    push_data->opcode = OP_PUSH;
+    assign_vreg((TypeSpec *)&SPEC_LONG, &push_data->dest, start + i);
+    int status = liter_ins_before(iter, push_data);
+    if (status) return status;
   }
+  status = liter_advance(iter, -1);
+  if (status) return status;
+  return 0;
 }
 
-void restore_registers(size_t start, size_t count) {
+int restore_registers(size_t start, size_t count, ListIter *iter) {
+  int status = liter_advance(iter, 1);
+  if (status) return status;
   size_t i;
   for (i = 1; i <= count; ++i) {
-    DEBUGS('g', "Restoring register %lu from stack", start + (count - i));
-    InstructionData *data = calloc(1, sizeof(InstructionData));
-    assert(data != NULL);
-    data->opcode = OP_POP;
-    assign_vreg((TypeSpec *)&SPEC_ULONG, &data->dest, start + (count - i));
-    assert(!llist_push_back(text_section, data));
+    InstructionData *pop_data = calloc(1, sizeof(InstructionData));
+    assert(pop_data != NULL);
+    pop_data->opcode = OP_POP;
+    assign_vreg((TypeSpec *)&SPEC_LONG, &pop_data->dest, start + (count - i));
+    int status = liter_ins_before(iter, pop_data);
+    if (status) return status;
   }
+  status = liter_advance(iter, -1);
+  if (status) return status;
+  return 0;
 }
 
 int translate_ident(ASTree *ident, CompilerState *state) {
@@ -777,76 +787,93 @@ int translate_binop(ASTree *operator) {
   return 0;
 }
 
-int translate_assignment(ASTree *assignment, CompilerState *state,
-                         InstructionData *data) {
+int translate_assignment(ASTree *assignment) {
   DEBUGS('g', "Translating assignment");
 
-  InstructionData *src_data = calloc(1, sizeof(*src_data));
-  src_data->flags |= USE_REG;
-  int status = translate_expr(astree_get(assignment, 1), state, src_data);
-  if (status) return status;
-  llist_push_back(text_section, src_data);
+  ASTree *lvalue = astree_get(assignment, 0);
+  InstructionData *lvalue_data = liter_get(lvalue->last_instr);
 
-  InstructionData *dest_data = calloc(1, sizeof(*dest_data));
-  dest_data->flags |= WANT_ADDR | USE_REG;
-  status = translate_expr(astree_get(assignment, 0), state, dest_data);
-  if (status) return status;
-  llist_push_back(text_section, dest_data);
+  ASTree *expr = astree_get(assignment, 1);
+  int status = 0;
+  /* it's called FIX_DEST, but it just gets the values of objects and puts non-
+   * register operands into registers
+   */
+  InstructionData *expr_data = FIX_DEST(expr);
+  if (expr_data == NULL) return status ? status : -1;
 
-  data->dest.ind.mode = MODE_INDIRECT;
-  data->dest.ind.num = dest_data->dest.reg.num;
-  data->src = src_data->dest;
-  data->opcode = OP_MOV;
+  InstructionData *assignment_data = calloc(1, sizeof(InstructionData));
+  assignment_data->opcode = OP_MOV;
+  copy_lvalue(&assignment_data->dest, &lvalue_data->dest);
+  assignment_data->src = expr_data->dest;
+
+  assignment->first_instr = liter_copy(lvalue->first_instr);
+  if (assignment->first_instr == NULL) return -1;
+  assignment->last_instr = liter_insert(lvalue->last_instr, 1, assignment_data);
+  if (assignment->last_instr == NULL) return -1;
   return 0;
 }
 
-int translate_call(ASTree *call, CompilerState *state, InstructionData *data) {
+int translate_call(ASTree *call) {
   DEBUGS('g', "Translating function call");
+  ASTree *pointer = astree_get(call, 0);
+  call->first_instr = liter_copy(pointer->first_instr);
+  if (call->first_instr == NULL) return -1;
+  ASTree *last_arg = astree_get(call, astree_count(call) - 1);
+  call->last_instr = liter_copy(last_arg->last_instr);
+  if (call->last_instr == NULL) return -1;
+  int status = save_registers(VOLATILE_START, VOLATILE_COUNT, call->last_instr);
+  if (status) return status;
+
   size_t i;
   for (i = 1; i < astree_count(call); ++i) {
     DEBUGS('g', "Translating parameter %i", i);
-    /* compute parameter */
     ASTree *arg = astree_get(call, i);
-    InstructionData *arg_data = calloc(1, sizeof(*arg_data));
-    int status = translate_expr(arg, state, arg_data);
-    if (status) return status;
-    llist_push_back(text_section, arg_data);
-
-    /* TODO(Robert): temporarily restrict number of arguments to 4 until I
-     * have implemented passing subroutine arguments on the stack
-     */
-    /* mov to argument register */
+    InstructionData *arg_data = liter_get(arg->last_instr);
     InstructionData *mov_data = calloc(1, sizeof(*mov_data));
     mov_data->opcode = OP_MOV;
     mov_data->src = arg_data->dest;
     assign_vreg(arg->type, &mov_data->dest, i);
-    llist_push_back(text_section, mov_data);
+    int status = liter_ins_after(call->last_instr, mov_data);
+    if (status) return status;
+    status = liter_advance(call->last_instr, 1);
+    if (status) return status;
   }
 
-  save_registers(VOLATILE_START, VOLATILE_COUNT);
-
-  /* compute function pointer value */
-  InstructionData *function_data = calloc(1, sizeof(InstructionData));
-  function_data->flags |= USE_REG;
-  int status = translate_expr(astree_get(call, 0), state, function_data);
-  if (status) return status;
-  llist_push_back(text_section, function_data);
-
+  InstructionData *pointer_data = liter_get(pointer->last_instr);
   InstructionData *call_data = calloc(1, sizeof(*call_data));
   call_data->opcode = OP_CALL;
-  call_data->dest = function_data->dest;
-  llist_push_back(text_section, call_data);
+  call_data->dest = pointer_data->dest;
+  status = liter_ins_after(call->last_instr, call_data);
+  if (status) return status;
+  status = liter_advance(call->last_instr, 1);
+  if (status) return status;
 
-  /* mov result to any other register if return type isn't void */
   if (call->type->base != TYPE_VOID) {
-    data->opcode = OP_MOV;
-    assign_vreg(call->type, &data->src, RETURN_VREG);
-    assign_vreg(call->type, &data->dest, vreg_count++);
+    InstructionData *mov_data = calloc(1, sizeof(InstructionData));
+    mov_data->opcode = OP_MOV;
+    assign_vreg(call->type, &mov_data->src, RETURN_VREG);
+    assign_vreg(call->type, &mov_data->dest, vreg_count++);
+    int status = liter_ins_after(call->last_instr, mov_data);
+    if (status) return status;
+    status = liter_advance(call->last_instr, 1);
+    if (status) return status;
+    status =
+        restore_registers(VOLATILE_START, VOLATILE_COUNT, call->last_instr);
+    if (status) return status;
+    /* dummy mov since parent expects last instr to have result */
+    InstructionData *dummy_data = calloc(1, sizeof(InstructionData));
+    dummy_data->opcode = OP_MOV;
+    dummy_data->dest = mov_data->dest;
+    dummy_data->src = mov_data->dest;
+    status = liter_ins_after(call->last_instr, mov_data);
+    if (status) return status;
+    status = liter_advance(call->last_instr, 1);
+    if (status) return status;
   } else {
-    data->opcode = OP_NOP;
+    int status =
+        restore_registers(VOLATILE_START, VOLATILE_COUNT, call->last_instr);
+    if (status) return status;
   }
-
-  restore_registers(VOLATILE_START, VOLATILE_COUNT);
   return 0;
 }
 
@@ -939,173 +966,6 @@ int translate_local_decl(ASTree *declaration, CompilerState *state) {
     }
   }
   return 0;
-}
-
-int translate_expr(ASTree *tree, CompilerState *state, InstructionData *out) {
-  int status = 0;
-  /* TODO(Robert): make a mapping from symbols to opcodes so that most
-   * of the case statements can be collapsed together
-   */
-  switch (tree->symbol) {
-    /* arithmetic operators */
-    case '+':
-      out->opcode = OP_ADD;
-      status = translate_binop(tree, state, out);
-      break;
-    case '-':
-      out->opcode = OP_SUB;
-      status = translate_binop(tree, state, out);
-      break;
-    case '*':
-      if (astree_get(tree, 0)->type->base == TYPE_SIGNED)
-        out->opcode = OP_IMUL;
-      else
-        out->opcode = OP_MUL;
-      status = translate_mul_div_mod(tree, state, out);
-      break;
-    case '/':
-    case '%':
-      if (astree_get(tree, 0)->type->base == TYPE_SIGNED)
-        out->opcode = OP_IDIV;
-      else
-        out->opcode = OP_DIV;
-      status = translate_mul_div_mod(tree, state, out);
-      break;
-    case TOK_INC:
-    case TOK_POST_INC:
-      out->opcode = OP_INC;
-      status = translate_inc_dec(tree, state, out);
-      break;
-    case TOK_DEC:
-    case TOK_POST_DEC:
-      out->opcode = OP_DEC;
-      status = translate_inc_dec(tree, state, out);
-      break;
-    case TOK_NEG:
-      out->opcode = OP_NEG;
-      status = translate_unop(tree, state, out);
-      break;
-    case TOK_POS:
-      status = translate_conversion(tree, state, out);
-      break;
-    /* bitwise operators */
-    case '&':
-      out->opcode = OP_AND;
-      status = translate_binop(tree, state, out);
-      break;
-    case '|':
-      out->opcode = OP_OR;
-      status = translate_binop(tree, state, out);
-      break;
-    case '^':
-      out->opcode = OP_XOR;
-      status = translate_binop(tree, state, out);
-      break;
-    case '~':
-      out->opcode = OP_NOT;
-      status = translate_unop(tree, state, out);
-      break;
-    /* shifts */
-    case TOK_SHL:
-      if (astree_get(tree, 0)->type->base == TYPE_SIGNED)
-        out->opcode = OP_SAL;
-      else
-        out->opcode = OP_SHL;
-      status = translate_binop(tree, state, out);
-      break;
-    case TOK_SHR:
-      if (astree_get(tree, 0)->type->base == TYPE_SIGNED)
-        out->opcode = OP_SAR;
-      else
-        out->opcode = OP_SHR;
-      status = translate_binop(tree, state, out);
-      break;
-    /* comparison operators */
-    case '>':
-      if (astree_get(tree, 0)->type->base == TYPE_SIGNED)
-        out->opcode = OP_SETG;
-      else
-        out->opcode = OP_SETA;
-      status = translate_comparison(tree, state, out);
-      break;
-    case TOK_GE:
-      if (astree_get(tree, 0)->type->base == TYPE_SIGNED)
-        out->opcode = OP_SETGE;
-      else
-        out->opcode = OP_SETAE;
-      status = translate_comparison(tree, state, out);
-      break;
-    case '<':
-      if (astree_get(tree, 0)->type->base == TYPE_SIGNED)
-        out->opcode = OP_SETL;
-      else
-        out->opcode = OP_SETB;
-      status = translate_comparison(tree, state, out);
-      break;
-    case TOK_LE:
-      if (astree_get(tree, 0)->type->base == TYPE_SIGNED)
-        out->opcode = OP_SETLE;
-      else
-        out->opcode = OP_SETBE;
-      status = translate_comparison(tree, state, out);
-      break;
-    case TOK_EQ:
-      out->opcode = OP_SETE;
-      status = translate_comparison(tree, state, out);
-      break;
-    case TOK_NE:
-      out->opcode = OP_SETNE;
-      status = translate_comparison(tree, state, out);
-      break;
-    /* logical operators */
-    case '!':
-      status = translate_logical_not(astree_get(tree, 0), state, out);
-      break;
-    case TOK_AND:
-      status = translate_logical(tree, state, out);
-      break;
-    case TOK_OR:
-      status = translate_logical(tree, state, out);
-      break;
-    /* constants */
-    case TOK_INTCON:
-      status = translate_intcon(tree, out);
-      break;
-    case TOK_CHARCON:
-      break;
-    /* miscellaneous */
-    case TOK_ADDROF:
-      status = translate_addrof(tree, state, out);
-      break;
-    case TOK_INDIRECTION:
-      status = translate_indirection(tree, state, out);
-      break;
-    case TOK_IDENT:
-      status = translate_ident(tree, state, out);
-      break;
-    case '=':
-      status = translate_assignment(tree, state, out);
-      break;
-    case TOK_CAST:
-      status = translate_conversion(tree, state, out);
-      break;
-    case TOK_CALL:
-      status = translate_call(tree, state, out);
-      break;
-    case TOK_SUBSCRIPT:
-      status = translate_subscript(tree, state, out);
-      break;
-    case '.':
-    case TOK_ARROW:
-      status = translate_reference(tree, state, out);
-      break;
-    default:
-      fprintf(stderr, "ERROR: Unimplemented token: %s, lexinfo: %s\n",
-              parser_get_tname(tree->symbol), tree->lexinfo);
-      status = -1;
-      break;
-  }
-  return status;
 }
 
 static int translate_ifelse(ASTree *ifelse, CompilerState *state) {
