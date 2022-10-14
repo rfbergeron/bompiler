@@ -1222,39 +1222,45 @@ static int translate_block(ASTree *block, CompilerState *state) {
   return state_pop_table(state);
 }
 
-int translate_return(ASTree *ret, CompilerState *state, InstructionData *data) {
+int translate_return(ASTree *ret, CompilerState *state) {
   DEBUGS('g', "Translating return statement");
-
   if (astree_count(ret) > 0) {
-    InstructionData *value_data = calloc(1, sizeof(*value_data));
-    int status =
-        translate_expr(astree_get(ret, 0), state, value_data, NO_INSTR_FLAGS);
-    if (status) return status;
-    llist_push_back(text_section, value_data);
+    ASTree *retval = astree_get(ret, 0);
+    InstructionData *retval_data = liter_get(retval->last_instr);
+    if (retval_data == NULL) return -1;
 
-    InstructionData *mov_data = calloc(1, sizeof(*mov_data));
-    mov_data->opcode = OPCODES[OP_MOV];
-    strcpy(mov_data->src_operand, value_data->dest_operand);
+    InstructionData *mov_data = instr_init(OP_MOV);
+    if (ret->attributes & ATTR_EXPR_LVAL)
+      copy_lvalue(&mov_data->src, &retval_data->dest);
+    else
+      mov_data->src = retval_data->dest;
 
     SymbolValue *function_symval = state_get_function(state);
     const TypeSpec *function_spec = &function_symval->type;
     /* strip function */
     TypeSpec return_spec = SPEC_EMPTY;
-    status = strip_aux_type(&return_spec, function_spec);
+    int status = strip_aux_type(&return_spec, function_spec);
     if (status) return status;
-    status = assign_vreg(&return_spec, mov_data->dest_operand, RETURN_VREG);
-    if (status) return status;
+    set_op_reg(&mov_data->dest, return_spec.width, RETURN_VREG);
     /* free typespec copies */
     typespec_destroy(&return_spec);
-
-    llist_push_back(text_section, mov_data);
+    status = liter_push_back(retval->last_instr, &ret->last_instr, 1, mov_data);
+    if (status) return status;
+    ret->first_instr = liter_copy(retval->first_instr);
+    if (ret->first_instr == NULL) return -1;
+  } else {
+    InstructionData *nop_data = instr_init(OP_NOP);
+    int status = llist_push_back(text_section, nop_data);
+    if (status) return status;
+    ret->first_instr = llist_iter_last(text_section);
+    if (ret->first_instr == NULL) return -1;
+    ret->last_instr = liter_copy(ret->first_instr);
+    if (ret->last_instr == NULL) return -1;
   }
 
-  /* restore non-volatile registers */
-  int status = restore_registers(NONVOLATILE_START, NONVOLATILE_COUNT);
+  int status =
+      restore_registers(NONVOLATILE_START, NONVOLATILE_COUNT, ret->last_instr);
   if (status) return status;
-
-  data->opcode = OPCODES[OP_RET];
   return 0;
 }
 
