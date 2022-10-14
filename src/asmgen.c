@@ -1063,7 +1063,10 @@ static int translate_switch(ASTree *switch_, CompilerState *state) {
   int status;
   InstructionData *cond_data = liter_get(condition->last_instr);
   if (cond_data == NULL) return -1;
+  switch_->first_instr = liter_copy(condition->first_instr);
+  if (switch_->first_instr == NULL) return -1;
 
+  /* switch prologue */
   InstructionData *mov_data = instr_init(OP_MOV);
   if (condition->attributes & ATTR_EXPR_LVAL)
     copy_lvalue(&mov_data->src, &cond_data->dest);
@@ -1072,11 +1075,13 @@ static int translate_switch(ASTree *switch_, CompilerState *state) {
   /* we are casting all values to unsigned long since it does not really matter
    * and communicating type information is annoying */
   set_op_reg(&mov_data->dest, REG_QWORD, state_get_control_reg(state));
-  status = liter_push_back(condition->last_instr, NULL, 1, mov_data);
+  InstructionData *jmp_case1_data = instr_init(OP_JMP);
+  set_op_dir(&jmp_case1_data->dest, NO_DISP, CASE_FMT, switch_->jump_id, 0);
+  status =
+      liter_push_back(condition->last_instr, NULL, 2, mov_data, jmp_case1_data);
   if (status) return status;
 
   /* switch epilogue */
-  ASTree *body = astree_get(switch_, 1);
   InstructionData *end_label = instr_init(OP_NOP);
   sprintf(end_label->label, END_FMT, switch_->jump_id);
   InstructionData *jmp_end_data = instr_init(OP_JMP);
@@ -1084,6 +1089,7 @@ static int translate_switch(ASTree *switch_, CompilerState *state) {
   InstructionData *dummy_case_label = instr_init(OP_NOP);
   sprintf(dummy_case_label->label, CASE_FMT, switch_->jump_id,
           state_get_case_id(state));
+  ASTree *body = astree_get(switch_, 1);
   if (state_get_selection_default(state)) {
     InstructionData *jmp_def_data = instr_init(OP_JMP);
     set_op_dir(&jmp_def_data->dest, NO_DISP, DEF_FMT, switch_->jump_id);
@@ -1306,6 +1312,10 @@ static int translate_label(ASTree *label, CompilerState *state) {
 }
 
 static int translate_case(ASTree *case_, CompilerState *state) {
+  ASTree *stmt = astree_get(case_, 1);
+  case_->last_instr = liter_copy(stmt->last_instr);
+  if (case_->last_instr == 0) return -1;
+
   ASTree *expr = astree_get(case_, 0);
   InstructionData *expr_data = liter_get(expr->last_instr);
   if (expr_data == NULL) return -1;
@@ -1313,28 +1323,19 @@ static int translate_case(ASTree *case_, CompilerState *state) {
   InstructionData *test_data = instr_init(OP_TEST);
   set_op_reg(&test_data->dest, REG_QWORD, state_get_control_reg(state));
   test_data->src = expr_data->dest;
-
   InstructionData *jmp_data = instr_init(OP_JNE);
   set_op_dir(&jmp_data->dest, NO_DISP, CASE_FMT, state_get_case_id(state));
-
-  if (case_->case_id != 0) {
-    InstructionData *fall_label = instr_init(OP_NOP);
-    sprintf(fall_label->label, FALL_FMT, case_->jump_id, case_->case_id);
-    InstructionData *case_label = instr_init(OP_NOP);
-    sprintf(case_label->label, CASE_FMT, case_->jump_id, case_->case_id);
-    InstructionData *fall_jmp_data = instr_init(OP_JMP);
-    set_op_dir(&fall_jmp_data->dest, NO_DISP, fall_label->label);
-    /* set first instr of case to fallthrough jump */
-    int status = liter_push_front(expr->first_instr, &case_->first_instr, 2,
-                                  fall_jmp_data, case_label);
-    if (status) return status;
-  } else {
-    /* set first instr of case to first instr of condition */
-    case_->first_instr = liter_copy(expr->first_instr);
-    if (case_->first_instr == NULL) return -1;
-  }
-  int status = liter_push_back(expr->last_instr, NULL, 3, test_data, jmp_data,
-                               fall_label);
+  InstructionData *fall_label = instr_init(OP_NOP);
+  sprintf(fall_label->label, FALL_FMT, case_->jump_id, case_->case_id);
+  InstructionData *case_label = instr_init(OP_NOP);
+  sprintf(case_label->label, CASE_FMT, case_->jump_id, case_->case_id);
+  InstructionData *fall_jmp_data = instr_init(OP_JMP);
+  set_op_dir(&fall_jmp_data->dest, NO_DISP, fall_label->label);
+  int status = liter_push_front(expr->first_instr, &case_->first_instr, 2,
+                                fall_jmp_data, case_label);
+  if (status) return status;
+  status = liter_push_back(expr->last_instr, NULL, 3, test_data, jmp_data,
+                           fall_label);
   if (status) return status;
   return 0;
 }
