@@ -956,7 +956,6 @@ int translate_list_initialization(ASTree *declarator, ASTree *init_list,
   for (i = 0; i < astree_count(init_list); ++i) {
     ASTree *initializer = astree_get(init_list, i);
     InstructionData *initializer_data = calloc(1, sizeof(InstructionData));
-    initializer_data->flags |= USE_REG;
     int status = translate_expr(initializer, state, initializer_data);
     if (status) return status;
     llist_push_back(text_section, initializer_data);
@@ -973,40 +972,44 @@ int translate_list_initialization(ASTree *declarator, ASTree *init_list,
   return 0;
 }
 
+/* NOTE: this gets called every time a declarator is adopted by declaration
+ * nonterminal, so there is no need to loop over previous entries
+ */
 int translate_local_decl(ASTree *declaration, CompilerState *state) {
   DEBUGS('g', "Translating local declaration");
-  size_t i;
-  /* skip typespec list */
-  for (i = 1; i < astree_count(declaration); ++i) {
-    ASTree *child = astree_get(declaration, i);
-    ASTree *declarator = child->symbol == '=' ? astree_get(child, 0) : child;
-    ASTree *initializer = child->symbol == '=' ? astree_get(child, 1) : NULL;
-    SymbolValue *symval = NULL;
-    assert(state_get_symbol(state, (char *)declarator->lexinfo,
-                            strlen(declarator->lexinfo), &symval));
-    assert(symval);
-    stack_window = assign_space(symval, STACK_POINTER_VREG, stack_window);
+  ASTree *child = astree_get(declaration, astree_count(declaration) - 1);
+  ASTree *declarator = child->symbol == '=' ? astree_get(child, 0) : child;
+  ASTree *initializer = child->symbol == '=' ? astree_get(child, 1) : NULL;
+  SymbolValue *symval = NULL;
+  assert(state_get_symbol(state, (char *)declarator->lexinfo,
+                          strlen(declarator->lexinfo), &symval));
+  assert(symval);
+  stack_window = assign_space(symval, STACK_POINTER_VREG, stack_window);
 
-    if (initializer != NULL) {
-      if (initializer->symbol == TOK_INIT_LIST) {
-        int status =
-            translate_list_initialization(declarator, initializer, state);
-        if (status) return status;
-      } else {
-        InstructionData *value_data = calloc(1, sizeof(*value_data));
-        value_data->flags |= USE_REG;
-        int status = translate_expr(initializer, state, value_data);
-        if (status) return status;
-        llist_push_back(text_section, value_data);
-
-        InstructionData *mov_data = calloc(1, sizeof(*mov_data));
-        resolve_object(state, &mov_data->dest, declarator->lexinfo);
-        mov_data->src = value_data->dest;
-        mov_data->opcode = OP_MOV;
-        llist_push_back(text_section, mov_data);
-      }
+  if (initializer != NULL) {
+    if (initializer->symbol == TOK_INIT_LIST) {
+      /* TODO(Robert): figure out how to do list initialization on the first
+       * pass
+       */
+      abort();
+    } else {
+      int status;
+      InstructionData *initializer_data = FIX_DEST(initializer);
+      if (initializer_data == NULL) return -1;
+      InstructionData *mov_data = instr_init(OP_MOV);
+      resolve_object(state, &mov_data->dest, declarator->lexinfo);
+      mov_data->src = initializer_data->dest;
+      status = liter_push_back(initializer->last_instr, &child->last_instr, 1,
+                               mov_data);
+      if (status) return status;
     }
   }
+  if (declaration->first_instr == NULL)
+    declaration->first_instr = liter_copy(child->first_instr);
+  if (declaration->last_instr != NULL) free(declaration->last_instr);
+  declaration->last_instr = liter_copy(child->last_instr);
+  if (declaration->first_instr == NULL || declaration->last_instr == NULL)
+    return -1;
   return 0;
 }
 
@@ -1210,16 +1213,23 @@ static int translate_do(ASTree *do_) {
 
 static int translate_block(ASTree *block, CompilerState *state) {
   DEBUGS('g', "Translating compound statement");
-  LinkedList *block_contents = &block->children;
-  int status = state_push_table(state, block->symbol_table);
-  if (status) return status;
-  size_t i;
-  for (i = 0; i < block_contents->size; ++i) {
-    ASTree *stmt = llist_get(block_contents, i);
-    int status = translate_stmt(stmt, state);
+  if (astree_count(block) == 0) {
+    InstructionData *nop_data = instr_init(OP_NOP);
+    int status = llist_push_back(text_section, nop_data);
     if (status) return status;
+    block->first_instr = llist_iter_last(text_section);
+    if (block->first_instr == NULL) return -1;
+    block->last_instr = liter_copy(block->first_instr);
+    if (block->last_instr == NULL) return -1;
+  } else {
+    ASTree *first_stmt = astree_get(block, 0);
+    ASTree *last_stmt = astree_get(block, astree_count(block) - 1);
+    block->first_instr = liter_copy(first_stmt->first_instr);
+    if (block->first_instr == NULL) return -1;
+    block->last_instr = liter_copy(last_stmt->last_instr);
+    if (block->last_instr == NULL) return -1;
   }
-  return state_pop_table(state);
+  return 0;
 }
 
 int translate_return(ASTree *ret, CompilerState *state) {
