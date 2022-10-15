@@ -1436,87 +1436,67 @@ static int translate_stmt(ASTree *stmt, CompilerState *state) {
   return status;
 }
 
-int translate_global_init(ASTree *declarator, ASTree *initializer,
-                          InstructionData *data) {
-  if (typespec_is_array(declarator->type)) {
-    data->opcode = OP_NOP;
-    strcpy(data->comment, "Array init");
-    return 0;
-  } else if (typespec_is_union(declarator->type) ||
-             typespec_is_struct(declarator->type)) {
-    data->opcode = OP_NOP;
+int translate_global_init(ASTree *declarator, ASTree *initializer) {
+  if (typespec_is_array(declarator->type) ||
+      typespec_is_union(declarator->type) ||
+      typespec_is_struct(declarator->type)) {
+    InstructionData *data = instr_init(OP_NOP);
     strcpy(data->comment, "Struct init");
+    assert(!llist_push_back(data_section, data));
     return 0;
   } else {
+    InstructionData *data;
     size_t width = typespec_get_width(declarator->type);
     switch (width) {
       case X64_SIZEOF_LONG:
-        data->opcode = OP_DQ;
-        goto dx_common_case;
+        data = instr_init(OP_DQ);
       case X64_SIZEOF_INT:
-        data->opcode = OP_DD;
-        goto dx_common_case;
+        data = instr_init(OP_DD);
       case X64_SIZEOF_SHORT:
-        data->opcode = OP_DW;
-        goto dx_common_case;
+        data = instr_init(OP_DW);
       case X64_SIZEOF_CHAR:
-        data->opcode = OP_DB;
-      common_case:
-        data->dest.imm.mode = MODE_IMMEDIATE;
-        data->dest.imm.val = initializer->constval;
-        break;
+        data = instr_init(OP_DB);
       default:
         fprintf(stderr,
                 "ERROR: cannot initialize non-aggregate type with width %lu\n",
                 width);
         abort();
     }
+    set_op_imm(&data->dest, initializer->constval);
     assert(!llist_push_back(data_section, data));
     return 0;
   }
 }
 
-int translate_global_decl(ASTree *declaration, InstructionData *data) {
+int translate_global_decl(ASTree *declaration) {
   DEBUGS('g', "Translating global declaration");
-  size_t i;
-  for (i = 1; i < astree_count(declaration); ++i) {
-    ASTree *child = astree_get(declaration, i);
-    ASTree *declarator = child->symbol == '=' ? astree_get(child, 0) : child;
-    ASTree *initializer = child->symbol == '=' ? astree_get(child, 1) : NULL;
-    strcpy(data->label, declarator->lexinfo);
-    if (initializer != NULL) {
-      /* put in data section */
-      return translate_global_init(declarator, initializer, data);
-    } else {
-      /* put in bss/uninitialized data section */
-      size_t width = typespec_get_width(declarator->type);
-      size_t align = typespec_get_alignment(declarator->type);
-      size_t res_count = width / align;
-      data->dest.imm.mode = MODE_IMMEDIATE;
-      data->dest.imm.val = res_count;
-      switch (align) {
-        case X64_ALIGNOF_LONG:
-          data->opcode = OP_RESQ;
-          break;
-        case X64_ALIGNOF_INT:
-          data->opcode = OP_RESD;
-          break;
-        case X64_ALIGNOF_SHORT:
-          data->opcode = OP_RESW;
-          break;
-        case X64_ALIGNOF_CHAR:
-          data->opcode = OP_RESB;
-          break;
-        default:
-          fprintf(stderr,
-                  "ERROR: cannot reserve space for object with alignment %lu\n",
-                  align);
-          abort();
-      }
-      assert(!llist_push_back(bss_section, data));
-      return 0;
-    }
+  ASTree *declarator = astree_get(declaration, astree_count(declaration) - 1);
+  size_t width = typespec_get_width(declarator->type);
+  size_t align = typespec_get_alignment(declarator->type);
+  size_t res_count = width / align;
+  InstructionData *data;
+  switch (align) {
+    case X64_ALIGNOF_LONG:
+      data = instr_init(OP_RESQ);
+      break;
+    case X64_ALIGNOF_INT:
+      data = instr_init(OP_RESD);
+      break;
+    case X64_ALIGNOF_SHORT:
+      data = instr_init(OP_RESW);
+      break;
+    case X64_ALIGNOF_CHAR:
+      data = instr_init(OP_RESB);
+      break;
+    default:
+      fprintf(stderr,
+              "ERROR: cannot reserve space for object with alignment %lu\n",
+              align);
+      abort();
   }
+  set_op_imm(&data->dest, res_count);
+  assert(!llist_push_back(bss_section, data));
+  return 0;
 }
 
 int translate_function(ASTree *function, CompilerState *state,
