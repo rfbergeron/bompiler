@@ -897,42 +897,59 @@ int translate_list_initialization(ASTree *declarator, ASTree *init_list,
   return 0;
 }
 
-/* NOTE: this gets called every time a declarator is adopted by declaration
- * nonterminal, so there is no need to loop over previous entries
- */
-int translate_local_decl(ASTree *declaration, CompilerState *state) {
-  DEBUGS('g', "Translating local declaration");
-  ASTree *child = astree_get(declaration, astree_count(declaration) - 1);
-  ASTree *declarator = child->symbol == '=' ? astree_get(child, 0) : child;
-  ASTree *initializer = child->symbol == '=' ? astree_get(child, 1) : NULL;
+int translate_local_init(ASTree *declaration, ASTree *declarator,
+                         ASTree *initializer) {
   SymbolValue *symval = NULL;
   assert(state_get_symbol(state, (char *)declarator->lexinfo,
                           strlen(declarator->lexinfo), &symval));
   assert(symval);
   stack_window = assign_space(symval, STACK_POINTER_VREG, stack_window);
 
-  if (initializer != NULL) {
-    if (initializer->symbol == TOK_INIT_LIST) {
-      /* TODO(Robert): figure out how to do list initialization on the first
-       * pass
-       */
-      abort();
-    } else {
-      int status;
-      InstructionData *initializer_data = FIX_DEST(initializer);
-      if (initializer_data == NULL) return status ? status : -1;
-      InstructionData *mov_data = instr_init(OP_MOV);
-      resolve_object(state, &mov_data->dest, declarator->lexinfo);
-      mov_data->src = initializer_data->dest;
-      status = liter_push_back(initializer->last_instr, &child->last_instr, 1,
-                               mov_data);
-      if (status) return status;
-    }
+  if (initializer->symbol == TOK_INIT_LIST) {
+    /* TODO(Robert): figure out how to do list initialization on the first
+     * pass
+     */
+    abort();
+  } else {
+    int status;
+    InstructionData *initializer_data = FIX_DEST(initializer);
+    if (initializer_data == NULL) return status ? status : -1;
+    InstructionData *mov_data = instr_init(OP_MOV);
+    resolve_object(state, &mov_data->dest, declarator->lexinfo);
+    mov_data->src = initializer_data->dest;
+    status = liter_push_back(initializer->last_instr, &initializer->last_instr,
+                             1, mov_data);
+    if (status) return status;
   }
   if (declaration->first_instr == NULL)
-    declaration->first_instr = liter_copy(child->first_instr);
+    declaration->first_instr = liter_copy(initializer->first_instr);
   if (declaration->last_instr != NULL) free(declaration->last_instr);
-  declaration->last_instr = liter_copy(child->last_instr);
+  declaration->last_instr = liter_copy(initializer->last_instr);
+  if (declaration->first_instr == NULL || declaration->last_instr == NULL)
+    return -1;
+  return 0;
+}
+
+int translate_local_decl(ASTree *declaration, ASTree *declarator) {
+  DEBUGS('g', "Translating local declaration");
+  SymbolValue *symval = NULL;
+  assert(state_get_symbol(state, (char *)declarator->lexinfo,
+                          strlen(declarator->lexinfo), &symval));
+  assert(symval);
+  stack_window = assign_space(symval, STACK_POINTER_VREG, stack_window);
+
+  InstructionData *dummy_data = instr_init(OP_NOP);
+  int status = llist_push_back(text_section, dummy_data);
+  if (status) return status;
+  declarator->first_instr = llist_iter_last(text_section);
+  if (declarator->first_instr == NULL) return -1;
+  declarator->last_instr = liter_copy(declarator->first_instr);
+  if (declarator->last_instr == NULL) return -1;
+
+  if (declaration->first_instr == NULL)
+    declaration->first_instr = liter_copy(declarator->first_instr);
+  if (declaration->last_instr != NULL) free(declaration->last_instr);
+  declaration->last_instr = liter_copy(declarator->last_instr);
   if (declaration->first_instr == NULL || declaration->last_instr == NULL)
     return -1;
   return 0;
