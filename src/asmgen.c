@@ -11,8 +11,8 @@
 #include "tchk_common.h"
 
 #define MAX_OPCODE_LENGTH 8
-#define MAX_OPERAND_LENGTH 32
-#define MAX_LABEL_LENGTH 32
+#define MAX_OPERAND_LENGTH 64
+#define MAX_LABEL_LENGTH 64
 #define NO_DISP 0
 
 /* macros used to generate string constants for OPCODES */
@@ -130,6 +130,7 @@ typedef enum index_scale {
   SCALE_DWORD = 4,
   SCALE_QWORD = 8
 } IndexScale;
+const char WIDTH_TO_CHAR[] = {'@', 'b', 'w', '@', 'd', '@', '@', '@', 'q'};
 
 typedef union operand {
   struct opall {
@@ -1419,48 +1420,69 @@ int translate_function(ASTree *function, CompilerState *state) {
   return 0;
 }
 
-int write_instruction(InstructionData *data, FILE *out) {
-  /* all fields except for the instruction are character arrays, not pointers,
-   * which are always legal to pass to printf and co., so we only need to
-   * check to see whether or not the instruction is NULL before printing
-   */
-  /* we want to defer as much of the formatting as possible until we get to
-   * this point so that we have as much information as possible to align
-   * fields in the generated assembly
-   */
+int operand_to_str(Operand *operand, char *str, size_t size) {
+  switch (operand->all.mode) {
+    case MODE_NONE:
+      str[0] = 0;
+      return 0;
+    case MODE_REGISTER:
+      return sprintf(str, "vr%lu%c", operand->reg.num,
+                     WIDTH_TO_CHAR[operand->reg.num]);
+    case MODE_SCALE:
+      return sprintf(str, "[vr%luq+%u*vr%luq%+li]", operand->sca.base,
+                     operand->sca.scale, operand->sca.index, operand->sca.disp);
+    case MODE_IMMEDIATE:
+      return sprintf(str, "%lu", operand->imm.val);
+    case MODE_DIRECT:
+      return sprintf(str, "[%s%+li]", operand->dir.lab, operand->dir.disp);
+    case MODE_INDIRECT:
+      return sprintf(str, "[vr%luq%+li]", operand->ind.num, operand->ind.disp);
+  }
+}
 
-  if (data->opcode == NULL && strlen(data->label) > 0) {
-    /* only a label */
-    fprintf(out, LABEL_FMT, data->label);
-  } else if (data->opcode != NULL) {
-    /* instruction, possible with a label */
-    int instruction_type =
-        (!!data->dest_operand[0]) | (!!data->src_operand[0] << 1);
-    if (data->opcode == OPCODES[OP_NOP]) instruction_type = 0;
-    switch (instruction_type) {
-      case 0:
-        /* nullary */
-        fprintf(out, NULLOP_FMT, data->label, data->opcode);
-        break;
-      case 1:
-        /* unary, destination */
-        fprintf(out, UNOP_FMT, data->label, data->opcode, data->dest_operand);
-        break;
-      case 2:
-        /* unary, source */
-        fprintf(out, UNOP_FMT, data->label, data->opcode, data->src_operand);
-        break;
-      case 3:
-        /* binary operation */
-        fprintf(out, BINOP_FMT, data->label, data->opcode, data->dest_operand,
-                data->src_operand);
-        break;
-      default:
-        break;
+int instr_to_str(InstructionData *data, char *str, size_t size) {
+  int ret = 0;
+  if (strlen(data->label) > 0) {
+    int chars_written = sprintf(str + ret, "%s: ", data->label);
+    if (chars_written < 0) return chars_written;
+    ret += chars_written;
+  }
+  if (data->opcode != OP_INVALID) {
+    if (data->src.all.mode != MODE_NONE) {
+      char dest_str[MAX_OPERAND_LENGTH];
+      int chars_written =
+          operand_to_str(&data->dest, dest_str, MAX_OPERAND_LENGTH);
+      if (chars_written < 0) return chars_written;
+      char src_str[MAX_OPERAND_LENGTH];
+      chars_written = operand_to_str(&data->src, src_str, MAX_OPERAND_LENGTH);
+      if (chars_written < 0) return chars_written;
+      chars_written = sprintf(str + ret, "%s %s, %s", OPCODES[data->opcode],
+                              dest_str, src_str);
+      if (chars_written < 0) return chars_written;
+      ret += chars_written;
+    } else if (data->dest.all.mode != MODE_NONE) {
+      char dest_str[MAX_OPERAND_LENGTH];
+      int chars_written =
+          operand_to_str(&data->dest, dest_str, MAX_OPERAND_LENGTH);
+      if (chars_written < 0) return chars_written;
+      chars_written =
+          sprintf(str + ret, "%s %s", OPCODES[data->opcode], dest_str);
+      if (chars_written < 0) return chars_written;
+      ret += chars_written;
+    } else {
+      int chars_written = sprintf(str + ret, "%s", OPCODES[data->opcode]);
+      if (chars_written < 0) return chars_written;
+      ret += chars_written;
     }
   }
-
-  return 0;
+  if (strlen(data->comment) > 0) {
+    int chars_written = sprintf(str + ret, ";%s", data->comment);
+    if (chars_written < 0)
+      return chars_written;
+    else
+      ret += chars_written;
+  }
+  return ret;
 }
 
 int write_text_section(FILE *out) {
