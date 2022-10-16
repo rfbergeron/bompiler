@@ -919,8 +919,7 @@ int translate_call(ASTree *call) {
   return 0;
 }
 
-int translate_param(ASTree *param, CompilerState *state,
-                    InstructionData *data) {
+int translate_param(ASTree *param, CompilerState *state, ListIter *where) {
   DEBUGS('g', "Translating parameter");
   ASTree *declarator = astree_get(param, 1);
   SymbolValue *symval = NULL;
@@ -928,9 +927,11 @@ int translate_param(ASTree *param, CompilerState *state,
                           strlen(declarator->lexinfo), &symval));
   assert(symval);
   stack_window = assign_space(symval, STACK_POINTER_VREG, stack_window);
-  resolve_object(state, &data->dest, declarator->lexinfo);
-  assign_vreg(declarator->type, &data->src, vreg_count++);
-  data->opcode = OP_MOV;
+  InstructionData *mov_data = instr_init(OP_MOV);
+  resolve_object(state, &mov_data->dest, declarator->lexinfo);
+  assign_vreg(declarator->type, &mov_data->src, vreg_count++);
+  int status = liter_push_front(where, &where, 1, mov_data);
+  if (status) return status;
   return 0;
 }
 
@@ -1499,62 +1500,38 @@ int translate_global_decl(ASTree *declaration) {
   return 0;
 }
 
-int translate_function(ASTree *function, CompilerState *state,
-                       InstructionData *data) {
+int translate_function(ASTree *function, CompilerState *state) {
   DEBUGS('g', "Translating function definition");
+
+  ASTree *body = astree_get(function, 2);
+  function->first_instr = liter_copy(body->first_instr);
+  if (function->first_instr == NULL) return -1;
+
   ASTree *declarator = astree_get(function, 1);
-  ASTree *name_node = declarator;
-  strcpy(data->label, name_node->lexinfo);
-
-  SymbolValue *function_symval = NULL;
-  state_get_symbol(state, name_node->lexinfo, strlen(name_node->lexinfo),
-                   &function_symval);
-  strcpy(function_symval->obj_loc, name_node->lexinfo);
-
-  int status = save_registers(NONVOLATILE_START, NONVOLATILE_COUNT);
-  if (status) return status;
-
   size_t i;
-  /* cleanup vregs from last function and skip return reg since we don't need
-   * to save or store it
-   */
-  vreg_count = 1;
-  /* remember to use function symbol table to translate parameters */
-  ASTree *function_block = astree_get(function, 2);
-  SymbolTable *function_table = function_block->symbol_table;
-  status = state_push_table(state, function_table);
-  if (status) return status;
   /* last direct declarator should be parent of parameter nodes */
   ASTree *function_dirdecl =
       astree_get(declarator, astree_count(declarator) - 1);
   for (i = 0; i < astree_count(function_dirdecl); ++i) {
     ASTree *param = astree_get(function_dirdecl, i);
-    InstructionData *param_data = calloc(1, sizeof(*param_data));
-    int status = translate_param(param, state, param_data);
+    int status = translate_param(param, state, function->first_instr);
     if (status) return status;
-    llist_push_back(text_section, param_data);
   }
-  status = state_pop_table(state);
+
+  int status = save_registers(NONVOLATILE_START, NONVOLATILE_COUNT,
+                              function->first_instr);
   if (status) return status;
 
-  /* start vreg counter outside of numbers which can be automatically mapped
-   * to real registers to eliminate duplicates and clobbered values when
-   * saving and restoring registers
-   */
-  vreg_count = VOLATILE_COUNT + NONVOLATILE_COUNT;
-  status = state_set_function(state, function_symval);
-  if (status) return status;
-  status = translate_stmt(astree_get(function, 2), state);
-  if (status) return status;
-  status = state_unset_function(state);
-  if (status) return status;
-  status = restore_registers(NONVOLATILE_START, NONVOLATILE_COUNT);
+  InstructionData *label_data = instr_init(OP_NOP);
+  strcpy(label_data->label, declarator->lexinfo);
+  status = liter_push_front(function->first_instr, &function->first_instr, 1,
+                            label_data);
   if (status) return status;
 
-  /* insert return in case function did not have one */
-  InstructionData *return_data = calloc(1, sizeof(*return_data));
-  return_data->opcode = OPCODES[OP_RET];
-  llist_push_back(text_section, return_data);
+  status = restore_registers(NONVOLATILE_START, NONVOLATILE_COUNT,
+                             function->last_instr);
+  if (status) return status;
+  InstructionData *return_data = instr_init(OP_RET);
   return 0;
 }
 
