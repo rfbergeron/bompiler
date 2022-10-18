@@ -177,9 +177,6 @@ typedef struct instruction_data {
   Operand src;
 } InstructionData;
 
-/* rbx, rsp, rbp, r12-r15 are preserved across function calls in the System V
- * ABI; Microsoft's ABI additionally preserves rdi and rsi
- */
 const char OPCODES[][MAX_OPCODE_LENGTH] = {FOREACH_OPCODE(GENERATE_STRING)};
 
 /* Base and index are registers; scale is limited to {1, 2, 4, 8}, and offset
@@ -208,30 +205,38 @@ static const char FALL_FMT[] = ".S%luF%lu";
 static const char SECTION_FMT[] = ".section %s\n";
 static const char EMPTY_FMT[] = "";
 
-/* Microsoft x64 calling convention flips these two numbers */
-static const size_t VOLATILE_COUNT = 9;
-static const size_t NONVOLATILE_COUNT = 7;
-static const size_t VOLATILE_START = 0;
-static const size_t NONVOLATILE_START = VOLATILE_COUNT;
-static const size_t STACK_POINTER_VREG = VOLATILE_COUNT;
-static const size_t RETURN_VREG = 0;
-static const char STACK_POINTER_STRING[] = "vr9q";
+/* register order: rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi, r8-r15 */
+/* argument registers, in order: rdi, rsi, rdx, rcx, r8, r9 */
+/* return registers: rax, rdx
+ * preserved registers: rbx, rsp, rbp, r12-r15
+ * other registers: r10, r11
+ */
+static const size_t RAX_VREG = 0;
+static const size_t RCX_VREG = 1;
+static const size_t RDX_VREG = 2;
+static const size_t RBX_VREG = 3;
+static const size_t RSP_VREG = 4;
+static const size_t RBP_VREG = 5;
+static const size_t RSI_VREG = 6;
+static const size_t RDI_VREG = 7;
+static const size_t PARAM_REGS[] = {RDI_VREG, RSI_VREG, RDX_VREG,
+                                    RCX_VREG, 8,        9};
+static const size_t PRESERVED_REGS[] = {RBX_VREG, RSP_VREG, RBP_VREG, 12,
+                                        13,       14,       15};
+static const size_t VOLATILE_REGS[] = {
+    RAX_VREG, RDX_VREG, RCX_VREG, RSI_VREG, RDI_VREG, 8, 9, 10, 11};
+static const size_t PARAM_REG_COUNT = 6;
+static const size_t PRESERVED_REG_COUNT = 7;
+static const size_t VOLATILE_REG_COUNT = 9;
 
 static size_t branch_count = 0;
 size_t vreg_count = 0;
-static size_t stack_window = 0;
+static ptrdiff_t window_size = 0;
 
 static LinkedList *text_section;
 static LinkedList *data_section;
 static LinkedList *bss_section;
 
-/* the function that mallocs the InstructionData is also responsible
- * for pushing the InstructionData onto its respective stack
- *
- * if the function called to populate the InstructionData fails, it should not
- * be pushed onto the stack, and ideally should not modify the InstructionData
- * until it cannot/should not fail
- */
 static char *translate_stride(ASTree *index, ASTree *memblock);
 static char *translate_reg_type(ASTree *);
 static char *translate_type(void *type, int flags);
@@ -332,25 +337,23 @@ Opcode opcode_from_operator(ASTree *tree) {
   }
 }
 
-/* assigns space for a symbol given an existing offset. inserts padding as
- * needed and returns the sum of the previous offset, the padding and the width
- * of the symbol
- */
-size_t assign_space(SymbolValue *symval, size_t reg, size_t offset) {
-  size_t alignment = typespec_get_alignment(&symval->type);
+void assign_stack_space(SymbolValue *symval) {
   size_t width = typespec_get_width(&symval->type);
-  size_t padding = alignment - (offset % alignment);
-  if (padding != alignment) offset += padding;
-  symval->offset = offset;
-  symval->reg = reg;
-  offset += width;
-  return offset;
+  size_t alignment = typespec_get_alignment(&symval->type);
+  /* over-align aggregates on the stack to make passing by value and assignment
+   * easier
+   */
+  if ((typespec_is_union(&symval->type) || typespec_is_struct(&symval->type)) &&
+      alignment < 8)
+    alignment = 8;
+  size_t padding = alignment - (window_size % alignment);
+  size_t to_add = width + padding == alignment ? 0 : padding;
+  if (to_add >= PTRDIFF_MAX) abort();
+  window_size += to_add;
+  symval->offset = -window_size;
+  symval->reg = RBP_VREG;
 }
 
-/* TODO(Robert): use flags to assign specific numbers for opcodes which
- * use specific registers as their source or destination to make register
- * allocation easier
- */
 int resolve_lval(ASTree *lvalue_tree) {
   InstructionData *lvalue_data = liter_get(lvalue_tree->last_instr);
   InstructionData *mov_data = instr_init(OP_MOV);
@@ -387,31 +390,49 @@ void resolve_object(CompilerState *state, Operand *operand, const char *ident) {
   if (symval->reg == 0) {
     set_op_dir(operand, symval->offset, ident);
   } else {
-    operand->ind.mode = MODE_INDIRECT;
-    operand->ind.num = symval->reg;
-    operand->ind.disp = symval->offset;
+    set_op_ind(operand, symval->offset, symval->reg);
   }
 }
 
-int save_registers(size_t start, size_t count, ListIter *iter) {
+int save_preserved_regs(ListIter *where) {
   size_t i;
-  for (i = 0; i < count; ++i) {
+  for (i = 0; i < PRESERVED_REG_COUNT; ++i) {
     InstructionData *push_data = instr_init(OP_PUSH);
-    assert(push_data != NULL);
-    set_op_reg(&push_data->dest, X64_SIZEOF_LONG, start + i);
-    int status = liter_push_front(iter, &iter, 1, push_data);
+    set_op_reg(&push_data->dest, X64_SIZEOF_LONG, PRESERVED_REGS[i]);
+    int status = liter_push_front(where, &where, 1, push_data);
     if (status) return status;
   }
   return 0;
 }
 
-int restore_registers(size_t start, size_t count, ListIter *iter) {
+int save_volatile_regs(ListIter *where) {
   size_t i;
-  for (i = 0; i < count; ++i) {
+  for (i = 0; i < VOLATILE_REG_COUNT; ++i) {
+    InstructionData *push_data = instr_init(OP_PUSH);
+    set_op_reg(&push_data->dest, X64_SIZEOF_LONG, VOLATILE_REGS[i]);
+    int status = liter_push_front(where, &where, 1, push_data);
+    if (status) return status;
+  }
+  return 0;
+}
+
+int restore_preserved_regs(ListIter *where) {
+  size_t i;
+  for (i = 0; i < PRESERVED_REG_COUNT; ++i) {
     InstructionData *pop_data = instr_init(OP_POP);
-    assert(pop_data != NULL);
-    set_op_reg(&pop_data->dest, X64_SIZEOF_LONG, start + i);
-    int status = liter_push_back(iter, &iter, 1, pop_data);
+    set_op_reg(&pop_data->dest, X64_SIZEOF_LONG, PRESERVED_REGS[i]);
+    int status = liter_push_back(where, &where, 1, pop_data);
+    if (status) return status;
+  }
+  return 0;
+}
+
+int restore_volatile_regs(ListIter *where) {
+  size_t i;
+  for (i = 0; i < VOLATILE_REG_COUNT; ++i) {
+    InstructionData *pop_data = instr_init(OP_POP);
+    set_op_reg(&pop_data->dest, X64_SIZEOF_LONG, VOLATILE_REGS[i]);
+    int status = liter_push_back(where, &where, 1, pop_data);
     if (status) return status;
   }
   return 0;
@@ -748,10 +769,10 @@ int translate_binop(ASTree *operator) {
   if (operator->symbol == '*' || operator->symbol == '/' || operator->symbol ==
       '%') {
     InstructionData *mov_data = instr_init(OP_MOV);
-    /* dummy vreg for quotient */
-    if (operator->symbol == '%') ++vreg_count;
-    /* mov from vreg representing rax/rdx to old vreg */
+    /* mov from vreg representing rax/rdx to new vreg */
     set_op_reg(&mov_data->src, typespec_get_width(operator->type),
+                               operator->symbol == '%' ? RDX_VREG : RAX_VREG);
+    set_op_reg(&mov_data->dest, typespec_get_width(operator->type),
                vreg_count++);
     mov_data->dest = left_data->dest;
     int status = liter_push_back(right->last_instr, &operator->last_instr, 2,
@@ -796,8 +817,7 @@ int translate_call(ASTree *call) {
   ASTree *last_arg = astree_get(call, astree_count(call) - 1);
   call->last_instr = liter_copy(last_arg->last_instr);
   if (call->last_instr == NULL) return -1;
-  int status =
-      save_registers(VOLATILE_START, VOLATILE_COUNT, call->first_instr);
+  int status = save_volatile_regs(call->first_instr);
   if (status) return status;
 
   size_t i;
@@ -821,13 +841,12 @@ int translate_call(ASTree *call) {
 
   if (call->type->base != TYPE_VOID) {
     InstructionData *mov_data = instr_init(OP_MOV);
-    set_op_reg(&mov_data->src, typespec_get_width(call->type), RETURN_VREG);
+    set_op_reg(&mov_data->src, typespec_get_width(call->type), RAX_VREG);
     set_op_reg(&mov_data->dest, typespec_get_width(call->type), vreg_count++);
     int status =
         liter_push_back(call->last_instr, &call->last_instr, 1, mov_data);
     if (status) return status;
-    status =
-        restore_registers(VOLATILE_START, VOLATILE_COUNT, call->last_instr);
+    status = restore_volatile_regs(call->last_instr);
     if (status) return status;
     /* dummy mov since parent expects last instr to have result */
     InstructionData *dummy_data = instr_init(OP_MOV);
@@ -836,8 +855,7 @@ int translate_call(ASTree *call) {
     status = liter_push_back(call->last_instr, &call->last_instr, 1, mov_data);
     if (status) return status;
   } else {
-    int status =
-        restore_registers(VOLATILE_START, VOLATILE_COUNT, call->last_instr);
+    int status = restore_volatile_regs(call->last_instr);
     if (status) return status;
   }
   return 0;
@@ -850,7 +868,7 @@ int translate_param(ASTree *param, CompilerState *state, ListIter *where) {
   assert(state_get_symbol(state, declarator->lexinfo,
                           strlen(declarator->lexinfo), &symval));
   assert(symval);
-  stack_window = assign_space(symval, STACK_POINTER_VREG, stack_window);
+  assign_stack_space(symval);
   InstructionData *mov_data = instr_init(OP_MOV);
   resolve_object(state, &mov_data->dest, declarator->lexinfo);
   set_op_reg(&mov_data->src, typespec_get_width(declarator->type),
@@ -903,7 +921,7 @@ int translate_local_init(ASTree *declaration, ASTree *declarator,
   assert(state_get_symbol(state, (char *)declarator->lexinfo,
                           strlen(declarator->lexinfo), &symval));
   assert(symval);
-  stack_window = assign_space(symval, STACK_POINTER_VREG, stack_window);
+  assign_stack_space(symval);
 
   if (initializer->symbol == TOK_INIT_LIST) {
     /* TODO(Robert): figure out how to do list initialization on the first
@@ -936,7 +954,7 @@ int translate_local_decl(ASTree *declaration, ASTree *declarator) {
   assert(state_get_symbol(state, (char *)declarator->lexinfo,
                           strlen(declarator->lexinfo), &symval));
   assert(symval);
-  stack_window = assign_space(symval, STACK_POINTER_VREG, stack_window);
+  assign_stack_space(symval);
 
   InstructionData *dummy_data = instr_init(OP_NOP);
   int status = llist_push_back(text_section, dummy_data);
@@ -1194,7 +1212,7 @@ int translate_return(ASTree *ret, CompilerState *state) {
     TypeSpec return_spec = SPEC_EMPTY;
     int status = strip_aux_type(&return_spec, function_spec);
     if (status) return status;
-    set_op_reg(&mov_data->dest, return_spec.width, RETURN_VREG);
+    set_op_reg(&mov_data->dest, return_spec.width, RAX_VREG);
     /* free typespec copies */
     typespec_destroy(&return_spec);
     status = liter_push_back(retval->last_instr, &ret->last_instr, 1, mov_data);
@@ -1211,8 +1229,7 @@ int translate_return(ASTree *ret, CompilerState *state) {
     if (ret->last_instr == NULL) return -1;
   }
 
-  int status =
-      restore_registers(NONVOLATILE_START, NONVOLATILE_COUNT, ret->last_instr);
+  int status = restore_preserved_regs(ret->last_instr);
   if (status) return status;
   return 0;
 }
@@ -1393,8 +1410,7 @@ int translate_function(ASTree *function, CompilerState *state) {
     if (status) return status;
   }
 
-  int status = save_registers(NONVOLATILE_START, NONVOLATILE_COUNT,
-                              function->first_instr);
+  int status = save_preserved_regs(function->first_instr);
   if (status) return status;
 
   InstructionData *label_data = instr_init(OP_NOP);
@@ -1403,8 +1419,7 @@ int translate_function(ASTree *function, CompilerState *state) {
                             label_data);
   if (status) return status;
 
-  status = restore_registers(NONVOLATILE_START, NONVOLATILE_COUNT,
-                             function->last_instr);
+  status = restore_preserved_regs(function->last_instr);
   if (status) return status;
   InstructionData *return_data = instr_init(OP_RET);
   return 0;

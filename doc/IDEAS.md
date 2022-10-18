@@ -59,6 +59,78 @@ that has does not do most of the things that I thought:
 - Tags and enumeration constants declared as struct and union members are
   "hoisted" up into the enclosing scope
 
+## Correct Parameter and Return Value Passing
+The AMD64 System V ABI specification contains an algorithm describing how
+parameters are to be passed. Fortunately, since I do not (at the moment) plan
+to implement floating point arithmetic, a lot of the algorithm can be ignored,
+but it does include some important information.
+
+Aggregates can be passed through registers as arguments or return values under
+the following circumstances:
+1. The aggregate may not be more than 16 bytes wide.
+2. The aggregate may not contain unaligned fields (not a problem here)
+3. When passing parameters, there must be enough registers available to hold the
+   entire parameter in registers. If the aggregate is <= 8 bytes in width, there
+   must be one register available. Otherwise, if the aggregate is <= 16 bytes in
+   width, there must be two registers available.
+
+And that's it for now. It would behoove me to actually implement the algorithm
+in full at a later date, but sticking to these rules should be fine for now.
+
+The ABI does not care about the layout or the members of the aggregate. The
+contents are simply copied into the registers as they are. If the aggregate is
+greater than 8 bytes in width, but less than 16 (including padding), then the
+upper portion of the aggregate is expanded, such that it occupies a whole 8 byte
+register.
+
+Parameters that do not fit in registers are passed on the stack in reverse
+order. Parameters on the stack always occupy 8 bytes, regardless of their acutal
+size. If `rsp + 8` would not be a multiple of 16 after pushing the arguments on
+the stack, 8 must be subtracted from `rsp` before pushing the arguments to
+ensure proper alignment.
+
+## Underaligned Aggregates as Parameters
+GCC handles aggregates with alignment requirements less than 8 by moving the
+components individually and shifting, or by doing unaligned memory accesses.
+
+This is complicated, so I'm going to take a few shortcuts. Aggregates shall
+always occupy stack space in multiples of 8. So, 1, 4, 5, etc. byte aggregates
+would occupy 8 bytes on the stack, 9 bytes -> 16 bytes, 23 -> 24 bytes, and
+so on.
+
+This makes passing aggregates easier, both on the stack and in registers.
+Simple `mov` instructions can be used to accomplish either.
+
+Since the GNU allocator implementations always return 8-byte aligned pointers,
+this should also be safe when dereferencing dynamically allocated memory.
+
+## Stack alignment
+Function stack frames abide by the following rules to maintain alignment:
+1. The size of the space occupied by the local variables and spilled registers
+   shall always be a multiple of 16.
+2. All preserved registers will be pushed to the stack in the function prologue,
+   and all volatile register will be pushed to the stack before function calls.
+3. If the number of eightbytes passed to a function on the stack is even or
+   zero, 8 must be subtracted from `rsp`.
+
+## Eightbyte and Parameter Information
+Since aggregates less than 16 bytes in width can be passed in registers, there
+needs to be a way to turn the contents of the aggregate into a flat, iterable
+data structure containing the information about each eightbyte component of the
+aggregate.
+
+Functions should also store eightbyte information about their parameters. This
+information is iterated through in reverse order at the call site to place the
+arguments in registers or on the stack.
+
+## Parameter Locations
+Parameters passed in registers will be moved onto the stack at the beginning of
+the function. Aggregates will occupy stack space in multiples of 8, as specified
+above, while integral types will occupy only as much space as they need, with
+padding inserted between.
+
+Parameters passed on the stack will be left where they are.
+
 ## Intermediate Language Generator Refactor
 I will not be generating the elaborate language or three-address code that has
 been described in `INTLANG.md` or `TAC.md`. Instead, I will continue to generate
