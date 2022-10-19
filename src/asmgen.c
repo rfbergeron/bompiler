@@ -906,6 +906,12 @@ int translate_call(ASTree *call) {
   status = translate_args(call, last_arg->last_instr);
   if (status) return status;
 
+  InstructionData *rsp_reset_data = instr_init(OP_ADD);
+  set_op_reg(&rsp_reset_data->dest, REG_QWORD, RSP_VREG);
+  set_op_imm(&rsp_reset_data->src, typespec_stack_eightbytes(pointer->type));
+  status = liter_push_back(call->last_instr, &call->last_instr, 1, call_data);
+  if (status) return status;
+
   if (call->type->base != TYPE_VOID) {
     InstructionData *mov_data = instr_init(OP_MOV);
     set_op_reg(&mov_data->src, typespec_get_width(call->type), RAX_VREG);

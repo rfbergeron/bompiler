@@ -396,6 +396,29 @@ size_t typespec_get_eightbytes(const TypeSpec *spec) {
   }
 }
 
+size_t typespec_stack_eightbytes(const TypeSpec *fn_spec) {
+  assert(typespec_is_function(fn_spec));
+  AuxSpec *aux_fn = llist_front(&fn_spec->auxspecs);
+  TypeSpec ret_spec;
+  int status = strip_aux_type(&ret_spec, fn_spec);
+  if (status) return (size_t)-1;
+  size_t reg_eightbytes = typespec_get_eightbytes(&ret_spec) > 2 ? 1 : 0;
+  size_t stack_eightbytes = 0;
+  size_t i;
+  for (i = 0; i < llist_size(aux_fn->data.params); ++i) {
+    SymbolValue *param_symval = llist_get(aux_fn->data.params, i);
+    size_t param_symval_eightbytes =
+        typespec_get_eightbytes(&param_symval->type);
+    if (param_symval_eightbytes <= 2 &&
+        reg_eightbytes + param_symval_eightbytes <= 6) {
+      reg_eightbytes += param_symval_eightbytes;
+    } else {
+      stack_eightbytes += param_symval_eightbytes;
+    }
+  }
+  return stack_eightbytes;
+}
+
 int typespec_append_auxspecs(TypeSpec *dest, TypeSpec *src) {
   size_t i;
   for (i = 0; i < llist_size(&src->auxspecs); ++i) {
