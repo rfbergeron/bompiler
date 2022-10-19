@@ -228,6 +228,8 @@ static const size_t VOLATILE_REGS[] = {
 static const size_t PARAM_REG_COUNT = 6;
 static const size_t PRESERVED_REG_COUNT = 7;
 static const size_t VOLATILE_REG_COUNT = 9;
+/* number of eightbytes occupied by the function prologue on the stack */
+static const size_t PROLOGUE_EIGHTBYTES = 8;
 
 static size_t branch_count = 0;
 size_t vreg_count = 0;
@@ -394,12 +396,12 @@ void resolve_object(CompilerState *state, Operand *operand, const char *ident) {
   }
 }
 
-int save_preserved_regs(ListIter *where) {
+int save_preserved_regs(void) {
   size_t i;
-  for (i = 0; i < PRESERVED_REG_COUNT; ++i) {
+  for (i = PRESERVED_REG_COUNT - 1; i >= 0; --i) {
     InstructionData *push_data = instr_init(OP_PUSH);
     set_op_reg(&push_data->dest, X64_SIZEOF_LONG, PRESERVED_REGS[i]);
-    int status = liter_push_front(where, &where, 1, push_data);
+    int status = llist_push_back(text_section, push_data);
     if (status) return status;
   }
   return 0;
@@ -416,12 +418,12 @@ int save_volatile_regs(ListIter *where) {
   return 0;
 }
 
-int restore_preserved_regs(ListIter *where) {
+int restore_preserved_regs(void) {
   size_t i;
   for (i = 0; i < PRESERVED_REG_COUNT; ++i) {
     InstructionData *pop_data = instr_init(OP_POP);
     set_op_reg(&pop_data->dest, X64_SIZEOF_LONG, PRESERVED_REGS[i]);
-    int status = liter_push_back(where, &where, 1, pop_data);
+    int status = llist_push_back(text_section, pop_data);
     if (status) return status;
   }
   return 0;
@@ -809,6 +811,78 @@ int translate_assignment(ASTree *assignment) {
   return 0;
 }
 
+int translate_agg_arg(ASTree *arg, size_t *reg_eightbytes, ListIter *where) {
+  size_t arg_eightbytes = typespec_get_eightbytes(arg->type);
+  int status;
+  InstructionData *arg_data = LVAL_TO_REG(arg);
+  if (arg_eightbytes <= 2 &&
+      arg_eightbytes + *reg_eightbytes <= PARAM_REG_COUNT) {
+    InstructionData *mov_data = instr_init(OP_MOV);
+    set_op_ind(&mov_data->src, NO_DISP, arg_data->dest.reg.num);
+    set_op_reg(&mov_data->dest, REG_QWORD, PARAM_REGS[(*reg_eightbytes)++]);
+    int status = liter_push_back(where, NULL, 1, mov_data);
+    if (status) return status;
+    if (arg_eightbytes == 2) {
+      InstructionData *mov_data_2 = instr_init(OP_MOV);
+      set_op_ind(&mov_data_2->src, 8, arg_data->dest.reg.num);
+      set_op_reg(&mov_data_2->dest, REG_QWORD, PARAM_REGS[(*reg_eightbytes)++]);
+      int status = liter_push_back(where, NULL, 1, mov_data_2);
+      if (status) return status;
+    }
+  } else {
+    size_t i;
+    for (i = 0; i < arg_eightbytes; ++i) {
+      InstructionData *mov_data = instr_init(OP_MOV);
+      set_op_ind(&mov_data->src, i * 8, arg_data->dest.reg.num);
+      set_op_reg(&mov_data->dest, REG_QWORD, vreg_count++);
+      InstructionData *push_data = instr_init(OP_PUSH);
+      push_data->dest = mov_data->dest;
+      int status = liter_push_back(where, NULL, 2, mov_data, push_data);
+      if (status) return status;
+    }
+  }
+  return 0;
+}
+
+int translate_scalar_arg(ASTree *arg, size_t *reg_eightbytes, ListIter *where) {
+  assert(typespec_get_eightbytes(arg->type) == 1);
+  int status;
+  InstructionData *arg_data = FIX_DEST(arg);
+  if (arg_data == NULL) return status ? status : -1;
+  if (*reg_eightbytes < PARAM_REG_COUNT) {
+    InstructionData *mov_data = instr_init(OP_MOV);
+    mov_data->src = arg_data->dest;
+    set_op_reg(&mov_data->dest, typespec_get_width(arg->type),
+               PARAM_REGS[(*reg_eightbytes)++]);
+    int status = liter_push_back(where, NULL, 1, mov_data);
+    if (status) return status;
+  } else {
+    InstructionData *push_data = instr_init(OP_PUSH);
+    /* arg_data->dest guaranteed to be reg by FIX_DEST */
+    set_op_reg(&push_data->dest, REG_QWORD, arg_data->dest.reg.num);
+    int status = liter_push_back(where, NULL, 1, push_data);
+    if (status) return status;
+  }
+}
+
+int translate_args(ASTree *call, ListIter *where) {
+  /* account for hidden out param */
+  size_t reg_eightbytes = typespec_get_eightbytes(call->type) > 2 ? 1 : 0;
+  size_t i;
+  for (i = 1; i < astree_count(call); ++i) {
+    DEBUGS('g', "Translating parameter %i", i);
+    ASTree *arg = astree_get(call, i);
+    if (typespec_is_union(arg->type) || typespec_is_struct(arg->type)) {
+      int status = translate_agg_arg(arg, &reg_eightbytes, where);
+      if (status) return status;
+    } else {
+      int status = translate_scalar_arg(arg, &reg_eightbytes, where);
+      if (status) return status;
+    }
+  }
+  return 0;
+}
+
 int translate_call(ASTree *call) {
   DEBUGS('g', "Translating function call");
   ASTree *pointer = astree_get(call, 0);
@@ -820,23 +894,16 @@ int translate_call(ASTree *call) {
   int status = save_volatile_regs(call->first_instr);
   if (status) return status;
 
-  size_t i;
-  for (i = 1; i < astree_count(call); ++i) {
-    DEBUGS('g', "Translating parameter %i", i);
-    ASTree *arg = astree_get(call, i);
-    InstructionData *arg_data = liter_get(arg->last_instr);
-    InstructionData *mov_data = instr_init(OP_MOV);
-    mov_data->src = arg_data->dest;
-    set_op_reg(&mov_data->dest, typespec_get_width(arg->type), i);
-    int status =
-        liter_push_back(call->last_instr, &call->last_instr, 1, mov_data);
-    if (status) return status;
-  }
-
   InstructionData *pointer_data = liter_get(pointer->last_instr);
   InstructionData *call_data = instr_init(OP_CALL);
   call_data->dest = pointer_data->dest;
   status = liter_push_back(call->last_instr, &call->last_instr, 1, call_data);
+  if (status) return status;
+
+  /* need to do this here so that iterating front to back over the parameters
+   * inserts them into the list back to front before the call
+   */
+  status = translate_args(call, last_arg->last_instr);
   if (status) return status;
 
   if (call->type->base != TYPE_VOID) {
@@ -861,20 +928,49 @@ int translate_call(ASTree *call) {
   return 0;
 }
 
-int translate_param(ASTree *param, CompilerState *state, ListIter *where) {
-  DEBUGS('g', "Translating parameter");
-  ASTree *declarator = astree_get(param, 1);
-  SymbolValue *symval = NULL;
-  assert(state_get_symbol(state, declarator->lexinfo,
-                          strlen(declarator->lexinfo), &symval));
-  assert(symval);
-  assign_stack_space(symval);
-  InstructionData *mov_data = instr_init(OP_MOV);
-  resolve_object(state, &mov_data->dest, declarator->lexinfo);
-  set_op_reg(&mov_data->src, typespec_get_width(declarator->type),
-             vreg_count++);
-  int status = liter_push_front(where, &where, 1, mov_data);
+int translate_params(ASTree *function, CompilerState *state) {
+  ASTree *fn_decl = astree_get(function, 1);
+  ASTree *fn_dirdecl = astree_get(fn_decl, astree_count(fn_decl) - 1);
+  const TypeSpec *fn_type = fn_decl->type;
+  TypeSpec ret_type;
+  int status = strip_aux_type(&ret_type, fn_type);
   if (status) return status;
+  /* account for hidden out param */
+  size_t reg_eightbytes = typespec_get_eightbytes(&ret_type) > 2 ? 1 : 0;
+  /* offset to account for preserved regs and return address */
+  size_t stack_eightbytes = PROLOGUE_EIGHTBYTES;
+  size_t i;
+  for (i = 0; i < astree_count(fn_dirdecl); ++i) {
+    ASTree *param = astree_get(fn_dirdecl, i);
+    ASTree *param_decl = astree_get(param, 1);
+    SymbolValue *param_symval = NULL;
+    assert(state_get_symbol(state, param_decl->lexinfo,
+                            strlen(param_decl->lexinfo), &param_symval));
+    assert(param_symval);
+    size_t param_symval_eightbytes =
+        typespec_get_eightbytes(&param_symval->type);
+    if (param_symval_eightbytes <= 2 &&
+        reg_eightbytes + param_symval_eightbytes <= PARAM_REG_COUNT) {
+      assign_stack_space(param_symval);
+      InstructionData *mov_data = instr_init(OP_MOV);
+      set_op_ind(&mov_data->dest, param_symval->offset, param_symval->reg);
+      set_op_reg(&mov_data->src, REG_QWORD, PARAM_REGS[reg_eightbytes++]);
+      int status = llist_push_back(text_section, mov_data);
+      if (status) return status;
+      if (param_symval_eightbytes == 2) {
+        InstructionData *mov_data_2 = instr_init(OP_MOV);
+        set_op_ind(&mov_data_2->dest, param_symval->offset + 8,
+                   param_symval->reg);
+        set_op_reg(&mov_data_2->src, REG_QWORD, PARAM_REGS[reg_eightbytes++]);
+        int status = llist_push_back(text_section, mov_data_2);
+        if (status) return status;
+      }
+    } else {
+      param_symval->offset = stack_eightbytes * 8;
+      param_symval->reg = RBP_VREG;
+      stack_eightbytes += param_symval_eightbytes;
+    }
+  }
   return 0;
 }
 
@@ -1392,36 +1488,44 @@ int translate_global_decl(ASTree *declaration) {
   return 0;
 }
 
-int translate_function(ASTree *function, CompilerState *state) {
-  DEBUGS('g', "Translating function definition");
-
-  ASTree *body = astree_get(function, 2);
-  function->first_instr = liter_copy(body->first_instr);
-  if (function->first_instr == NULL) return -1;
+int begin_translate_fn(ASTree *function, CompilerState *state) {
+  DEBUGS('g', "Translating function prologue");
 
   ASTree *declarator = astree_get(function, 1);
-  size_t i;
-  /* last direct declarator should be parent of parameter nodes */
-  ASTree *function_dirdecl =
-      astree_get(declarator, astree_count(declarator) - 1);
-  for (i = 0; i < astree_count(function_dirdecl); ++i) {
-    ASTree *param = astree_get(function_dirdecl, i);
-    int status = translate_param(param, state, function->first_instr);
-    if (status) return status;
-  }
-
-  int status = save_preserved_regs(function->first_instr);
-  if (status) return status;
-
   InstructionData *label_data = instr_init(OP_NOP);
   strcpy(label_data->label, declarator->lexinfo);
-  status = liter_push_front(function->first_instr, &function->first_instr, 1,
-                            label_data);
+  int status = llist_push_back(text_section, label_data);
+  if (status) return status;
+  function->first_instr = llist_iter_last(text_section);
+  if (function->first_instr == NULL) return -1;
+
+  status = save_preserved_regs();
   if (status) return status;
 
-  status = restore_preserved_regs(function->last_instr);
+  InstructionData *mov_data = instr_init(OP_MOV);
+  set_op_reg(&mov_data->dest, REG_QWORD, RBP_VREG);
+  set_op_reg(&mov_data->src, REG_QWORD, RSP_VREG);
+  status = llist_push_back(text_section, mov_data);
+  if (status) return status;
+
+  status = translate_params(function, state);
+  if (status) return status;
+  return 0;
+}
+
+int end_translate_fn(ASTree *function, CompilerState *state) {
+  InstructionData *mov_data = instr_init(OP_MOV);
+  set_op_reg(&mov_data->dest, REG_QWORD, RSP_VREG);
+  set_op_reg(&mov_data->src, REG_QWORD, RBP_VREG);
+  int status = llist_push_back(text_section, mov_data);
+  if (status) return status;
+  status = restore_preserved_regs();
   if (status) return status;
   InstructionData *return_data = instr_init(OP_RET);
+  status = llist_push_back(text_section, return_data);
+  if (status) return status;
+  function->last_instr = llist_iter_last(text_section);
+  if (function->last_instr == NULL) return -1;
   return 0;
 }
 
