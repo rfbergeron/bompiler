@@ -384,6 +384,18 @@ size_t typespec_get_alignment(TypeSpec *spec) {
   return spec->alignment;
 }
 
+size_t typespec_get_eightbytes(const TypeSpec *spec) {
+  assert(!typespec_is_function(spec) && !typespec_is_array(spec));
+  if (typespec_is_union(spec) || typespec_is_struct(spec)) {
+    size_t ret = spec->width;
+    size_t padding = 8 - (ret % 8);
+    if (padding < 8) ret += padding;
+    return ret / 8;
+  } else {
+    return 1;
+  }
+}
+
 int typespec_append_auxspecs(TypeSpec *dest, TypeSpec *src) {
   size_t i;
   for (i = 0; i < llist_size(&src->auxspecs); ++i) {

@@ -114,14 +114,9 @@ Function stack frames abide by the following rules to maintain alignment:
    zero, 8 must be subtracted from `rsp`.
 
 ## Eightbyte and Parameter Information
-Since aggregates less than 16 bytes in width can be passed in registers, there
-needs to be a way to turn the contents of the aggregate into a flat, iterable
-data structure containing the information about each eightbyte component of the
-aggregate.
-
-Functions should also store eightbyte information about their parameters. This
-information is iterated through in reverse order at the call site to place the
-arguments in registers or on the stack.
+Aggregates and functions do not need to carry eightbyte information as a
+separate member; it can be calculated from existing type information without
+much trouble.
 
 ## Parameter Locations
 Parameters passed in registers will be moved onto the stack at the beginning of
