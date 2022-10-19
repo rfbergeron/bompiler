@@ -247,6 +247,7 @@ size_t typespec_member_width(TypeSpec *spec);
 size_t typespec_get_width(TypeSpec *spec);
 size_t typespec_get_alignment(TypeSpec *spec);
 size_t typespec_get_eightbytes(const TypeSpec *spec);
+size_t typespec_stack_eightbytes(const TypeSpec *fn_spec);
 int typespec_append_auxspecs(TypeSpec *dest, TypeSpec *src);
 int strip_aux_type(TypeSpec *dest, const TypeSpec *src);
 
