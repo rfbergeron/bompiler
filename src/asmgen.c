@@ -619,22 +619,39 @@ int translate_comparison(ASTree *operator) {
 }
 
 int translate_indirection(ASTree *indirection) {
-  /* does nothing. we don't know if the parent wants the object of the value,
-   * so we keep the address in the register
-   */
   DEBUGS('g', "Translating indirection operation.");
   ASTree *operand = astree_get(indirection, 0);
   indirection->first_instr = liter_copy(operand->first_instr);
   if (indirection->first_instr == NULL) return -1;
-  indirection->last_instr = liter_copy(operand->last_instr);
-  if (indirection->last_instr == NULL) return -1;
+
+  int status;
+  InstructionData *operand_data = LVAL_TO_REG(operand);
+  if (operand_data == NULL) return -1;
+  InstructionData *mov_data = instr_init(OP_MOV);
+  set_op_ind(&mov_data->src, NO_DISP, operand_data->dest.reg.num);
+  set_op_reg(&mov_data->dest, typespec_get_width(indirection->type),
+             vreg_count++);
+  status = liter_push_back(operand->last_instr, &indirection->last_instr, 1,
+                           mov_data);
+  if (status) return status;
   return 0;
 }
 
 int translate_addrof(ASTree *addrof) {
-  /* same as above */
   DEBUGS('g', "Translating address operation.");
   ASTree *operand = astree_get(addrof, 0);
+  if (operand->symbol == TOK_INDIRECTION) {
+    /* just remove the code if some idiot does &*&*&*&*&* */
+    /* NOTE: liter_delete deletes the node (not the iterator) and moves the
+     * iterator to the next node, unless the next node is the anchor, in which
+     * case it moves to the previous node. the extra mov should be the last
+     * instruction, so the iterator should move to the previous node
+     *
+     * not the greatest interface, but it is a one-liner solution here
+     */
+    int status = liter_delete(operand->last_instr);
+    if (status) return -1;
+  }
   addrof->first_instr = liter_copy(operand->first_instr);
   if (addrof->first_instr == NULL) return -1;
   addrof->last_instr = liter_copy(operand->last_instr);
