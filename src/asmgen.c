@@ -823,13 +823,40 @@ int translate_binop(ASTree *operator) {
   return 0;
 }
 
-int translate_assignment(ASTree *assignment) {
-  DEBUGS('g', "Translating assignment");
+int assign_aggregate(ASTree *assignment, ASTree *lvalue, ASTree *expr) {
+  assignment->first_instr = liter_copy(lvalue->first_instr);
+  if (assignment->first_instr == NULL) return -1;
+  assignment->last_instr = liter_copy(lvalue->last_instr);
+  if (assignment->last_instr == NULL) return -1;
 
-  ASTree *lvalue = astree_get(assignment, 0);
+  InstructionData *lvalue_data = liter_get(lvalue->last_instr);
+  InstructionData *expr_data = liter_get(expr->last_instr);
+  size_t agg_eightbytes = typespec_get_eightbytes(expr->type);
+  size_t i;
+  for (i = 0; i < agg_eightbytes; ++i) {
+    InstructionData *mov_data = instr_init(OP_MOV);
+    set_op_ind(&mov_data->src, i * 8, expr_data->dest.reg.num);
+    set_op_reg(&mov_data->dest, REG_QWORD, vreg_count++);
+
+    InstructionData *mov_data_2 = instr_init(OP_MOV);
+    mov_data_2->src = mov_data->dest;
+    set_op_ind(&mov_data_2->dest, i * 8, lvalue_data->dest.reg.num);
+    int status =
+        liter_push_back(assignment->last_instr, &assignment->last_instr, 2,
+                        mov_data, mov_data_2);
+    if (status) return status;
+  }
+  InstructionData *dummy_data = instr_init(OP_MOV);
+  dummy_data->src = dummy_data->dest = lvalue_data->dest;
+  int status = liter_push_back(assignment->last_instr, &assignment->last_instr,
+                               1, dummy_data);
+  if (status) return status;
+  return 0;
+}
+
+int assign_scalar(ASTree *assignment, ASTree *lvalue, ASTree *expr) {
   InstructionData *lvalue_data = liter_get(lvalue->last_instr);
 
-  ASTree *expr = astree_get(assignment, 1);
   int status = rvalue_conversions(expr, lvalue->type);
   if (status) return status;
   InstructionData *expr_data = liter_get(expr->last_instr);
@@ -838,12 +865,30 @@ int translate_assignment(ASTree *assignment) {
   set_op_ind(&assignment_data->dest, NO_DISP, lvalue_data->dest.reg.num);
   assignment_data->src = expr_data->dest;
 
+  InstructionData *dummy_data = instr_init(OP_MOV);
+  set_op_reg(&dummy_data->dest, typespec_get_width(assignment->type),
+             vreg_count++);
+  dummy_data->src = expr_data->dest;
+
   assignment->first_instr = liter_copy(lvalue->first_instr);
   if (assignment->first_instr == NULL) return -1;
-  status = liter_push_back(lvalue->last_instr, &assignment->last_instr, 1,
-                           assignment_data);
+  status = liter_push_back(lvalue->last_instr, &assignment->last_instr, 2,
+                           assignment_data, dummy_data);
   if (status) return status;
   return 0;
+}
+
+int translate_assignment(ASTree *assignment) {
+  DEBUGS('g', "Translating assignment");
+  ASTree *lvalue = astree_get(assignment, 0);
+  ASTree *expr = astree_get(assignment, 1);
+
+  if (typespec_is_union(assignment->type) ||
+      typespec_is_struct(assignment->type)) {
+    return assign_aggregate(assignment, lvalue, expr);
+  } else {
+    return assign_scalar(assignment, lvalue, expr);
+  }
 }
 
 int translate_agg_arg(ASTree *arg, size_t *reg_eightbytes, ListIter *where) {
