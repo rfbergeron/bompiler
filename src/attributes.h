@@ -259,6 +259,7 @@ int typespec_is_array(const TypeSpec *type);
 int typespec_is_function(const TypeSpec *type);
 int typespec_is_scalar(const TypeSpec *type);
 int typespec_is_voidptr(const TypeSpec *type);
+int typespec_is_void(const TypeSpec *type);
 int typespec_is_fnptr(const TypeSpec *type);
 int typespec_is_struct(const TypeSpec *type);
 int typespec_is_structptr(const TypeSpec *type);
