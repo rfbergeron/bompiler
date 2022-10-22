@@ -908,7 +908,20 @@ int translate_args(ASTree *call, ListIter *where) {
   AuxSpec *fn_aux = llist_get(&pointer->type->auxspecs, 1);
   assert(fn_aux->aux == AUX_FUNCTION);
   /* account for hidden out param */
-  size_t reg_eightbytes = typespec_get_eightbytes(call->type) > 2 ? 1 : 0;
+  int out_param = typespec_get_eightbytes(call->type) > 2;
+  size_t reg_eightbytes = out_param ? 1 : 0;
+  if (typespec_is_struct(call->type) || typespec_is_union(call->type)) {
+    SymbolValue dummy;
+    dummy.type = *call->type;
+    assign_stack_space(&dummy);
+    if (out_param) {
+      InstructionData *lea_data = instr_init(OP_LEA);
+      set_op_reg(&lea_data->dest, REG_QWORD, RDI_VREG);
+      set_op_ind(&lea_data->src, -window_size, RBP_VREG);
+      int status = liter_push_back(where, NULL, 1, lea_data);
+      if (status) return status;
+    }
+  }
   size_t i;
   for (i = 1; i < astree_count(call); ++i) {
     DEBUGS('g', "Translating parameter %i", i);
@@ -955,20 +968,47 @@ int translate_call(ASTree *call) {
   status = liter_push_back(call->last_instr, &call->last_instr, 1, call_data);
   if (status) return status;
 
-  if (call->type->base != TYPE_VOID) {
-    InstructionData *mov_data = instr_init(OP_MOV);
-    set_op_reg(&mov_data->src, typespec_get_width(call->type), RAX_VREG);
-    set_op_reg(&mov_data->dest, typespec_get_width(call->type), vreg_count++);
-    int status =
-        liter_push_back(call->last_instr, &call->last_instr, 1, mov_data);
-    if (status) return status;
+  if (!typespec_is_void(call->type)) {
+    if (typespec_is_struct(call->type) || typespec_is_union(call->type)) {
+      size_t ret_eightbytes = typespec_get_eightbytes(call->type);
+      if (ret_eightbytes <= 2) {
+        InstructionData *mov_data = instr_init(OP_MOV);
+        set_op_reg(&mov_data->src, REG_QWORD, RAX_VREG);
+        set_op_ind(&mov_data->dest, -window_size, RBP_VREG);
+        int status =
+            liter_push_back(call->last_instr, &call->last_instr, 1, mov_data);
+        if (status) return status;
+      }
+      if (ret_eightbytes == 2) {
+        InstructionData *mov_data_2 = instr_init(OP_MOV);
+        set_op_reg(&mov_data_2->src, REG_QWORD, RDX_VREG);
+        set_op_ind(&mov_data_2->dest, -window_size + 8, RBP_VREG);
+        int status =
+            liter_push_back(call->last_instr, &call->last_instr, 1, mov_data_2);
+        if (status) return status;
+      }
+      InstructionData *lea_data = instr_init(OP_LEA);
+      set_op_ind(&lea_data->src, -window_size, RBP_VREG);
+      set_op_reg(&lea_data->dest, REG_QWORD, vreg_count++);
+      int status =
+          liter_push_back(call->last_instr, &call->last_instr, 1, lea_data);
+      if (status) return status;
+    } else {
+      InstructionData *mov_data = instr_init(OP_MOV);
+      set_op_reg(&mov_data->src, typespec_get_width(call->type), RAX_VREG);
+      set_op_reg(&mov_data->dest, typespec_get_width(call->type), vreg_count++);
+      int status =
+          liter_push_back(call->last_instr, &call->last_instr, 1, mov_data);
+      if (status) return status;
+    }
     status = restore_volatile_regs(call->last_instr);
     if (status) return status;
     /* dummy mov since parent expects last instr to have result */
     InstructionData *dummy_data = instr_init(OP_MOV);
-    dummy_data->dest = mov_data->dest;
-    dummy_data->src = mov_data->dest;
-    status = liter_push_back(call->last_instr, &call->last_instr, 1, mov_data);
+    set_op_reg(&dummy_data->dest, REG_QWORD, vreg_count);
+    set_op_reg(&dummy_data->src, REG_QWORD, vreg_count);
+    status =
+        liter_push_back(call->last_instr, &call->last_instr, 1, dummy_data);
     if (status) return status;
   } else {
     int status = restore_volatile_regs(call->last_instr);
@@ -1341,34 +1381,76 @@ static int translate_block(ASTree *block, CompilerState *state) {
   return 0;
 }
 
-int translate_return(ASTree *ret, CompilerState *state) {
-  DEBUGS('g', "Translating return statement");
-  if (astree_count(ret) > 0) {
-    SymbolValue *function_symval = state_get_function(state);
-    const TypeSpec *function_spec = &function_symval->type;
-    /* strip function */
-    TypeSpec return_spec = SPEC_EMPTY;
-    int status = strip_aux_type(&return_spec, function_spec);
-    if (status) return status;
-    ASTree *retval = astree_get(ret, 0);
-    status = rvalue_conversions(retval, &return_spec);
-    if (status) return status;
-    InstructionData *retval_data = liter_get(retval->last_instr);
+int return_scalar(ASTree *ret, ASTree *expr) {
+  ret->first_instr = liter_copy(expr->first_instr);
+  if (ret->first_instr == NULL) return -1;
+  SymbolValue *function_symval = state_get_function(state);
+  const TypeSpec *function_spec = &function_symval->type;
+  /* strip function */
+  TypeSpec return_spec = SPEC_EMPTY;
+  int status = strip_aux_type(&return_spec, function_spec);
+  if (status) return status;
+  ASTree *retval = astree_get(ret, 0);
+  status = rvalue_conversions(retval, &return_spec);
+  if (status) return status;
+  InstructionData *retval_data = liter_get(retval->last_instr);
 
+  InstructionData *mov_data = instr_init(OP_MOV);
+  mov_data->src = retval_data->dest;
+  set_op_reg(&mov_data->dest, typespec_get_width(&return_spec), RAX_VREG);
+  status = llist_push_back(text_section, mov_data);
+  if (status) return status;
+  /* free typespec copies */
+  typespec_destroy(&return_spec);
+
+  status = restore_preserved_regs();
+  if (status) return status;
+  InstructionData *ret_data = instr_init(OP_RET);
+  status = llist_push_back(text_section, ret_data);
+  if (status) return status;
+  ret->last_instr = llist_iter_last(text_section);
+  if (ret->last_instr == NULL) return -1;
+  return 0;
+}
+
+int return_aggregate(ASTree *ret, ASTree *expr) {
+  ret->first_instr = liter_copy(expr->first_instr);
+  if (ret->first_instr == NULL) return -1;
+  InstructionData *expr_data = liter_get(expr->last_instr);
+  size_t expr_eightbytes = typespec_get_eightbytes(expr->type);
+
+  if (expr_eightbytes <= 2) {
     InstructionData *mov_data = instr_init(OP_MOV);
-    mov_data->src = retval_data->dest;
-    set_op_reg(&mov_data->dest, typespec_get_width(&return_spec), RAX_VREG);
-    status = llist_push_back(text_section, mov_data);
+    set_op_ind(&mov_data->src, NO_DISP, expr_data->dest.reg.num);
+    set_op_reg(&mov_data->dest, REG_QWORD, RAX_VREG);
+    int status = llist_push_back(text_section, mov_data);
     if (status) return status;
-
-    /* free typespec copies */
-    typespec_destroy(&return_spec);
-    ret->first_instr = liter_copy(retval->first_instr);
+    if (expr_eightbytes == 2) {
+      InstructionData *mov_data_2 = instr_init(OP_MOV);
+      set_op_ind(&mov_data_2->src, 8, expr_data->dest.reg.num);
+      set_op_reg(&mov_data_2->dest, REG_QWORD, RDX_VREG);
+      int status = llist_push_back(text_section, mov_data_2);
+      if (status) return status;
+    }
   } else {
-    InstructionData *nop_data = instr_init(OP_NOP);
-    int status = llist_push_back(text_section, nop_data);
+    InstructionData *hidden_mov_data = instr_init(OP_MOV);
+    set_op_reg(&hidden_mov_data->dest, REG_QWORD, RDI_VREG);
+    set_op_ind(&hidden_mov_data->src, -8, RBP_VREG);
+    int status = llist_push_back(text_section, hidden_mov_data);
     if (status) return status;
-    ret->first_instr = llist_iter_last(text_section);
+    size_t i;
+    for (i = 0; i < expr_eightbytes; ++i) {
+      InstructionData *mov_data = instr_init(OP_MOV);
+      set_op_ind(&mov_data->src, i * 8, expr_data->dest.reg.num);
+      set_op_reg(&mov_data->dest, REG_QWORD, vreg_count++);
+      InstructionData *mov_data_2 = instr_init(OP_MOV);
+      mov_data_2->src = mov_data->dest;
+      set_op_ind(&mov_data_2->dest, i * 8, RDI_VREG);
+      int status = llist_push_back(text_section, mov_data);
+      if (status) return status;
+      status = llist_push_back(text_section, mov_data_2);
+      if (status) return status;
+    }
   }
 
   if (ret->first_instr == NULL) return -1;
@@ -1380,6 +1462,36 @@ int translate_return(ASTree *ret, CompilerState *state) {
   ret->last_instr = llist_iter_last(text_section);
   if (ret->last_instr == NULL) return -1;
   return 0;
+}
+
+int return_void(ASTree *ret) {
+  InstructionData *nop_data = instr_init(OP_NOP);
+  int status = llist_push_back(text_section, nop_data);
+  if (status) return status;
+  ret->first_instr = llist_iter_last(text_section);
+  if (ret->first_instr == NULL) return -1;
+  status = restore_preserved_regs();
+  if (status) return status;
+  InstructionData *ret_data = instr_init(OP_RET);
+  status = llist_push_back(text_section, ret_data);
+  if (status) return status;
+  ret->last_instr = llist_iter_last(text_section);
+  if (ret->last_instr == NULL) return -1;
+  return 0;
+}
+
+int translate_return(ASTree *ret, CompilerState *state) {
+  DEBUGS('g', "Translating return statement");
+  if (astree_count(ret) == 0) {
+    return return_void(ret);
+  } else {
+    ASTree *expr = astree_get(ret, 0);
+    if (typespec_is_union(expr->type) || typespec_is_struct(expr->type)) {
+      return return_aggregate(ret, expr);
+    } else {
+      return return_scalar(ret, expr);
+    }
+  }
 }
 
 static int translate_continue(ASTree *continue_, CompilerState *state) {

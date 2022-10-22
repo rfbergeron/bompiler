@@ -488,6 +488,10 @@ int typespec_is_voidptr(const TypeSpec *type) {
          llist_size(&type->auxspecs) == 1;
 }
 
+int typespec_is_void(const TypeSpec *type) {
+  return llist_empty(&type->auxspecs) && type->base == TYPE_VOID;
+}
+
 int typespec_is_fnptr(const TypeSpec *type) {
   return typespec_is_pointer(type) && typespec_is_aux(type, AUX_FUNCTION, 1);
 }
