@@ -59,6 +59,12 @@ that has does not do most of the things that I thought:
 - Tags and enumeration constants declared as struct and union members are
   "hoisted" up into the enclosing scope
 
+## Pointer Dereferencing/Indexing and Arrays
+Accessing the underlying elements of pointers and arrays is different when the
+element type is an array. Because the elements of multidimensional arrays are
+allocated sequentially, the bracket and indirection operators should use `lea`
+when accessing elements of array type, instead of `mov`.
+
 ## Emitting Conversions
 The IL generator needs to select and emit conversions for operands based on the
 desired type and whether or not the operand is an lvalue, and whether or not

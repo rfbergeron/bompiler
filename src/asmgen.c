@@ -616,12 +616,19 @@ int translate_indirection(ASTree *indirection) {
   int status = rvalue_conversions(operand, operand->type);
   if (status) return status;
   InstructionData *operand_data = liter_get(operand->last_instr);
-  InstructionData *mov_data = instr_init(OP_MOV);
-  set_op_ind(&mov_data->src, NO_DISP, operand_data->dest.reg.num);
-  set_op_reg(&mov_data->dest, typespec_get_width(indirection->type),
+
+  TypeSpec element_type;
+  status = strip_aux_type(&element_type, operand->type);
+  if (status) return status;
+  InstructionData *load_data =
+      instr_init(typespec_is_array(&element_type) ? OP_LEA : OP_MOV);
+  status = typespec_destroy(&element_type);
+  if (status) return status;
+  set_op_ind(&load_data->src, NO_DISP, operand_data->dest.reg.num);
+  set_op_reg(&load_data->dest, typespec_get_width(indirection->type),
              vreg_count++);
   status = liter_push_back(operand->last_instr, &indirection->last_instr, 1,
-                           mov_data);
+                           load_data);
   if (status) return status;
   return 0;
 }
@@ -786,14 +793,33 @@ int translate_binop(ASTree *operator) {
     set_op_reg(&mov_data->dest, typespec_get_width(operator->type),
                vreg_count++);
     mov_data->dest = left_data->dest;
-    int status = liter_push_back(right->last_instr, &operator->last_instr, 2,
-                                 operator_data, mov_data);
+    status = liter_push_back(right->last_instr, &operator->last_instr, 2,
+                             operator_data, mov_data);
+  } else if (typespec_is_pointer(left->type) &&
+             !typespec_is_pointer(right->type)) {
+    TypeSpec element_type;
+    status = strip_aux_type(&element_type, left->type);
     if (status) return status;
+    InstructionData *mul_data = instr_init(OP_MUL);
+    mul_data->dest = right_data->dest;
+    set_op_imm(&mul_data->src, typespec_get_width(&element_type));
+    status = liter_push_back(right->last_instr, &operator->last_instr, 2,
+                             mul_data, operator_data);
+  } else if (!typespec_is_pointer(left->type) &&
+             typespec_is_pointer(right->type)) {
+    TypeSpec element_type;
+    status = strip_aux_type(&element_type, right->type);
+    if (status) return status;
+    InstructionData *mul_data = instr_init(OP_MUL);
+    mul_data->dest = left_data->dest;
+    set_op_imm(&mul_data->src, typespec_get_width(&element_type));
+    status = liter_push_back(right->last_instr, &operator->last_instr, 2,
+                             mul_data, operator_data);
   } else {
-    int status = liter_push_back(right->last_instr, &operator->last_instr, 1,
-                                 operator_data);
-    if (status) return status;
+    status = liter_push_back(right->last_instr, &operator->last_instr, 1,
+                             operator_data);
   }
+  if (status) return status;
   return 0;
 }
 
