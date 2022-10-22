@@ -59,6 +59,25 @@ that has does not do most of the things that I thought:
 - Tags and enumeration constants declared as struct and union members are
   "hoisted" up into the enclosing scope
 
+## Emitting Conversions
+The IL generator needs to select and emit conversions for operands based on the
+desired type and whether or not the operand is an lvalue, and whether or not
+the lvalue should be converted to an rvalue. This is partially covered by a
+series of macros, but they are insufficient and poorly named.
+
+There should be a function or macro that does the following:
+1. Converts lvalues into rvalues
+2. Converts the rvalue to the desired type
+3. If nothing else, puts the rvalue into a register
+
+Since aggregates and functions (not function pointers) cannot be cast and are
+either unassignable or have complicated assignments, this function should not
+be called on them. Expressions of these types should have their own separate
+code paths, or should not appear on the right hand side of an expression.
+
+The code generator should make sure that lvalues are always passed in registers,
+so that no other conversion function is necessary.
+
 ## Correct Parameter and Return Value Passing
 The AMD64 System V ABI specification contains an algorithm describing how
 parameters are to be passed. Fortunately, since I do not (at the moment) plan

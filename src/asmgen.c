@@ -91,24 +91,6 @@
 
 #define GENERATE_ENUM(ENUM) OP_##ENUM,
 #define GENERATE_STRING(STRING) #STRING,
-#define DEST_IS_REG(tree)                                             \
-  (((InstructionData *)liter_get(tree->last_instr))->dest.all.mode == \
-   MODE_REGISTER)
-#define LVAL_TO_REG(tree)                                                   \
-  (!DEST_IS_REG(tree)                                                       \
-       ? ((status = mov_to_reg(tree)) ? NULL : liter_get(tree->last_instr)) \
-       : (status = 0, liter_get(tree->last_instr)))
-#define FIX_LVAL(tree)                                                        \
-  (tree->attributes & ATTR_EXPR_LVAL                                          \
-       ? ((status = resolve_lval(tree)) ? NULL : liter_get(tree->last_instr)) \
-       : liter_get(tree->last_instr))
-#define FIX_DEST(tree)                                                        \
-  (tree->attributes & ATTR_EXPR_LVAL                                          \
-       ? ((status = resolve_lval(tree)) ? NULL : liter_get(tree->last_instr)) \
-       : (!DEST_IS_REG(tree)                                                  \
-              ? ((status = mov_to_reg(tree)) ? NULL                           \
-                                             : liter_get(tree->last_instr))   \
-              : (status = 0, liter_get(tree->last_instr))))
 
 typedef enum opcode { FOREACH_OPCODE(GENERATE_ENUM) OPCODE_COUNT } Opcode;
 
@@ -356,6 +338,54 @@ void assign_stack_space(SymbolValue *symval) {
   symval->reg = RBP_VREG;
 }
 
+/* NOTE: on x64, most operations that write to the lower 32 bits of a
+ * register will zero the upper 32 bits.
+ *
+ * any signed int -> any wider unsigned int: movzx
+ * any signed int -> any wider signed int: movsx
+ * any unsigned int -> any wider int: movzx
+ * any int -> any narrower int: simple mov
+ * any int -> any int of same width: nop
+ */
+int rvalue_conversions(ASTree *expr, const TypeSpec *to) {
+  if (expr->attributes & ATTR_EXPR_LVAL) {
+    InstructionData *lvalue_data = liter_get(expr->last_instr);
+    InstructionData *mov_data = instr_init(OP_MOV);
+    set_op_ind(&mov_data->src, NO_DISP, lvalue_data->dest.reg.num);
+    set_op_reg(&mov_data->dest, typespec_get_width(expr->type), vreg_count++);
+    int status =
+        liter_push_back(expr->last_instr, &expr->last_instr, 1, mov_data);
+    if (status) return status;
+  }
+  InstructionData *expr_data = liter_get(expr->last_instr);
+  if (expr_data->dest.all.mode != MODE_REGISTER) {
+    InstructionData *mov_data = instr_init(OP_MOV);
+    mov_data->src = expr_data->dest;
+    set_op_reg(&mov_data->dest, typespec_get_width(expr->type), vreg_count++);
+    int status =
+        liter_push_back(expr->last_instr, &expr->last_instr, 1, mov_data);
+    if (status) return status;
+    expr_data = liter_get(expr->last_instr);
+  }
+
+  const TypeSpec *from = expr->type;
+  if (typespec_get_width(from) >= typespec_get_width(to)) {
+    return 0;
+  } else if (from->base == TYPE_SIGNED) {
+    InstructionData *movsx_data = instr_init(OP_MOVSX);
+    movsx_data->src = expr_data->dest;
+    set_op_reg(&movsx_data->dest, typespec_get_width(to), vreg_count++);
+    return liter_push_back(expr->last_instr, &expr->last_instr, 1, movsx_data);
+  } else if (from->base == TYPE_UNSIGNED) {
+    InstructionData *movzx_data = instr_init(OP_MOVZX);
+    movzx_data->src = expr_data->dest;
+    set_op_reg(&movzx_data->dest, typespec_get_width(to), vreg_count++);
+    return liter_push_back(expr->last_instr, &expr->last_instr, 1, movzx_data);
+  } else {
+    return -1;
+  }
+}
+
 int resolve_lval(ASTree *lvalue_tree) {
   InstructionData *lvalue_data = liter_get(lvalue_tree->last_instr);
   InstructionData *mov_data = instr_init(OP_MOV);
@@ -398,9 +428,10 @@ void resolve_object(CompilerState *state, Operand *operand, const char *ident) {
 
 int save_preserved_regs(void) {
   size_t i;
-  for (i = PRESERVED_REG_COUNT - 1; i >= 0; --i) {
+  for (i = 1; i <= PRESERVED_REG_COUNT; ++i) {
     InstructionData *push_data = instr_init(OP_PUSH);
-    set_op_reg(&push_data->dest, X64_SIZEOF_LONG, PRESERVED_REGS[i]);
+    set_op_reg(&push_data->dest, X64_SIZEOF_LONG,
+               PRESERVED_REGS[PRESERVED_REG_COUNT - i]);
     int status = llist_push_back(text_section, push_data);
     if (status) return status;
   }
@@ -455,62 +486,17 @@ int translate_ident(ASTree *ident, CompilerState *state) {
   return 0;
 }
 
-/* NOTE: on x64, most operations that write to the lower 32 bits of a
- * register will zero the upper 32 bits. However, I will be zero- and
- * sign-extensions whenever the conversion requires it, just to be safe.
- *
- * any signed int -> any wider unsigned int: movzx
- * any signed int -> any wider signed int: movsx
- * any unsigned int -> any wider int: movzx
- * any int -> any narrower int: simple mov
- * any int -> any int of same width: nop
- */
-int translate_conversion(ASTree *conversion) {
-  DEBUGS('g', "Translating conversion");
-  assert(astree_count(conversion) <= 2);
+int translate_cast(ASTree *cast) {
+  DEBUGS('g', "Translating cast");
+  ASTree *expr = astree_get(cast, 1);
 
-  ASTree *converted_expr = astree_count(conversion) == 1
-                               ? astree_get(conversion, 0)
-                               : astree_get(conversion, 1);
-
-  const TypeSpec *target_type = conversion->type;
-  const TypeSpec *source_type = converted_expr->type;
-  AuxSpec *source_aux = llist_back(&source_type->auxspecs);
-  Opcode opcode;
-  if (source_aux &&
-      (source_aux->aux == AUX_ARRAY || source_aux->aux == AUX_FUNCTION)) {
-    opcode = OP_MOV;
-  } else if (source_type->width > target_type->width) {
-    opcode = OP_MOV;
-  } else if (source_type->width == target_type->width) {
-    opcode = OP_NOP;
-  } else if (source_type->base == TYPE_SIGNED) {
-    if (target_type->base == TYPE_SIGNED) {
-      opcode = OP_MOVSX;
-    } else if (target_type->base == TYPE_UNSIGNED) {
-      opcode = OP_MOVZX;
-    } else {
-      opcode = OP_INVALID;
-    }
-  } else if (source_type->base == TYPE_UNSIGNED) {
-    opcode = OP_MOVZX;
-  } else {
-    opcode = OP_INVALID;
-  }
-
-  InstructionData *data = instr_init(opcode);
-  set_op_reg(&data->dest, typespec_get_width(conversion->type), vreg_count++);
-  InstructionData *src_data = liter_get(converted_expr->last_instr);
-  if (converted_expr->attributes & ATTR_EXPR_LVAL)
-    set_op_ind(&data->src, NO_DISP, src_data->dest.reg.num);
-  else
-    data->src = src_data->dest;
-
-  conversion->first_instr = liter_copy(converted_expr->first_instr);
-  if (conversion->first_instr == NULL) return -1;
-  int status = liter_push_back(converted_expr->last_instr,
-                               &conversion->last_instr, 1, data);
+  int status = rvalue_conversions(expr, cast->type);
   if (status) return status;
+
+  cast->first_instr = liter_copy(expr->first_instr);
+  if (cast->first_instr == NULL) return -1;
+  cast->last_instr = liter_copy(expr->last_instr);
+  if (cast->last_instr == NULL) return -1;
   return 0;
 }
 
@@ -539,9 +525,9 @@ int translate_logical_not(ASTree * not ) {
   ASTree *operand = astree_get(not, 0);
 
   /* move lval into reg, if necessary */
-  int status = 0;
-  InstructionData *operand_data = FIX_DEST(operand);
-  if (operand_data == NULL) return status ? status : -1;
+  int status = rvalue_conversions(operand, operand->type);
+  if (status) return status;
+  InstructionData *operand_data = liter_get(operand->last_instr);
 
   /* TEST operand with itself */
   InstructionData *test_data = instr_init(OP_TEST);
@@ -567,9 +553,10 @@ int translate_logical(ASTree *operator) {
 
   /* test first operand; jump on false for && and true for || */
   ASTree *first = astree_get(operator, 0);
-  int status = 0;
-  InstructionData *first_data = FIX_DEST(first);
-  if (first_data == NULL) return status ? status : -1;
+  int status = rvalue_conversions(first, first->type);
+  if (status) return status;
+  InstructionData *first_data = liter_get(first->last_instr);
+  ;
 
   InstructionData *test_first_data = instr_init(OP_TEST);
   test_first_data->dest = test_first_data->src = first_data->dest;
@@ -581,8 +568,9 @@ int translate_logical(ASTree *operator) {
   if (status) return status;
 
   ASTree *second = astree_get(operator, 1);
-  InstructionData *second_data = FIX_DEST(second);
-  if (second_data == NULL) return status ? status : -1;
+  status = rvalue_conversions(second, second->type);
+  if (status) return status;
+  InstructionData *second_data = liter_get(second->last_instr);
 
   InstructionData *test_second_data = instr_init(OP_TEST);
   test_second_data->dest = test_second_data->src = second_data->dest;
@@ -595,19 +583,20 @@ int translate_logical(ASTree *operator) {
   return 0;
 }
 
-/* TODO(Robert): check location of result of first subexpression, and require
- * second subexpression to place result in a register if the first was not
- */
-/* TODO(Robert): insert conversion operators */
 int translate_comparison(ASTree *operator) {
   ASTree *first = astree_get(operator, 0);
-  int status;
-  InstructionData *first_data = FIX_DEST(first);
-  if (first_data == NULL) return status ? status : -1;
-
   ASTree *second = astree_get(operator, 1);
-  InstructionData *second_data = FIX_LVAL(second);
-  if (second_data == NULL) return status ? status : -1;
+  const TypeSpec *common_type = NULL;
+  int status = determine_conversion(first->type, second->type, &common_type);
+  if (status) return status;
+
+  status = rvalue_conversions(first, common_type);
+  if (status) return status;
+  InstructionData *first_data = liter_get(first->last_instr);
+
+  status = rvalue_conversions(second, common_type);
+  if (status) return status;
+  InstructionData *second_data = liter_get(second->last_instr);
 
   InstructionData *cmp_data = instr_init(OP_CMP);
   cmp_data->dest = first_data->dest;
@@ -624,9 +613,9 @@ int translate_indirection(ASTree *indirection) {
   indirection->first_instr = liter_copy(operand->first_instr);
   if (indirection->first_instr == NULL) return -1;
 
-  int status;
-  InstructionData *operand_data = LVAL_TO_REG(operand);
-  if (operand_data == NULL) return -1;
+  int status = rvalue_conversions(operand, operand->type);
+  if (status) return status;
+  InstructionData *operand_data = liter_get(operand->last_instr);
   InstructionData *mov_data = instr_init(OP_MOV);
   set_op_ind(&mov_data->src, NO_DISP, operand_data->dest.reg.num);
   set_op_reg(&mov_data->dest, typespec_get_width(indirection->type),
@@ -664,14 +653,15 @@ int translate_subscript(ASTree *subscript) {
   /* both the pointer and index must be in a register so that the offset and
    * scale addressing mode can be used
    */
-  int status;
   ASTree *pointer = astree_get(subscript, 0);
-  InstructionData *pointer_data = LVAL_TO_REG(pointer);
-  if (status) return status ? status : -1;
+  int status = rvalue_conversions(pointer, pointer->type);
+  if (status) return status;
+  InstructionData *pointer_data = liter_get(pointer->last_instr);
 
   ASTree *index = astree_get(subscript, 1);
-  InstructionData *index_data = FIX_DEST(index);
-  if (status) return status ? status : -1;
+  status = rvalue_conversions(index, &SPEC_LONG);
+  if (status) return status;
+  InstructionData *index_data = liter_get(index->last_instr);
 
   subscript->first_instr = liter_copy(pointer->first_instr);
   if (subscript->first_instr == NULL) return -1;
@@ -752,9 +742,10 @@ int translate_inc_dec(ASTree *inc_dec) {
 int translate_unop(ASTree *operator) {
   DEBUGS('g', "Translating unary operation");
   ASTree *operand = astree_get(operator, 0);
-  int status;
-  InstructionData *operand_data = FIX_DEST(operand);
-  if (operand_data == NULL) return status ? status : -1;
+  int status = rvalue_conversions(operand, operator->type);
+  ;
+  if (status) return status;
+  InstructionData *operand_data = liter_get(operand->last_instr);
 
   InstructionData *operator_data = instr_init(opcode_from_operator(operator));
   operator_data->dest = operand_data->dest;
@@ -770,13 +761,14 @@ int translate_unop(ASTree *operator) {
 int translate_binop(ASTree *operator) {
   DEBUGS('g', "Translating binary operation");
   ASTree *left = astree_get(operator, 0);
-  int status;
-  InstructionData *left_data = FIX_DEST(left);
-  if (left_data == NULL) return status ? status : -1;
+  int status = rvalue_conversions(left, operator->type);
+  if (status) return status;
+  InstructionData *left_data = liter_get(left->last_instr);
 
   ASTree *right = astree_get(operator, 1);
-  InstructionData *right_data = FIX_LVAL(right);
-  if (right_data == NULL) return status ? status : -1;
+  status = rvalue_conversions(right, operator->type);
+  if (status) return status;
+  InstructionData *right_data = liter_get(right->last_instr);
 
   InstructionData *operator_data = instr_init(opcode_from_operator(operator));
   operator_data->dest = left_data->dest;
@@ -812,9 +804,9 @@ int translate_assignment(ASTree *assignment) {
   InstructionData *lvalue_data = liter_get(lvalue->last_instr);
 
   ASTree *expr = astree_get(assignment, 1);
-  int status;
-  InstructionData *expr_data = FIX_DEST(expr);
-  if (expr_data == NULL) return status ? status : -1;
+  int status = rvalue_conversions(expr, lvalue->type);
+  if (status) return status;
+  InstructionData *expr_data = liter_get(expr->last_instr);
 
   InstructionData *assignment_data = instr_init(OP_MOV);
   set_op_ind(&assignment_data->dest, NO_DISP, lvalue_data->dest.reg.num);
@@ -831,7 +823,7 @@ int translate_assignment(ASTree *assignment) {
 int translate_agg_arg(ASTree *arg, size_t *reg_eightbytes, ListIter *where) {
   size_t arg_eightbytes = typespec_get_eightbytes(arg->type);
   int status;
-  InstructionData *arg_data = LVAL_TO_REG(arg);
+  InstructionData *arg_data = liter_get(arg->last_instr);
   if (arg_eightbytes <= 2 &&
       arg_eightbytes + *reg_eightbytes <= PARAM_REG_COUNT) {
     InstructionData *mov_data = instr_init(OP_MOV);
@@ -861,11 +853,14 @@ int translate_agg_arg(ASTree *arg, size_t *reg_eightbytes, ListIter *where) {
   return 0;
 }
 
-int translate_scalar_arg(ASTree *arg, size_t *reg_eightbytes, ListIter *where) {
+int translate_scalar_arg(ASTree *arg, size_t *reg_eightbytes, ListIter *where,
+                         const TypeSpec *param_type) {
   assert(typespec_get_eightbytes(arg->type) == 1);
-  int status;
-  InstructionData *arg_data = FIX_DEST(arg);
-  if (arg_data == NULL) return status ? status : -1;
+  int status = rvalue_conversions(arg, param_type);
+  ;
+  if (status) return status;
+  InstructionData *arg_data = liter_get(arg->last_instr);
+
   if (*reg_eightbytes < PARAM_REG_COUNT) {
     InstructionData *mov_data = instr_init(OP_MOV);
     mov_data->src = arg_data->dest;
@@ -875,14 +870,17 @@ int translate_scalar_arg(ASTree *arg, size_t *reg_eightbytes, ListIter *where) {
     if (status) return status;
   } else {
     InstructionData *push_data = instr_init(OP_PUSH);
-    /* arg_data->dest guaranteed to be reg by FIX_DEST */
     set_op_reg(&push_data->dest, REG_QWORD, arg_data->dest.reg.num);
     int status = liter_push_back(where, NULL, 1, push_data);
     if (status) return status;
   }
+  return 0;
 }
 
 int translate_args(ASTree *call, ListIter *where) {
+  ASTree *pointer = astree_get(call, 0);
+  AuxSpec *fn_aux = llist_get(&pointer->type->auxspecs, 1);
+  assert(fn_aux->aux == AUX_FUNCTION);
   /* account for hidden out param */
   size_t reg_eightbytes = typespec_get_eightbytes(call->type) > 2 ? 1 : 0;
   size_t i;
@@ -893,7 +891,9 @@ int translate_args(ASTree *call, ListIter *where) {
       int status = translate_agg_arg(arg, &reg_eightbytes, where);
       if (status) return status;
     } else {
-      int status = translate_scalar_arg(arg, &reg_eightbytes, where);
+      SymbolValue *param_symval = llist_get(fn_aux->data.params, i - 1);
+      int status = translate_scalar_arg(arg, &reg_eightbytes, where,
+                                        &param_symval->type);
       if (status) return status;
     }
   }
@@ -1048,9 +1048,9 @@ int translate_local_init(ASTree *declaration, ASTree *declarator,
      */
     abort();
   } else {
-    int status;
-    InstructionData *initializer_data = FIX_DEST(initializer);
-    if (initializer_data == NULL) return status ? status : -1;
+    int status = rvalue_conversions(initializer, declarator->type);
+    if (status) return status;
+    InstructionData *initializer_data = liter_get(initializer->last_instr);
     InstructionData *mov_data = instr_init(OP_MOV);
     resolve_object(state, &mov_data->dest, declarator->lexinfo);
     mov_data->src = initializer_data->dest;
@@ -1094,9 +1094,9 @@ int translate_local_decl(ASTree *declaration, ASTree *declarator) {
 
 static int translate_ifelse(ASTree *ifelse) {
   ASTree *condition = astree_get(ifelse, 0);
-  int status;
-  InstructionData *condition_data = FIX_DEST(condition);
-  if (condition_data == NULL) return status ? status : -1;
+  int status = rvalue_conversions(condition, condition->type);
+  if (status) return status;
+  InstructionData *condition_data = liter_get(condition->last_instr);
 
   ifelse->first_instr = liter_copy(condition->first_instr);
   if (ifelse->first_instr == NULL) return -1;
@@ -1196,8 +1196,9 @@ static int translate_while(ASTree *while_) {
                                 condition_label);
   if (status) return status;
 
-  InstructionData *condition_data = FIX_DEST(condition);
-  if (condition_data == NULL) return status ? status : -1;
+  status = rvalue_conversions(condition, condition->type);
+  if (status) return status;
+  InstructionData *condition_data = liter_get(condition->last_instr);
   InstructionData *test_data = instr_init(OP_TEST);
   test_data->src = test_data->dest = condition_data->dest;
 
@@ -1229,9 +1230,9 @@ static int translate_for(ASTree *for_, CompilerState *state) {
 
   ASTree *condition = astree_get(for_exprs, 1);
   /* TODO(Robert): mov vrxq, 1 when no condition */
-  int status;
-  InstructionData *condition_data = FIX_DEST(condition);
-  if (condition_data == NULL) return status ? status : -1;
+  int status = rvalue_conversions(condition, condition->type);
+  if (status) return status;
+  InstructionData *condition_data = liter_get(condition->last_instr);
   InstructionData *condition_label = instr_init(OP_NOP);
   sprintf(condition_label->label, COND_FMT, for_->jump_id);
   status = liter_push_front(condition->first_instr, NULL, 1, condition_label);
@@ -1276,7 +1277,9 @@ static int translate_do(ASTree *do_) {
   status = liter_push_front(condition->first_instr, NULL, 1, condition_label);
   if (status) return status;
 
-  InstructionData *condition_data = FIX_DEST(condition);
+  status = rvalue_conversions(condition, condition->type);
+  if (status) return status;
+  InstructionData *condition_data = liter_get(condition->last_instr);
   if (condition_data == NULL) return status ? status : -1;
   InstructionData *test_data = instr_init(OP_TEST);
   test_data->dest = test_data->src = condition_data->dest;
@@ -1315,41 +1318,41 @@ static int translate_block(ASTree *block, CompilerState *state) {
 int translate_return(ASTree *ret, CompilerState *state) {
   DEBUGS('g', "Translating return statement");
   if (astree_count(ret) > 0) {
-    ASTree *retval = astree_get(ret, 0);
-    InstructionData *retval_data = liter_get(retval->last_instr);
-    if (retval_data == NULL) return -1;
-
-    InstructionData *mov_data = instr_init(OP_MOV);
-    if (ret->attributes & ATTR_EXPR_LVAL)
-      set_op_reg(&mov_data->src, NO_DISP, retval_data->dest.reg.num);
-    else
-      mov_data->src = retval_data->dest;
-
     SymbolValue *function_symval = state_get_function(state);
     const TypeSpec *function_spec = &function_symval->type;
     /* strip function */
     TypeSpec return_spec = SPEC_EMPTY;
     int status = strip_aux_type(&return_spec, function_spec);
     if (status) return status;
-    set_op_reg(&mov_data->dest, return_spec.width, RAX_VREG);
+    ASTree *retval = astree_get(ret, 0);
+    status = rvalue_conversions(retval, &return_spec);
+    if (status) return status;
+    InstructionData *retval_data = liter_get(retval->last_instr);
+
+    InstructionData *mov_data = instr_init(OP_MOV);
+    mov_data->src = retval_data->dest;
+    set_op_reg(&mov_data->dest, typespec_get_width(&return_spec), RAX_VREG);
+    status = llist_push_back(text_section, mov_data);
+    if (status) return status;
+
     /* free typespec copies */
     typespec_destroy(&return_spec);
-    status = liter_push_back(retval->last_instr, &ret->last_instr, 1, mov_data);
-    if (status) return status;
     ret->first_instr = liter_copy(retval->first_instr);
-    if (ret->first_instr == NULL) return -1;
   } else {
     InstructionData *nop_data = instr_init(OP_NOP);
     int status = llist_push_back(text_section, nop_data);
     if (status) return status;
     ret->first_instr = llist_iter_last(text_section);
-    if (ret->first_instr == NULL) return -1;
-    ret->last_instr = liter_copy(ret->first_instr);
-    if (ret->last_instr == NULL) return -1;
   }
 
-  int status = restore_preserved_regs(ret->last_instr);
+  if (ret->first_instr == NULL) return -1;
+  int status = restore_preserved_regs();
   if (status) return status;
+  InstructionData *ret_data = instr_init(OP_RET);
+  status = llist_push_back(text_section, ret_data);
+  if (status) return status;
+  ret->last_instr = llist_iter_last(text_section);
+  if (ret->last_instr == NULL) return -1;
   return 0;
 }
 
@@ -1462,12 +1465,16 @@ int translate_global_init(ASTree *declarator, ASTree *initializer) {
     switch (width) {
       case X64_SIZEOF_LONG:
         data = instr_init(OP_DQ);
+        break;
       case X64_SIZEOF_INT:
         data = instr_init(OP_DD);
+        break;
       case X64_SIZEOF_SHORT:
         data = instr_init(OP_DW);
+        break;
       case X64_SIZEOF_CHAR:
         data = instr_init(OP_DB);
+        break;
       default:
         fprintf(stderr,
                 "ERROR: cannot initialize non-aggregate type with width %lu\n",
@@ -1569,6 +1576,8 @@ int operand_to_str(Operand *operand, char *str, size_t size) {
       return sprintf(str, "[%s%+li]", operand->dir.lab, operand->dir.disp);
     case MODE_INDIRECT:
       return sprintf(str, "[vr%luq%+li]", operand->ind.num, operand->ind.disp);
+    default:
+      abort();
   }
 }
 
