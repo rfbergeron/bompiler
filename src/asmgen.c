@@ -210,12 +210,15 @@ static const size_t VOLATILE_REGS[] = {
 static const size_t PARAM_REG_COUNT = 6;
 static const size_t PRESERVED_REG_COUNT = 7;
 static const size_t VOLATILE_REG_COUNT = 9;
+static const size_t REAL_REG_COUNT = PRESERVED_REG_COUNT + VOLATILE_REG_COUNT;
 /* number of eightbytes occupied by the function prologue on the stack */
 static const size_t PROLOGUE_EIGHTBYTES = 8;
 
-static size_t branch_count = 0;
-size_t vreg_count = 0;
-static ptrdiff_t window_size = 0;
+static size_t branch_count;
+static size_t reg_eightbytes;
+static size_t stack_eightbytes;
+size_t vreg_count;
+static ptrdiff_t window_size;
 
 static LinkedList *text_section;
 static LinkedList *data_section;
@@ -460,12 +463,12 @@ int restore_preserved_regs(void) {
   return 0;
 }
 
-int restore_volatile_regs(ListIter *where) {
+int restore_volatile_regs() {
   size_t i;
   for (i = 0; i < VOLATILE_REG_COUNT; ++i) {
     InstructionData *pop_data = instr_init(OP_POP);
     set_op_reg(&pop_data->dest, X64_SIZEOF_LONG, VOLATILE_REGS[i]);
-    int status = liter_push_back(where, &where, 1, pop_data);
+    int status = llist_push_back(text_section, pop_data);
     if (status) return status;
   }
   return 0;
@@ -891,22 +894,22 @@ int translate_assignment(ASTree *assignment) {
   }
 }
 
-int translate_agg_arg(ASTree *arg, size_t *reg_eightbytes, ListIter *where) {
+int translate_agg_arg(ASTree *call, ASTree *arg) {
   size_t arg_eightbytes = typespec_get_eightbytes(arg->type);
   int status;
   InstructionData *arg_data = liter_get(arg->last_instr);
   if (arg_eightbytes <= 2 &&
-      arg_eightbytes + *reg_eightbytes <= PARAM_REG_COUNT) {
+      arg_eightbytes + reg_eightbytes <= PARAM_REG_COUNT) {
     InstructionData *mov_data = instr_init(OP_MOV);
     set_op_ind(&mov_data->src, NO_DISP, arg_data->dest.reg.num);
-    set_op_reg(&mov_data->dest, REG_QWORD, PARAM_REGS[(*reg_eightbytes)++]);
-    int status = liter_push_back(where, NULL, 1, mov_data);
+    set_op_reg(&mov_data->dest, REG_QWORD, PARAM_REGS[reg_eightbytes++]);
+    int status = liter_push_back(call->last_instr, NULL, 1, mov_data);
     if (status) return status;
     if (arg_eightbytes == 2) {
       InstructionData *mov_data_2 = instr_init(OP_MOV);
       set_op_ind(&mov_data_2->src, 8, arg_data->dest.reg.num);
-      set_op_reg(&mov_data_2->dest, REG_QWORD, PARAM_REGS[(*reg_eightbytes)++]);
-      int status = liter_push_back(where, NULL, 1, mov_data_2);
+      set_op_reg(&mov_data_2->dest, REG_QWORD, PARAM_REGS[reg_eightbytes++]);
+      int status = liter_push_back(call->last_instr, NULL, 1, mov_data_2);
       if (status) return status;
     }
   } else {
@@ -917,44 +920,49 @@ int translate_agg_arg(ASTree *arg, size_t *reg_eightbytes, ListIter *where) {
       set_op_reg(&mov_data->dest, REG_QWORD, vreg_count++);
       InstructionData *push_data = instr_init(OP_PUSH);
       push_data->dest = mov_data->dest;
-      int status = liter_push_back(where, NULL, 2, mov_data, push_data);
+      int status =
+          liter_push_back(call->last_instr, NULL, 2, mov_data, push_data);
       if (status) return status;
+      ++stack_eightbytes;
     }
   }
   return 0;
 }
 
-int translate_scalar_arg(ASTree *arg, size_t *reg_eightbytes, ListIter *where,
-                         const TypeSpec *param_type) {
+int translate_scalar_arg(ASTree *call, ASTree *arg) {
   assert(typespec_get_eightbytes(arg->type) == 1);
-  int status = rvalue_conversions(arg, param_type);
-  ;
+  ASTree *fn_pointer = astree_get(call, 0);
+  AuxSpec *fn_aux = llist_get(&fn_pointer->type->auxspecs, 1);
+  assert(fn_aux->aux == AUX_FUNCTION);
+  SymbolValue *param_symval =
+      llist_get(fn_aux->data.params, astree_count(call) - 1);
+
+  int status = rvalue_conversions(arg, &param_symval->type);
   if (status) return status;
   InstructionData *arg_data = liter_get(arg->last_instr);
 
-  if (*reg_eightbytes < PARAM_REG_COUNT) {
+  if (reg_eightbytes < PARAM_REG_COUNT) {
     InstructionData *mov_data = instr_init(OP_MOV);
     mov_data->src = arg_data->dest;
     set_op_reg(&mov_data->dest, typespec_get_width(arg->type),
-               PARAM_REGS[(*reg_eightbytes)++]);
-    int status = liter_push_back(where, NULL, 1, mov_data);
+               PARAM_REGS[reg_eightbytes++]);
+    int status = liter_push_back(call->last_instr, NULL, 1, mov_data);
     if (status) return status;
   } else {
     InstructionData *push_data = instr_init(OP_PUSH);
     set_op_reg(&push_data->dest, REG_QWORD, arg_data->dest.reg.num);
-    int status = liter_push_back(where, NULL, 1, push_data);
+    int status = liter_push_back(call->last_instr, NULL, 1, push_data);
     if (status) return status;
+    ++stack_eightbytes;
   }
   return 0;
 }
 
-int translate_args(ASTree *call, ListIter *where) {
-  ASTree *pointer = astree_get(call, 0);
-  AuxSpec *fn_aux = llist_get(&pointer->type->auxspecs, 1);
-  assert(fn_aux->aux == AUX_FUNCTION);
+int translate_args(ASTree *call) {
   /* account for hidden out param */
   int out_param = typespec_get_eightbytes(call->type) > 2;
-  size_t reg_eightbytes = out_param ? 1 : 0;
+  reg_eightbytes = out_param ? 1 : 0;
+  stack_eightbytes = 0;
   if (typespec_is_struct(call->type) || typespec_is_union(call->type)) {
     SymbolValue dummy;
     dummy.type = *call->type;
@@ -963,7 +971,7 @@ int translate_args(ASTree *call, ListIter *where) {
       InstructionData *lea_data = instr_init(OP_LEA);
       set_op_reg(&lea_data->dest, REG_QWORD, RDI_VREG);
       set_op_ind(&lea_data->src, -window_size, RBP_VREG);
-      int status = liter_push_back(where, NULL, 1, lea_data);
+      int status = liter_push_back(call->last_instr, NULL, 1, lea_data);
       if (status) return status;
     }
   }
@@ -972,12 +980,10 @@ int translate_args(ASTree *call, ListIter *where) {
     DEBUGS('g', "Translating parameter %i", i);
     ASTree *arg = astree_get(call, i);
     if (typespec_is_union(arg->type) || typespec_is_struct(arg->type)) {
-      int status = translate_agg_arg(arg, &reg_eightbytes, where);
+      int status = translate_agg_arg(call, arg);
       if (status) return status;
     } else {
-      SymbolValue *param_symval = llist_get(fn_aux->data.params, i - 1);
-      int status = translate_scalar_arg(arg, &reg_eightbytes, where,
-                                        &param_symval->type);
+      int status = translate_scalar_arg(call, arg);
       if (status) return status;
     }
   }
@@ -986,31 +992,32 @@ int translate_args(ASTree *call, ListIter *where) {
 
 int translate_call(ASTree *call) {
   DEBUGS('g', "Translating function call");
-  ASTree *pointer = astree_get(call, 0);
-  call->first_instr = liter_copy(pointer->first_instr);
+  ASTree *fn_pointer = astree_get(call, 0);
+  call->first_instr = liter_copy(fn_pointer->first_instr);
   if (call->first_instr == NULL) return -1;
-  ASTree *last_arg = astree_get(call, astree_count(call) - 1);
-  call->last_instr = liter_copy(last_arg->last_instr);
-  if (call->last_instr == NULL) return -1;
   int status = save_volatile_regs(call->first_instr);
   if (status) return status;
+  /* temporary iterator for inserting args in reverse order */
+  call->last_instr = llist_iter_last(text_section);
+  if (call->last_instr == NULL) return -1;
 
-  InstructionData *pointer_data = liter_get(pointer->last_instr);
-  InstructionData *call_data = instr_init(OP_CALL);
-  call_data->dest = pointer_data->dest;
-  status = liter_push_back(call->last_instr, &call->last_instr, 1, call_data);
+  status = translate_args(call);
   if (status) return status;
+  free(call->last_instr);
+  call->last_instr = NULL;
 
-  /* need to do this here so that iterating front to back over the parameters
-   * inserts them into the list back to front before the call
-   */
-  status = translate_args(call, last_arg->last_instr);
+  status = rvalue_conversions(fn_pointer, fn_pointer->type);
+  if (status) return status;
+  InstructionData *fn_pointer_data = liter_get(fn_pointer->last_instr);
+  InstructionData *call_data = instr_init(OP_CALL);
+  call_data->dest = fn_pointer_data->dest;
+  status = llist_push_back(text_section, call_data);
   if (status) return status;
 
   InstructionData *rsp_reset_data = instr_init(OP_ADD);
   set_op_reg(&rsp_reset_data->dest, REG_QWORD, RSP_VREG);
-  set_op_imm(&rsp_reset_data->src, typespec_stack_eightbytes(pointer->type));
-  status = liter_push_back(call->last_instr, &call->last_instr, 1, call_data);
+  set_op_imm(&rsp_reset_data->src, stack_eightbytes);
+  status = llist_push_back(text_section, rsp_reset_data);
   if (status) return status;
 
   if (!typespec_is_void(call->type)) {
@@ -1020,45 +1027,42 @@ int translate_call(ASTree *call) {
         InstructionData *mov_data = instr_init(OP_MOV);
         set_op_reg(&mov_data->src, REG_QWORD, RAX_VREG);
         set_op_ind(&mov_data->dest, -window_size, RBP_VREG);
-        int status =
-            liter_push_back(call->last_instr, &call->last_instr, 1, mov_data);
+        int status = llist_push_back(text_section, mov_data);
         if (status) return status;
       }
       if (ret_eightbytes == 2) {
         InstructionData *mov_data_2 = instr_init(OP_MOV);
         set_op_reg(&mov_data_2->src, REG_QWORD, RDX_VREG);
         set_op_ind(&mov_data_2->dest, -window_size + 8, RBP_VREG);
-        int status =
-            liter_push_back(call->last_instr, &call->last_instr, 1, mov_data_2);
+        int status = llist_push_back(text_section, mov_data_2);
         if (status) return status;
       }
       InstructionData *lea_data = instr_init(OP_LEA);
       set_op_ind(&lea_data->src, -window_size, RBP_VREG);
       set_op_reg(&lea_data->dest, REG_QWORD, vreg_count++);
-      int status =
-          liter_push_back(call->last_instr, &call->last_instr, 1, lea_data);
+      int status = llist_push_back(text_section, lea_data);
       if (status) return status;
     } else {
       InstructionData *mov_data = instr_init(OP_MOV);
       set_op_reg(&mov_data->src, typespec_get_width(call->type), RAX_VREG);
       set_op_reg(&mov_data->dest, typespec_get_width(call->type), vreg_count++);
-      int status =
-          liter_push_back(call->last_instr, &call->last_instr, 1, mov_data);
+      int status = llist_push_back(text_section, mov_data);
       if (status) return status;
     }
-    status = restore_volatile_regs(call->last_instr);
+    status = restore_volatile_regs();
     if (status) return status;
     /* dummy mov since parent expects last instr to have result */
     InstructionData *dummy_data = instr_init(OP_MOV);
     set_op_reg(&dummy_data->dest, REG_QWORD, vreg_count);
     set_op_reg(&dummy_data->src, REG_QWORD, vreg_count);
-    status =
-        liter_push_back(call->last_instr, &call->last_instr, 1, dummy_data);
+    status = llist_push_back(text_section, dummy_data);
     if (status) return status;
   } else {
-    int status = restore_volatile_regs(call->last_instr);
+    int status = restore_volatile_regs();
     if (status) return status;
   }
+  call->last_instr = llist_iter_last(text_section);
+  if (call->last_instr == NULL) return -1;
   return 0;
 }
 
@@ -1070,9 +1074,19 @@ int translate_params(ASTree *function, CompilerState *state) {
   int status = strip_aux_type(&ret_type, fn_type);
   if (status) return status;
   /* account for hidden out param */
-  size_t reg_eightbytes = typespec_get_eightbytes(&ret_type) > 2 ? 1 : 0;
+  reg_eightbytes = typespec_get_eightbytes(&ret_type) > 2 ? 1 : 0;
+  if (reg_eightbytes == 1) {
+    SymbolValue dummy;
+    dummy.type = SPEC_LONG;
+    assign_stack_space(&dummy);
+    InstructionData *mov_data = instr_init(OP_MOV);
+    set_op_reg(&mov_data->src, REG_QWORD, RDI_VREG);
+    set_op_ind(&mov_data->dest, -window_size, RBP_VREG);
+    int status = llist_push_back(text_section, mov_data);
+    if (status) return status;
+  }
   /* offset to account for preserved regs and return address */
-  size_t stack_eightbytes = PROLOGUE_EIGHTBYTES;
+  stack_eightbytes = PROLOGUE_EIGHTBYTES;
   size_t i;
   for (i = 0; i < astree_count(fn_dirdecl); ++i) {
     ASTree *param = astree_get(fn_dirdecl, i);
@@ -1703,6 +1717,8 @@ int translate_global_decl(ASTree *declaration) {
 
 int begin_translate_fn(ASTree *function, CompilerState *state) {
   DEBUGS('g', "Translating function prologue");
+  branch_count = window_size = 0;
+  vreg_count = REAL_REG_COUNT;
 
   ASTree *declarator = astree_get(function, 1);
   InstructionData *label_data = instr_init(OP_NOP);
@@ -1721,16 +1737,29 @@ int begin_translate_fn(ASTree *function, CompilerState *state) {
   status = llist_push_back(text_section, mov_data);
   if (status) return status;
 
+  /* save location for later rsp adjustment */
+  function->last_instr = llist_iter_last(text_section);
+  if (function->last_instr == NULL) return -1;
+
   status = translate_params(function, state);
   if (status) return status;
   return 0;
 }
 
 int end_translate_fn(ASTree *function, CompilerState *state) {
+  /* emit rsp adjustment now that we know the amount of stack space */
+  InstructionData *rsp_sub_data = instr_init(OP_SUB);
+  set_op_reg(&rsp_sub_data->dest, REG_QWORD, RSP_VREG);
+  set_op_imm(&rsp_sub_data->src, window_size);
+  int status = liter_push_back(function->last_instr, NULL, 1, rsp_sub_data);
+  if (status) return status;
+  free(function->last_instr);
+  function->last_instr = NULL;
+
   InstructionData *mov_data = instr_init(OP_MOV);
   set_op_reg(&mov_data->dest, REG_QWORD, RSP_VREG);
   set_op_reg(&mov_data->src, REG_QWORD, RBP_VREG);
-  int status = llist_push_back(text_section, mov_data);
+  status = llist_push_back(text_section, mov_data);
   if (status) return status;
   status = restore_preserved_regs();
   if (status) return status;
