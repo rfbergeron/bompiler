@@ -203,11 +203,13 @@ static const size_t RSI_VREG = 6;
 static const size_t RDI_VREG = 7;
 static const size_t PARAM_REGS[] = {RDI_VREG, RSI_VREG, RDX_VREG,
                                     RCX_VREG, 8,        9};
+static const size_t RETURN_REGS[] = {RAX_VREG, RDX_VREG};
 static const size_t PRESERVED_REGS[] = {RBX_VREG, RSP_VREG, RBP_VREG, 12,
                                         13,       14,       15};
 static const size_t VOLATILE_REGS[] = {
     RAX_VREG, RDX_VREG, RCX_VREG, RSI_VREG, RDI_VREG, 8, 9, 10, 11};
 static const size_t PARAM_REG_COUNT = 6;
+static const size_t RETURN_REG_COUNT = 2;
 static const size_t PRESERVED_REG_COUNT = 7;
 static const size_t VOLATILE_REG_COUNT = 9;
 static const size_t REAL_REG_COUNT = PRESERVED_REG_COUNT + VOLATILE_REG_COUNT;
@@ -267,6 +269,99 @@ void set_op_sca(Operand *operand, IndexScale scale, intmax_t disp, size_t base,
   operand->sca.disp = disp;
   operand->sca.base = base;
   operand->sca.index = index;
+}
+
+int bulk_rtom(size_t dest_memreg, ptrdiff_t dest_disp, const size_t *src_regs,
+              const TypeSpec *type, ListIter *where) {
+  size_t alignment = typespec_get_alignment(type);
+  size_t width = typespec_get_width(type);
+  if (alignment < 8 && width / alignment > 1) {
+    size_t eightbytes = typespec_get_eightbytes(type);
+    size_t i;
+    for (i = 0; i < eightbytes; ++i) {
+      size_t j;
+      for (j = 0; j < 8 && i * 8 + j < width; j += alignment) {
+        size_t chunk_disp = dest_disp + i * 8 + j;
+        InstructionData *mov_data = instr_init(OP_MOV);
+        set_op_reg(&mov_data->src, alignment, src_regs[i]);
+        set_op_ind(&mov_data->dest, chunk_disp, dest_memreg);
+        InstructionData *shr_data = instr_init(OP_SHR);
+        set_op_reg(&shr_data->dest, REG_QWORD, src_regs[i]);
+        set_op_imm(&shr_data->src, alignment);
+        int status = liter_push_back(where, NULL, 2, mov_data, shr_data);
+        if (status) return status;
+      }
+    }
+  } else {
+    size_t mov_count = width / alignment;
+    size_t i;
+    for (i = 0; i < mov_count; ++i) {
+      InstructionData *mov_data = instr_init(OP_MOV);
+      set_op_reg(&mov_data->src, alignment, src_regs[i]);
+      set_op_ind(&mov_data->dest, dest_disp + i * alignment, dest_memreg);
+      int status = liter_push_back(where, NULL, 1, mov_data);
+      if (status) return status;
+    }
+  }
+  return 0;
+}
+
+int bulk_mtor(const size_t *dest_regs, size_t src_memreg, ptrdiff_t src_disp,
+              const TypeSpec *type, ListIter *where) {
+  size_t alignment = typespec_get_alignment(type);
+  size_t width = typespec_get_width(type);
+  if (alignment < 8 && width / alignment > 1) {
+    size_t eightbytes = typespec_get_eightbytes(type);
+    size_t i;
+    for (i = 0; i < eightbytes; ++i) {
+      size_t j;
+      for (j = 0; j < 8 && i * 8 + j < width; j += alignment) {
+        size_t chunk_disp = src_disp + i * 8 + j;
+        InstructionData *mov_data = instr_init(OP_MOVZX);
+        set_op_reg(&mov_data->dest, REG_QWORD, vreg_count++);
+        set_op_ind(&mov_data->src, chunk_disp, src_memreg);
+        InstructionData *shl_data = instr_init(OP_SHL);
+        shl_data->dest = mov_data->dest;
+        set_op_imm(&shl_data->src, j);
+        InstructionData *bitor_data = instr_init(OP_OR);
+        bitor_data->src = mov_data->dest;
+        set_op_reg(&bitor_data->dest, REG_QWORD, dest_regs[i]);
+        int status =
+            liter_push_back(where, NULL, 3, mov_data, shl_data, bitor_data);
+        if (status) return status;
+      }
+    }
+  } else {
+    size_t mov_count = width / alignment;
+    size_t i;
+    for (i = 0; i < mov_count; ++i) {
+      InstructionData *mov_data = instr_init(OP_MOV);
+      set_op_reg(&mov_data->dest, alignment, dest_regs[i]);
+      set_op_ind(&mov_data->src, src_disp + i * alignment, src_memreg);
+      int status = liter_push_back(where, NULL, 1, mov_data);
+      if (status) return status;
+    }
+  }
+  return 0;
+}
+
+int bulk_mtom(size_t dest_reg, size_t src_reg, const TypeSpec *type,
+              ListIter *where) {
+  size_t alignment = typespec_get_alignment(type);
+  size_t width = typespec_get_width(type);
+  size_t mov_count = width / alignment;
+  size_t i;
+  for (i = 0; i < mov_count; ++i) {
+    InstructionData *mov_data = instr_init(OP_MOV);
+    set_op_reg(&mov_data->dest, alignment, vreg_count++);
+    set_op_ind(&mov_data->src, i * alignment, src_reg);
+    InstructionData *mov_data_2 = instr_init(OP_MOV);
+    mov_data_2->src = mov_data->dest;
+    set_op_ind(&mov_data->dest, i * alignment, dest_reg);
+    int status = liter_push_back(where, NULL, 2, mov_data, mov_data_2);
+    if (status) return status;
+  }
+  return 0;
 }
 
 Opcode opcode_from_operator(ASTree *tree) {
@@ -829,31 +924,20 @@ int translate_binop(ASTree *operator) {
 int assign_aggregate(ASTree *assignment, ASTree *lvalue, ASTree *expr) {
   assignment->first_instr = liter_copy(lvalue->first_instr);
   if (assignment->first_instr == NULL) return -1;
-  assignment->last_instr = liter_copy(lvalue->last_instr);
-  if (assignment->last_instr == NULL) return -1;
 
   InstructionData *lvalue_data = liter_get(lvalue->last_instr);
   InstructionData *expr_data = liter_get(expr->last_instr);
-  size_t agg_eightbytes = typespec_get_eightbytes(expr->type);
-  size_t i;
-  for (i = 0; i < agg_eightbytes; ++i) {
-    InstructionData *mov_data = instr_init(OP_MOV);
-    set_op_ind(&mov_data->src, i * 8, expr_data->dest.reg.num);
-    set_op_reg(&mov_data->dest, REG_QWORD, vreg_count++);
-
-    InstructionData *mov_data_2 = instr_init(OP_MOV);
-    mov_data_2->src = mov_data->dest;
-    set_op_ind(&mov_data_2->dest, i * 8, lvalue_data->dest.reg.num);
-    int status =
-        liter_push_back(assignment->last_instr, &assignment->last_instr, 2,
-                        mov_data, mov_data_2);
-    if (status) return status;
-  }
+  ListIter *temp = llist_iter_last(text_section);
+  int status = bulk_mtom(lvalue_data->dest.reg.num, expr_data->dest.reg.num,
+                         assignment->type, temp);
+  free(temp);
+  if (status) return status;
   InstructionData *dummy_data = instr_init(OP_MOV);
   dummy_data->src = dummy_data->dest = lvalue_data->dest;
-  int status = liter_push_back(assignment->last_instr, &assignment->last_instr,
-                               1, dummy_data);
+  status = llist_push_back(text_section, dummy_data);
   if (status) return status;
+  assignment->last_instr = llist_iter_last(text_section);
+  if (assignment->last_instr == NULL) return -1;
   return 0;
 }
 
@@ -900,31 +984,21 @@ int translate_agg_arg(ASTree *call, ASTree *arg) {
   InstructionData *arg_data = liter_get(arg->last_instr);
   if (arg_eightbytes <= 2 &&
       arg_eightbytes + reg_eightbytes <= PARAM_REG_COUNT) {
-    InstructionData *mov_data = instr_init(OP_MOV);
-    set_op_ind(&mov_data->src, NO_DISP, arg_data->dest.reg.num);
-    set_op_reg(&mov_data->dest, REG_QWORD, PARAM_REGS[reg_eightbytes++]);
-    int status = liter_push_back(call->last_instr, NULL, 1, mov_data);
+    int status = bulk_mtor(PARAM_REGS + reg_eightbytes, arg_data->dest.reg.num,
+                           NO_DISP, arg->type, call->last_instr);
+    reg_eightbytes += arg_eightbytes;
     if (status) return status;
-    if (arg_eightbytes == 2) {
-      InstructionData *mov_data_2 = instr_init(OP_MOV);
-      set_op_ind(&mov_data_2->src, 8, arg_data->dest.reg.num);
-      set_op_reg(&mov_data_2->dest, REG_QWORD, PARAM_REGS[reg_eightbytes++]);
-      int status = liter_push_back(call->last_instr, NULL, 1, mov_data_2);
-      if (status) return status;
-    }
   } else {
-    size_t i;
-    for (i = 0; i < arg_eightbytes; ++i) {
-      InstructionData *mov_data = instr_init(OP_MOV);
-      set_op_ind(&mov_data->src, i * 8, arg_data->dest.reg.num);
-      set_op_reg(&mov_data->dest, REG_QWORD, vreg_count++);
-      InstructionData *push_data = instr_init(OP_PUSH);
-      push_data->dest = mov_data->dest;
-      int status =
-          liter_push_back(call->last_instr, NULL, 2, mov_data, push_data);
-      if (status) return status;
-      ++stack_eightbytes;
-    }
+    int status = bulk_mtom(RSP_VREG, arg_data->dest.reg.num, arg->type,
+                           call->last_instr);
+    if (status) return status;
+    stack_eightbytes += arg_eightbytes;
+    InstructionData *sub_data = instr_init(OP_SUB);
+    set_op_reg(&sub_data->dest, REG_QWORD, RSP_VREG);
+    set_op_imm(&sub_data->src, arg_eightbytes * 8);
+    /* push after since instructions will be reversed */
+    status = liter_push_back(call->last_instr, NULL, 1, sub_data);
+    if (status) return status;
   }
   return 0;
 }
@@ -1022,19 +1096,11 @@ int translate_call(ASTree *call) {
 
   if (!typespec_is_void(call->type)) {
     if (typespec_is_struct(call->type) || typespec_is_union(call->type)) {
-      size_t ret_eightbytes = typespec_get_eightbytes(call->type);
-      if (ret_eightbytes <= 2) {
-        InstructionData *mov_data = instr_init(OP_MOV);
-        set_op_reg(&mov_data->src, REG_QWORD, RAX_VREG);
-        set_op_ind(&mov_data->dest, -window_size, RBP_VREG);
-        int status = llist_push_back(text_section, mov_data);
-        if (status) return status;
-      }
-      if (ret_eightbytes == 2) {
-        InstructionData *mov_data_2 = instr_init(OP_MOV);
-        set_op_reg(&mov_data_2->src, REG_QWORD, RDX_VREG);
-        set_op_ind(&mov_data_2->dest, -window_size + 8, RBP_VREG);
-        int status = llist_push_back(text_section, mov_data_2);
+      if (typespec_get_eightbytes(call->type) <= 2) {
+        ListIter *temp = llist_iter_last(text_section);
+        int status =
+            bulk_rtom(RBP_VREG, -window_size, RETURN_REGS, call->type, temp);
+        free(temp);
         if (status) return status;
       }
       InstructionData *lea_data = instr_init(OP_LEA);
@@ -1100,19 +1166,13 @@ int translate_params(ASTree *function, CompilerState *state) {
     if (param_symval_eightbytes <= 2 &&
         reg_eightbytes + param_symval_eightbytes <= PARAM_REG_COUNT) {
       assign_stack_space(param_symval);
-      InstructionData *mov_data = instr_init(OP_MOV);
-      set_op_ind(&mov_data->dest, param_symval->offset, param_symval->reg);
-      set_op_reg(&mov_data->src, REG_QWORD, PARAM_REGS[reg_eightbytes++]);
-      int status = llist_push_back(text_section, mov_data);
+      ListIter *temp = llist_iter_last(text_section);
+      int status =
+          bulk_rtom(param_symval->reg, param_symval->offset,
+                    PARAM_REGS + reg_eightbytes, &param_symval->type, temp);
+      reg_eightbytes += param_symval_eightbytes;
+      free(temp);
       if (status) return status;
-      if (param_symval_eightbytes == 2) {
-        InstructionData *mov_data_2 = instr_init(OP_MOV);
-        set_op_ind(&mov_data_2->dest, param_symval->offset + 8,
-                   param_symval->reg);
-        set_op_reg(&mov_data_2->src, REG_QWORD, PARAM_REGS[reg_eightbytes++]);
-        int status = llist_push_back(text_section, mov_data_2);
-        if (status) return status;
-      }
     } else {
       param_symval->offset = stack_eightbytes * 8;
       param_symval->reg = RBP_VREG;
@@ -1479,37 +1539,21 @@ int return_aggregate(ASTree *ret, ASTree *expr) {
   size_t expr_eightbytes = typespec_get_eightbytes(expr->type);
 
   if (expr_eightbytes <= 2) {
-    InstructionData *mov_data = instr_init(OP_MOV);
-    set_op_ind(&mov_data->src, NO_DISP, expr_data->dest.reg.num);
-    set_op_reg(&mov_data->dest, REG_QWORD, RAX_VREG);
-    int status = llist_push_back(text_section, mov_data);
+    ListIter *temp = llist_iter_last(text_section);
+    int status = bulk_mtor(RETURN_REGS, expr_data->dest.reg.num, NO_DISP,
+                           expr->type, temp);
+    free(temp);
     if (status) return status;
-    if (expr_eightbytes == 2) {
-      InstructionData *mov_data_2 = instr_init(OP_MOV);
-      set_op_ind(&mov_data_2->src, 8, expr_data->dest.reg.num);
-      set_op_reg(&mov_data_2->dest, REG_QWORD, RDX_VREG);
-      int status = llist_push_back(text_section, mov_data_2);
-      if (status) return status;
-    }
   } else {
     InstructionData *hidden_mov_data = instr_init(OP_MOV);
-    set_op_reg(&hidden_mov_data->dest, REG_QWORD, RDI_VREG);
+    set_op_reg(&hidden_mov_data->dest, REG_QWORD, vreg_count++);
     set_op_ind(&hidden_mov_data->src, -8, RBP_VREG);
     int status = llist_push_back(text_section, hidden_mov_data);
     if (status) return status;
-    size_t i;
-    for (i = 0; i < expr_eightbytes; ++i) {
-      InstructionData *mov_data = instr_init(OP_MOV);
-      set_op_ind(&mov_data->src, i * 8, expr_data->dest.reg.num);
-      set_op_reg(&mov_data->dest, REG_QWORD, vreg_count++);
-      InstructionData *mov_data_2 = instr_init(OP_MOV);
-      mov_data_2->src = mov_data->dest;
-      set_op_ind(&mov_data_2->dest, i * 8, RDI_VREG);
-      int status = llist_push_back(text_section, mov_data);
-      if (status) return status;
-      status = llist_push_back(text_section, mov_data_2);
-      if (status) return status;
-    }
+    ListIter *temp = llist_iter_last(text_section);
+    status = bulk_mtom(vreg_count, expr_data->dest.reg.num, expr->type, temp);
+    free(temp);
+    if (status) return status;
   }
 
   if (ret->first_instr == NULL) return -1;
