@@ -227,10 +227,6 @@ static LinkedList *text_section;
 static LinkedList *data_section;
 static LinkedList *bss_section;
 
-static char *translate_stride(ASTree *index, ASTree *memblock);
-static char *translate_reg_type(ASTree *);
-static char *translate_type(void *type, int flags);
-
 InstructionData *instr_init(Opcode opcode) {
   InstructionData *ret = calloc(1, sizeof(InstructionData));
   ret->opcode = opcode;
@@ -483,35 +479,6 @@ int rvalue_conversions(ASTree *expr, const TypeSpec *to) {
   } else {
     return -1;
   }
-}
-
-int resolve_lval(ASTree *lvalue_tree) {
-  InstructionData *lvalue_data = liter_get(lvalue_tree->last_instr);
-  InstructionData *mov_data = instr_init(OP_MOV);
-  set_op_ind(&mov_data->src, NO_DISP, lvalue_data->dest.reg.num);
-  set_op_reg(&mov_data->dest, typespec_get_width(lvalue_tree->type),
-             vreg_count++);
-  int status = liter_push_back(lvalue_tree->last_instr,
-                               &lvalue_tree->last_instr, 1, mov_data);
-  if (status) {
-    free(mov_data);
-    return status;
-  }
-  return 0;
-}
-
-int mov_to_reg(ASTree *tree) {
-  InstructionData *tree_data = liter_get(tree->last_instr);
-  InstructionData *mov_data = instr_init(OP_MOV);
-  mov_data->src = tree_data->dest;
-  set_op_reg(&tree_data->dest, typespec_get_width(tree->type), vreg_count++);
-  int status =
-      liter_push_back(tree->last_instr, &tree->last_instr, 1, mov_data);
-  if (status) {
-    free(mov_data);
-    return status;
-  }
-  return 0;
 }
 
 void resolve_object(CompilerState *state, Operand *operand, const char *ident) {
@@ -1896,4 +1863,54 @@ int instr_to_str(InstructionData *data, char *str, size_t size) {
       ret += chars_written;
   }
   return ret;
+}
+
+int generator_print_il(FILE *out) {
+  char buffer[1024];
+  int chars_written = fprintf(out, SECTION_FMT, "text");
+  if (chars_written < 0) return chars_written;
+  size_t i;
+  for (i = 0; i < llist_size(text_section); ++i) {
+    InstructionData *data = llist_get(text_section, i);
+    chars_written = instr_to_str(data, buffer, 1024);
+    if (chars_written < 0) return chars_written;
+    chars_written = fprintf(out, "%s\n", buffer);
+    if (chars_written < 0) return chars_written;
+  }
+
+  chars_written = fprintf(out, SECTION_FMT, "data");
+  if (chars_written < 0) return chars_written;
+  for (i = 0; i < llist_size(data_section); ++i) {
+    InstructionData *data = llist_get(data_section, i);
+    chars_written = instr_to_str(data, buffer, 1024);
+    if (chars_written < 0) return chars_written;
+    chars_written = fprintf(out, "%s\n", buffer);
+    if (chars_written < 0) return chars_written;
+  }
+
+  chars_written = fprintf(out, SECTION_FMT, "bss");
+  if (chars_written < 0) return chars_written;
+  for (i = 0; i < llist_size(bss_section); ++i) {
+    InstructionData *data = llist_get(bss_section, i);
+    chars_written = instr_to_str(data, buffer, 1024);
+    if (chars_written < 0) return chars_written;
+    chars_written = fprintf(out, "%s\n", buffer);
+    if (chars_written < 0) return chars_written;
+  }
+  return 0;
+}
+
+void asmgen_init_globals(void) {
+  text_section = malloc(sizeof(*text_section));
+  assert(!llist_init(text_section, free, NULL));
+  data_section = malloc(sizeof(*data_section));
+  assert(!llist_init(data_section, free, NULL));
+  bss_section = malloc(sizeof(*bss_section));
+  assert(!llist_init(bss_section, free, NULL));
+}
+
+void asmgen_free_globals(void) {
+  assert(!llist_destroy(text_section));
+  assert(!llist_destroy(data_section));
+  assert(!llist_destroy(bss_section));
 }
