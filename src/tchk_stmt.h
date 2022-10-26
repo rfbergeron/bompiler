@@ -9,9 +9,8 @@ ASTree *validate_ifelse(ASTree *ifelse, ASTree *condition, ASTree *if_body,
 ASTree *validate_switch(ASTree *switch_, ASTree *expr, ASTree *stmt);
 ASTree *validate_while(ASTree *while_, ASTree *condition, ASTree *stmt);
 ASTree *validate_do(ASTree *do_, ASTree *stmt, ASTree *condition);
-ASTree *validate_for_exprs(ASTree *left_paren, ASTree *init_expr,
-                           ASTree *pre_iter_expr, ASTree *reinit_expr);
-ASTree *validate_for(ASTree *for_, ASTree *left_paren, ASTree *stmt);
+ASTree *validate_for(ASTree *for_, ASTree *init_expr, ASTree *pre_iter_expr,
+                     ASTree *reinit_expr, ASTree *body);
 ASTree *validate_label(ASTree *label, ASTree *ident_node, ASTree *stmt);
 ASTree *validate_case(ASTree *case_, ASTree *expr, ASTree *stmt);
 ASTree *validate_default(ASTree *default_, ASTree *stmt);

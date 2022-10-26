@@ -180,26 +180,20 @@ stmt                : block                                             { $$ = b
                     | switch                                            { $$ = bcc_yyval = $1; }
                     | return                                            { $$ = bcc_yyval = $1; }
                     | labelled_stmt                                     { $$ = bcc_yyval = $1; }
-                    | expr ';'                                          { $$ = bcc_yyval = $1; parser_cleanup (1, $2); }
                     | TOK_CONTINUE ';'                                  { $$ = bcc_yyval = validate_continue($1); astree_destroy($2); }
                     | TOK_BREAK ';'                                     { $$ = bcc_yyval = validate_break($1); astree_destroy($2); }
                     | TOK_GOTO any_ident ';'                            { $$ = bcc_yyval = validate_goto($1, $2); astree_destroy($3); }
-                    | ';'                                               { $$ = bcc_yyval = &EMPTY_EXPR; astree_destroy($1); }
+                    | stmt_expr                                         { $$ = bcc_yyval = $1; }
+                    ;
+stmt_expr           : expr ';'                                          { $$ = bcc_yyval = $1; astree_destroy($2); }
+                    | ';'                                               { $$ = bcc_yyval = $1; }
                     ;
 labelled_stmt       : any_ident ':' stmt                                { $$ = bcc_yyval = validate_label(parser_make_label($1), $1, $3); parser_cleanup(1, $2); }
                     | TOK_DEFAULT ':' stmt                              { $$ = bcc_yyval = validate_default($1, $3); parser_cleanup(1, $2); }
                     | TOK_CASE cond_expr   ':' stmt                     { $$ = bcc_yyval = validate_case($1, $2, $4); parser_cleanup(1, $3); }
                     ;
-for                 : TOK_FOR for_exprs stmt                            { $$ = bcc_yyval = validate_for($1, $2, $3); }
-                    ;
-for_exprs           : '(' ';' ';' ')'                                   { $$ = bcc_yyval = validate_for_exprs($1, &EMPTY_EXPR, &EMPTY_EXPR, &EMPTY_EXPR); parser_cleanup(3, $2, $3, $4); }
-                    | '(' expr ';' ';' ')'                              { $$ = bcc_yyval = validate_for_exprs($1, $2, &EMPTY_EXPR, &EMPTY_EXPR); parser_cleanup(3, $3, $4, $5); }
-                    | '(' ';' expr ';' ')'                              { $$ = bcc_yyval = validate_for_exprs($1, &EMPTY_EXPR, $3, &EMPTY_EXPR); parser_cleanup(3, $2, $4, $5); }
-                    | '(' ';' ';' expr ')'                              { $$ = bcc_yyval = validate_for_exprs($1, &EMPTY_EXPR, &EMPTY_EXPR, $4); parser_cleanup(3, $2, $3, $5); }
-                    | '(' expr ';' expr ';' ')'                         { $$ = bcc_yyval = validate_for_exprs($1, $2, $4, &EMPTY_EXPR); parser_cleanup(3, $3, $5, $6); }
-                    | '(' expr ';' ';' expr ')'                         { $$ = bcc_yyval = validate_for_exprs($1, $2, &EMPTY_EXPR, $5); parser_cleanup(3, $3, $4, $6); }
-                    | '(' ';' expr ';' expr ')'                         { $$ = bcc_yyval = validate_for_exprs($1, &EMPTY_EXPR, $3, $5); parser_cleanup(3, $2, $4, $6); }
-                    | '(' expr ';' expr ';' expr ')'                    { $$ = bcc_yyval = validate_for_exprs($1, $2, $4, $6); parser_cleanup(3, $3, $5, $7); }
+for                 : TOK_FOR '(' stmt_expr stmt_expr ')' stmt          { $$ = bcc_yyval = validate_for($1, $3, $4, parser_new_sym($5, ';'), $6); parser_cleanup(1, $2); }
+                    | TOK_FOR '(' stmt_expr stmt_expr expr ')' stmt     { $$ = bcc_yyval = validate_for($1, $3, $4, $5, $7); parser_cleanup(2, $2, $6); }
                     ;
 dowhile             : TOK_DO stmt TOK_WHILE '(' expr ')' ';'            { $$ = bcc_yyval = validate_do($1, $2, $5); parser_cleanup (4, $3, $4, $6, $7); }
                     ;
