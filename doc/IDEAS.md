@@ -59,6 +59,28 @@ that has does not do most of the things that I thought:
 - Tags and enumeration constants declared as struct and union members are
   "hoisted" up into the enclosing scope
 
+## Empty Expressions, Uninitialized Variables and For Loops
+Because for loops might not have all of their control expressions set, no-ops
+need to be generated so that the iterators are set correctly and labels can be
+inserted into the correct locations in the generated code. This is hard with
+the way for loops are currently parsed.
+
+`EMPTY_EXPR` will be renamed to `EMPTY_NODE` or similar. Empty
+statement-expressions will not use `EMPTY_NODE`, instead creating a dummy node.
+This node will have a single no-op instruction associated with it.
+
+For loop control expressions will instead be parsed as if they were two
+statement-expressions, optionally followed by a third expression. If absent,
+the reinit expression will be treated the same as an empty statement-expression.
+If the conditional expression is empty (signified by the node having the symbol
+';'), an unconditional jump to the for-loop body will be emitted, instead of the
+usual test-and-jmp sequence.
+
+Block scope declarations that have no initializer(s) or that have static storage
+will also have a single no-op instruction associated with them. This is to
+ensure that their parent node can always copy the iterators which point to the
+first and last instructions of its children.
+
 ## Pointer Dereferencing/Indexing and Arrays
 Accessing the underlying elements of pointers and arrays is different when the
 element type is an array. Because the elements of multidimensional arrays are

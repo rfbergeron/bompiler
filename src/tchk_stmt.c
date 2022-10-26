@@ -133,34 +133,21 @@ ASTree *validate_do(ASTree *do_, ASTree *stmt, ASTree *condition) {
   return astree_adopt(do_, 2, condition, stmt);
 }
 
-ASTree *validate_for_exprs(ASTree *left_paren, ASTree *init_expr,
-                           ASTree *pre_iter_expr, ASTree *reinit_expr) {
-  if (init_expr->symbol == TOK_TYPE_ERROR) {
-    return astree_propogate_errnode_v(left_paren, 3, init_expr, pre_iter_expr,
-                                      reinit_expr);
-  } else if (pre_iter_expr->symbol == TOK_TYPE_ERROR) {
-    return astree_propogate_errnode_v(left_paren, 3, init_expr, pre_iter_expr,
-                                      reinit_expr);
-  } else if (reinit_expr->symbol == TOK_TYPE_ERROR) {
-    return astree_propogate_errnode_v(left_paren, 3, init_expr, pre_iter_expr,
-                                      reinit_expr);
+ASTree *validate_for(ASTree *for_, ASTree *init_expr, ASTree *pre_iter_expr,
+                     ASTree *reinit_expr, ASTree *body) {
+  if (init_expr->symbol == TOK_TYPE_ERROR ||
+      pre_iter_expr->symbol == TOK_TYPE_ERROR ||
+      reinit_expr->symbol == TOK_TYPE_ERROR || body->symbol == TOK_TYPE_ERROR) {
+    return astree_propogate_errnode_v(for_, 4, init_expr, pre_iter_expr,
+                                      reinit_expr, body);
   }
 
-  if (pre_iter_expr != &EMPTY_EXPR) {
+  if (pre_iter_expr->symbol != ';') {
     if (!typespec_is_scalar(pre_iter_expr->type)) {
       return astree_create_errnode(
-          astree_adopt(left_paren, 3, init_expr, pre_iter_expr, reinit_expr),
-          BCC_TERR_EXPECTED_SCALCONST, 2, left_paren, pre_iter_expr);
+          astree_adopt(for_, 4, init_expr, pre_iter_expr, reinit_expr, body),
+          BCC_TERR_EXPECTED_SCALCONST, 2, for_, pre_iter_expr);
     }
-  }
-  return astree_adopt(left_paren, 3, init_expr, pre_iter_expr, reinit_expr);
-}
-
-ASTree *validate_for(ASTree *for_, ASTree *left_paren, ASTree *stmt) {
-  if (left_paren->symbol == TOK_TYPE_ERROR) {
-    return astree_propogate_errnode_v(for_, 2, left_paren, stmt);
-  } else if (stmt->symbol == TOK_TYPE_ERROR) {
-    return astree_propogate_errnode_v(for_, 2, left_paren, stmt);
   }
 
   assert(state_get_break_id(state) == for_->jump_id);
@@ -168,7 +155,7 @@ ASTree *validate_for(ASTree *for_, ASTree *left_paren, ASTree *stmt) {
   state_pop_break_id(state);
   state_pop_continue_id(state);
 
-  return astree_adopt(for_, 2, left_paren, stmt);
+  return astree_adopt(for_, 4, init_expr, pre_iter_expr, reinit_expr, body);
 }
 
 ASTree *validate_label(ASTree *label, ASTree *ident_node, ASTree *stmt) {

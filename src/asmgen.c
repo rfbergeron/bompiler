@@ -179,6 +179,7 @@ static const char LABEL_FMT[] = "%s: \n";
 static const char COND_FMT[] = ".C%lu";
 static const char END_FMT[] = ".E%lu";
 static const char STMT_FMT[] = ".S%lu";
+static const char REINIT_FMT[] = ".R%lu";
 static const char LOOP_FMT[] = ".L%lu";
 static const char BOOL_FMT[] = ".B%lu";
 static const char DEF_FMT[] = ".D%lu";
@@ -566,6 +567,16 @@ int restore_volatile_regs() {
     int status = llist_push_back(text_section, pop_data);
     if (status) return status;
   }
+  return 0;
+}
+
+int translate_empty_expr(ASTree *empty_expr) {
+  InstructionData *nop_data = instr_init(OP_NOP);
+  llist_push_back(text_section, nop_data);
+  empty_expr->first_instr = llist_iter_last(text_section);
+  if (empty_expr->first_instr == NULL) return -1;
+  empty_expr->last_instr = llist_iter_last(text_section);
+  if (empty_expr->last_instr == NULL) return -1;
   return 0;
 }
 
@@ -1407,44 +1418,49 @@ static int translate_while(ASTree *while_) {
 }
 
 static int translate_for(ASTree *for_, CompilerState *state) {
-  ASTree *for_exprs = astree_get(for_, 0);
-  /* TODO(Robert): remember to have empty parts of the for loop generate NOP */
-  ASTree *initializer = astree_get(for_exprs, 0);
+  ASTree *initializer = astree_get(for_, 0);
   for_->first_instr = liter_copy(initializer->first_instr);
   if (for_->first_instr == NULL) return -1;
 
-  ASTree *condition = astree_get(for_exprs, 1);
-  /* TODO(Robert): mov vrxq, 1 when no condition */
-  int status = rvalue_conversions(condition, condition->type);
-  if (status) return status;
-  InstructionData *condition_data = liter_get(condition->last_instr);
-  InstructionData *condition_label = instr_init(OP_NOP);
-  sprintf(condition_label->label, COND_FMT, for_->jump_id);
-  status = liter_push_front(condition->first_instr, NULL, 1, condition_label);
-  if (status) return status;
-
-  InstructionData *test_data = instr_init(OP_TEST);
-  test_data->dest = test_data->src = condition_data->dest;
-  InstructionData *test_jmp_data = instr_init(OP_JZ);
-  set_op_dir(&test_jmp_data->dest, NO_DISP, END_FMT, for_->jump_id);
-  status =
-      liter_push_back(condition->last_instr, NULL, 2, test_data, test_jmp_data);
-  if (status) return status;
-
-  /* move reinit instructions to loop end */
-  ASTree *reinitializer = astree_get(for_exprs, 2);
-  ASTree *body = astree_get(for_, 1);
-  status = liter_move_range(reinitializer->first_instr,
-                            reinitializer->last_instr, body->last_instr);
+  ASTree *condition = astree_get(for_, 1);
+  InstructionData *condition_start_data = liter_get(condition->first_instr);
+  sprintf(condition_start_data->label, COND_FMT, for_->jump_id);
+  if (condition->symbol != ';') {
+    int status = rvalue_conversions(condition, condition->type);
+    if (status) return status;
+    InstructionData *condition_data = liter_get(condition->last_instr);
+    InstructionData *test_data = instr_init(OP_TEST);
+    test_data->dest = test_data->src = condition_data->dest;
+    InstructionData *test_jmp_data = instr_init(OP_JZ);
+    set_op_dir(&test_jmp_data->dest, NO_DISP, END_FMT, for_->jump_id);
+    status = liter_push_back(condition->last_instr, NULL, 2, test_data,
+                             test_jmp_data);
+    if (status) return status;
+  }
+  InstructionData *body_jmp_data = instr_init(OP_JMP);
+  set_op_dir(&body_jmp_data->dest, NO_DISP, STMT_FMT, for_->jump_id);
+  int status = liter_push_back(condition->last_instr, NULL, 1, body_jmp_data);
   if (status) return status;
 
+  ASTree *reinitializer = astree_get(for_, 2);
+  InstructionData *reinit_start_data = liter_get(reinitializer->first_instr);
+  sprintf(reinit_start_data->label, REINIT_FMT, for_->jump_id);
   InstructionData *cond_jmp_data = instr_init(OP_JMP);
   set_op_dir(&cond_jmp_data->dest, NO_DISP, COND_FMT, for_->jump_id);
+  status = liter_push_back(reinitializer->last_instr, NULL, 1, cond_jmp_data);
+  if (status) return status;
+
+  ASTree *body = astree_get(for_, 3);
+  InstructionData *body_label = instr_init(OP_NOP);
+  sprintf(body_label->label, STMT_FMT, for_->jump_id);
+  status = liter_push_front(body->first_instr, NULL, 1, body_label);
+  if (status) return status;
+  InstructionData *reinit_jmp_data = instr_init(OP_JMP);
+  set_op_dir(&reinit_jmp_data->dest, NO_DISP, COND_FMT, for_->jump_id);
   InstructionData *end_label = instr_init(OP_NOP);
   sprintf(end_label->label, END_FMT, for_->jump_id);
-
-  status = liter_push_back(reinitializer->last_instr, &for_->last_instr, 2,
-                           cond_jmp_data, end_label);
+  status = liter_push_back(body->last_instr, &for_->last_instr, 2,
+                           reinit_jmp_data, end_label);
   if (status) return status;
   return 0;
 }
