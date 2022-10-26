@@ -211,6 +211,7 @@ int main(int argc, char **argv) {
   astree_print_symbols(UNWRAP(parser_root), symfile, 0);
   astree_print_tree(UNWRAP(parser_root), astfile, 0);
 
+  /*
   if (skip_asm || skip_type_check) goto cleanup;
   status = translate_file(parser_root);
   if (status) {
@@ -223,6 +224,7 @@ int main(int argc, char **argv) {
     warnx("Failed to emit assembly instructions.");
     goto cleanup;
   }
+  */
 
 cleanup:
   if (parser_root->symbol == TOK_TYPE_ERROR) {
