@@ -16,83 +16,95 @@
 #define NO_DISP 0
 
 /* macros used to generate string constants for OPCODES */
-#define FOREACH_OPCODE(GENERATOR) \
-  GENERATOR(INVALID)              \
-  /* arithmetic */                \
-  GENERATOR(ADD)                  \
-  GENERATOR(SUB)                  \
-  GENERATOR(MUL)                  \
-  GENERATOR(DIV)                  \
-  GENERATOR(INC)                  \
-  GENERATOR(DEC)                  \
-  GENERATOR(NEG)                  \
-  GENERATOR(IMUL)                 \
-  GENERATOR(IDIV)                 \
-  /* compare and test */          \
-  GENERATOR(TEST)                 \
-  GENERATOR(CMP)                  \
-  GENERATOR(SETE)                 \
-  GENERATOR(SETNE)                \
-  GENERATOR(SETG)                 \
-  GENERATOR(SETGE)                \
-  GENERATOR(SETL)                 \
-  GENERATOR(SETLE)                \
-  GENERATOR(SETA)                 \
-  GENERATOR(SETAE)                \
-  GENERATOR(SETB)                 \
-  GENERATOR(SETBE)                \
-  GENERATOR(SETZ)                 \
-  GENERATOR(SETNZ)                \
-  /* jump */                      \
-  GENERATOR(JMP)                  \
-  GENERATOR(JE)                   \
-  GENERATOR(JNE)                  \
-  GENERATOR(JG)                   \
-  GENERATOR(JGE)                  \
-  GENERATOR(JL)                   \
-  GENERATOR(JLE)                  \
-  GENERATOR(JA)                   \
-  GENERATOR(JAE)                  \
-  GENERATOR(JB)                   \
-  GENERATOR(JBE)                  \
-  GENERATOR(JZ)                   \
-  GENERATOR(JNZ)                  \
-  /* logical and bitwise */       \
-  GENERATOR(NOT)                  \
-  GENERATOR(OR)                   \
-  GENERATOR(AND)                  \
-  GENERATOR(LEA)                  \
-  GENERATOR(XOR)                  \
-  /* shifts */                    \
-  GENERATOR(SHL)                  \
-  GENERATOR(SAL)                  \
-  GENERATOR(SHR)                  \
-  GENERATOR(SAR)                  \
-  /* code movement */             \
-  GENERATOR(MOV)                  \
-  GENERATOR(MOVZX)                \
-  GENERATOR(MOVSX)                \
-  GENERATOR(PUSH)                 \
-  GENERATOR(POP)                  \
-  GENERATOR(CALL)                 \
-  GENERATOR(LEAVE)                \
-  GENERATOR(RET)                  \
-  GENERATOR(NOP)                  \
-  /* data section definitions */  \
-  GENERATOR(DB)                   \
-  GENERATOR(DW)                   \
-  GENERATOR(DD)                   \
-  GENERATOR(DQ)                   \
-  /* bss section definitions */   \
-  GENERATOR(RESB)                 \
-  GENERATOR(RESW)                 \
-  GENERATOR(RESD)                 \
-  GENERATOR(RESQ)
+#define FOREACH_OPCODE(GENERATOR)       \
+  GENERATOR(INVALID, OPTYPE_INVALID, 0) \
+  /* arithmetic */                      \
+  GENERATOR(ADD, OPTYPE_BINARY, 1)      \
+  GENERATOR(SUB, OPTYPE_BINARY, 1)      \
+  GENERATOR(MUL, OPTYPE_BINARY, 1)      \
+  GENERATOR(DIV, OPTYPE_BINARY, 1)      \
+  GENERATOR(INC, OPTYPE_UNARY, 1)       \
+  GENERATOR(DEC, OPTYPE_UNARY, 1)       \
+  GENERATOR(NEG, OPTYPE_UNARY, 1)       \
+  GENERATOR(IMUL, OPTYPE_BINARY, 1)     \
+  GENERATOR(IDIV, OPTYPE_BINARY, 1)     \
+  /* compare and test */                \
+  GENERATOR(TEST, OPTYPE_BINARY, 1)     \
+  GENERATOR(CMP, OPTYPE_BINARY, 1)      \
+  GENERATOR(SETE, OPTYPE_UNARY, 0)      \
+  GENERATOR(SETNE, OPTYPE_UNARY, 0)     \
+  GENERATOR(SETG, OPTYPE_UNARY, 0)      \
+  GENERATOR(SETGE, OPTYPE_UNARY, 0)     \
+  GENERATOR(SETL, OPTYPE_UNARY, 0)      \
+  GENERATOR(SETLE, OPTYPE_UNARY, 0)     \
+  GENERATOR(SETA, OPTYPE_UNARY, 0)      \
+  GENERATOR(SETAE, OPTYPE_UNARY, 0)     \
+  GENERATOR(SETB, OPTYPE_UNARY, 0)      \
+  GENERATOR(SETBE, OPTYPE_UNARY, 0)     \
+  GENERATOR(SETZ, OPTYPE_UNARY, 0)      \
+  GENERATOR(SETNZ, OPTYPE_UNARY, 0)     \
+  /* jump */                            \
+  GENERATOR(JMP, OPTYPE_UNARY, 0)       \
+  GENERATOR(JE, OPTYPE_UNARY, 0)        \
+  GENERATOR(JNE, OPTYPE_UNARY, 0)       \
+  GENERATOR(JG, OPTYPE_UNARY, 0)        \
+  GENERATOR(JGE, OPTYPE_UNARY, 0)       \
+  GENERATOR(JL, OPTYPE_UNARY, 0)        \
+  GENERATOR(JLE, OPTYPE_UNARY, 0)       \
+  GENERATOR(JA, OPTYPE_UNARY, 0)        \
+  GENERATOR(JAE, OPTYPE_UNARY, 0)       \
+  GENERATOR(JB, OPTYPE_UNARY, 0)        \
+  GENERATOR(JBE, OPTYPE_UNARY, 0)       \
+  GENERATOR(JZ, OPTYPE_UNARY, 0)        \
+  GENERATOR(JNZ, OPTYPE_UNARY, 0)       \
+  /* logical and bitwise */             \
+  GENERATOR(NOT, OPTYPE_UNARY, 1)       \
+  GENERATOR(OR, OPTYPE_BINARY, 1)       \
+  GENERATOR(AND, OPTYPE_BINARY, 1)      \
+  GENERATOR(LEA, OPTYPE_BINARY, 1)      \
+  GENERATOR(XOR, OPTYPE_BINARY, 1)      \
+  /* shifts */                          \
+  GENERATOR(SHL, OPTYPE_BINARY, 1)      \
+  GENERATOR(SAL, OPTYPE_BINARY, 1)      \
+  GENERATOR(SHR, OPTYPE_BINARY, 1)      \
+  GENERATOR(SAR, OPTYPE_BINARY, 1)      \
+  /* code movement */                   \
+  GENERATOR(MOV, OPTYPE_BINARY, 1)      \
+  GENERATOR(MOVZ, OPTYPE_BINARY, 1)     \
+  GENERATOR(MOVS, OPTYPE_BINARY, 1)     \
+  GENERATOR(PUSH, OPTYPE_UNARY, 1)      \
+  GENERATOR(POP, OPTYPE_UNARY, 1)       \
+  GENERATOR(CALL, OPTYPE_UNARY, 0)      \
+  GENERATOR(LEAVE, OPTYPE_NULLARY, 0)   \
+  GENERATOR(RET, OPTYPE_NULLARY, 0)     \
+  GENERATOR(NOP, OPTYPE_NULLARY, 0)     \
+  /* data section definitions */        \
+  GENERATOR(DB, OPTYPE_UNARY, 0)        \
+  GENERATOR(DW, OPTYPE_UNARY, 0)        \
+  GENERATOR(DD, OPTYPE_UNARY, 0)        \
+  GENERATOR(DQ, OPTYPE_UNARY, 0)        \
+  /* bss section definitions */         \
+  GENERATOR(RESB, OPTYPE_UNARY, 0)      \
+  GENERATOR(RESW, OPTYPE_UNARY, 0)      \
+  GENERATOR(RESD, OPTYPE_UNARY, 0)      \
+  GENERATOR(RESQ, OPTYPE_UNARY, 0)
 
-#define GENERATE_ENUM(ENUM) OP_##ENUM,
-#define GENERATE_STRING(STRING) #STRING,
+#define GENERATE_ENUM(CODE, TYPE, BOOL) OP_##CODE,
+#define GENERATE_STRING(CODE, TYPE, BOOL) #CODE,
+#define GENERATE_TYPE(CODE, TYPE, BOOL) \
+  case OP_##CODE:                       \
+    return TYPE;
+#define GENERATE_NEEDS_WIDTH(CODE, TYPE, BOOL) \
+  case OP_##CODE:                              \
+    return BOOL;
 
 typedef enum opcode { FOREACH_OPCODE(GENERATE_ENUM) OPCODE_COUNT } Opcode;
+typedef enum optype {
+  OPTYPE_INVALID = -1,
+  OPTYPE_NULLARY,
+  OPTYPE_UNARY,
+  OPTYPE_BINARY
+} OpType;
 
 typedef enum address_mode {
   MODE_NONE,
@@ -116,7 +128,7 @@ typedef enum index_scale {
   SCALE_DWORD = 4,
   SCALE_QWORD = 8
 } IndexScale;
-const char WIDTH_TO_CHAR[] = {'@', 'b', 'w', '@', 'd', '@', '@', '@', 'q'};
+const char WIDTH_TO_CHAR[] = {'@', 'B', 'W', '@', 'L', '@', '@', '@', 'Q'};
 
 typedef union operand {
   struct opall {
@@ -317,16 +329,16 @@ int bulk_mtor(const size_t *dest_regs, size_t src_memreg, ptrdiff_t src_disp,
         InstructionData *mov_data = instr_init(OP_MOV);
         set_op_ind(&mov_data->src, chunk_disp, src_memreg);
         set_op_reg(&mov_data->dest, alignment, vreg_count++);
-        InstructionData *movzx_data = instr_init(OP_MOVZX);
-        movzx_data->src = mov_data->dest;
-        set_op_reg(&movzx_data->dest, REG_QWORD, vreg_count++);
+        InstructionData *movz_data = instr_init(OP_MOVZ);
+        movz_data->src = mov_data->dest;
+        set_op_reg(&movz_data->dest, REG_QWORD, vreg_count++);
         InstructionData *shl_data = instr_init(OP_SHL);
-        shl_data->dest = movzx_data->dest;
+        shl_data->dest = movz_data->dest;
         set_op_imm(&shl_data->src, j);
         InstructionData *bitor_data = instr_init(OP_OR);
-        bitor_data->src = movzx_data->dest;
+        bitor_data->src = movz_data->dest;
         set_op_reg(&bitor_data->dest, REG_QWORD, dest_regs[i]);
-        int status = liter_push_back(where, NULL, 4, mov_data, movzx_data,
+        int status = liter_push_back(where, NULL, 4, mov_data, movz_data,
                                      shl_data, bitor_data);
         if (status) return status;
       }
@@ -419,6 +431,22 @@ Opcode opcode_from_operator(ASTree *tree) {
   }
 }
 
+OpType optype_from_opcode(Opcode opcode) {
+  switch (opcode) {
+    FOREACH_OPCODE(GENERATE_TYPE)
+    default:
+      return OPTYPE_INVALID;
+  }
+}
+
+int opcode_needs_width(Opcode opcode) {
+  switch (opcode) {
+    FOREACH_OPCODE(GENERATE_NEEDS_WIDTH);
+    default:
+      return 0;
+  }
+}
+
 void assign_stack_space(SymbolValue *symval) {
   size_t width = typespec_get_width(&symval->type);
   size_t alignment = typespec_get_alignment(&symval->type);
@@ -439,9 +467,9 @@ void assign_stack_space(SymbolValue *symval) {
 /* NOTE: on x64, most operations that write to the lower 32 bits of a
  * register will zero the upper 32 bits.
  *
- * any signed int -> any wider unsigned int: movzx
- * any signed int -> any wider signed int: movsx
- * any unsigned int -> any wider int: movzx
+ * any signed int -> any wider unsigned int: movz
+ * any signed int -> any wider signed int: movs
+ * any unsigned int -> any wider int: movz
  * any int -> any narrower int: simple mov
  * any int -> any int of same width: nop
  */
@@ -472,15 +500,15 @@ int rvalue_conversions(ASTree *expr, const TypeSpec *to) {
   if (from_width >= to_width) {
     return 0;
   } else if (from->base == TYPE_SIGNED) {
-    InstructionData *movsx_data = instr_init(OP_MOVSX);
-    movsx_data->src = expr_data->dest;
-    set_op_reg(&movsx_data->dest, to_width, vreg_count++);
-    return liter_push_back(expr->last_instr, &expr->last_instr, 1, movsx_data);
+    InstructionData *movs_data = instr_init(OP_MOVS);
+    movs_data->src = expr_data->dest;
+    set_op_reg(&movs_data->dest, to_width, vreg_count++);
+    return liter_push_back(expr->last_instr, &expr->last_instr, 1, movs_data);
   } else if (from->base == TYPE_UNSIGNED) {
-    InstructionData *movzx_data = instr_init(OP_MOVZX);
-    movzx_data->src = expr_data->dest;
-    set_op_reg(&movzx_data->dest, to_width, vreg_count++);
-    return liter_push_back(expr->last_instr, &expr->last_instr, 1, movzx_data);
+    InstructionData *movz_data = instr_init(OP_MOVZ);
+    movz_data->src = expr_data->dest;
+    set_op_reg(&movz_data->dest, to_width, vreg_count++);
+    return liter_push_back(expr->last_instr, &expr->last_instr, 1, movz_data);
   } else {
     return -1;
   }
@@ -617,14 +645,14 @@ int translate_logical_not(ASTree * not ) {
   InstructionData *setz_data = instr_init(OP_SETZ);
   set_op_reg(&setz_data->dest, REG_BYTE, vreg_count++);
 
-  InstructionData *movzx_data = instr_init(OP_MOVZX);
-  movzx_data->src = setz_data->dest;
-  set_op_reg(&movzx_data->dest, REG_DWORD, vreg_count++);
+  InstructionData *movz_data = instr_init(OP_MOVZ);
+  movz_data->src = setz_data->dest;
+  set_op_reg(&movz_data->dest, REG_DWORD, vreg_count++);
 
   not ->first_instr = liter_copy(operand->first_instr);
   if (not ->first_instr == NULL) return -1;
   status = liter_push_back(operand->last_instr, &not ->first_instr, 3,
-                           test_data, setz_data, movzx_data);
+                           test_data, setz_data, movz_data);
   if (status) return status;
   return 0;
 }
@@ -657,14 +685,14 @@ int translate_logical(ASTree *operator) {
   InstructionData *setnz_data = instr_init(OP_SETNZ);
   set_op_reg(&setnz_data->dest, REG_BYTE, vreg_count++);
   sprintf(setnz_data->label, BOOL_FMT, branch_count++);
-  InstructionData *movzx_data = instr_init(OP_MOVZX);
-  movzx_data->src = setnz_data->src;
-  set_op_reg(&movzx_data->dest, REG_DWORD, vreg_count++);
+  InstructionData *movz_data = instr_init(OP_MOVZ);
+  movz_data->src = setnz_data->src;
+  set_op_reg(&movz_data->dest, REG_DWORD, vreg_count++);
 
   operator->first_instr = liter_copy(first->first_instr);
   if (operator->first_instr == NULL) return -1;
   status = liter_push_back(second->last_instr, &operator->last_instr, 3,
-                           test_second_data, setnz_data, movzx_data);
+                           test_second_data, setnz_data, movz_data);
   if (status) return status;
   return 0;
 }
@@ -692,11 +720,11 @@ int translate_comparison(ASTree *operator) {
   cmp_data->src = second_data->dest;
   InstructionData *setcc_data = instr_init(opcode_from_operator(operator));
   set_op_reg(&setcc_data->dest, REG_BYTE, vreg_count++);
-  InstructionData *movzx_data = instr_init(OP_MOVZX);
-  movzx_data->src = setcc_data->dest;
-  set_op_reg(&movzx_data->dest, REG_DWORD, vreg_count++);
+  InstructionData *movz_data = instr_init(OP_MOVZ);
+  movz_data->src = setcc_data->dest;
+  set_op_reg(&movz_data->dest, REG_DWORD, vreg_count++);
   return liter_push_back(second->last_instr, &operator->last_instr, 3, cmp_data,
-                         setcc_data, movzx_data);
+                         setcc_data, movz_data);
 }
 
 int translate_indirection(ASTree *indirection) {
