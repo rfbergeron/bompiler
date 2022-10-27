@@ -1862,6 +1862,70 @@ int operand_to_str(Operand *operand, char *str, size_t size) {
   }
 }
 
+int opcode_to_str(InstructionData *data, char *str, size_t size) {
+  switch (optype_from_opcode(data->opcode)) {
+    case OPTYPE_BINARY:
+      if (data->opcode == OP_MOVS || data->opcode == OP_MOVZ) {
+        assert(data->src.all.mode == MODE_REGISTER &&
+               data->dest.all.mode == MODE_REGISTER);
+        return sprintf(str, "%s%c%c", OPCODES[data->opcode],
+                       WIDTH_TO_CHAR[data->src.reg.num],
+                       WIDTH_TO_CHAR[data->dest.reg.num]);
+      } else if (data->src.all.mode == MODE_REGISTER) {
+        assert(data->dest.all.mode != MODE_REGISTER ||
+               data->src.reg.width == data->dest.reg.width);
+        return sprintf(str, "%s%c", OPCODES[data->opcode],
+                       WIDTH_TO_CHAR[data->src.reg.num]);
+      } else {
+        assert(data->dest.all.mode == MODE_REGISTER);
+        return sprintf(str, "%s%c", OPCODES[data->opcode],
+                       WIDTH_TO_CHAR[data->dest.reg.num]);
+      }
+    case OPTYPE_UNARY:
+      if (opcode_needs_width(data->opcode)) {
+        assert(data->dest.all.mode == MODE_REGISTER);
+        return sprintf(str, "%s%c", OPCODES[data->opcode],
+                       WIDTH_TO_CHAR[data->dest.reg.num]);
+      } else {
+        return sprintf(str, "%s", OPCODES[data->opcode]);
+      }
+    case OPTYPE_NULLARY:
+      return sprintf(str, "%s", OPCODES[data->opcode]);
+    case OPTYPE_INVALID:
+      /* fallthrough */
+    default:
+      abort();
+  }
+}
+
+int bin_to_str(InstructionData *data, char *str, size_t size) {
+  char opcode_str[MAX_OPCODE_LENGTH];
+  int chars_written = opcode_to_str(data, opcode_str, MAX_OPCODE_LENGTH);
+  if (chars_written < 0) return chars_written;
+
+  char dest_str[MAX_OPERAND_LENGTH];
+  chars_written = operand_to_str(&data->dest, dest_str, MAX_OPERAND_LENGTH);
+  if (chars_written < 0) return chars_written;
+
+  char src_str[MAX_OPERAND_LENGTH];
+  chars_written = operand_to_str(&data->src, src_str, MAX_OPERAND_LENGTH);
+  if (chars_written < 0) return chars_written;
+
+  return sprintf(str, "%s %s, %s", OPCODES[data->opcode], dest_str, src_str);
+}
+
+int un_to_str(InstructionData *data, char *str, size_t size) {
+  char opcode_str[MAX_OPCODE_LENGTH];
+  int chars_written = opcode_to_str(data, opcode_str, MAX_OPCODE_LENGTH);
+  if (chars_written < 0) return chars_written;
+
+  char dest_str[MAX_OPERAND_LENGTH];
+  chars_written = operand_to_str(&data->dest, dest_str, MAX_OPERAND_LENGTH);
+  if (chars_written < 0) return chars_written;
+
+  return sprintf(str, "%s %s", OPCODES[data->opcode], dest_str);
+}
+
 int instr_to_str(InstructionData *data, char *str, size_t size) {
   int ret = 0;
   if (strlen(data->label) > 0) {
@@ -1869,33 +1933,27 @@ int instr_to_str(InstructionData *data, char *str, size_t size) {
     if (chars_written < 0) return chars_written;
     ret += chars_written;
   }
-  if (data->opcode != OP_INVALID) {
-    if (data->src.all.mode != MODE_NONE) {
-      char dest_str[MAX_OPERAND_LENGTH];
-      int chars_written =
-          operand_to_str(&data->dest, dest_str, MAX_OPERAND_LENGTH);
-      if (chars_written < 0) return chars_written;
-      char src_str[MAX_OPERAND_LENGTH];
-      chars_written = operand_to_str(&data->src, src_str, MAX_OPERAND_LENGTH);
-      if (chars_written < 0) return chars_written;
-      chars_written = sprintf(str + ret, "%s %s, %s", OPCODES[data->opcode],
-                              dest_str, src_str);
+  switch (optype_from_opcode(data->opcode)) {
+    int chars_written;
+    case OPTYPE_BINARY:
+      chars_written = bin_to_str(data, str + ret, size - ret);
       if (chars_written < 0) return chars_written;
       ret += chars_written;
-    } else if (data->dest.all.mode != MODE_NONE) {
-      char dest_str[MAX_OPERAND_LENGTH];
-      int chars_written =
-          operand_to_str(&data->dest, dest_str, MAX_OPERAND_LENGTH);
-      if (chars_written < 0) return chars_written;
-      chars_written =
-          sprintf(str + ret, "%s %s", OPCODES[data->opcode], dest_str);
+      break;
+    case OPTYPE_UNARY:
+      chars_written = un_to_str(data, str + ret, size - ret);
       if (chars_written < 0) return chars_written;
       ret += chars_written;
-    } else {
-      int chars_written = sprintf(str + ret, "%s", OPCODES[data->opcode]);
+      break;
+    case OPTYPE_NULLARY:
+      chars_written = opcode_to_str(data, str + ret, size - ret);
       if (chars_written < 0) return chars_written;
       ret += chars_written;
-    }
+      break;
+    case OPTYPE_INVALID:
+      break;
+    default:
+      abort();
   }
   if (strlen(data->comment) > 0) {
     int chars_written = sprintf(str + ret, ";%s", data->comment);
