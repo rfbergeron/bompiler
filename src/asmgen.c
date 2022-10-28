@@ -78,16 +78,21 @@
   GENERATOR(LEAVE, OPTYPE_NULLARY, 0)   \
   GENERATOR(RET, OPTYPE_NULLARY, 0)     \
   GENERATOR(NOP, OPTYPE_NULLARY, 0)     \
-  /* data section definitions */        \
-  GENERATOR(DB, OPTYPE_UNARY, 0)        \
-  GENERATOR(DW, OPTYPE_UNARY, 0)        \
-  GENERATOR(DD, OPTYPE_UNARY, 0)        \
-  GENERATOR(DQ, OPTYPE_UNARY, 0)        \
-  /* bss section definitions */         \
-  GENERATOR(RESB, OPTYPE_UNARY, 0)      \
-  GENERATOR(RESW, OPTYPE_UNARY, 0)      \
-  GENERATOR(RESD, OPTYPE_UNARY, 0)      \
-  GENERATOR(RESQ, OPTYPE_UNARY, 0)
+  /* directives */                      \
+  GENERATOR(GLOBL, OPTYPE_UNARY, 0)     \
+  GENERATOR(ZERO, OPTYPE_UNARY, 0)      \
+  GENERATOR(BYTE, OPTYPE_UNARY, 0)      \
+  GENERATOR(VALUE, OPTYPE_UNARY, 0)     \
+  GENERATOR(LONG, OPTYPE_UNARY, 0)      \
+  GENERATOR(QUAD, OPTYPE_UNARY, 0)      \
+  GENERATOR(ALIGN, OPTYPE_UNARY, 0)     \
+  GENERATOR(SIZE, OPTYPE_BINARY, 0)     \
+  GENERATOR(TYPE, OPTYPE_BINARY, 0)     \
+  GENERATOR(STRING, OPTYPE_UNARY, 0)    \
+  GENERATOR(SECTION, OPTYPE_UNARY, 0)   \
+  GENERATOR(BSS, OPTYPE_NULLARY, 0)     \
+  GENERATOR(TEXT, OPTYPE_NULLARY, 0)    \
+  GENERATOR(DATA, OPTYPE_NULLARY, 0)
 
 #define GENERATE_ENUM(CODE, TYPE, BOOL) OP_##CODE,
 #define GENERATE_STRING(CODE, TYPE, BOOL) #CODE,
@@ -151,12 +156,14 @@ typedef union operand {
   struct opind {
     AddressMode mode;
     intmax_t disp;
+    char lab[MAX_LABEL_LENGTH];
     size_t num;
   } ind;
   struct opsca {
     AddressMode mode;
     IndexScale scale;
     intmax_t disp;
+    char lab[MAX_LABEL_LENGTH];
     size_t base;
     size_t index;
   } sca;
@@ -206,6 +213,7 @@ static const char EMPTY_FMT[] = "";
  * preserved registers: rbx, rsp, rbp, r12-r15
  * other registers: r10, r11
  */
+static const size_t RIP_VREG = SIZE_MAX;
 static const size_t RAX_VREG = 0;
 static const size_t RCX_VREG = 1;
 static const size_t RDX_VREG = 2;
@@ -265,19 +273,22 @@ void set_op_dir(Operand *operand, intmax_t disp, const char *format, ...) {
   va_end(args);
 }
 
-void set_op_ind(Operand *operand, intmax_t disp, size_t num) {
+void set_op_ind(Operand *operand, intmax_t disp, size_t num,
+                const char *label) {
   operand->ind.mode = MODE_INDIRECT;
   operand->ind.disp = disp;
   operand->ind.num = num;
+  if (label != NULL) strcpy(operand->ind.lab, label);
 }
 
 void set_op_sca(Operand *operand, IndexScale scale, intmax_t disp, size_t base,
-                size_t index) {
+                size_t index, const char *label) {
   operand->sca.mode = MODE_SCALE;
   operand->sca.scale = scale;
   operand->sca.disp = disp;
   operand->sca.base = base;
   operand->sca.index = index;
+  if (label != NULL) strcpy(operand->sca.lab, label);
 }
 
 int bulk_rtom(size_t dest_memreg, ptrdiff_t dest_disp, const size_t *src_regs,
@@ -293,7 +304,7 @@ int bulk_rtom(size_t dest_memreg, ptrdiff_t dest_disp, const size_t *src_regs,
         size_t chunk_disp = dest_disp + i * 8 + j;
         InstructionData *mov_data = instr_init(OP_MOV);
         set_op_reg(&mov_data->src, alignment, src_regs[i]);
-        set_op_ind(&mov_data->dest, chunk_disp, dest_memreg);
+        set_op_ind(&mov_data->dest, chunk_disp, dest_memreg, NULL);
         InstructionData *shr_data = instr_init(OP_SHR);
         set_op_reg(&shr_data->dest, REG_QWORD, src_regs[i]);
         set_op_imm(&shr_data->src, alignment);
@@ -307,7 +318,7 @@ int bulk_rtom(size_t dest_memreg, ptrdiff_t dest_disp, const size_t *src_regs,
     for (i = 0; i < mov_count; ++i) {
       InstructionData *mov_data = instr_init(OP_MOV);
       set_op_reg(&mov_data->src, alignment, src_regs[i]);
-      set_op_ind(&mov_data->dest, dest_disp + i * alignment, dest_memreg);
+      set_op_ind(&mov_data->dest, dest_disp + i * alignment, dest_memreg, NULL);
       int status = liter_push_back(where, NULL, 1, mov_data);
       if (status) return status;
     }
@@ -327,7 +338,7 @@ int bulk_mtor(const size_t *dest_regs, size_t src_memreg, ptrdiff_t src_disp,
       for (j = 0; j < 8 && i * 8 + j < width; j += alignment) {
         size_t chunk_disp = src_disp + i * 8 + j;
         InstructionData *mov_data = instr_init(OP_MOV);
-        set_op_ind(&mov_data->src, chunk_disp, src_memreg);
+        set_op_ind(&mov_data->src, chunk_disp, src_memreg, NULL);
         set_op_reg(&mov_data->dest, alignment, vreg_count++);
         InstructionData *movz_data = instr_init(OP_MOVZ);
         movz_data->src = mov_data->dest;
@@ -349,7 +360,7 @@ int bulk_mtor(const size_t *dest_regs, size_t src_memreg, ptrdiff_t src_disp,
     for (i = 0; i < mov_count; ++i) {
       InstructionData *mov_data = instr_init(OP_MOV);
       set_op_reg(&mov_data->dest, alignment, dest_regs[i]);
-      set_op_ind(&mov_data->src, src_disp + i * alignment, src_memreg);
+      set_op_ind(&mov_data->src, src_disp + i * alignment, src_memreg, NULL);
       int status = liter_push_back(where, NULL, 1, mov_data);
       if (status) return status;
     }
@@ -366,10 +377,10 @@ int bulk_mtom(size_t dest_reg, size_t src_reg, const TypeSpec *type,
   for (i = 0; i < mov_count; ++i) {
     InstructionData *mov_data = instr_init(OP_MOV);
     set_op_reg(&mov_data->dest, alignment, vreg_count++);
-    set_op_ind(&mov_data->src, i * alignment, src_reg);
+    set_op_ind(&mov_data->src, i * alignment, src_reg, NULL);
     InstructionData *mov_data_2 = instr_init(OP_MOV);
     mov_data_2->src = mov_data->dest;
-    set_op_ind(&mov_data->dest, i * alignment, dest_reg);
+    set_op_ind(&mov_data->dest, i * alignment, dest_reg, NULL);
     int status = liter_push_back(where, NULL, 2, mov_data, mov_data_2);
     if (status) return status;
   }
@@ -447,6 +458,28 @@ int opcode_needs_width(Opcode opcode) {
   }
 }
 
+int opcode_is_directive(Opcode opcode) {
+  switch (opcode) {
+    case OP_GLOBL:
+    case OP_ZERO:
+    case OP_BYTE:
+    case OP_VALUE:
+    case OP_LONG:
+    case OP_QUAD:
+    case OP_ALIGN:
+    case OP_SIZE:
+    case OP_TYPE:
+    case OP_STRING:
+    case OP_SECTION:
+    case OP_BSS:
+    case OP_TEXT:
+    case OP_DATA:
+      return 1;
+    default:
+      return 0;
+  }
+}
+
 void assign_stack_space(SymbolValue *symval) {
   size_t width = typespec_get_width(&symval->type);
   size_t alignment = typespec_get_alignment(&symval->type);
@@ -479,7 +512,7 @@ int rvalue_conversions(ASTree *expr, const TypeSpec *to) {
   if (expr->attributes & ATTR_EXPR_LVAL) {
     InstructionData *lvalue_data = liter_get(expr->last_instr);
     InstructionData *mov_data = instr_init(OP_MOV);
-    set_op_ind(&mov_data->src, NO_DISP, lvalue_data->dest.reg.num);
+    set_op_ind(&mov_data->src, NO_DISP, lvalue_data->dest.reg.num, NULL);
     set_op_reg(&mov_data->dest, from_width, vreg_count++);
     int status =
         liter_push_back(expr->last_instr, &expr->last_instr, 1, mov_data);
@@ -518,11 +551,8 @@ void resolve_object(CompilerState *state, Operand *operand, const char *ident) {
   SymbolValue *symval = NULL;
   state_get_symbol(state, ident, strlen(ident), &symval);
   assert(symval != NULL);
-  if (symval->reg == 0) {
-    set_op_dir(operand, symval->offset, ident);
-  } else {
-    set_op_ind(operand, symval->offset, symval->reg);
-  }
+  set_op_ind(operand, symval->offset, symval->reg,
+             symval->reg == RIP_VREG ? ident : NULL);
 }
 
 int save_preserved_regs(void) {
@@ -744,7 +774,7 @@ int translate_indirection(ASTree *indirection) {
       instr_init(typespec_is_array(&element_type) ? OP_LEA : OP_MOV);
   status = typespec_destroy(&element_type);
   if (status) return status;
-  set_op_ind(&load_data->src, NO_DISP, operand_data->dest.reg.num);
+  set_op_ind(&load_data->src, NO_DISP, operand_data->dest.reg.num, NULL);
   set_op_reg(&load_data->dest, typespec_get_width(indirection->type),
              vreg_count++);
   status = liter_push_back(operand->last_instr, &indirection->last_instr, 1,
@@ -798,13 +828,13 @@ int translate_subscript(ASTree *subscript) {
   size_t scale = typespec_get_width((TypeSpec *)subscript->type);
   if (scale == 1 || scale == 2 || scale == 4 || scale == 8) {
     set_op_sca(&lea_data->src, scale, NO_DISP, pointer_data->dest.ind.num,
-               index_data->dest.reg.num);
+               index_data->dest.reg.num, NULL);
     int status =
         liter_push_back(index->last_instr, &subscript->last_instr, 1, lea_data);
     if (status) return status;
   } else {
     set_op_sca(&lea_data->src, SCALE_BYTE, NO_DISP, pointer_data->dest.ind.num,
-               index_data->dest.reg.num);
+               index_data->dest.reg.num, NULL);
     InstructionData *mul_data = instr_init(OP_IMUL);
     mul_data->dest = index_data->dest;
     set_op_imm(&mul_data->src, scale);
@@ -829,7 +859,8 @@ int translate_reference(ASTree *reference) {
   SymbolValue *member_symbol =
       symbol_table_get(member_table, member_name, member_name_len);
   InstructionData *lea_data = instr_init(OP_LEA);
-  set_op_ind(&lea_data->src, member_symbol->offset, struct_data->dest.reg.num);
+  set_op_ind(&lea_data->src, member_symbol->offset, struct_data->dest.reg.num,
+             NULL);
   set_op_reg(&lea_data->dest, REG_QWORD, vreg_count++);
 
   reference->first_instr = liter_copy(struct_->first_instr);
@@ -845,11 +876,11 @@ int translate_inc_dec(ASTree *inc_dec) {
   ASTree *operand = astree_get(inc_dec, 0);
   InstructionData *operand_data = liter_get(operand->last_instr);
   InstructionData *mov_data = instr_init(OP_MOV);
-  set_op_ind(&mov_data->src, NO_DISP, operand_data->dest.reg.num);
+  set_op_ind(&mov_data->src, NO_DISP, operand_data->dest.reg.num, NULL);
   set_op_reg(&mov_data->dest, typespec_get_width(inc_dec->type), vreg_count++);
 
   InstructionData *inc_dec_data = instr_init(opcode_from_operator(inc_dec));
-  set_op_ind(&inc_dec_data->dest, NO_DISP, operand_data->dest.reg.num);
+  set_op_ind(&inc_dec_data->dest, NO_DISP, operand_data->dest.reg.num, NULL);
 
   inc_dec->first_instr = liter_copy(operand->first_instr);
   if (inc_dec->first_instr == NULL) return -1;
@@ -969,7 +1000,7 @@ int assign_scalar(ASTree *assignment, ASTree *lvalue, ASTree *expr) {
   InstructionData *expr_data = liter_get(expr->last_instr);
 
   InstructionData *assignment_data = instr_init(OP_MOV);
-  set_op_ind(&assignment_data->dest, NO_DISP, lvalue_data->dest.reg.num);
+  set_op_ind(&assignment_data->dest, NO_DISP, lvalue_data->dest.reg.num, NULL);
   assignment_data->src = expr_data->dest;
 
   InstructionData *dummy_data = instr_init(OP_MOV);
@@ -1064,7 +1095,7 @@ int translate_args(ASTree *call) {
     if (out_param) {
       InstructionData *lea_data = instr_init(OP_LEA);
       set_op_reg(&lea_data->dest, REG_QWORD, RDI_VREG);
-      set_op_ind(&lea_data->src, -window_size, RBP_VREG);
+      set_op_ind(&lea_data->src, -window_size, RBP_VREG, NULL);
       int status = liter_push_back(call->last_instr, NULL, 1, lea_data);
       if (status) return status;
     }
@@ -1124,7 +1155,7 @@ int translate_call(ASTree *call) {
         if (status) return status;
       }
       InstructionData *lea_data = instr_init(OP_LEA);
-      set_op_ind(&lea_data->src, -window_size, RBP_VREG);
+      set_op_ind(&lea_data->src, -window_size, RBP_VREG, NULL);
       set_op_reg(&lea_data->dest, REG_QWORD, vreg_count++);
       int status = llist_push_back(text_section, lea_data);
       if (status) return status;
@@ -1167,7 +1198,7 @@ int translate_params(ASTree *function, CompilerState *state) {
     assign_stack_space(&dummy);
     InstructionData *mov_data = instr_init(OP_MOV);
     set_op_reg(&mov_data->src, REG_QWORD, RDI_VREG);
-    set_op_ind(&mov_data->dest, -window_size, RBP_VREG);
+    set_op_ind(&mov_data->dest, -window_size, RBP_VREG, NULL);
     int status = llist_push_back(text_section, mov_data);
     if (status) return status;
   }
@@ -1356,7 +1387,7 @@ static int translate_switch(ASTree *switch_, CompilerState *state) {
   /* switch prologue */
   InstructionData *mov_data = instr_init(OP_MOV);
   if (condition->attributes & ATTR_EXPR_LVAL)
-    set_op_ind(&mov_data->src, NO_DISP, cond_data->dest.reg.num);
+    set_op_ind(&mov_data->src, NO_DISP, cond_data->dest.reg.num, NULL);
   else
     mov_data->src = cond_data->dest;
   /* we are casting all values to unsigned long since it does not really matter
@@ -1572,7 +1603,7 @@ int return_aggregate(ASTree *ret, ASTree *expr) {
   } else {
     InstructionData *hidden_mov_data = instr_init(OP_MOV);
     set_op_reg(&hidden_mov_data->dest, REG_QWORD, vreg_count++);
-    set_op_ind(&hidden_mov_data->src, -8, RBP_VREG);
+    set_op_ind(&hidden_mov_data->src, -8, RBP_VREG, NULL);
     int status = llist_push_back(text_section, hidden_mov_data);
     if (status) return status;
     ListIter *temp = llist_iter_last(text_section);
@@ -1730,16 +1761,16 @@ int translate_global_init(ASTree *declarator, ASTree *initializer) {
     size_t width = typespec_get_width(declarator->type);
     switch (width) {
       case X64_SIZEOF_LONG:
-        data = instr_init(OP_DQ);
+        data = instr_init(OP_QUAD);
         break;
       case X64_SIZEOF_INT:
-        data = instr_init(OP_DD);
+        data = instr_init(OP_LONG);
         break;
       case X64_SIZEOF_SHORT:
-        data = instr_init(OP_DW);
+        data = instr_init(OP_VALUE);
         break;
       case X64_SIZEOF_CHAR:
-        data = instr_init(OP_DB);
+        data = instr_init(OP_BYTE);
         break;
       default:
         fprintf(stderr,
@@ -1757,29 +1788,8 @@ int translate_global_decl(ASTree *declaration) {
   DEBUGS('g', "Translating global declaration");
   ASTree *declarator = astree_get(declaration, astree_count(declaration) - 1);
   size_t width = typespec_get_width(declarator->type);
-  size_t align = typespec_get_alignment(declarator->type);
-  size_t res_count = width / align;
-  InstructionData *data;
-  switch (align) {
-    case X64_ALIGNOF_LONG:
-      data = instr_init(OP_RESQ);
-      break;
-    case X64_ALIGNOF_INT:
-      data = instr_init(OP_RESD);
-      break;
-    case X64_ALIGNOF_SHORT:
-      data = instr_init(OP_RESW);
-      break;
-    case X64_ALIGNOF_CHAR:
-      data = instr_init(OP_RESB);
-      break;
-    default:
-      fprintf(stderr,
-              "ERROR: cannot reserve space for object with alignment %lu\n",
-              align);
-      abort();
-  }
-  set_op_imm(&data->dest, res_count);
+  InstructionData *data = instr_init(OP_ZERO);
+  set_op_imm(&data->dest, width);
   assert(!llist_push_back(bss_section, data));
   return 0;
 }
@@ -1849,14 +1859,16 @@ int operand_to_str(Operand *operand, char *str, size_t size) {
       return sprintf(str, "vr%lu%c", operand->reg.num,
                      WIDTH_TO_CHAR[operand->reg.num]);
     case MODE_SCALE:
-      return sprintf(str, "[vr%luq+%u*vr%luq%+li]", operand->sca.base,
-                     operand->sca.scale, operand->sca.index, operand->sca.disp);
+      return sprintf(str, "%s%+li(%%vr%luq, %%vr%luq, %u)", operand->sca.lab,
+                     operand->sca.disp, operand->sca.base, operand->sca.index,
+                     operand->sca.scale);
     case MODE_IMMEDIATE:
-      return sprintf(str, "%lu", operand->imm.val);
+      return sprintf(str, "$%lu", operand->imm.val);
     case MODE_DIRECT:
-      return sprintf(str, "[%s%+li]", operand->dir.lab, operand->dir.disp);
+      return sprintf(str, "%s%+li", operand->dir.lab, operand->dir.disp);
     case MODE_INDIRECT:
-      return sprintf(str, "[vr%luq%+li]", operand->ind.num, operand->ind.disp);
+      return sprintf(str, "%s%+li(vr%luq)", operand->ind.lab, operand->ind.disp,
+                     operand->ind.num);
     default:
       abort();
   }
@@ -1911,7 +1923,7 @@ int bin_to_str(InstructionData *data, char *str, size_t size) {
   chars_written = operand_to_str(&data->src, src_str, MAX_OPERAND_LENGTH);
   if (chars_written < 0) return chars_written;
 
-  return sprintf(str, "%s %s, %s", OPCODES[data->opcode], dest_str, src_str);
+  return sprintf(str, "%s %s, %s", OPCODES[data->opcode], src_str, dest_str);
 }
 
 int un_to_str(InstructionData *data, char *str, size_t size) {
@@ -1929,9 +1941,16 @@ int un_to_str(InstructionData *data, char *str, size_t size) {
 int instr_to_str(InstructionData *data, char *str, size_t size) {
   int ret = 0;
   if (strlen(data->label) > 0) {
-    int chars_written = sprintf(str + ret, "%s: ", data->label);
+    int chars_written = sprintf(
+        str + ret,
+        data->opcode == OP_INVALID && strlen(data->comment) == 0 ? "%s:"
+                                                                 : "%s: ",
+        data->label);
     if (chars_written < 0) return chars_written;
     ret += chars_written;
+  } else {
+    str[ret++] = '\t';
+    str[ret] = '\0';
   }
   switch (optype_from_opcode(data->opcode)) {
     int chars_written;
@@ -1956,7 +1975,8 @@ int instr_to_str(InstructionData *data, char *str, size_t size) {
       abort();
   }
   if (strlen(data->comment) > 0) {
-    int chars_written = sprintf(str + ret, ";%s", data->comment);
+    int chars_written =
+        sprintf(str + ret, ret > 0 ? " # %s" : "# %s", data->comment);
     if (chars_written < 0)
       return chars_written;
     else
