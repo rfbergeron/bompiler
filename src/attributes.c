@@ -489,6 +489,11 @@ int typespec_is_unionptr(const TypeSpec *type) {
   return typespec_is_pointer(type) && typespec_is_aux(type, AUX_UNION, 1);
 }
 
+int typespec_is_aggregate(const TypeSpec *type) {
+  return typespec_is_struct(type) || typespec_is_array(type) ||
+         typespec_is_union(type);
+}
+
 int typespec_is_enum(const TypeSpec *type) {
   return typespec_is_aux(type, AUX_ENUM, 0);
 }

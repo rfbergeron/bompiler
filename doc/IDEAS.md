@@ -96,6 +96,44 @@ GEN_LABEL:
         .string STRING
 ```
 
+## File-scope Initialization Code
+For now, initializer lists will just be traversed a second time, after the type
+checker has finished analyzing the whole list.
+
+Most of the logic is broken up into functions which initialize a specific types:
+one for scalars, one for structs, one for unions, and one for arrays.
+
+The scalar takes as arguments a type and and initializer, and returns a status
+code. The enclosing braces of the initializer are stripped away, if present, and
+emits the appropriate directive for the size of the type, along with the value
+of the initializer.
+
+The aggregate functions take the same arguments as the scalar function, plus an
+index, and return the number of initializers consumed from the list. If this
+number is negative, the function encountered an error. If there remain any
+uninitialized bytes after all possible initializers have been from the
+initializer list, this function emits a `.zero` directive whose argument is the
+number of bytes not explicitly initialized. This process also happens for unions
+whose first member's size is smaller than the union's size.
+
+The aggregate function select which function to recursively call to initialize
+a member based on the type of the member and the symbol of its corresponding
+initializer:
+- If the type is scalar `init_global_scalar` is called
+- If the type is aggregate and the initializer is scalar,
+  `init_global_aggregate` is called with the member type, the current
+  initializer list, and starting index equal to the current index in the current
+  initializer list
+- If the type is aggregate and the initializer is an initializer list,
+  `init_global_aggregate` is called with the member type, the new initializer
+  list, and starting index of 0
+
+The struct function tracks the total number of bytes initialized as it iterates
+over the initializer list. If this number is not properly aligned before it
+attempts to translate the initializer for the next member, it emits a `.zero`
+directive whose argument is the number of padding bytes needed to align the next
+member.
+
 ## Empty Expressions, Uninitialized Variables and For Loops
 Because for loops might not have all of their control expressions set, no-ops
 need to be generated so that the iterators are set correctly and labels can be

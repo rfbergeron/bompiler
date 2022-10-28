@@ -264,5 +264,6 @@ int typespec_is_struct(const TypeSpec *type);
 int typespec_is_structptr(const TypeSpec *type);
 int typespec_is_union(const TypeSpec *type);
 int typespec_is_unionptr(const TypeSpec *type);
+int typespec_is_aggregate(const TypeSpec *type);
 int typespec_is_enum(const TypeSpec *type);
 #endif
