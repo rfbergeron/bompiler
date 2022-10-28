@@ -16,83 +16,83 @@
 #define NO_DISP 0
 
 /* macros used to generate string constants for OPCODES */
-#define FOREACH_OPCODE(GENERATOR)       \
-  GENERATOR(INVALID, OPTYPE_INVALID, 0) \
-  /* arithmetic */                      \
-  GENERATOR(ADD, OPTYPE_BINARY, 1)      \
-  GENERATOR(SUB, OPTYPE_BINARY, 1)      \
-  GENERATOR(MUL, OPTYPE_BINARY, 1)      \
-  GENERATOR(DIV, OPTYPE_BINARY, 1)      \
-  GENERATOR(INC, OPTYPE_UNARY, 1)       \
-  GENERATOR(DEC, OPTYPE_UNARY, 1)       \
-  GENERATOR(NEG, OPTYPE_UNARY, 1)       \
-  GENERATOR(IMUL, OPTYPE_BINARY, 1)     \
-  GENERATOR(IDIV, OPTYPE_BINARY, 1)     \
-  /* compare and test */                \
-  GENERATOR(TEST, OPTYPE_BINARY, 1)     \
-  GENERATOR(CMP, OPTYPE_BINARY, 1)      \
-  GENERATOR(SETE, OPTYPE_UNARY, 0)      \
-  GENERATOR(SETNE, OPTYPE_UNARY, 0)     \
-  GENERATOR(SETG, OPTYPE_UNARY, 0)      \
-  GENERATOR(SETGE, OPTYPE_UNARY, 0)     \
-  GENERATOR(SETL, OPTYPE_UNARY, 0)      \
-  GENERATOR(SETLE, OPTYPE_UNARY, 0)     \
-  GENERATOR(SETA, OPTYPE_UNARY, 0)      \
-  GENERATOR(SETAE, OPTYPE_UNARY, 0)     \
-  GENERATOR(SETB, OPTYPE_UNARY, 0)      \
-  GENERATOR(SETBE, OPTYPE_UNARY, 0)     \
-  GENERATOR(SETZ, OPTYPE_UNARY, 0)      \
-  GENERATOR(SETNZ, OPTYPE_UNARY, 0)     \
-  /* jump */                            \
-  GENERATOR(JMP, OPTYPE_UNARY, 0)       \
-  GENERATOR(JE, OPTYPE_UNARY, 0)        \
-  GENERATOR(JNE, OPTYPE_UNARY, 0)       \
-  GENERATOR(JG, OPTYPE_UNARY, 0)        \
-  GENERATOR(JGE, OPTYPE_UNARY, 0)       \
-  GENERATOR(JL, OPTYPE_UNARY, 0)        \
-  GENERATOR(JLE, OPTYPE_UNARY, 0)       \
-  GENERATOR(JA, OPTYPE_UNARY, 0)        \
-  GENERATOR(JAE, OPTYPE_UNARY, 0)       \
-  GENERATOR(JB, OPTYPE_UNARY, 0)        \
-  GENERATOR(JBE, OPTYPE_UNARY, 0)       \
-  GENERATOR(JZ, OPTYPE_UNARY, 0)        \
-  GENERATOR(JNZ, OPTYPE_UNARY, 0)       \
-  /* logical and bitwise */             \
-  GENERATOR(NOT, OPTYPE_UNARY, 1)       \
-  GENERATOR(OR, OPTYPE_BINARY, 1)       \
-  GENERATOR(AND, OPTYPE_BINARY, 1)      \
-  GENERATOR(LEA, OPTYPE_BINARY, 1)      \
-  GENERATOR(XOR, OPTYPE_BINARY, 1)      \
-  /* shifts */                          \
-  GENERATOR(SHL, OPTYPE_BINARY, 1)      \
-  GENERATOR(SAL, OPTYPE_BINARY, 1)      \
-  GENERATOR(SHR, OPTYPE_BINARY, 1)      \
-  GENERATOR(SAR, OPTYPE_BINARY, 1)      \
-  /* code movement */                   \
-  GENERATOR(MOV, OPTYPE_BINARY, 1)      \
-  GENERATOR(MOVZ, OPTYPE_BINARY, 1)     \
-  GENERATOR(MOVS, OPTYPE_BINARY, 1)     \
-  GENERATOR(PUSH, OPTYPE_UNARY, 1)      \
-  GENERATOR(POP, OPTYPE_UNARY, 1)       \
-  GENERATOR(CALL, OPTYPE_UNARY, 0)      \
-  GENERATOR(LEAVE, OPTYPE_NULLARY, 0)   \
-  GENERATOR(RET, OPTYPE_NULLARY, 0)     \
-  GENERATOR(NOP, OPTYPE_NULLARY, 0)     \
-  /* directives */                      \
-  GENERATOR(GLOBL, OPTYPE_UNARY, 0)     \
-  GENERATOR(ZERO, OPTYPE_UNARY, 0)      \
-  GENERATOR(BYTE, OPTYPE_UNARY, 0)      \
-  GENERATOR(VALUE, OPTYPE_UNARY, 0)     \
-  GENERATOR(LONG, OPTYPE_UNARY, 0)      \
-  GENERATOR(QUAD, OPTYPE_UNARY, 0)      \
-  GENERATOR(ALIGN, OPTYPE_UNARY, 0)     \
-  GENERATOR(SIZE, OPTYPE_BINARY, 0)     \
-  GENERATOR(TYPE, OPTYPE_BINARY, 0)     \
-  GENERATOR(STRING, OPTYPE_UNARY, 0)    \
-  GENERATOR(SECTION, OPTYPE_UNARY, 0)   \
-  GENERATOR(BSS, OPTYPE_NULLARY, 0)     \
-  GENERATOR(TEXT, OPTYPE_NULLARY, 0)    \
-  GENERATOR(DATA, OPTYPE_NULLARY, 0)
+#define FOREACH_OPCODE(GENERATOR)         \
+  GENERATOR(INVALID, OPTYPE_INVALID, 0)   \
+  /* arithmetic */                        \
+  GENERATOR(ADD, OPTYPE_BINARY, 1)        \
+  GENERATOR(SUB, OPTYPE_BINARY, 1)        \
+  GENERATOR(MUL, OPTYPE_BINARY, 1)        \
+  GENERATOR(DIV, OPTYPE_BINARY, 1)        \
+  GENERATOR(INC, OPTYPE_UNARY, 1)         \
+  GENERATOR(DEC, OPTYPE_UNARY, 1)         \
+  GENERATOR(NEG, OPTYPE_UNARY, 1)         \
+  GENERATOR(IMUL, OPTYPE_BINARY, 1)       \
+  GENERATOR(IDIV, OPTYPE_BINARY, 1)       \
+  /* compare and test */                  \
+  GENERATOR(TEST, OPTYPE_BINARY, 1)       \
+  GENERATOR(CMP, OPTYPE_BINARY, 1)        \
+  GENERATOR(SETE, OPTYPE_UNARY, 0)        \
+  GENERATOR(SETNE, OPTYPE_UNARY, 0)       \
+  GENERATOR(SETG, OPTYPE_UNARY, 0)        \
+  GENERATOR(SETGE, OPTYPE_UNARY, 0)       \
+  GENERATOR(SETL, OPTYPE_UNARY, 0)        \
+  GENERATOR(SETLE, OPTYPE_UNARY, 0)       \
+  GENERATOR(SETA, OPTYPE_UNARY, 0)        \
+  GENERATOR(SETAE, OPTYPE_UNARY, 0)       \
+  GENERATOR(SETB, OPTYPE_UNARY, 0)        \
+  GENERATOR(SETBE, OPTYPE_UNARY, 0)       \
+  GENERATOR(SETZ, OPTYPE_UNARY, 0)        \
+  GENERATOR(SETNZ, OPTYPE_UNARY, 0)       \
+  /* jump */                              \
+  GENERATOR(JMP, OPTYPE_UNARY, 0)         \
+  GENERATOR(JE, OPTYPE_UNARY, 0)          \
+  GENERATOR(JNE, OPTYPE_UNARY, 0)         \
+  GENERATOR(JG, OPTYPE_UNARY, 0)          \
+  GENERATOR(JGE, OPTYPE_UNARY, 0)         \
+  GENERATOR(JL, OPTYPE_UNARY, 0)          \
+  GENERATOR(JLE, OPTYPE_UNARY, 0)         \
+  GENERATOR(JA, OPTYPE_UNARY, 0)          \
+  GENERATOR(JAE, OPTYPE_UNARY, 0)         \
+  GENERATOR(JB, OPTYPE_UNARY, 0)          \
+  GENERATOR(JBE, OPTYPE_UNARY, 0)         \
+  GENERATOR(JZ, OPTYPE_UNARY, 0)          \
+  GENERATOR(JNZ, OPTYPE_UNARY, 0)         \
+  /* logical and bitwise */               \
+  GENERATOR(NOT, OPTYPE_UNARY, 1)         \
+  GENERATOR(OR, OPTYPE_BINARY, 1)         \
+  GENERATOR(AND, OPTYPE_BINARY, 1)        \
+  GENERATOR(LEA, OPTYPE_BINARY, 1)        \
+  GENERATOR(XOR, OPTYPE_BINARY, 1)        \
+  /* shifts */                            \
+  GENERATOR(SHL, OPTYPE_BINARY, 1)        \
+  GENERATOR(SAL, OPTYPE_BINARY, 1)        \
+  GENERATOR(SHR, OPTYPE_BINARY, 1)        \
+  GENERATOR(SAR, OPTYPE_BINARY, 1)        \
+  /* code movement */                     \
+  GENERATOR(MOV, OPTYPE_BINARY, 1)        \
+  GENERATOR(MOVZ, OPTYPE_BINARY, 1)       \
+  GENERATOR(MOVS, OPTYPE_BINARY, 1)       \
+  GENERATOR(PUSH, OPTYPE_UNARY, 1)        \
+  GENERATOR(POP, OPTYPE_UNARY, 1)         \
+  GENERATOR(CALL, OPTYPE_UNARY, 0)        \
+  GENERATOR(LEAVE, OPTYPE_NULLARY, 0)     \
+  GENERATOR(RET, OPTYPE_NULLARY, 0)       \
+  GENERATOR(NOP, OPTYPE_NULLARY, 0)       \
+  /* directives */                        \
+  GENERATOR(GLOBL, OPTYPE_DIRECTIVE, 0)   \
+  GENERATOR(ZERO, OPTYPE_DIRECTIVE, 0)    \
+  GENERATOR(BYTE, OPTYPE_DIRECTIVE, 0)    \
+  GENERATOR(VALUE, OPTYPE_DIRECTIVE, 0)   \
+  GENERATOR(LONG, OPTYPE_DIRECTIVE, 0)    \
+  GENERATOR(QUAD, OPTYPE_DIRECTIVE, 0)    \
+  GENERATOR(ALIGN, OPTYPE_DIRECTIVE, 0)   \
+  GENERATOR(SIZE, OPTYPE_DIRECTIVE, 0)    \
+  GENERATOR(TYPE, OPTYPE_DIRECTIVE, 0)    \
+  GENERATOR(STRING, OPTYPE_DIRECTIVE, 0)  \
+  GENERATOR(SECTION, OPTYPE_DIRECTIVE, 0) \
+  GENERATOR(BSS, OPTYPE_DIRECTIVE, 0)     \
+  GENERATOR(TEXT, OPTYPE_DIRECTIVE, 0)    \
+  GENERATOR(DATA, OPTYPE_DIRECTIVE, 0)
 
 #define GENERATE_ENUM(CODE, TYPE, BOOL) OP_##CODE,
 #define GENERATE_STRING(CODE, TYPE, BOOL) #CODE,
@@ -108,7 +108,8 @@ typedef enum optype {
   OPTYPE_INVALID = -1,
   OPTYPE_NULLARY,
   OPTYPE_UNARY,
-  OPTYPE_BINARY
+  OPTYPE_BINARY,
+  OPTYPE_DIRECTIVE
 } OpType;
 
 typedef enum address_mode {
@@ -243,9 +244,7 @@ static size_t stack_eightbytes;
 size_t vreg_count;
 static ptrdiff_t window_size;
 
-static LinkedList *text_section;
-static LinkedList *data_section;
-static LinkedList *bss_section;
+static LinkedList *instructions;
 
 InstructionData *instr_init(Opcode opcode) {
   InstructionData *ret = calloc(1, sizeof(InstructionData));
@@ -561,7 +560,7 @@ int save_preserved_regs(void) {
     InstructionData *push_data = instr_init(OP_PUSH);
     set_op_reg(&push_data->dest, REG_QWORD,
                PRESERVED_REGS[PRESERVED_REG_COUNT - i]);
-    int status = llist_push_back(text_section, push_data);
+    int status = llist_push_back(instructions, push_data);
     if (status) return status;
   }
   return 0;
@@ -583,7 +582,7 @@ int restore_preserved_regs(void) {
   for (i = 0; i < PRESERVED_REG_COUNT; ++i) {
     InstructionData *pop_data = instr_init(OP_POP);
     set_op_reg(&pop_data->dest, REG_QWORD, PRESERVED_REGS[i]);
-    int status = llist_push_back(text_section, pop_data);
+    int status = llist_push_back(instructions, pop_data);
     if (status) return status;
   }
   return 0;
@@ -594,7 +593,7 @@ int restore_volatile_regs() {
   for (i = 0; i < VOLATILE_REG_COUNT; ++i) {
     InstructionData *pop_data = instr_init(OP_POP);
     set_op_reg(&pop_data->dest, REG_QWORD, VOLATILE_REGS[i]);
-    int status = llist_push_back(text_section, pop_data);
+    int status = llist_push_back(instructions, pop_data);
     if (status) return status;
   }
   return 0;
@@ -602,10 +601,10 @@ int restore_volatile_regs() {
 
 int translate_empty_expr(ASTree *empty_expr) {
   InstructionData *nop_data = instr_init(OP_NOP);
-  llist_push_back(text_section, nop_data);
-  empty_expr->first_instr = llist_iter_last(text_section);
+  llist_push_back(instructions, nop_data);
+  empty_expr->first_instr = llist_iter_last(instructions);
   if (empty_expr->first_instr == NULL) return -1;
-  empty_expr->last_instr = llist_iter_last(text_section);
+  empty_expr->last_instr = llist_iter_last(instructions);
   if (empty_expr->last_instr == NULL) return -1;
   return 0;
 }
@@ -616,9 +615,9 @@ int translate_ident(ASTree *ident, CompilerState *state) {
   const TypeSpec *ident_type = ident->type;
   AuxSpec *ident_aux = llist_back(&ident_type->auxspecs);
   set_op_reg(&lea_data->dest, REG_QWORD, vreg_count++);
-  int status = llist_push_back(text_section, lea_data);
+  int status = llist_push_back(instructions, lea_data);
   if (status) return status;
-  ident->first_instr = llist_iter_last(text_section);
+  ident->first_instr = llist_iter_last(instructions);
   if (ident->first_instr == NULL) return -1;
   ident->last_instr = liter_copy(ident->first_instr);
   if (ident->last_instr == NULL) return -1;
@@ -644,9 +643,9 @@ int translate_intcon(ASTree *constant) {
   InstructionData *data = instr_init(OP_MOV);
   set_op_reg(&data->dest, typespec_get_width(constant->type), vreg_count++);
   set_op_imm(&data->src, constant->constval);
-  int status = llist_push_back(text_section, data);
+  int status = llist_push_back(instructions, data);
   if (status) return status;
-  constant->first_instr = llist_iter_last(text_section);
+  constant->first_instr = llist_iter_last(instructions);
   if (constant->first_instr == NULL) return -1;
   constant->last_instr = liter_copy(constant->first_instr);
   if (constant->last_instr == NULL) return -1;
@@ -978,16 +977,16 @@ int assign_aggregate(ASTree *assignment, ASTree *lvalue, ASTree *expr) {
 
   InstructionData *lvalue_data = liter_get(lvalue->last_instr);
   InstructionData *expr_data = liter_get(expr->last_instr);
-  ListIter *temp = llist_iter_last(text_section);
+  ListIter *temp = llist_iter_last(instructions);
   int status = bulk_mtom(lvalue_data->dest.reg.num, expr_data->dest.reg.num,
                          assignment->type, temp);
   free(temp);
   if (status) return status;
   InstructionData *dummy_data = instr_init(OP_MOV);
   dummy_data->src = dummy_data->dest = lvalue_data->dest;
-  status = llist_push_back(text_section, dummy_data);
+  status = llist_push_back(instructions, dummy_data);
   if (status) return status;
-  assignment->last_instr = llist_iter_last(text_section);
+  assignment->last_instr = llist_iter_last(instructions);
   if (assignment->last_instr == NULL) return -1;
   return 0;
 }
@@ -1123,7 +1122,7 @@ int translate_call(ASTree *call) {
   int status = save_volatile_regs(call->first_instr);
   if (status) return status;
   /* temporary iterator for inserting args in reverse order */
-  call->last_instr = llist_iter_last(text_section);
+  call->last_instr = llist_iter_last(instructions);
   if (call->last_instr == NULL) return -1;
 
   status = translate_args(call);
@@ -1136,19 +1135,19 @@ int translate_call(ASTree *call) {
   InstructionData *fn_pointer_data = liter_get(fn_pointer->last_instr);
   InstructionData *call_data = instr_init(OP_CALL);
   call_data->dest = fn_pointer_data->dest;
-  status = llist_push_back(text_section, call_data);
+  status = llist_push_back(instructions, call_data);
   if (status) return status;
 
   InstructionData *rsp_reset_data = instr_init(OP_ADD);
   set_op_reg(&rsp_reset_data->dest, REG_QWORD, RSP_VREG);
   set_op_imm(&rsp_reset_data->src, stack_eightbytes);
-  status = llist_push_back(text_section, rsp_reset_data);
+  status = llist_push_back(instructions, rsp_reset_data);
   if (status) return status;
 
   if (!typespec_is_void(call->type)) {
     if (typespec_is_struct(call->type) || typespec_is_union(call->type)) {
       if (typespec_get_eightbytes(call->type) <= 2) {
-        ListIter *temp = llist_iter_last(text_section);
+        ListIter *temp = llist_iter_last(instructions);
         int status =
             bulk_rtom(RBP_VREG, -window_size, RETURN_REGS, call->type, temp);
         free(temp);
@@ -1157,13 +1156,13 @@ int translate_call(ASTree *call) {
       InstructionData *lea_data = instr_init(OP_LEA);
       set_op_ind(&lea_data->src, -window_size, RBP_VREG, NULL);
       set_op_reg(&lea_data->dest, REG_QWORD, vreg_count++);
-      int status = llist_push_back(text_section, lea_data);
+      int status = llist_push_back(instructions, lea_data);
       if (status) return status;
     } else {
       InstructionData *mov_data = instr_init(OP_MOV);
       set_op_reg(&mov_data->src, typespec_get_width(call->type), RAX_VREG);
       set_op_reg(&mov_data->dest, typespec_get_width(call->type), vreg_count++);
-      int status = llist_push_back(text_section, mov_data);
+      int status = llist_push_back(instructions, mov_data);
       if (status) return status;
     }
     status = restore_volatile_regs();
@@ -1172,13 +1171,13 @@ int translate_call(ASTree *call) {
     InstructionData *dummy_data = instr_init(OP_MOV);
     set_op_reg(&dummy_data->dest, REG_QWORD, vreg_count);
     set_op_reg(&dummy_data->src, REG_QWORD, vreg_count);
-    status = llist_push_back(text_section, dummy_data);
+    status = llist_push_back(instructions, dummy_data);
     if (status) return status;
   } else {
     int status = restore_volatile_regs();
     if (status) return status;
   }
-  call->last_instr = llist_iter_last(text_section);
+  call->last_instr = llist_iter_last(instructions);
   if (call->last_instr == NULL) return -1;
   return 0;
 }
@@ -1199,7 +1198,7 @@ int translate_params(ASTree *function, CompilerState *state) {
     InstructionData *mov_data = instr_init(OP_MOV);
     set_op_reg(&mov_data->src, REG_QWORD, RDI_VREG);
     set_op_ind(&mov_data->dest, -window_size, RBP_VREG, NULL);
-    int status = llist_push_back(text_section, mov_data);
+    int status = llist_push_back(instructions, mov_data);
     if (status) return status;
   }
   /* offset to account for preserved regs and return address */
@@ -1217,7 +1216,7 @@ int translate_params(ASTree *function, CompilerState *state) {
     if (param_symval_eightbytes <= 2 &&
         reg_eightbytes + param_symval_eightbytes <= PARAM_REG_COUNT) {
       assign_stack_space(param_symval);
-      ListIter *temp = llist_iter_last(text_section);
+      ListIter *temp = llist_iter_last(instructions);
       int status =
           bulk_rtom(param_symval->reg, param_symval->offset,
                     PARAM_REGS + reg_eightbytes, &param_symval->type, temp);
@@ -1240,7 +1239,7 @@ int translate_list_initialization(ASTree *declarator, ASTree *init_list,
   resolve_object(state, &struct_data->src, declarator->lexinfo);
   set_op_reg(&struct_data->dest, REG_QWORD, vreg_count++);
   struct_data->opcode = OP_LEA;
-  llist_push_back(text_section, struct_data);
+  llist_push_back(instructions, struct_data);
 
   /* TODO(Robert): initialize unset struct members and array elements to
    * zero if the object is static
@@ -1256,7 +1255,7 @@ int translate_list_initialization(ASTree *declarator, ASTree *init_list,
     ASTree *initializer = astree_get(init_list, i);
     InstructionData *initializer_data = calloc(1, sizeof(InstructionData));
     /* int status = translate_expr(initializer, state, initializer_data); */
-    llist_push_back(text_section, initializer_data);
+    llist_push_back(instructions, initializer_data);
 
     InstructionData *mov_data = calloc(1, sizeof(InstructionData));
     mov_data->src = initializer_data->dest;
@@ -1265,7 +1264,7 @@ int translate_list_initialization(ASTree *declarator, ASTree *init_list,
     mov_data->dest.ind.num = struct_data->dest.reg.num;
     mov_data->dest.ind.disp = member_symbol->offset;
     mov_data->opcode = OP_MOV;
-    llist_push_back(text_section, mov_data);
+    llist_push_back(instructions, mov_data);
   }
   return 0;
 }
@@ -1312,9 +1311,9 @@ int translate_local_decl(ASTree *declaration, ASTree *declarator) {
   assign_stack_space(symval);
 
   InstructionData *dummy_data = instr_init(OP_NOP);
-  int status = llist_push_back(text_section, dummy_data);
+  int status = llist_push_back(instructions, dummy_data);
   if (status) return status;
-  declarator->first_instr = llist_iter_last(text_section);
+  declarator->first_instr = llist_iter_last(instructions);
   if (declarator->first_instr == NULL) return -1;
   declarator->last_instr = liter_copy(declarator->first_instr);
   if (declarator->last_instr == NULL) return -1;
@@ -1539,9 +1538,9 @@ static int translate_block(ASTree *block, CompilerState *state) {
   DEBUGS('g', "Translating compound statement");
   if (astree_count(block) == 0) {
     InstructionData *nop_data = instr_init(OP_NOP);
-    int status = llist_push_back(text_section, nop_data);
+    int status = llist_push_back(instructions, nop_data);
     if (status) return status;
-    block->first_instr = llist_iter_last(text_section);
+    block->first_instr = llist_iter_last(instructions);
     if (block->first_instr == NULL) return -1;
     block->last_instr = liter_copy(block->first_instr);
     if (block->last_instr == NULL) return -1;
@@ -1573,7 +1572,7 @@ int return_scalar(ASTree *ret, ASTree *expr) {
   InstructionData *mov_data = instr_init(OP_MOV);
   mov_data->src = retval_data->dest;
   set_op_reg(&mov_data->dest, typespec_get_width(&return_spec), RAX_VREG);
-  status = llist_push_back(text_section, mov_data);
+  status = llist_push_back(instructions, mov_data);
   if (status) return status;
   /* free typespec copies */
   typespec_destroy(&return_spec);
@@ -1581,9 +1580,9 @@ int return_scalar(ASTree *ret, ASTree *expr) {
   status = restore_preserved_regs();
   if (status) return status;
   InstructionData *ret_data = instr_init(OP_RET);
-  status = llist_push_back(text_section, ret_data);
+  status = llist_push_back(instructions, ret_data);
   if (status) return status;
-  ret->last_instr = llist_iter_last(text_section);
+  ret->last_instr = llist_iter_last(instructions);
   if (ret->last_instr == NULL) return -1;
   return 0;
 }
@@ -1595,7 +1594,7 @@ int return_aggregate(ASTree *ret, ASTree *expr) {
   size_t expr_eightbytes = typespec_get_eightbytes(expr->type);
 
   if (expr_eightbytes <= 2) {
-    ListIter *temp = llist_iter_last(text_section);
+    ListIter *temp = llist_iter_last(instructions);
     int status = bulk_mtor(RETURN_REGS, expr_data->dest.reg.num, NO_DISP,
                            expr->type, temp);
     free(temp);
@@ -1604,9 +1603,9 @@ int return_aggregate(ASTree *ret, ASTree *expr) {
     InstructionData *hidden_mov_data = instr_init(OP_MOV);
     set_op_reg(&hidden_mov_data->dest, REG_QWORD, vreg_count++);
     set_op_ind(&hidden_mov_data->src, -8, RBP_VREG, NULL);
-    int status = llist_push_back(text_section, hidden_mov_data);
+    int status = llist_push_back(instructions, hidden_mov_data);
     if (status) return status;
-    ListIter *temp = llist_iter_last(text_section);
+    ListIter *temp = llist_iter_last(instructions);
     status = bulk_mtom(vreg_count, expr_data->dest.reg.num, expr->type, temp);
     free(temp);
     if (status) return status;
@@ -1616,25 +1615,25 @@ int return_aggregate(ASTree *ret, ASTree *expr) {
   int status = restore_preserved_regs();
   if (status) return status;
   InstructionData *ret_data = instr_init(OP_RET);
-  status = llist_push_back(text_section, ret_data);
+  status = llist_push_back(instructions, ret_data);
   if (status) return status;
-  ret->last_instr = llist_iter_last(text_section);
+  ret->last_instr = llist_iter_last(instructions);
   if (ret->last_instr == NULL) return -1;
   return 0;
 }
 
 int return_void(ASTree *ret) {
   InstructionData *nop_data = instr_init(OP_NOP);
-  int status = llist_push_back(text_section, nop_data);
+  int status = llist_push_back(instructions, nop_data);
   if (status) return status;
-  ret->first_instr = llist_iter_last(text_section);
+  ret->first_instr = llist_iter_last(instructions);
   if (ret->first_instr == NULL) return -1;
   status = restore_preserved_regs();
   if (status) return status;
   InstructionData *ret_data = instr_init(OP_RET);
-  status = llist_push_back(text_section, ret_data);
+  status = llist_push_back(instructions, ret_data);
   if (status) return status;
-  ret->last_instr = llist_iter_last(text_section);
+  ret->last_instr = llist_iter_last(instructions);
   if (ret->last_instr == NULL) return -1;
   return 0;
 }
@@ -1656,9 +1655,9 @@ int translate_return(ASTree *ret, CompilerState *state) {
 static int translate_continue(ASTree *continue_, CompilerState *state) {
   InstructionData *cond_jmp_data = instr_init(OP_JMP);
   set_op_dir(&cond_jmp_data->dest, NO_DISP, COND_FMT, continue_->jump_id);
-  int status = llist_push_back(text_section, cond_jmp_data);
+  int status = llist_push_back(instructions, cond_jmp_data);
   if (status) return status;
-  continue_->first_instr = llist_iter_last(text_section);
+  continue_->first_instr = llist_iter_last(instructions);
   if (continue_->first_instr == NULL) return -1;
   continue_->last_instr = liter_copy(continue_->first_instr);
   if (continue_->last_instr == NULL) return -1;
@@ -1668,9 +1667,9 @@ static int translate_continue(ASTree *continue_, CompilerState *state) {
 static int translate_break(ASTree *break_, CompilerState *state) {
   InstructionData *end_jmp_data = instr_init(OP_JMP);
   set_op_dir(&end_jmp_data->dest, NO_DISP, END_FMT, break_->jump_id);
-  int status = llist_push_back(text_section, break_);
+  int status = llist_push_back(instructions, break_);
   if (status) return status;
-  break_->first_instr = llist_iter_last(text_section);
+  break_->first_instr = llist_iter_last(instructions);
   if (break_->first_instr == NULL) return -1;
   break_->last_instr = liter_copy(break_->first_instr);
   if (break_->last_instr == NULL) return -1;
@@ -1682,9 +1681,9 @@ static int translate_goto(ASTree *goto_, CompilerState *state) {
   const char *ident_str = ident->lexinfo;
   InstructionData *jmp_data = instr_init(OP_JMP);
   set_op_dir(&jmp_data->dest, NO_DISP, ident_str);
-  int status = llist_push_back(text_section, jmp_data);
+  int status = llist_push_back(instructions, jmp_data);
   if (status) return status;
-  goto_->first_instr = llist_iter_last(text_section);
+  goto_->first_instr = llist_iter_last(instructions);
   if (goto_->first_instr == NULL) return -1;
   goto_->last_instr = liter_copy(goto_->first_instr);
   if (goto_->last_instr == NULL) return -1;
@@ -1754,7 +1753,7 @@ int translate_global_init(ASTree *declarator, ASTree *initializer) {
       typespec_is_struct(declarator->type)) {
     InstructionData *data = instr_init(OP_NOP);
     strcpy(data->comment, "Struct init");
-    assert(!llist_push_back(data_section, data));
+    assert(!llist_push_back(instructions, data));
     return 0;
   } else {
     InstructionData *data;
@@ -1779,7 +1778,7 @@ int translate_global_init(ASTree *declarator, ASTree *initializer) {
         abort();
     }
     set_op_imm(&data->dest, initializer->constval);
-    assert(!llist_push_back(data_section, data));
+    assert(!llist_push_back(instructions, data));
     return 0;
   }
 }
@@ -1790,7 +1789,7 @@ int translate_global_decl(ASTree *declaration) {
   size_t width = typespec_get_width(declarator->type);
   InstructionData *data = instr_init(OP_ZERO);
   set_op_imm(&data->dest, width);
-  assert(!llist_push_back(bss_section, data));
+  assert(!llist_push_back(instructions, data));
   return 0;
 }
 
@@ -1802,9 +1801,9 @@ int begin_translate_fn(ASTree *function, CompilerState *state) {
   ASTree *declarator = astree_get(function, 1);
   InstructionData *label_data = instr_init(OP_NOP);
   strcpy(label_data->label, declarator->lexinfo);
-  int status = llist_push_back(text_section, label_data);
+  int status = llist_push_back(instructions, label_data);
   if (status) return status;
-  function->first_instr = llist_iter_last(text_section);
+  function->first_instr = llist_iter_last(instructions);
   if (function->first_instr == NULL) return -1;
 
   status = save_preserved_regs();
@@ -1813,11 +1812,11 @@ int begin_translate_fn(ASTree *function, CompilerState *state) {
   InstructionData *mov_data = instr_init(OP_MOV);
   set_op_reg(&mov_data->dest, REG_QWORD, RBP_VREG);
   set_op_reg(&mov_data->src, REG_QWORD, RSP_VREG);
-  status = llist_push_back(text_section, mov_data);
+  status = llist_push_back(instructions, mov_data);
   if (status) return status;
 
   /* save location for later rsp adjustment */
-  function->last_instr = llist_iter_last(text_section);
+  function->last_instr = llist_iter_last(instructions);
   if (function->last_instr == NULL) return -1;
 
   status = translate_params(function, state);
@@ -1838,14 +1837,14 @@ int end_translate_fn(ASTree *function, CompilerState *state) {
   InstructionData *mov_data = instr_init(OP_MOV);
   set_op_reg(&mov_data->dest, REG_QWORD, RSP_VREG);
   set_op_reg(&mov_data->src, REG_QWORD, RBP_VREG);
-  status = llist_push_back(text_section, mov_data);
+  status = llist_push_back(instructions, mov_data);
   if (status) return status;
   status = restore_preserved_regs();
   if (status) return status;
   InstructionData *return_data = instr_init(OP_RET);
-  status = llist_push_back(text_section, return_data);
+  status = llist_push_back(instructions, return_data);
   if (status) return status;
-  function->last_instr = llist_iter_last(text_section);
+  function->last_instr = llist_iter_last(instructions);
   if (function->last_instr == NULL) return -1;
   return 0;
 }
@@ -1905,6 +1904,8 @@ int opcode_to_str(InstructionData *data, char *str, size_t size) {
       return sprintf(str, "%s", OPCODES[data->opcode]);
     case OPTYPE_INVALID:
       /* fallthrough */
+    case OPTYPE_DIRECTIVE:
+      /* fallthrough */
     default:
       abort();
   }
@@ -1938,6 +1939,52 @@ int un_to_str(InstructionData *data, char *str, size_t size) {
   return sprintf(str, "%s %s", OPCODES[data->opcode], dest_str);
 }
 
+int dir_to_str(InstructionData *data, char *str, size_t size) {
+  switch (data->opcode) {
+    case OP_GLOBL:
+      /* fallthrough */
+    case OP_SECTION:
+      assert(data->dest.all.mode == MODE_DIRECT);
+      return sprintf(str, ".%s %s", OPCODES[data->opcode], data->dest.dir.lab);
+    case OP_ZERO:
+      /* fallthrough */
+    case OP_ALIGN:
+      assert(data->dest.all.mode == MODE_IMMEDIATE);
+      return sprintf(str, ".%s %lu", OPCODES[data->opcode], data->dest.imm.val);
+    case OP_BYTE:
+      /* fallthrough */
+    case OP_VALUE:
+      /* fallthrough */
+    case OP_LONG:
+      /* fallthrough */
+    case OP_QUAD:
+      assert(data->dest.all.mode == MODE_IMMEDIATE);
+      return sprintf(str, ".%s %li", OPCODES[data->opcode], data->dest.imm.val);
+    case OP_SIZE:
+      assert(data->dest.all.mode == MODE_DIRECT);
+      assert(data->src.all.mode == MODE_IMMEDIATE);
+      return sprintf(str, ".%s %s, %lu", OPCODES[OP_SIZE], data->dest.dir.lab,
+                     data->src.imm.val);
+    case OP_TYPE:
+      assert(data->dest.all.mode == MODE_DIRECT);
+      assert(data->src.all.mode == MODE_DIRECT);
+      return sprintf(str, ".%s %s, %s", OPCODES[OP_SIZE], data->dest.dir.lab,
+                     data->src.dir.lab);
+    case OP_STRING:
+      assert(data->dest.all.mode == MODE_IMMEDIATE);
+      return sprintf(str, ".%s %s", OPCODES[OP_STRING],
+                     (const char *)data->dest.imm.val);
+    case OP_BSS:
+      /* fallthrough */
+    case OP_TEXT:
+      /* fallthrough */
+    case OP_DATA:
+      return sprintf(str, ".%s", OPCODES[data->opcode]);
+    default:
+      abort();
+  }
+}
+
 int instr_to_str(InstructionData *data, char *str, size_t size) {
   int ret = 0;
   if (strlen(data->label) > 0) {
@@ -1954,6 +2001,11 @@ int instr_to_str(InstructionData *data, char *str, size_t size) {
   }
   switch (optype_from_opcode(data->opcode)) {
     int chars_written;
+    case OPTYPE_DIRECTIVE:
+      chars_written = dir_to_str(data, str + ret, size - ret);
+      if (chars_written < 0) return chars_written;
+      ret += chars_written;
+      break;
     case OPTYPE_BINARY:
       chars_written = bin_to_str(data, str + ret, size - ret);
       if (chars_written < 0) return chars_written;
@@ -1990,28 +2042,8 @@ int generator_print_il(FILE *out) {
   int chars_written = fprintf(out, SECTION_FMT, "text");
   if (chars_written < 0) return chars_written;
   size_t i;
-  for (i = 0; i < llist_size(text_section); ++i) {
-    InstructionData *data = llist_get(text_section, i);
-    chars_written = instr_to_str(data, buffer, 1024);
-    if (chars_written < 0) return chars_written;
-    chars_written = fprintf(out, "%s\n", buffer);
-    if (chars_written < 0) return chars_written;
-  }
-
-  chars_written = fprintf(out, SECTION_FMT, "data");
-  if (chars_written < 0) return chars_written;
-  for (i = 0; i < llist_size(data_section); ++i) {
-    InstructionData *data = llist_get(data_section, i);
-    chars_written = instr_to_str(data, buffer, 1024);
-    if (chars_written < 0) return chars_written;
-    chars_written = fprintf(out, "%s\n", buffer);
-    if (chars_written < 0) return chars_written;
-  }
-
-  chars_written = fprintf(out, SECTION_FMT, "bss");
-  if (chars_written < 0) return chars_written;
-  for (i = 0; i < llist_size(bss_section); ++i) {
-    InstructionData *data = llist_get(bss_section, i);
+  for (i = 0; i < llist_size(instructions); ++i) {
+    InstructionData *data = llist_get(instructions, i);
     chars_written = instr_to_str(data, buffer, 1024);
     if (chars_written < 0) return chars_written;
     chars_written = fprintf(out, "%s\n", buffer);
@@ -2021,16 +2053,8 @@ int generator_print_il(FILE *out) {
 }
 
 void asmgen_init_globals(void) {
-  text_section = malloc(sizeof(*text_section));
-  assert(!llist_init(text_section, free, NULL));
-  data_section = malloc(sizeof(*data_section));
-  assert(!llist_init(data_section, free, NULL));
-  bss_section = malloc(sizeof(*bss_section));
-  assert(!llist_init(bss_section, free, NULL));
+  instructions = malloc(sizeof(*instructions));
+  assert(!llist_init(instructions, free, NULL));
 }
 
-void asmgen_free_globals(void) {
-  assert(!llist_destroy(text_section));
-  assert(!llist_destroy(data_section));
-  assert(!llist_destroy(bss_section));
-}
+void asmgen_free_globals(void) { assert(!llist_destroy(instructions)); }

@@ -59,6 +59,43 @@ that has does not do most of the things that I thought:
 - Tags and enumeration constants declared as struct and union members are
   "hoisted" up into the enclosing scope
 
+## Directive Usage
+### File Scope Variables
+```
+        (.bss|.data|.section .rodata)
+        .globl NAME (unless linkage is static)
+        .align ALIGNMENT
+        .type NAME, @object
+        .size NAME, WIDTH
+NAME:
+        (.zero|.byte|.value|.long|.quad) (INITIALIZER|COUNT)
+        ...
+```
+
+### Functions
+NOTE: in gas, when a directive expects a numeric argument and `.` appears in
+the text, it is treated as the address/program counter/whatever of the current
+line. In the following text, `.-NAME` would be the number of bytes between the
+label `NAME` and the end of the function.
+```
+        .text
+        .globl NAME (unless linkage is static)
+        .type NAME, @function
+NAME:
+        ...
+        .size NAME, .-NAME
+```
+
+### String Constants
+NOTE: string constants will need to be relocated outside of functions and file
+scope initializers somehow.
+```
+        .section .rodata
+        .align ALIGNMENT (optional?)
+GEN_LABEL:
+        .string STRING
+```
+
 ## Empty Expressions, Uninitialized Variables and For Loops
 Because for loops might not have all of their control expressions set, no-ops
 need to be generated so that the iterators are set correctly and labels can be
