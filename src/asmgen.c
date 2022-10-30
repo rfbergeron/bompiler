@@ -2033,16 +2033,33 @@ int translate_global_decl(ASTree *declarator) {
   return llist_push_back(instructions, zero_data);
 }
 
+int translate_fn_prelude(ASTree *declarator) {
+  InstructionData *text_data = instr_init(OP_TEXT);
+  int status = llist_push_back(instructions, text_data);
+  if (status) return status;
+  /* TODO(Robert): check linkage */
+  InstructionData *globl_data = instr_init(OP_GLOBL);
+  set_op_dir(&globl_data->dest, NO_DISP, declarator->lexinfo);
+  status = llist_push_back(instructions, globl_data);
+  if (status) return status;
+  InstructionData *type_data = instr_init(OP_TYPE);
+  set_op_dir(&type_data->dest, NO_DISP, declarator->lexinfo);
+  set_op_dir(&type_data->src, NO_DISP, "@function");
+  status = llist_push_back(instructions, type_data);
+  if (status) return status;
+  InstructionData *label_data = instr_init(OP_NOP);
+  strcpy(label_data->label, declarator->lexinfo);
+  return llist_push_back(instructions, label_data);
+}
+
 int begin_translate_fn(ASTree *function, CompilerState *state) {
   DEBUGS('g', "Translating function prologue");
   branch_count = window_size = 0;
   vreg_count = REAL_REG_COUNT;
-
   ASTree *declarator = astree_get(function, 1);
-  InstructionData *label_data = instr_init(OP_NOP);
-  strcpy(label_data->label, declarator->lexinfo);
-  int status = llist_push_back(instructions, label_data);
+  int status = translate_fn_prelude(declarator);
   if (status) return status;
+
   function->first_instr = llist_iter_last(instructions);
   if (function->first_instr == NULL) return -1;
 
@@ -2083,6 +2100,12 @@ int end_translate_fn(ASTree *function, CompilerState *state) {
   if (status) return status;
   InstructionData *return_data = instr_init(OP_RET);
   status = llist_push_back(instructions, return_data);
+  if (status) return status;
+  ASTree *declarator = astree_get(function, 1);
+  InstructionData *size_data = instr_init(OP_SIZE);
+  set_op_dir(&size_data->dest, NO_DISP, declarator->lexinfo);
+  set_op_dir(&size_data->src, NO_DISP, ".-%s", declarator->lexinfo);
+  status = llist_push_back(instructions, size_data);
   if (status) return status;
   function->last_instr = llist_iter_last(instructions);
   if (function->last_instr == NULL) return -1;
