@@ -1274,64 +1274,6 @@ int translate_list_initialization(ASTree *declarator, ASTree *init_list,
   return 0;
 }
 
-int translate_local_init(ASTree *declaration, ASTree *declarator,
-                         ASTree *initializer) {
-  SymbolValue *symval = NULL;
-  assert(state_get_symbol(state, (char *)declarator->lexinfo,
-                          strlen(declarator->lexinfo), &symval));
-  assert(symval);
-  assign_stack_space(symval);
-
-  if (initializer->symbol == TOK_INIT_LIST) {
-    /* TODO(Robert): figure out how to do list initialization on the first
-     * pass
-     */
-    abort();
-  } else {
-    int status = rvalue_conversions(initializer, declarator->type);
-    if (status) return status;
-    InstructionData *initializer_data = liter_get(initializer->last_instr);
-    InstructionData *mov_data = instr_init(OP_MOV);
-    resolve_object(state, &mov_data->dest, declarator->lexinfo);
-    mov_data->src = initializer_data->dest;
-    status = liter_push_back(initializer->last_instr, &initializer->last_instr,
-                             1, mov_data);
-    if (status) return status;
-  }
-  if (declaration->first_instr == NULL)
-    declaration->first_instr = liter_copy(initializer->first_instr);
-  if (declaration->last_instr != NULL) free(declaration->last_instr);
-  declaration->last_instr = liter_copy(initializer->last_instr);
-  if (declaration->first_instr == NULL || declaration->last_instr == NULL)
-    return -1;
-  return 0;
-}
-
-int translate_local_decl(ASTree *declaration, ASTree *declarator) {
-  DEBUGS('g', "Translating local declaration");
-  SymbolValue *symval = NULL;
-  assert(state_get_symbol(state, (char *)declarator->lexinfo,
-                          strlen(declarator->lexinfo), &symval));
-  assert(symval);
-  assign_stack_space(symval);
-
-  InstructionData *dummy_data = instr_init(OP_NOP);
-  int status = llist_push_back(instructions, dummy_data);
-  if (status) return status;
-  declarator->first_instr = llist_iter_last(instructions);
-  if (declarator->first_instr == NULL) return -1;
-  declarator->last_instr = liter_copy(declarator->first_instr);
-  if (declarator->last_instr == NULL) return -1;
-
-  if (declaration->first_instr == NULL)
-    declaration->first_instr = liter_copy(declarator->first_instr);
-  if (declaration->last_instr != NULL) free(declaration->last_instr);
-  declaration->last_instr = liter_copy(declarator->last_instr);
-  if (declaration->first_instr == NULL || declaration->last_instr == NULL)
-    return -1;
-  return 0;
-}
-
 static int translate_ifelse(ASTree *ifelse) {
   ASTree *condition = astree_get(ifelse, 0);
   int status = rvalue_conversions(condition, condition->type);
@@ -1752,12 +1694,20 @@ static int translate_default(ASTree *default_, CompilerState *state) {
   return 0;
 }
 
-int init_global_scalar(TypeSpec *type, ASTree *initializer) {
+int init_scalar(const TypeSpec *type, ptrdiff_t displacement,
+                ASTree *initializer) {
   assert(!typespec_is_aggregate(type));
   if (initializer->symbol == TOK_INIT_LIST) {
     assert(astree_count(initializer) == 1);
-    return init_global_scalar(type, astree_get(initializer, 0));
-  } else {
+    int status = init_scalar(type, displacement, astree_get(initializer, 0));
+    if (status) return status;
+    initializer->first_instr =
+        liter_copy(astree_get(initializer, 0)->first_instr);
+    if (initializer->first_instr == NULL) return -1;
+    initializer->last_instr = llist_iter_last(instructions);
+    if (initializer->last_instr == NULL) return -1;
+    return 0;
+  } else if (displacement >= 0) {
     Opcode directive;
     switch (typespec_get_width(type)) {
       case X64_SIZEOF_LONG:
@@ -1778,17 +1728,42 @@ int init_global_scalar(TypeSpec *type, ASTree *initializer) {
     InstructionData *data = instr_init(directive);
     set_op_imm(&data->dest, initializer->constval);
     return llist_push_back(instructions, data);
+  } else if (initializer->attributes & ATTR_EXPR_CONST1) {
+    /* TODO(Robert): update flag once merged with main, and remove all
+     * instructions there were emitted for this initializer. or, just don't
+     * emit any instructions for valid constant expressions until they are
+     * used in a non-constant expression
+     */
+    InstructionData *mov_data = instr_init(OP_MOV);
+    set_op_imm(&mov_data->src, initializer->constval);
+    set_op_reg(&mov_data->dest, typespec_get_width(type), vreg_count++);
+    int status = llist_push_back(instructions, mov_data);
+    if (status) return status;
+    InstructionData *mov_data_2 = instr_init(OP_MOV);
+    mov_data_2->src = mov_data->dest;
+    set_op_ind(&mov_data_2->dest, displacement, RBP_VREG, NULL);
+    return llist_push_back(instructions, mov_data_2);
+  } else {
+    int status = rvalue_conversions(initializer, type);
+    if (status) return status;
+    InstructionData *initializer_data = liter_get(initializer->last_instr);
+    InstructionData *mov_data = instr_init(OP_MOV);
+    set_op_ind(&mov_data->dest, displacement, RBP_VREG, NULL);
+    mov_data->src = initializer_data->dest;
+    return llist_push_back(instructions, mov_data);
   }
 }
 
-int init_global_aggregate(TypeSpec *agg_type, ASTree *initializer,
-                          size_t start);
+int init_aggregate(const TypeSpec *agg_type, ptrdiff_t agg_disp,
+                   ASTree *initializer, size_t start);
 
-int init_global_array(TypeSpec *arr_type, ASTree *init_list, size_t start) {
+int init_array(const TypeSpec *arr_type, ptrdiff_t arr_disp, ASTree *init_list,
+               size_t start) {
   TypeSpec elem_type;
   int status = strip_aux_type(&elem_type, arr_type);
   if (status) return -1;
   AuxSpec *arr_aux = llist_front(&arr_type->auxspecs);
+  size_t elem_width = typespec_get_width(&elem_type);
   size_t elem_count = arr_aux->data.memory_loc.length;
   size_t init_count = astree_count(init_list);
   size_t init_index, elem_index;
@@ -1796,27 +1771,52 @@ int init_global_array(TypeSpec *arr_type, ASTree *init_list, size_t start) {
        elem_index < elem_count && init_index < init_count;
        ++elem_index, ++init_index) {
     ASTree *initializer = astree_get(init_list, init_index);
+    ptrdiff_t elem_disp = arr_disp + (elem_index * elem_width);
     if (typespec_is_aggregate(&elem_type)) {
       if (initializer->symbol == TOK_INIT_LIST) {
-        int consumed = init_global_aggregate(&elem_type, initializer, 0);
+        int consumed = init_aggregate(&elem_type, elem_disp, initializer, 0);
         if (consumed < 0) return consumed;
       } else {
-        int consumed = init_global_aggregate(&elem_type, init_list, init_index);
+        int consumed =
+            init_aggregate(&elem_type, elem_disp, init_list, init_index);
         if (consumed < 0) return consumed;
         init_index += consumed - 1;
       }
     } else {
-      int status = init_global_scalar(&elem_type, initializer);
+      int status = init_scalar(&elem_type, elem_disp, initializer);
       if (status) return status;
     }
   }
-  size_t zero_count =
-      (elem_count - elem_index) * typespec_get_width(&elem_type);
+  if (arr_disp >= 0) {
+    size_t zero_count =
+        (elem_count - elem_index) * typespec_get_width(&elem_type);
+    if (zero_count > 0) {
+      InstructionData *zero_data = instr_init(OP_ZERO);
+      set_op_imm(&zero_data->dest, zero_count);
+      int status = llist_push_back(instructions, zero_data);
+      if (status) return -1;
+    }
+  } else {
+    for (; elem_index < elem_count; ++elem_index) {
+      ptrdiff_t elem_disp = arr_disp + (elem_index * elem_width);
+      InstructionData *mov_data = instr_init(OP_MOV);
+      set_op_reg(&mov_data->dest, typespec_get_width(&elem_type), vreg_count++);
+      set_op_imm(&mov_data->src, 0);
+      int status = llist_push_back(instructions, mov_data);
+      if (status) return -1;
+      InstructionData *mov_data_2 = instr_init(OP_MOV);
+      mov_data_2->src = mov_data->dest;
+      set_op_ind(&mov_data_2->dest, elem_disp, RBP_VREG, NULL);
+      status = llist_push_back(instructions, mov_data_2);
+      if (status) return -1;
+    }
+  }
   typespec_destroy(&elem_type);
   return init_index - start;
 }
 
-int init_global_struct(TypeSpec *struct_type, ASTree *init_list, size_t start) {
+int init_struct(const TypeSpec *struct_type, ptrdiff_t struct_disp,
+                ASTree *init_list, size_t start) {
   AuxSpec *struct_aux = llist_front(&struct_type->auxspecs);
   LinkedList *member_list = &struct_aux->data.tag.val->data.members.in_order;
   size_t member_count = llist_size(member_list);
@@ -1826,69 +1826,88 @@ int init_global_struct(TypeSpec *struct_type, ASTree *init_list, size_t start) {
   for (member_index = 0, init_index = start;
        member_index < member_count && init_index < init_count;
        ++member_index, ++init_index) {
-    TypeSpec *member_type =
-        &((SymbolValue *)llist_get(member_list, member_index))->type;
+    SymbolValue *member_symval = llist_get(member_list, member_index);
+    TypeSpec *member_type = &member_symval->type;
     ASTree *initializer = astree_get(init_list, init_index);
     size_t member_alignment = typespec_get_alignment(member_type);
+    ptrdiff_t member_disp = struct_disp + member_symval->offset;
     size_t padding = member_alignment - (bytes_initialized % member_alignment);
-    if (padding > 0 && padding != member_alignment) {
+    if (padding == member_alignment) padding = 0;
+    if (member_disp >= 0 && padding > 0) {
       InstructionData *zero_data = instr_init(OP_ZERO);
       set_op_imm(&zero_data->dest, padding);
       int status = llist_push_back(instructions, zero_data);
       if (status) return -1;
-      bytes_initialized += padding;
     }
     if (typespec_is_aggregate(member_type)) {
       if (initializer->symbol == TOK_INIT_LIST) {
-        int consumed = init_global_aggregate(member_type, initializer, 0);
+        int consumed = init_aggregate(member_type, member_disp, initializer, 0);
         if (consumed < 0) return consumed;
       } else {
         int consumed =
-            init_global_aggregate(member_type, init_list, init_index);
+            init_aggregate(member_type, member_disp, init_list, init_index);
         if (consumed < 0) return consumed;
         init_index += consumed - 1;
       }
     } else {
-      int status = init_global_scalar(member_type, initializer);
+      int status = init_scalar(member_type, member_disp, initializer);
       if (status) return -1;
     }
-    bytes_initialized += typespec_get_width(member_type);
+    bytes_initialized += padding + typespec_get_width(member_type);
   }
-  assert(bytes_initialized <= typespec_get_width(struct_type));
-  size_t zero_count = typespec_get_width(struct_type) - bytes_initialized;
-  if (zero_count > 0) {
-    InstructionData *zero_data = instr_init(OP_ZERO);
-    set_op_imm(&zero_data->dest, zero_count);
-    int status = llist_push_back(instructions, zero_data);
-    if (status) return -1;
+  if (struct_disp >= 0) {
+    size_t zero_count = typespec_get_width(struct_type) - bytes_initialized;
+    if (zero_count > 0) {
+      InstructionData *zero_data = instr_init(OP_ZERO);
+      set_op_imm(&zero_data->dest, zero_count);
+      int status = llist_push_back(instructions, zero_data);
+      if (status) return -1;
+    }
+  } else {
+    for (; member_index < member_count; ++member_index) {
+      SymbolValue *member_symval = llist_get(member_list, member_index);
+      TypeSpec *member_type = &member_symval->type;
+      ptrdiff_t member_disp = struct_disp + member_symval->offset;
+      InstructionData *mov_data = instr_init(OP_MOV);
+      set_op_reg(&mov_data->dest, typespec_get_width(member_type),
+                 vreg_count++);
+      set_op_imm(&mov_data->src, 0);
+      int status = llist_push_back(instructions, mov_data);
+      if (status) return -1;
+      InstructionData *mov_data_2 = instr_init(OP_MOV);
+      mov_data_2->src = mov_data->dest;
+      set_op_ind(&mov_data_2->dest, member_disp, RBP_VREG, NULL);
+      status = llist_push_back(instructions, mov_data_2);
+      if (status) return -1;
+    }
   }
   return init_index - start;
 }
 
-int init_global_union(TypeSpec *union_type, ASTree *init_list, size_t start) {
+int init_union(const TypeSpec *union_type, ptrdiff_t union_disp,
+               ASTree *init_list, size_t start) {
   AuxSpec *union_aux = llist_front(&union_type->auxspecs);
-  TypeSpec *member_type =
-      &((SymbolValue *)llist_front(
-            &union_aux->data.tag.val->data.members.in_order))
-           ->type;
+  SymbolValue *member_symval =
+      llist_front(&union_aux->data.tag.val->data.members.in_order);
+  TypeSpec *member_type = &member_symval->type;
   ASTree *initializer = astree_get(init_list, start);
   int consumed;
   if (typespec_is_aggregate(member_type)) {
     if (initializer->symbol == TOK_INIT_LIST) {
-      consumed = init_global_aggregate(member_type, initializer, 0);
+      consumed = init_aggregate(member_type, union_disp, initializer, 0);
       if (consumed < 0) return consumed;
     } else {
-      consumed = init_global_aggregate(member_type, init_list, start);
+      consumed = init_aggregate(member_type, union_disp, init_list, start);
       if (consumed < 0) return consumed;
     }
   } else {
-    int status = init_global_scalar(member_type, initializer);
+    int status = init_scalar(member_type, union_disp, initializer);
     if (status) return -1;
     consumed = 1;
   }
   size_t zero_count =
       typespec_get_width(union_type) - typespec_get_width(member_type);
-  if (zero_count > 0) {
+  if (union_disp >= 0 && zero_count > 0) {
     InstructionData *zero_data = instr_init(OP_ZERO);
     set_op_imm(&zero_data->dest, zero_count);
     int status = llist_push_back(instructions, zero_data);
@@ -1897,18 +1916,54 @@ int init_global_union(TypeSpec *union_type, ASTree *init_list, size_t start) {
   return consumed;
 }
 
-int init_global_aggregate(TypeSpec *agg_type, ASTree *initializer,
-                          size_t start) {
+int init_aggregate(const TypeSpec *agg_type, ptrdiff_t agg_disp,
+                   ASTree *initializer, size_t start) {
   assert(typespec_is_aggregate(agg_type) &&
          initializer->symbol == TOK_INIT_LIST);
+  int consumed = -1;
   if (typespec_is_array(agg_type)) {
-    return init_global_array(agg_type, initializer, start);
+    consumed = init_array(agg_type, agg_disp, initializer, start);
   } else if (typespec_is_struct(agg_type)) {
-    return init_global_struct(agg_type, initializer, start);
+    consumed = init_struct(agg_type, agg_disp, initializer, start);
   } else if (typespec_is_union(agg_type)) {
-    return init_global_union(agg_type, initializer, start);
+    consumed = init_union(agg_type, agg_disp, initializer, start);
   }
-  return -1;
+  if (consumed < 0) return consumed;
+  initializer->first_instr =
+      liter_copy(astree_get(initializer, 0)->first_instr);
+  if (initializer->first_instr == NULL) return -1;
+  initializer->last_instr = llist_iter_last(instructions);
+  if (initializer->last_instr == NULL) return -1;
+  return consumed;
+}
+
+int translate_local_init(ASTree *assignment, ASTree *declarator,
+                         ASTree *initializer) {
+  DEBUGS('g', "Translating local initialization");
+  SymbolValue *symval = NULL;
+  assert(state_get_symbol(state, (char *)declarator->lexinfo,
+                          strlen(declarator->lexinfo), &symval));
+  assert(symval);
+  assign_stack_space(symval);
+
+  if (typespec_is_aggregate(declarator->type)) {
+    int consumed =
+        init_aggregate(declarator->type, symval->offset, initializer, 0);
+    if (consumed < 0) return consumed;
+    return 0;
+  } else {
+    return init_scalar(declarator->type, symval->offset, initializer);
+  }
+}
+
+int translate_local_decl(ASTree *declarator) {
+  DEBUGS('g', "Translating local declaration");
+  SymbolValue *symval = NULL;
+  assert(state_get_symbol(state, (char *)declarator->lexinfo,
+                          strlen(declarator->lexinfo), &symval));
+  assert(symval);
+  assign_stack_space(symval);
+  return 0;
 }
 
 int translate_global_prelude(ASTree *declarator) {
@@ -1951,10 +2006,13 @@ int translate_global_init(ASTree *declarator, ASTree *initializer) {
   status = translate_global_prelude(declarator);
   if (status) return status;
   if (typespec_is_aggregate(declarator->type)) {
-    return init_global_aggregate(declarator->type, initializer, 0);
+    int consumed = init_aggregate(declarator->type, 0, initializer, 0);
+    if (consumed < 0) return consumed;
   } else {
-    return init_global_scalar(declarator->type, initializer);
+    int status = init_scalar(declarator->type, 0, initializer);
+    if (status) return status;
   }
+  return 0;
 }
 
 int translate_global_decl(ASTree *declarator) {
@@ -1972,8 +2030,7 @@ int translate_global_decl(ASTree *declarator) {
   if (status) return status;
   InstructionData *zero_data = instr_init(OP_ZERO);
   set_op_imm(&zero_data->dest, typespec_get_width(declarator->type));
-  status = llist_push_back(instructions, zero_data);
-  return 0;
+  return llist_push_back(instructions, zero_data);
 }
 
 int begin_translate_fn(ASTree *function, CompilerState *state) {
