@@ -866,17 +866,35 @@ int translate_inc_dec(ASTree *inc_dec) {
   set_op_reg(&mov_data->dest, typespec_get_width(inc_dec->type), vreg_count++);
 
   InstructionData *inc_dec_data = instr_init(opcode_from_operator(inc_dec));
-  set_op_ind(&inc_dec_data->dest, NO_DISP, operand_data->dest.reg.num, NULL);
+  inc_dec_data->dest = mov_data->dest;
 
+  InstructionData *mov_data_2 = instr_init(OP_MOV);
+  mov_data_2->dest = mov_data->src;
+  mov_data_2->src = mov_data->dest;
+
+  /* have to do this since the generator expects at least one operand to be a
+   * register at all times, and expects the last instruction emitted to contain
+   * the destination register
+   */
   inc_dec->first_instr = liter_copy(operand->first_instr);
   if (inc_dec->first_instr == NULL) return -1;
   if (inc_dec->symbol == TOK_POST_DEC || inc_dec->symbol == TOK_POST_INC) {
-    int status = liter_push_back(operand->last_instr, &inc_dec->last_instr, 2,
-                                 mov_data, inc_dec_data);
+    InstructionData *mov_data_3 = instr_init(OP_MOV);
+    mov_data_3->src = mov_data->dest;
+    set_op_reg(&mov_data_3->dest, typespec_get_width(inc_dec->type),
+               vreg_count++);
+    InstructionData *dummy_data = instr_init(OP_MOV);
+    dummy_data->src = dummy_data->dest = mov_data_3->dest;
+    int status =
+        liter_push_back(operand->last_instr, &inc_dec->last_instr, 3, mov_data,
+                        mov_data_3, inc_dec_data, mov_data_2, dummy_data);
     if (status) return status;
   } else {
-    int status = liter_push_back(operand->last_instr, &inc_dec->last_instr, 2,
-                                 inc_dec_data, mov_data);
+    InstructionData *dummy_data = instr_init(OP_MOV);
+    dummy_data->src = dummy_data->dest = mov_data->dest;
+    int status =
+        liter_push_back(operand->last_instr, &inc_dec->last_instr, 2, mov_data,
+                        inc_dec_data, mov_data_2, dummy_data);
     if (status) return status;
   }
   return 0;
