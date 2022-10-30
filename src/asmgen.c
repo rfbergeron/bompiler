@@ -919,6 +919,93 @@ int translate_unop(ASTree *operator) {
   return 0;
 }
 
+int translate_addition(ASTree *operator) {
+  DEBUGS('g', "Translating additive operation");
+  ASTree *left = astree_get(operator, 0);
+  int status = rvalue_conversions(left, operator->type);
+  if (status) return status;
+  InstructionData *left_data = liter_get(left->last_instr);
+
+  ASTree *right = astree_get(operator, 1);
+  status = rvalue_conversions(right, operator->type);
+  if (status) return status;
+  InstructionData *right_data = liter_get(right->last_instr);
+
+  InstructionData *operator_data = instr_init(opcode_from_operator(operator));
+  operator_data->dest = left_data->dest;
+  operator_data->src = right_data->dest;
+
+  operator->first_instr = liter_copy(left->first_instr);
+  if (operator->first_instr == NULL) return -1;
+
+  /* use two-operand IMUL, since it is more convenient in this case */
+  if (typespec_is_pointer(left->type) && !typespec_is_pointer(right->type)) {
+    TypeSpec element_type;
+    status = strip_aux_type(&element_type, left->type);
+    if (status) return status;
+    InstructionData *mul_data = instr_init(OP_IMUL);
+    mul_data->dest = right_data->dest;
+    set_op_imm(&mul_data->src, typespec_get_width(&element_type));
+    return liter_push_back(right->last_instr, &operator->last_instr, 2,
+                           mul_data, operator_data);
+  } else if (!typespec_is_pointer(left->type) &&
+             typespec_is_pointer(right->type)) {
+    TypeSpec element_type;
+    status = strip_aux_type(&element_type, right->type);
+    if (status) return status;
+    InstructionData *mul_data = instr_init(OP_IMUL);
+    mul_data->dest = left_data->dest;
+    set_op_imm(&mul_data->src, typespec_get_width(&element_type));
+    return liter_push_back(right->last_instr, &operator->last_instr, 2,
+                           mul_data, operator_data);
+  } else {
+    return liter_push_back(right->last_instr, &operator->last_instr, 1,
+                           operator_data);
+  }
+}
+
+/* DIV/IDIV: divide ax by operand; quotient -> ax; remainder -> dx except
+ * when the operand is al, in which case upper bits -> ah
+ * MUL/IMUL: multipy ax by operand; lower bits -> ax; upper bits -> dx except
+ * when the operand is al, in which case upper bits -> ah
+ *
+ * IMUL has 2- and 3-operand forms, but we use the 1-operand form here since it
+ * lets us reuse the whole procedure to emit it
+ *
+ * because of integral promotion, the operands should be at least 32 bits, and
+ * we don't need to worry about the case where the remainder is in ah
+ */
+int translate_multiplication(ASTree *operator) {
+  DEBUGS('g', "Translating binary operation");
+  ASTree *left = astree_get(operator, 0);
+  int status = rvalue_conversions(left, operator->type);
+  if (status) return status;
+  InstructionData *left_data = liter_get(left->last_instr);
+
+  ASTree *right = astree_get(operator, 1);
+  status = rvalue_conversions(right, operator->type);
+  if (status) return status;
+  InstructionData *right_data = liter_get(right->last_instr);
+
+  InstructionData *mov_rax_data = instr_init(OP_MOV);
+  set_op_reg(&mov_rax_data->dest, typespec_get_width(operator->type), RAX_VREG);
+  mov_rax_data->src = left_data->dest;
+
+  InstructionData *operator_data = instr_init(opcode_from_operator(operator));
+  operator_data->dest = right_data->dest;
+
+  operator->first_instr = liter_copy(left->first_instr);
+  if (operator->first_instr == NULL) return -1;
+
+  InstructionData *mov_data = instr_init(OP_MOV);
+  /* mov from vreg representing rax/rdx to new vreg */
+  set_op_reg(&mov_data->src, typespec_get_width(operator->type),
+                             operator->symbol == '%' ? RDX_VREG : RAX_VREG);
+  set_op_reg(&mov_data->dest, typespec_get_width(operator->type), vreg_count++);
+  return liter_push_back(right->last_instr, &operator->last_instr, 3,
+                         mov_rax_data, operator_data, mov_data);
+}
+
 int translate_binop(ASTree *operator) {
   DEBUGS('g', "Translating binary operation");
   ASTree *left = astree_get(operator, 0);
@@ -938,42 +1025,8 @@ int translate_binop(ASTree *operator) {
   operator->first_instr = liter_copy(left->first_instr);
   if (operator->first_instr == NULL) return -1;
 
-  if (operator->symbol == '*' || operator->symbol == '/' || operator->symbol ==
-      '%') {
-    InstructionData *mov_data = instr_init(OP_MOV);
-    /* mov from vreg representing rax/rdx to new vreg */
-    set_op_reg(&mov_data->src, typespec_get_width(operator->type),
-                               operator->symbol == '%' ? RDX_VREG : RAX_VREG);
-    set_op_reg(&mov_data->dest, typespec_get_width(operator->type),
-               vreg_count++);
-    status = liter_push_back(right->last_instr, &operator->last_instr, 2,
-                             operator_data, mov_data);
-  } else if (typespec_is_pointer(left->type) &&
-             !typespec_is_pointer(right->type)) {
-    TypeSpec element_type;
-    status = strip_aux_type(&element_type, left->type);
-    if (status) return status;
-    InstructionData *mul_data = instr_init(OP_MUL);
-    mul_data->dest = right_data->dest;
-    set_op_imm(&mul_data->src, typespec_get_width(&element_type));
-    status = liter_push_back(right->last_instr, &operator->last_instr, 2,
-                             mul_data, operator_data);
-  } else if (!typespec_is_pointer(left->type) &&
-             typespec_is_pointer(right->type)) {
-    TypeSpec element_type;
-    status = strip_aux_type(&element_type, right->type);
-    if (status) return status;
-    InstructionData *mul_data = instr_init(OP_MUL);
-    mul_data->dest = left_data->dest;
-    set_op_imm(&mul_data->src, typespec_get_width(&element_type));
-    status = liter_push_back(right->last_instr, &operator->last_instr, 2,
-                             mul_data, operator_data);
-  } else {
-    status = liter_push_back(right->last_instr, &operator->last_instr, 1,
-                             operator_data);
-  }
-  if (status) return status;
-  return 0;
+  return liter_push_back(right->last_instr, &operator->last_instr, 1,
+                         operator_data);
 }
 
 int assign_aggregate(ASTree *assignment, ASTree *lvalue, ASTree *expr) {
