@@ -190,6 +190,7 @@ static const char BOOL_FMT[] = ".B%lu";
 static const char DEF_FMT[] = ".D%lu";
 static const char CASE_FMT[] = ".S%luC%lu";
 static const char FALL_FMT[] = ".S%luF%lu";
+static const char STR_FMT[] = ".STR%lu";
 
 /* Base and index are registers; scale is limited to {1, 2, 4, 8}, and
  * displacement is a signed 32-bit integer.
@@ -231,6 +232,7 @@ size_t vreg_count;
 static ptrdiff_t window_size;
 
 static LinkedList *instructions;
+static Map *string_constants;
 
 InstructionData *instr_init(Opcode opcode) {
   InstructionData *ret = calloc(1, sizeof(InstructionData));
@@ -608,6 +610,37 @@ int translate_ident(ASTree *ident, CompilerState *state) {
   if (ident->first_instr == NULL) return -1;
   ident->last_instr = liter_copy(ident->first_instr);
   if (ident->last_instr == NULL) return -1;
+  return 0;
+}
+
+/* TODO(Robert): create iterator/list/some global variable that can be used as
+ * a place to store string constant and static local declarations so that they
+ * are not interleaved with text section instructions
+ */
+int translate_stringcon(ASTree *stringcon) {
+  size_t *string_id =
+      map_get(string_constants, stringcon->lexinfo, strlen(stringcon->lexinfo));
+  if (!string_id) {
+    string_id = malloc(sizeof(size_t));
+    *string_id = map_size(string_constants);
+    int status = map_insert(string_constants, stringcon->lexinfo,
+                            strlen(stringcon->lexinfo), string_id);
+    if (status) return status;
+    InstructionData *section_data = instr_init(OP_SECTION);
+    set_op_dir(&section_data->dest, 0, ".rodata");
+    status = llist_push_back(instructions, section_data);
+    if (status) return status;
+    /* TODO(Robert): determine when alignment needs to be set, if ever */
+    InstructionData *label_data = instr_init(OP_INVALID);
+    strcpy(label_data->label, stringcon->lexinfo);
+    status = llist_push_back(instructions, label_data);
+    if (status) return status;
+    InstructionData *string_data = instr_init(OP_STRING);
+    set_op_imm(&string_data->dest, (uintmax_t)stringcon->lexinfo);
+    status = llist_push_back(instructions, string_data);
+    if (status) return status;
+  }
+  /* TODO(Robert): set node constval to label */
   return 0;
 }
 
@@ -2338,9 +2371,25 @@ int generator_print_il(FILE *out) {
   return 0;
 }
 
+static int strncmp_wrapper(void *s1, void *s2) {
+  int ret = 0;
+  if (!s1 || !s2) {
+    ret = s1 == s2;
+  } else {
+    ret = !strncmp(s1, s2, MAX_IDENT_LEN);
+  }
+  return ret;
+}
+
 void asmgen_init_globals(void) {
   instructions = malloc(sizeof(*instructions));
   assert(!llist_init(instructions, free, NULL));
+  string_constants = malloc(sizeof(*string_constants));
+  assert(!map_init(string_constants, DEFAULT_MAP_SIZE, NULL, free,
+                   strncmp_wrapper));
 }
 
-void asmgen_free_globals(void) { assert(!llist_destroy(instructions)); }
+void asmgen_free_globals(void) {
+  assert(!llist_destroy(instructions));
+  assert(!map_destroy(string_constants));
+}
