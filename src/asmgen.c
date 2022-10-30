@@ -2221,17 +2221,29 @@ int dir_to_str(InstructionData *data, char *str, size_t size) {
     case OP_LONG:
       /* fallthrough */
     case OP_QUAD:
-      assert(data->dest.all.mode == MODE_IMMEDIATE);
-      return sprintf(str, ".%s %li", OPCODES[data->opcode], data->dest.imm.val);
+      assert(data->dest.all.mode == MODE_IMMEDIATE ||
+             data->dest.all.mode == MODE_DIRECT);
+      if (data->dest.all.mode == MODE_IMMEDIATE)
+        return sprintf(str, ".%s %li", OPCODES[data->opcode],
+                       data->dest.imm.val);
+      else
+        return sprintf(str, ".%s %s%+li", OPCODES[data->opcode],
+                       data->dest.dir.lab, data->dest.dir.disp);
     case OP_SIZE:
       assert(data->dest.all.mode == MODE_DIRECT);
-      assert(data->src.all.mode == MODE_IMMEDIATE);
-      return sprintf(str, ".%s %s, %lu", OPCODES[OP_SIZE], data->dest.dir.lab,
-                     data->src.imm.val);
+      assert(data->src.all.mode == MODE_DIRECT ||
+             data->src.all.mode == MODE_IMMEDIATE);
+      if (data->src.all.mode == MODE_IMMEDIATE)
+        return sprintf(str, ".%s %s, %lu", OPCODES[OP_SIZE], data->dest.dir.lab,
+                       data->src.imm.val);
+      else
+        return sprintf(str, ".%s %s, %s%+li", OPCODES[OP_SIZE],
+                       data->dest.dir.lab, data->src.dir.lab,
+                       data->src.dir.disp);
     case OP_TYPE:
       assert(data->dest.all.mode == MODE_DIRECT);
       assert(data->src.all.mode == MODE_DIRECT);
-      return sprintf(str, ".%s %s, %s", OPCODES[OP_SIZE], data->dest.dir.lab,
+      return sprintf(str, ".%s %s, %s", OPCODES[OP_TYPE], data->dest.dir.lab,
                      data->src.dir.lab);
     case OP_STRING:
       assert(data->dest.all.mode == MODE_IMMEDIATE);
