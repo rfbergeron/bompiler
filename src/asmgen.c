@@ -181,33 +181,19 @@ typedef struct instruction_data {
 
 const char OPCODES[][MAX_OPCODE_LENGTH] = {FOREACH_OPCODE(GENERATE_STRING)};
 
-/* Base and index are registers; scale is limited to {1, 2, 4, 8}, and offset
- * is a signed 32-bit integer. Having unnecessary offsets and scales shouldn't
- * affect the validity of the code.
- *
- * stars indicate that field width is an argument
- * TODO(Robert): make field width an argument
- */
-static const char INDEX_FMT[] = "[%s+%s*%lu+%i]";
-static const char OFFSET_FMT[] = "[%s+%i]";
-static const char INDIRECT_FMT[] = "[%s]";
-static const char VREG_FMT[] = "vr%lu%c";
-static const char BINOP_FMT[] = "%8s%8s %16s, %s\n";
-static const char UNOP_FMT[] = "%8s%8s %16s\n";
-static const char NULLOP_FMT[] = "%8s%8s\n";
 static const char LABEL_FMT[] = "%s: \n";
 static const char COND_FMT[] = ".C%lu";
 static const char END_FMT[] = ".E%lu";
 static const char STMT_FMT[] = ".S%lu";
 static const char REINIT_FMT[] = ".R%lu";
-static const char LOOP_FMT[] = ".L%lu";
 static const char BOOL_FMT[] = ".B%lu";
 static const char DEF_FMT[] = ".D%lu";
 static const char CASE_FMT[] = ".S%luC%lu";
 static const char FALL_FMT[] = ".S%luF%lu";
-static const char SECTION_FMT[] = ".section %s\n";
-static const char EMPTY_FMT[] = "";
 
+/* Base and index are registers; scale is limited to {1, 2, 4, 8}, and
+ * displacement is a signed 32-bit integer.
+ */
 /* register order: rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi, r8-r15 */
 /* argument registers, in order: rdi, rsi, rdx, rcx, r8, r9 */
 /* return registers: rax, rdx
@@ -492,13 +478,7 @@ void assign_stack_space(SymbolValue *symval) {
   size_t to_add = width + padding == alignment ? 0 : padding;
   if (to_add >= PTRDIFF_MAX) abort();
   window_size += to_add;
-  symval->offset = -window_size;
-  symval->reg = RBP_VREG;
-}
-
-void assign_global_space(SymbolValue *symval) {
-  symval->reg = RIP_VREG;
-  symval->offset = 0;
+  symval->disp = -window_size;
 }
 
 /* NOTE: on x64, most operations that write to the lower 32 bits of a
@@ -555,8 +535,10 @@ void resolve_object(CompilerState *state, Operand *operand, const char *ident) {
   SymbolValue *symval = NULL;
   state_get_symbol(state, ident, strlen(ident), &symval);
   assert(symval != NULL);
-  set_op_ind(operand, symval->offset, symval->reg,
-             symval->reg == RIP_VREG ? ident : NULL);
+  if (symval->disp >= 0)
+    set_op_ind(operand, symval->disp, RIP_VREG, ident);
+  else
+    set_op_ind(operand, symval->disp, RBP_VREG, NULL);
 }
 
 int save_preserved_regs(void) {
@@ -593,7 +575,7 @@ int restore_preserved_regs(void) {
   return 0;
 }
 
-int restore_volatile_regs() {
+int restore_volatile_regs(void) {
   size_t i;
   for (i = 0; i < VOLATILE_REG_COUNT; ++i) {
     InstructionData *pop_data = instr_init(OP_POP);
@@ -811,8 +793,8 @@ int translate_addrof(ASTree *addrof) {
 
 int translate_subscript(ASTree *subscript) {
   DEBUGS('g', "Translating pointer subscript");
-  /* both the pointer and index must be in a register so that the offset and
-   * scale addressing mode can be used
+  /* both the pointer and index must be in a register so that the displacement
+   * and scale addressing mode can be used
    */
   ASTree *pointer = astree_get(subscript, 0);
   int status = rvalue_conversions(pointer, pointer->type);
@@ -863,7 +845,7 @@ int translate_reference(ASTree *reference) {
   SymbolValue *member_symbol =
       symbol_table_get(member_table, member_name, member_name_len);
   InstructionData *lea_data = instr_init(OP_LEA);
-  set_op_ind(&lea_data->src, member_symbol->offset, struct_data->dest.reg.num,
+  set_op_ind(&lea_data->src, member_symbol->disp, struct_data->dest.reg.num,
              NULL);
   set_op_reg(&lea_data->dest, REG_QWORD, vreg_count++);
 
@@ -1223,53 +1205,15 @@ int translate_params(ASTree *function, CompilerState *state) {
       assign_stack_space(param_symval);
       ListIter *temp = llist_iter_last(instructions);
       int status =
-          bulk_rtom(param_symval->reg, param_symval->offset,
-                    PARAM_REGS + reg_eightbytes, &param_symval->type, temp);
+          bulk_rtom(RBP_VREG, param_symval->disp, PARAM_REGS + reg_eightbytes,
+                    &param_symval->type, temp);
       reg_eightbytes += param_symval_eightbytes;
       free(temp);
       if (status) return status;
     } else {
-      param_symval->offset = stack_eightbytes * 8;
-      param_symval->reg = RBP_VREG;
+      param_symval->disp = stack_eightbytes * 8;
       stack_eightbytes += param_symval_eightbytes;
     }
-  }
-  return 0;
-}
-
-int translate_list_initialization(ASTree *declarator, ASTree *init_list,
-                                  CompilerState *state) {
-  DEBUGS('g', "Translating struct initialization by initializer list");
-  InstructionData *struct_data = calloc(1, sizeof(InstructionData));
-  resolve_object(state, &struct_data->src, declarator->lexinfo);
-  set_op_reg(&struct_data->dest, REG_QWORD, vreg_count++);
-  struct_data->opcode = OP_LEA;
-  llist_push_back(instructions, struct_data);
-
-  /* TODO(Robert): initialize unset struct members and array elements to
-   * zero if the object is static
-   */
-  /* TODO(Robert): handle array initializers here or create a separate function
-   * to handle them
-   */
-  AuxSpec *struct_aux = llist_back(&declarator->type->auxspecs);
-  const LinkedList *member_symbols =
-      &struct_aux->data.tag.val->data.members.in_order;
-  size_t i;
-  for (i = 0; i < astree_count(init_list); ++i) {
-    ASTree *initializer = astree_get(init_list, i);
-    InstructionData *initializer_data = calloc(1, sizeof(InstructionData));
-    /* int status = translate_expr(initializer, state, initializer_data); */
-    llist_push_back(instructions, initializer_data);
-
-    InstructionData *mov_data = calloc(1, sizeof(InstructionData));
-    mov_data->src = initializer_data->dest;
-    SymbolValue *member_symbol = llist_get(member_symbols, i);
-    mov_data->dest.ind.mode = MODE_INDIRECT;
-    mov_data->dest.ind.num = struct_data->dest.reg.num;
-    mov_data->dest.ind.disp = member_symbol->offset;
-    mov_data->opcode = OP_MOV;
-    llist_push_back(instructions, mov_data);
   }
   return 0;
 }
@@ -1830,7 +1774,7 @@ int init_struct(const TypeSpec *struct_type, ptrdiff_t struct_disp,
     TypeSpec *member_type = &member_symval->type;
     ASTree *initializer = astree_get(init_list, init_index);
     size_t member_alignment = typespec_get_alignment(member_type);
-    ptrdiff_t member_disp = struct_disp + member_symval->offset;
+    ptrdiff_t member_disp = struct_disp + member_symval->disp;
     size_t padding = member_alignment - (bytes_initialized % member_alignment);
     if (padding == member_alignment) padding = 0;
     if (member_disp >= 0 && padding > 0) {
@@ -1867,7 +1811,7 @@ int init_struct(const TypeSpec *struct_type, ptrdiff_t struct_disp,
     for (; member_index < member_count; ++member_index) {
       SymbolValue *member_symval = llist_get(member_list, member_index);
       TypeSpec *member_type = &member_symval->type;
-      ptrdiff_t member_disp = struct_disp + member_symval->offset;
+      ptrdiff_t member_disp = struct_disp + member_symval->disp;
       InstructionData *mov_data = instr_init(OP_MOV);
       set_op_reg(&mov_data->dest, typespec_get_width(member_type),
                  vreg_count++);
@@ -1948,11 +1892,11 @@ int translate_local_init(ASTree *assignment, ASTree *declarator,
 
   if (typespec_is_aggregate(declarator->type)) {
     int consumed =
-        init_aggregate(declarator->type, symval->offset, initializer, 0);
+        init_aggregate(declarator->type, symval->disp, initializer, 0);
     if (consumed < 0) return consumed;
     return 0;
   } else {
-    return init_scalar(declarator->type, symval->offset, initializer);
+    return init_scalar(declarator->type, symval->disp, initializer);
   }
 }
 
@@ -1998,7 +1942,6 @@ int translate_global_init(ASTree *declarator, ASTree *initializer) {
   assert(state_get_symbol(state, (char *)declarator->lexinfo,
                           strlen(declarator->lexinfo), &symval));
   assert(symval);
-  assign_global_space(symval);
 
   InstructionData *data_data = instr_init(OP_DATA);
   int status = llist_push_back(instructions, data_data);
@@ -2021,7 +1964,6 @@ int translate_global_decl(ASTree *declarator) {
   assert(state_get_symbol(state, (char *)declarator->lexinfo,
                           strlen(declarator->lexinfo), &symval));
   assert(symval);
-  assign_global_space(symval);
 
   InstructionData *bss_data = instr_init(OP_BSS);
   int status = llist_push_back(instructions, bss_data);
@@ -2314,12 +2256,10 @@ int instr_to_str(InstructionData *data, char *str, size_t size) {
 
 int generator_print_il(FILE *out) {
   char buffer[1024];
-  int chars_written = fprintf(out, SECTION_FMT, "text");
-  if (chars_written < 0) return chars_written;
   size_t i;
   for (i = 0; i < llist_size(instructions); ++i) {
     InstructionData *data = llist_get(instructions, i);
-    chars_written = instr_to_str(data, buffer, 1024);
+    int chars_written = instr_to_str(data, buffer, 1024);
     if (chars_written < 0) return chars_written;
     chars_written = fprintf(out, "%s\n", buffer);
     if (chars_written < 0) return chars_written;

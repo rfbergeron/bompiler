@@ -1226,7 +1226,7 @@ ASTree *define_struct_member(ASTree *struct_, ASTree *member) {
     if (tagval->tag == TAG_STRUCT) {
       size_t padding = member_alignment - (tagval->width % member_alignment);
       if (padding != member_alignment) tagval->width += padding;
-      symval->offset = tagval->width;
+      symval->disp = tagval->width;
       tagval->width += member_width;
     } else if (tagval->width < member_width) {
       tagval->width = member_width;
