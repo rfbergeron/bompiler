@@ -30,11 +30,12 @@ typedef enum symbol_flag {
 } SymbolFlag;
 
 typedef struct symbol_value {
-  size_t sequence; /* used to order declarations in a given block */
-  Location loc;    /* declaration location */
-  TypeSpec type;   /* type of symbol */
-  int flags;       /* flags, as enumerated above */
-  size_t disp;     /* displacement on stack/in struct */
+  size_t sequence;  /* used to order declarations in a given block */
+  Location loc;     /* declaration location */
+  TypeSpec type;    /* type of symbol */
+  int flags;        /* flags, as enumerated above */
+  size_t disp;      /* displacement on stack/in struct */
+  size_t static_id; /* unique id for static local variables */
 } SymbolValue;
 
 typedef enum tag_type { TAG_STRUCT = 0, TAG_UNION, TAG_ENUM } TagType;

@@ -14,6 +14,9 @@
 #define MAX_OPERAND_LENGTH 64
 #define MAX_LABEL_LENGTH 64
 #define NO_DISP 0
+#define TODO_STORE_STATIC(symval) 0
+#define TODO_NO_LINKAGE(symval) 0
+#define TODO_EXTERNAL_LINKAGE(symval) 0
 
 /* macros used to generate string constants for OPCODES */
 #define FOREACH_OPCODE(GENERATOR)         \
@@ -233,6 +236,7 @@ static ptrdiff_t window_size;
 
 static LinkedList *instructions;
 static Map *string_constants;
+static Map *static_locals;
 
 InstructionData *instr_init(Opcode opcode) {
   InstructionData *ret = calloc(1, sizeof(InstructionData));
@@ -483,6 +487,17 @@ void assign_stack_space(SymbolValue *symval) {
   symval->disp = -window_size;
 }
 
+int assign_static_space(const char *ident, SymbolValue *symval) {
+  size_t *static_count = map_get(static_locals, ident, strlen(ident));
+  if (!static_count) {
+    static_count = calloc(1, sizeof(size_t));
+    int status = map_insert(static_locals, ident, strlen(ident), static_count);
+    if (status) return status;
+  }
+  symval->static_id = *static_count++;
+  return 0;
+}
+
 /* NOTE: on x64, most operations that write to the lower 32 bits of a
  * register will zero the upper 32 bits.
  *
@@ -537,10 +552,17 @@ void resolve_object(CompilerState *state, Operand *operand, const char *ident) {
   SymbolValue *symval = NULL;
   state_get_symbol(state, ident, strlen(ident), &symval);
   assert(symval != NULL);
-  if (symval->disp >= 0)
-    set_op_ind(operand, symval->disp, RIP_VREG, ident);
-  else
+  if (TODO_STORE_STATIC(symval)) {
+    if (TODO_NO_LINKAGE(symval)) {
+      char temp[MAX_LABEL_LENGTH];
+      sprintf(temp, "%s.%lu", ident, symval->static_id);
+      set_op_ind(operand, NO_DISP, RIP_VREG, temp);
+    } else {
+      set_op_ind(operand, NO_DISP, RIP_VREG, ident);
+    }
+  } else {
     set_op_ind(operand, symval->disp, RBP_VREG, NULL);
+  }
 }
 
 int save_preserved_regs(void) {
@@ -1985,6 +2007,41 @@ int init_aggregate(const TypeSpec *agg_type, ptrdiff_t agg_disp,
   return consumed;
 }
 
+int translate_static_prelude(ASTree *declarator, SymbolValue *symval) {
+  if (TODO_EXTERNAL_LINKAGE(symval)) {
+    InstructionData *globl_data = instr_init(OP_GLOBL);
+    set_op_dir(&globl_data->dest, NO_DISP, declarator->lexinfo);
+    int status = llist_push_back(instructions, globl_data);
+    if (status) return status;
+  }
+
+  char identifier[MAX_LABEL_LENGTH];
+  if (TODO_NO_LINKAGE(symval)) {
+    sprintf(identifier, "%s.%lu", declarator->lexinfo, symval->static_id);
+  } else {
+    strcpy(identifier, declarator->lexinfo);
+  }
+
+  InstructionData *align_data = instr_init(OP_ALIGN);
+  set_op_imm(&align_data->dest, typespec_get_alignment(declarator->type));
+  int status = llist_push_back(instructions, align_data);
+  if (status) return status;
+  InstructionData *type_data = instr_init(OP_TYPE);
+  set_op_dir(&type_data->dest, NO_DISP, identifier);
+  set_op_dir(&type_data->src, NO_DISP, "@object");
+  status = llist_push_back(instructions, type_data);
+  if (status) return status;
+  InstructionData *size_data = instr_init(OP_SIZE);
+  set_op_dir(&size_data->dest, NO_DISP, identifier);
+  set_op_imm(&size_data->src, typespec_get_width(declarator->type));
+  status = llist_push_back(instructions, size_data);
+  if (status) return status;
+  InstructionData *label_data = instr_init(OP_INVALID);
+  strcpy(label_data->label, identifier);
+  status = llist_push_back(instructions, label_data);
+  return 0;
+}
+
 int translate_local_init(ASTree *assignment, ASTree *declarator,
                          ASTree *initializer) {
   DEBUGS('g', "Translating local initialization");
@@ -1992,7 +2049,15 @@ int translate_local_init(ASTree *assignment, ASTree *declarator,
   assert(state_get_symbol(state, (char *)declarator->lexinfo,
                           strlen(declarator->lexinfo), &symval));
   assert(symval);
-  assign_stack_space(symval);
+
+  if (TODO_STORE_STATIC(symval)) {
+    int status = assign_static_space(declarator->lexinfo, symval);
+    if (status) return status;
+    status = translate_static_prelude(declarator, symval);
+    if (status) return status;
+  } else {
+    assign_stack_space(symval);
+  }
 
   if (typespec_is_aggregate(declarator->type)) {
     int consumed =
@@ -2010,33 +2075,14 @@ int translate_local_decl(ASTree *declarator) {
   assert(state_get_symbol(state, (char *)declarator->lexinfo,
                           strlen(declarator->lexinfo), &symval));
   assert(symval);
-  assign_stack_space(symval);
-  return 0;
-}
-
-int translate_global_prelude(ASTree *declarator) {
-  /* TODO(Robert): check for static linkage */
-  InstructionData *globl_data = instr_init(OP_GLOBL);
-  set_op_dir(&globl_data->dest, NO_DISP, declarator->lexinfo);
-  int status = llist_push_back(instructions, globl_data);
-  if (status) return status;
-  InstructionData *align_data = instr_init(OP_ALIGN);
-  set_op_imm(&align_data->dest, typespec_get_alignment(declarator->type));
-  status = llist_push_back(instructions, align_data);
-  if (status) return status;
-  InstructionData *type_data = instr_init(OP_TYPE);
-  set_op_dir(&type_data->dest, NO_DISP, declarator->lexinfo);
-  set_op_dir(&type_data->src, NO_DISP, "@object");
-  status = llist_push_back(instructions, type_data);
-  if (status) return status;
-  InstructionData *size_data = instr_init(OP_SIZE);
-  set_op_dir(&size_data->dest, NO_DISP, declarator->lexinfo);
-  set_op_imm(&size_data->src, typespec_get_width(declarator->type));
-  status = llist_push_back(instructions, size_data);
-  if (status) return status;
-  InstructionData *label_data = instr_init(OP_INVALID);
-  strcpy(label_data->label, declarator->lexinfo);
-  status = llist_push_back(instructions, label_data);
+  if (TODO_STORE_STATIC(symval)) {
+    int status = assign_static_space(declarator->lexinfo, symval);
+    if (status) return status;
+    status = translate_static_prelude(declarator, symval);
+    if (status) return status;
+  } else {
+    assign_stack_space(symval);
+  }
   return 0;
 }
 
@@ -2050,7 +2096,7 @@ int translate_global_init(ASTree *declarator, ASTree *initializer) {
   InstructionData *data_data = instr_init(OP_DATA);
   int status = llist_push_back(instructions, data_data);
   if (status) return status;
-  status = translate_global_prelude(declarator);
+  status = translate_static_prelude(declarator, symval);
   if (status) return status;
   if (typespec_is_aggregate(declarator->type)) {
     int consumed = init_aggregate(declarator->type, 0, initializer, 0);
@@ -2072,7 +2118,7 @@ int translate_global_decl(ASTree *declarator) {
   InstructionData *bss_data = instr_init(OP_BSS);
   int status = llist_push_back(instructions, bss_data);
   if (status) return status;
-  status = translate_global_prelude(declarator);
+  status = translate_static_prelude(declarator, symval);
   if (status) return status;
   InstructionData *zero_data = instr_init(OP_ZERO);
   set_op_imm(&zero_data->dest, typespec_get_width(declarator->type));
@@ -2387,9 +2433,13 @@ void asmgen_init_globals(void) {
   string_constants = malloc(sizeof(*string_constants));
   assert(!map_init(string_constants, DEFAULT_MAP_SIZE, NULL, free,
                    strncmp_wrapper));
+  static_locals = malloc(sizeof(*static_locals));
+  assert(
+      !map_init(static_locals, DEFAULT_MAP_SIZE, NULL, free, strncmp_wrapper));
 }
 
 void asmgen_free_globals(void) {
   assert(!llist_destroy(instructions));
   assert(!map_destroy(string_constants));
+  assert(!map_destroy(static_locals));
 }
