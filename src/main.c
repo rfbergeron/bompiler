@@ -199,7 +199,7 @@ int main(int argc, char **argv) {
   string_set_init_globals();
   lexer_init_globals();
   state = state_init();
-  asmgen_init_globals();
+  asmgen_init_globals(srcname);
 
   status = yyparse();
   if (status) {
