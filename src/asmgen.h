@@ -6,7 +6,7 @@
 #include "lyutils.h"
 
 int generator_print_il(FILE *out);
-void asmgen_init_globals(void);
+void asmgen_init_globals(const char *filename);
 void asmgen_free_globals(void);
 
 #endif

@@ -59,6 +59,23 @@ that has does not do most of the things that I thought:
 - Tags and enumeration constants declared as struct and union members are
   "hoisted" up into the enclosing scope
 
+## Directive insertion for strings and static locals
+The declarations of static local variables and string constants should not be
+interleaved with the definitions of functions or global variables. To prevent
+this, there must be another insertion point that can be used besides the end of
+the instruction list or the iterators in the syntax tree.
+
+A single iterator should be sufficient, based on the following observations:
+1. Function definitions are translated in two phases, one before and one after
+   the body. The iterator can be adjusted before the body is even parsed.
+2. Variable declarations/definitions are parsed from the bottom up. String
+   constants used in variables should be emitted before the code initializing
+   the variables without any interference. This is true for global and static
+   local variables.
+3. Since variable declarations/definitions are parsed from the bottom up, the
+   iterator can only be adjusted after the definition has been completed, and
+   should point to the last instruction emitted for the declaration/definition.
+
 ## Directive Usage
 ### File Scope Variables
 ```
