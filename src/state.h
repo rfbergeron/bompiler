@@ -8,7 +8,6 @@
 
 DECLARE_STACK(size_t_stack, size_t)
 typedef struct size_t_stack SizetStack;
-extern size_t vreg_count;
 
 typedef struct switch_info {
   size_t id;
