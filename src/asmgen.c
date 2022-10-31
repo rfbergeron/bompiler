@@ -476,16 +476,11 @@ int opcode_is_directive(Opcode opcode) {
 void assign_stack_space(SymbolValue *symval) {
   size_t width = typespec_get_width(&symval->type);
   size_t alignment = typespec_get_alignment(&symval->type);
-  /* over-align aggregates on the stack to make passing by value and assignment
-   * easier
-   */
-  if ((typespec_is_union(&symval->type) || typespec_is_struct(&symval->type)) &&
-      alignment < 8)
-    alignment = 8;
   size_t padding = alignment - (window_size % alignment);
   size_t to_add = width + padding == alignment ? 0 : padding;
-  if (to_add >= PTRDIFF_MAX) abort();
+  if (to_add > PTRDIFF_MAX) abort();
   window_size += to_add;
+  if (window_size < 0) abort();
   symval->disp = -window_size;
 }
 
@@ -550,23 +545,6 @@ int rvalue_conversions(ASTree *expr, const TypeSpec *to) {
   }
 }
 
-void resolve_object(CompilerState *state, Operand *operand, const char *ident) {
-  SymbolValue *symval = NULL;
-  state_get_symbol(state, ident, strlen(ident), &symval);
-  assert(symval != NULL);
-  if (TODO_STORE_STATIC(symval)) {
-    if (TODO_NO_LINKAGE(symval)) {
-      char temp[MAX_LABEL_LENGTH];
-      sprintf(temp, "%s.%lu", ident, symval->static_id);
-      set_op_ind(operand, NO_DISP, RIP_VREG, temp);
-    } else {
-      set_op_ind(operand, NO_DISP, RIP_VREG, ident);
-    }
-  } else {
-    set_op_ind(operand, symval->disp, RBP_VREG, NULL);
-  }
-}
-
 int save_preserved_regs(void) {
   size_t i;
   for (i = 1; i <= PRESERVED_REG_COUNT; ++i) {
@@ -624,7 +602,21 @@ int translate_empty_expr(ASTree *empty_expr) {
 
 int translate_ident(ASTree *ident, CompilerState *state) {
   InstructionData *lea_data = instr_init(OP_LEA);
-  resolve_object(state, &lea_data->src, ident->lexinfo);
+  SymbolValue *symval = NULL;
+  state_get_symbol(state, ident->lexinfo, strlen(ident->lexinfo), &symval);
+  assert(symval != NULL);
+
+  if (TODO_STORE_STATIC(symval)) {
+    if (TODO_NO_LINKAGE(symval)) {
+      char temp[MAX_LABEL_LENGTH];
+      sprintf(temp, "%s.%lu", ident->lexinfo, symval->static_id);
+      set_op_ind(&lea_data->src, NO_DISP, RIP_VREG, temp);
+    } else {
+      set_op_ind(&lea_data->src, NO_DISP, RIP_VREG, ident->lexinfo);
+    }
+  } else {
+    set_op_ind(&lea_data->src, symval->disp, RBP_VREG, NULL);
+  }
   const TypeSpec *ident_type = ident->type;
   AuxSpec *ident_aux = llist_back(&ident_type->auxspecs);
   set_op_reg(&lea_data->dest, REG_QWORD, vreg_count++);
