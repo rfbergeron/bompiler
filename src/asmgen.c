@@ -233,13 +233,17 @@ static const size_t PROLOGUE_EIGHTBYTES = 8;
 static size_t branch_count;
 static size_t reg_eightbytes;
 static size_t stack_eightbytes;
-size_t vreg_count;
 static ptrdiff_t window_size;
 
 static LinkedList *instructions;
 static ListIter *before_definition;
 static Map *string_constants;
 static Map *static_locals;
+
+size_t next_vreg(void) {
+  static size_t vreg_count = REAL_REG_COUNT;
+  return vreg_count++;
+}
 
 InstructionData *instr_init(Opcode opcode) {
   InstructionData *ret = calloc(1, sizeof(InstructionData));
@@ -333,10 +337,10 @@ int bulk_mtor(const size_t *dest_regs, size_t src_memreg, ptrdiff_t src_disp,
         size_t chunk_disp = src_disp + i * 8 + j;
         InstructionData *mov_data = instr_init(OP_MOV);
         set_op_ind(&mov_data->src, chunk_disp, src_memreg, NULL);
-        set_op_reg(&mov_data->dest, alignment, vreg_count++);
+        set_op_reg(&mov_data->dest, alignment, next_vreg());
         InstructionData *movz_data = instr_init(OP_MOVZ);
         movz_data->src = mov_data->dest;
-        set_op_reg(&movz_data->dest, REG_QWORD, vreg_count++);
+        set_op_reg(&movz_data->dest, REG_QWORD, next_vreg());
         InstructionData *shl_data = instr_init(OP_SHL);
         shl_data->dest = movz_data->dest;
         set_op_imm(&shl_data->src, j);
@@ -370,7 +374,7 @@ int bulk_mtom(size_t dest_reg, size_t src_reg, const TypeSpec *type,
   size_t i;
   for (i = 0; i < mov_count; ++i) {
     InstructionData *mov_data = instr_init(OP_MOV);
-    set_op_reg(&mov_data->dest, alignment, vreg_count++);
+    set_op_reg(&mov_data->dest, alignment, next_vreg());
     set_op_ind(&mov_data->src, i * alignment, src_reg, NULL);
     InstructionData *mov_data_2 = instr_init(OP_MOV);
     mov_data_2->src = mov_data->dest;
@@ -514,7 +518,7 @@ int rvalue_conversions(ASTree *expr, const TypeSpec *to) {
     InstructionData *lvalue_data = liter_get(expr->last_instr);
     InstructionData *mov_data = instr_init(OP_MOV);
     set_op_ind(&mov_data->src, NO_DISP, lvalue_data->dest.reg.num, NULL);
-    set_op_reg(&mov_data->dest, from_width, vreg_count++);
+    set_op_reg(&mov_data->dest, from_width, next_vreg());
     int status =
         liter_push_back(expr->last_instr, &expr->last_instr, 1, mov_data);
     if (status) return status;
@@ -523,7 +527,7 @@ int rvalue_conversions(ASTree *expr, const TypeSpec *to) {
   if (expr_data->dest.all.mode != MODE_REGISTER) {
     InstructionData *mov_data = instr_init(OP_MOV);
     mov_data->src = expr_data->dest;
-    set_op_reg(&mov_data->dest, from_width, vreg_count++);
+    set_op_reg(&mov_data->dest, from_width, next_vreg());
     int status =
         liter_push_back(expr->last_instr, &expr->last_instr, 1, mov_data);
     if (status) return status;
@@ -536,12 +540,12 @@ int rvalue_conversions(ASTree *expr, const TypeSpec *to) {
   } else if (from->base == TYPE_SIGNED) {
     InstructionData *movs_data = instr_init(OP_MOVS);
     movs_data->src = expr_data->dest;
-    set_op_reg(&movs_data->dest, to_width, vreg_count++);
+    set_op_reg(&movs_data->dest, to_width, next_vreg());
     return liter_push_back(expr->last_instr, &expr->last_instr, 1, movs_data);
   } else if (from->base == TYPE_UNSIGNED) {
     InstructionData *movz_data = instr_init(OP_MOVZ);
     movz_data->src = expr_data->dest;
-    set_op_reg(&movz_data->dest, to_width, vreg_count++);
+    set_op_reg(&movz_data->dest, to_width, next_vreg());
     return liter_push_back(expr->last_instr, &expr->last_instr, 1, movz_data);
   } else {
     return -1;
@@ -622,7 +626,7 @@ int translate_ident(ASTree *ident, CompilerState *state) {
   }
   const TypeSpec *ident_type = ident->type;
   AuxSpec *ident_aux = llist_back(&ident_type->auxspecs);
-  set_op_reg(&lea_data->dest, REG_QWORD, vreg_count++);
+  set_op_reg(&lea_data->dest, REG_QWORD, next_vreg());
   int status = llist_push_back(instructions, lea_data);
   if (status) return status;
   ident->first_instr = llist_iter_last(instructions);
@@ -673,7 +677,7 @@ int translate_cast(ASTree *cast) {
 int translate_intcon(ASTree *constant) {
   DEBUGS('g', "Translating integer constant");
   InstructionData *data = instr_init(OP_MOV);
-  set_op_reg(&data->dest, typespec_get_width(constant->type), vreg_count++);
+  set_op_reg(&data->dest, typespec_get_width(constant->type), next_vreg());
   set_op_imm(&data->src, constant->constval);
   int status = llist_push_back(instructions, data);
   if (status) return status;
@@ -704,11 +708,11 @@ int translate_logical_not(ASTree * not ) {
   test_data->dest = test_data->src = operand_data->dest;
 
   InstructionData *setz_data = instr_init(OP_SETZ);
-  set_op_reg(&setz_data->dest, REG_BYTE, vreg_count++);
+  set_op_reg(&setz_data->dest, REG_BYTE, next_vreg());
 
   InstructionData *movz_data = instr_init(OP_MOVZ);
   movz_data->src = setz_data->dest;
-  set_op_reg(&movz_data->dest, REG_DWORD, vreg_count++);
+  set_op_reg(&movz_data->dest, REG_DWORD, next_vreg());
 
   not ->first_instr = liter_copy(operand->first_instr);
   if (not ->first_instr == NULL) return -1;
@@ -744,11 +748,11 @@ int translate_logical(ASTree *operator) {
 
   /* result will always be the truth value of the last evaluated expression */
   InstructionData *setnz_data = instr_init(OP_SETNZ);
-  set_op_reg(&setnz_data->dest, REG_BYTE, vreg_count++);
+  set_op_reg(&setnz_data->dest, REG_BYTE, next_vreg());
   sprintf(setnz_data->label, BOOL_FMT, branch_count++);
   InstructionData *movz_data = instr_init(OP_MOVZ);
   movz_data->src = setnz_data->src;
-  set_op_reg(&movz_data->dest, REG_DWORD, vreg_count++);
+  set_op_reg(&movz_data->dest, REG_DWORD, next_vreg());
 
   operator->first_instr = liter_copy(first->first_instr);
   if (operator->first_instr == NULL) return -1;
@@ -780,10 +784,10 @@ int translate_comparison(ASTree *operator) {
   cmp_data->dest = first_data->dest;
   cmp_data->src = second_data->dest;
   InstructionData *setcc_data = instr_init(opcode_from_operator(operator));
-  set_op_reg(&setcc_data->dest, REG_BYTE, vreg_count++);
+  set_op_reg(&setcc_data->dest, REG_BYTE, next_vreg());
   InstructionData *movz_data = instr_init(OP_MOVZ);
   movz_data->src = setcc_data->dest;
-  set_op_reg(&movz_data->dest, REG_DWORD, vreg_count++);
+  set_op_reg(&movz_data->dest, REG_DWORD, next_vreg());
   return liter_push_back(second->last_instr, &operator->last_instr, 3, cmp_data,
                          setcc_data, movz_data);
 }
@@ -807,7 +811,7 @@ int translate_indirection(ASTree *indirection) {
   if (status) return status;
   set_op_ind(&load_data->src, NO_DISP, operand_data->dest.reg.num, NULL);
   set_op_reg(&load_data->dest, typespec_get_width(indirection->type),
-             vreg_count++);
+             next_vreg());
   status = liter_push_back(operand->last_instr, &indirection->last_instr, 1,
                            load_data);
   if (status) return status;
@@ -855,7 +859,7 @@ int translate_subscript(ASTree *subscript) {
   if (subscript->first_instr == NULL) return -1;
 
   InstructionData *lea_data = instr_init(OP_LEA);
-  set_op_reg(&lea_data->dest, REG_QWORD, vreg_count++);
+  set_op_reg(&lea_data->dest, REG_QWORD, next_vreg());
   size_t scale = typespec_get_width((TypeSpec *)subscript->type);
   if (scale == 1 || scale == 2 || scale == 4 || scale == 8) {
     set_op_sca(&lea_data->src, scale, NO_DISP, pointer_data->dest.ind.num,
@@ -892,7 +896,7 @@ int translate_reference(ASTree *reference) {
   InstructionData *lea_data = instr_init(OP_LEA);
   set_op_ind(&lea_data->src, member_symbol->disp, struct_data->dest.reg.num,
              NULL);
-  set_op_reg(&lea_data->dest, REG_QWORD, vreg_count++);
+  set_op_reg(&lea_data->dest, REG_QWORD, next_vreg());
 
   reference->first_instr = liter_copy(struct_->first_instr);
   if (reference->first_instr == NULL) return -1;
@@ -908,7 +912,7 @@ int translate_inc_dec(ASTree *inc_dec) {
   InstructionData *operand_data = liter_get(operand->last_instr);
   InstructionData *mov_data = instr_init(OP_MOV);
   set_op_ind(&mov_data->src, NO_DISP, operand_data->dest.reg.num, NULL);
-  set_op_reg(&mov_data->dest, typespec_get_width(inc_dec->type), vreg_count++);
+  set_op_reg(&mov_data->dest, typespec_get_width(inc_dec->type), next_vreg());
 
   InstructionData *inc_dec_data = instr_init(opcode_from_operator(inc_dec));
   inc_dec_data->dest = mov_data->dest;
@@ -927,7 +931,7 @@ int translate_inc_dec(ASTree *inc_dec) {
     InstructionData *mov_data_3 = instr_init(OP_MOV);
     mov_data_3->src = mov_data->dest;
     set_op_reg(&mov_data_3->dest, typespec_get_width(inc_dec->type),
-               vreg_count++);
+               next_vreg());
     InstructionData *dummy_data = instr_init(OP_MOV);
     dummy_data->src = dummy_data->dest = mov_data_3->dest;
     int status =
@@ -1046,7 +1050,7 @@ int translate_multiplication(ASTree *operator) {
   /* mov from vreg representing rax/rdx to new vreg */
   set_op_reg(&mov_data->src, typespec_get_width(operator->type),
                              operator->symbol == '%' ? RDX_VREG : RAX_VREG);
-  set_op_reg(&mov_data->dest, typespec_get_width(operator->type), vreg_count++);
+  set_op_reg(&mov_data->dest, typespec_get_width(operator->type), next_vreg());
   return liter_push_back(right->last_instr, &operator->last_instr, 3,
                          mov_rax_data, operator_data, mov_data);
 }
@@ -1094,7 +1098,7 @@ int translate_conditional(ASTree *conditional) {
   InstructionData *mov_true_data = instr_init(OP_MOV);
   mov_true_data->src = true_expr_data->dest;
   set_op_reg(&mov_true_data->dest, typespec_get_width(conditional->type),
-             vreg_count++);
+             next_vreg());
   InstructionData *jmp_end_data = instr_init(OP_JMP);
   set_op_dir(&jmp_end_data->dest, NO_DISP, BOOL_END_FMT, branch_count);
   status = liter_push_back(true_expr->last_instr, NULL, 2, mov_true_data,
@@ -1157,7 +1161,7 @@ int assign_scalar(ASTree *assignment, ASTree *lvalue, ASTree *expr) {
 
   InstructionData *dummy_data = instr_init(OP_MOV);
   set_op_reg(&dummy_data->dest, typespec_get_width(assignment->type),
-             vreg_count++);
+             next_vreg());
   dummy_data->src = expr_data->dest;
 
   assignment->first_instr = liter_copy(lvalue->first_instr);
@@ -1298,6 +1302,7 @@ int translate_call(ASTree *call) {
   if (status) return status;
 
   if (!typespec_is_void(call->type)) {
+    size_t result_vreg = next_vreg();
     if (typespec_is_struct(call->type) || typespec_is_union(call->type)) {
       if (typespec_get_eightbytes(call->type) <= 2) {
         ListIter *temp = llist_iter_last(instructions);
@@ -1308,13 +1313,13 @@ int translate_call(ASTree *call) {
       }
       InstructionData *lea_data = instr_init(OP_LEA);
       set_op_ind(&lea_data->src, -window_size, RBP_VREG, NULL);
-      set_op_reg(&lea_data->dest, REG_QWORD, vreg_count++);
+      set_op_reg(&lea_data->dest, REG_QWORD, result_vreg);
       int status = llist_push_back(instructions, lea_data);
       if (status) return status;
     } else {
       InstructionData *mov_data = instr_init(OP_MOV);
       set_op_reg(&mov_data->src, typespec_get_width(call->type), RAX_VREG);
-      set_op_reg(&mov_data->dest, typespec_get_width(call->type), vreg_count++);
+      set_op_reg(&mov_data->dest, typespec_get_width(call->type), result_vreg);
       int status = llist_push_back(instructions, mov_data);
       if (status) return status;
     }
@@ -1322,8 +1327,8 @@ int translate_call(ASTree *call) {
     if (status) return status;
     /* dummy mov since parent expects last instr to have result */
     InstructionData *dummy_data = instr_init(OP_MOV);
-    set_op_reg(&dummy_data->dest, REG_QWORD, vreg_count);
-    set_op_reg(&dummy_data->src, REG_QWORD, vreg_count);
+    set_op_reg(&dummy_data->dest, REG_QWORD, result_vreg);
+    set_op_reg(&dummy_data->src, REG_QWORD, result_vreg);
     status = llist_push_back(instructions, dummy_data);
     if (status) return status;
   } else {
@@ -1658,12 +1663,12 @@ int return_aggregate(ASTree *ret, ASTree *expr) {
     if (status) return status;
   } else {
     InstructionData *hidden_mov_data = instr_init(OP_MOV);
-    set_op_reg(&hidden_mov_data->dest, REG_QWORD, vreg_count++);
+    set_op_reg(&hidden_mov_data->dest, REG_QWORD, RAX_VREG);
     set_op_ind(&hidden_mov_data->src, -8, RBP_VREG, NULL);
     int status = llist_push_back(instructions, hidden_mov_data);
     if (status) return status;
     ListIter *temp = llist_iter_last(instructions);
-    status = bulk_mtom(vreg_count, expr_data->dest.reg.num, expr->type, temp);
+    status = bulk_mtom(RAX_VREG, expr_data->dest.reg.num, expr->type, temp);
     free(temp);
     if (status) return status;
   }
@@ -1847,7 +1852,7 @@ int init_scalar(const TypeSpec *type, ptrdiff_t displacement,
      */
     InstructionData *mov_data = instr_init(OP_MOV);
     set_op_imm(&mov_data->src, initializer->constval);
-    set_op_reg(&mov_data->dest, typespec_get_width(type), vreg_count++);
+    set_op_reg(&mov_data->dest, typespec_get_width(type), next_vreg());
     InstructionData *mov_data_2 = instr_init(OP_MOV);
     mov_data_2->src = mov_data->dest;
     set_op_ind(&mov_data_2->dest, displacement, RBP_VREG, NULL);
@@ -1910,7 +1915,7 @@ int init_array(const TypeSpec *arr_type, ptrdiff_t arr_disp, ASTree *init_list,
     for (; elem_index < elem_count; ++elem_index) {
       ptrdiff_t elem_disp = arr_disp + (elem_index * elem_width);
       InstructionData *mov_data = instr_init(OP_MOV);
-      set_op_reg(&mov_data->dest, typespec_get_width(&elem_type), vreg_count++);
+      set_op_reg(&mov_data->dest, typespec_get_width(&elem_type), next_vreg());
       set_op_imm(&mov_data->src, 0);
       InstructionData *mov_data_2 = instr_init(OP_MOV);
       mov_data_2->src = mov_data->dest;
@@ -1978,8 +1983,7 @@ int init_struct(const TypeSpec *struct_type, ptrdiff_t struct_disp,
       TypeSpec *member_type = &member_symval->type;
       ptrdiff_t member_disp = struct_disp + member_symval->disp;
       InstructionData *mov_data = instr_init(OP_MOV);
-      set_op_reg(&mov_data->dest, typespec_get_width(member_type),
-                 vreg_count++);
+      set_op_reg(&mov_data->dest, typespec_get_width(member_type), next_vreg());
       set_op_imm(&mov_data->src, 0);
       InstructionData *mov_data_2 = instr_init(OP_MOV);
       mov_data_2->src = mov_data->dest;
@@ -2196,7 +2200,6 @@ int translate_fn_prelude(ASTree *declarator) {
 int begin_translate_fn(ASTree *function, CompilerState *state) {
   DEBUGS('g', "Translating function prologue");
   branch_count = window_size = 0;
-  vreg_count = REAL_REG_COUNT;
   ASTree *declarator = astree_get(function, 1);
   int status = translate_fn_prelude(declarator);
   if (status) return status;

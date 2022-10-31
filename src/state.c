@@ -2,6 +2,7 @@
 
 #include "stdlib.h"
 
+extern size_t next_vreg(void);
 CompilerState *state;
 PROC_STACK(size_t_stack, size_t)
 
@@ -299,7 +300,7 @@ void state_push_selection(CompilerState *state, size_t id) {
   info->id = id;
   info->case_id = 0;
   info->has_default = 0;
-  info->control_reg = vreg_count++;
+  info->control_reg = next_vreg();
   llist_push_front(&state->switch_stack, info);
 }
 
