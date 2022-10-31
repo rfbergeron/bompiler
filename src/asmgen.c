@@ -191,6 +191,7 @@ static const char END_FMT[] = ".E%lu";
 static const char STMT_FMT[] = ".S%lu";
 static const char REINIT_FMT[] = ".R%lu";
 static const char BOOL_FMT[] = ".B%lu";
+static const char BOOL_END_FMT[] = ".BE%lu";
 static const char DEF_FMT[] = ".D%lu";
 static const char CASE_FMT[] = ".S%luC%lu";
 static const char FALL_FMT[] = ".S%luF%lu";
@@ -428,6 +429,8 @@ Opcode opcode_from_operator(ASTree *tree) {
       return OP_SETNE;
     case TOK_OR:
       return OP_JNZ;
+    case '?':
+      /* fallthrough */
     case TOK_AND:
       return OP_JZ;
     default:
@@ -1069,6 +1072,56 @@ int translate_binop(ASTree *operator) {
 
   return liter_push_back(right->last_instr, &operator->last_instr, 1,
                          operator_data);
+}
+
+int translate_conditional(ASTree *conditional) {
+  ASTree *condition = astree_get(conditional, 0);
+  int status = rvalue_conversions(condition, condition->type);
+  if (status) return status;
+  InstructionData *condition_data = liter_get(condition->last_instr);
+  InstructionData *test_data = instr_init(OP_TEST);
+  test_data->dest = test_data->src = condition_data->dest;
+  InstructionData *jmp_false_data = instr_init(opcode_from_operator(condition));
+  set_op_dir(&jmp_false_data->dest, NO_DISP, BOOL_FMT, branch_count);
+  status = liter_push_back(condition->last_instr, NULL, 2, test_data,
+                           jmp_false_data);
+  if (status) return status;
+
+  ASTree *true_expr = astree_get(conditional, 1);
+  status = rvalue_conversions(true_expr, conditional->type);
+  if (status) return status;
+  InstructionData *true_expr_data = liter_get(true_expr->last_instr);
+  InstructionData *mov_true_data = instr_init(OP_MOV);
+  mov_true_data->src = true_expr_data->dest;
+  set_op_reg(&mov_true_data->dest, typespec_get_width(conditional->type),
+             vreg_count++);
+  InstructionData *jmp_end_data = instr_init(OP_JMP);
+  set_op_dir(&jmp_end_data->dest, NO_DISP, BOOL_END_FMT, branch_count);
+  status = liter_push_back(true_expr->last_instr, NULL, 2, mov_true_data,
+                           jmp_end_data);
+
+  ASTree *false_expr = astree_get(conditional, 2);
+  status = rvalue_conversions(false_expr, conditional->type);
+  if (status) return status;
+  InstructionData *false_label = instr_init(OP_INVALID);
+  sprintf(false_label->label, BOOL_FMT, branch_count);
+  status = liter_push_front(false_expr->first_instr, NULL, 1, false_label);
+  if (status) return status;
+  InstructionData *false_expr_data = liter_get(false_expr->last_instr);
+  InstructionData *mov_false_data = instr_init(OP_MOV);
+  mov_false_data->src = false_expr_data->dest;
+  mov_false_data->dest = mov_true_data->dest;
+  /* dummy mov so that last instruction has destination reg */
+  InstructionData *end_label = instr_init(OP_MOV);
+  sprintf(end_label->label, BOOL_END_FMT, branch_count++);
+  end_label->src = end_label->dest = mov_false_data->dest;
+  status = liter_push_back(false_expr->last_instr, &conditional->last_instr, 2,
+                           mov_false_data, end_label);
+  if (status) return status;
+
+  conditional->first_instr = liter_copy(condition->first_instr);
+  if (conditional->first_instr == NULL) return -1;
+  return 0;
 }
 
 int assign_aggregate(ASTree *assignment, ASTree *lvalue, ASTree *expr) {
