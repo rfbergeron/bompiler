@@ -2204,11 +2204,16 @@ int translate_fn_prelude(ASTree *declarator) {
   InstructionData *text_data = instr_init(OP_TEXT);
   int status = llist_push_back(instructions, text_data);
   if (status) return status;
-  /* TODO(Robert): check linkage */
-  InstructionData *globl_data = instr_init(OP_GLOBL);
-  set_op_dir(&globl_data->dest, NO_DISP, declarator->lexinfo);
-  status = llist_push_back(instructions, globl_data);
-  if (status) return status;
+  SymbolValue *symval = NULL;
+  state_get_symbol(state, declarator->lexinfo, strlen(declarator->lexinfo),
+                   &symval);
+  assert(symval != NULL);
+  if (TODO_EXTERNAL_LINKAGE(symval)) {
+    InstructionData *globl_data = instr_init(OP_GLOBL);
+    set_op_dir(&globl_data->dest, NO_DISP, declarator->lexinfo);
+    status = llist_push_back(instructions, globl_data);
+    if (status) return status;
+  }
   InstructionData *type_data = instr_init(OP_TYPE);
   set_op_dir(&type_data->dest, NO_DISP, declarator->lexinfo);
   set_op_dir(&type_data->src, NO_DISP, "@function");
