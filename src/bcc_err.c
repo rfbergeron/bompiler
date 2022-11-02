@@ -42,24 +42,32 @@ AuxSpec *create_erraux_v(int errcode, size_t info_count, va_list info_ptrs) {
 
 int expected_err_to_string(AuxSpec *erraux, const char *expected_str, char *buf,
                            size_t size) {
-  ASTree *parent = erraux->data.err.info[0];
-  char parent_buf[LINESIZE];
-  int chars_written = astree_to_string(parent, parent_buf, LINESIZE);
-  ASTree *child1 = erraux->data.err.info[1];
-  char child1_buf[LINESIZE];
-  chars_written = type_to_string(child1->type, child1_buf, LINESIZE);
-  if (erraux->data.err.info_count == 3) {
-    ASTree *child2 = erraux->data.err.info[2];
-    char child2_buf[LINESIZE];
-    chars_written = type_to_string(child2->type, child2_buf, LINESIZE);
-    /* TODO(Robert): check size without snprintf */
-    return sprintf(
-        buf, "Semantic error: node %s expected %s types, but found %s and %s",
-        parent_buf, expected_str, child1_buf, child2_buf);
+  ASTree *expecting_node = erraux->data.err.info[0];
+  char expecting_buf[LINESIZE];
+  int chars_written = astree_to_string(expecting_node, expecting_buf, LINESIZE);
+  if (erraux->data.err.info_count > 1) {
+    ASTree *child1 = erraux->data.err.info[1];
+    char child1_buf[LINESIZE];
+    chars_written = type_to_string(child1->type, child1_buf, LINESIZE);
+    if (erraux->data.err.info_count > 2) {
+      ASTree *child2 = erraux->data.err.info[2];
+      char child2_buf[LINESIZE];
+      chars_written = type_to_string(child2->type, child2_buf, LINESIZE);
+      /* TODO(Robert): check size without snprintf */
+      return sprintf(
+          buf, "Semantic error: node %s expected %s types, but found %s and %s",
+          expecting_buf, expected_str, child1_buf, child2_buf);
+    } else {
+      return sprintf(buf,
+                     "Semantic error: node %s expected %s type, but found %s",
+                     expecting_buf, expected_str, child1_buf);
+    }
   } else {
+    char type_buf[LINESIZE];
+    chars_written = type_to_string(expecting_node->type, type_buf, LINESIZE);
     return sprintf(buf,
-                   "Semantic error: node %s expected %s type, but found %s",
-                   parent_buf, expected_str, child1_buf);
+                   "Semantic error at node %s: expected type %s, but found %s",
+                   expecting_buf, expected_str, type_buf);
   }
 }
 

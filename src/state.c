@@ -251,6 +251,11 @@ int state_get_selection_default(CompilerState *state) {
   return ((SwitchInfo *)llist_front(&state->switch_stack))->has_default;
 }
 
+const TypeSpec *state_get_control_type(CompilerState *state) {
+  if (llist_empty(&state->switch_stack)) return &SPEC_EMPTY;
+  return ((SwitchInfo *)llist_front(&state->switch_stack))->control_type;
+}
+
 size_t state_get_break_id(CompilerState *state) {
   if (size_t_stack_count(&state->break_stack) == 0) {
     return (size_t)-1L;
@@ -301,6 +306,7 @@ void state_push_selection(CompilerState *state, size_t id) {
   info->case_id = 0;
   info->has_default = 0;
   info->control_reg = next_vreg();
+  info->control_type = NULL;
   llist_push_front(&state->switch_stack, info);
 }
 
@@ -315,6 +321,14 @@ int state_set_selection_default(CompilerState *state) {
   if (info == NULL) abort();
   if (info->has_default) return 1;
   info->has_default = 1;
+  return 0;
+}
+
+int state_set_control_type(CompilerState *state, const TypeSpec *type) {
+  SwitchInfo *info = llist_front(&state->switch_stack);
+  if (info == NULL) return -1;
+  if (info->control_type != NULL) abort();
+  info->control_type = type;
   return 0;
 }
 
