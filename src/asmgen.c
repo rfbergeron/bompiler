@@ -913,47 +913,61 @@ int translate_reference(ASTree *reference) {
   return 0;
 }
 
-int translate_inc_dec(ASTree *inc_dec) {
-  DEBUGS('g', "Translating increment/decrement");
-  ASTree *operand = astree_get(inc_dec, 0);
+int translate_post_inc_dec(ASTree *post_inc_dec) {
+  DEBUGS('g', "Translating postfix increment/decrement");
+  ASTree *operand = astree_get(post_inc_dec, 0);
+  post_inc_dec->first_instr = liter_copy(operand->first_instr);
+  if (post_inc_dec->first_instr == NULL) return -1;
+  InstructionData *lvalue_data = liter_get(operand->last_instr);
+  if (lvalue_data == NULL) return -1;
+  int status = scalar_conversions(operand, post_inc_dec->type);
+  if (status) return status;
   InstructionData *operand_data = liter_get(operand->last_instr);
-  InstructionData *mov_data = instr_init(OP_MOV);
-  set_op_ind(&mov_data->src, NO_DISP, operand_data->dest.reg.num, NULL);
-  set_op_reg(&mov_data->dest, typespec_get_width(inc_dec->type), next_vreg());
 
-  InstructionData *inc_dec_data = instr_init(opcode_from_operator(inc_dec));
-  inc_dec_data->dest = mov_data->dest;
+  InstructionData *mov_data = instr_init(OP_MOV);
+  mov_data->src = operand_data->dest;
+  set_op_reg(&mov_data->dest, typespec_get_width(post_inc_dec->type),
+             next_vreg());
+
+  InstructionData *inc_dec_data =
+      instr_init(opcode_from_operator(post_inc_dec));
+  inc_dec_data->dest = operand_data->dest;
 
   InstructionData *mov_data_2 = instr_init(OP_MOV);
-  mov_data_2->dest = mov_data->src;
-  mov_data_2->src = mov_data->dest;
+  set_op_ind(&mov_data_2->dest, NO_DISP, lvalue_data->dest.reg.num, NULL);
+  set_op_reg(&mov_data_2->src, typespec_get_width(operand->type),
+             operand_data->dest.reg.num);
 
-  /* have to do this since the generator expects at least one operand to be a
-   * register at all times, and expects the last instruction emitted to contain
-   * the destination register
-   */
+  InstructionData *dummy_data = instr_init(OP_MOV);
+  dummy_data->src = dummy_data->dest = mov_data->dest;
+  return liter_push_back(operand->last_instr, &post_inc_dec->last_instr, 4,
+                         mov_data, inc_dec_data, mov_data_2, dummy_data);
+}
+
+int translate_inc_dec(ASTree *inc_dec) {
+  DEBUGS('g', "Translating prefix increment/decrement");
+  ASTree *operand = astree_get(inc_dec, 0);
   inc_dec->first_instr = liter_copy(operand->first_instr);
   if (inc_dec->first_instr == NULL) return -1;
-  if (inc_dec->symbol == TOK_POST_DEC || inc_dec->symbol == TOK_POST_INC) {
-    InstructionData *mov_data_3 = instr_init(OP_MOV);
-    mov_data_3->src = mov_data->dest;
-    set_op_reg(&mov_data_3->dest, typespec_get_width(inc_dec->type),
-               next_vreg());
-    InstructionData *dummy_data = instr_init(OP_MOV);
-    dummy_data->src = dummy_data->dest = mov_data_3->dest;
-    int status =
-        liter_push_back(operand->last_instr, &inc_dec->last_instr, 3, mov_data,
-                        mov_data_3, inc_dec_data, mov_data_2, dummy_data);
-    if (status) return status;
-  } else {
-    InstructionData *dummy_data = instr_init(OP_MOV);
-    dummy_data->src = dummy_data->dest = mov_data->dest;
-    int status =
-        liter_push_back(operand->last_instr, &inc_dec->last_instr, 2, mov_data,
-                        inc_dec_data, mov_data_2, dummy_data);
-    if (status) return status;
-  }
-  return 0;
+  InstructionData *lvalue_data = liter_get(operand->last_instr);
+  if (lvalue_data == NULL) return -1;
+  int status = scalar_conversions(operand, inc_dec->type);
+  if (status) return status;
+  InstructionData *operand_data = liter_get(operand->last_instr);
+
+  InstructionData *inc_dec_data = instr_init(opcode_from_operator(inc_dec));
+  inc_dec_data->dest = operand_data->dest;
+
+  InstructionData *mov_data = instr_init(OP_MOV);
+  set_op_ind(&mov_data->dest, NO_DISP, lvalue_data->dest.reg.num, NULL);
+  set_op_reg(&mov_data->src, typespec_get_width(operand->type),
+             operand_data->dest.reg.num);
+
+  InstructionData *dummy_data = instr_init(OP_MOV);
+  dummy_data->src = dummy_data->dest = operand_data->dest;
+
+  return liter_push_back(operand->last_instr, &inc_dec->first_instr, 3,
+                         inc_dec_data, mov_data, dummy_data);
 }
 
 int translate_unop(ASTree *operator) {
