@@ -204,6 +204,8 @@ ifelse              : TOK_IF '(' expr ')' stmt TOK_ELSE stmt            { $$ = b
                     ;
 switch              : TOK_SWITCH '(' expr ')' stmt                      { $$ = bcc_yyval = validate_switch($1, $3, $5); parser_cleanup(2, $2, $4); }
                     ;
+switch_expr         : expr                                              { $$ = bcc_yyval = validate_switch_expr($1); }
+                    ;
 return              : TOK_RETURN expr ';'                               { $$ = bcc_yyval = validate_return($1, $2); parser_cleanup (1, $3); }
                     | TOK_RETURN ';'                                    { $$ = bcc_yyval = validate_return($1, &EMPTY_EXPR); parser_cleanup (1, $2); }
                     ;

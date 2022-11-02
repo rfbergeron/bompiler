@@ -76,12 +76,18 @@ ASTree *validate_switch(ASTree *switch_, ASTree *expr, ASTree *stmt) {
   state_pop_break_id(state);
   state_pop_selection(state);
 
-  if (!typespec_is_integer(expr->type)) {
-    return astree_create_errnode(astree_adopt(switch_, 2, expr, stmt),
-                                 BCC_TERR_EXPECTED_INTEGER, 2, switch_, expr);
-  }
-
   return astree_adopt(switch_, 2, expr, stmt);
+}
+
+ASTree *validate_switch_expr(ASTree *expr) {
+  if (!typespec_is_integer(expr->type)) {
+    return astree_create_errnode(expr, BCC_TERR_EXPECTED_INTEGER, 1, expr);
+  }
+  const TypeSpec *promoted_type;
+  int status = determine_conversion(expr->type, &SPEC_INT, &promoted_type);
+
+  state_set_control_type(state, expr->type);
+  return expr;
 }
 
 ASTree *validate_while(ASTree *while_, ASTree *condition, ASTree *stmt) {
