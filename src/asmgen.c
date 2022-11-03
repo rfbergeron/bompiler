@@ -14,9 +14,6 @@
 #define MAX_OPERAND_LENGTH 64
 #define MAX_LABEL_LENGTH 64
 #define NO_DISP 0
-#define TODO_STORE_STATIC(symval) 0
-#define TODO_NO_LINKAGE(symval) 0
-#define TODO_EXTERNAL_LINKAGE(symval) 0
 
 /* macros used to generate string constants for OPCODES */
 #define FOREACH_OPCODE(GENERATOR)         \
@@ -621,8 +618,8 @@ ASTree *translate_ident(ASTree *ident) {
   state_get_symbol(state, ident->lexinfo, strlen(ident->lexinfo), &symval);
   assert(symval != NULL);
 
-  if (TODO_STORE_STATIC(symval)) {
-    if (TODO_NO_LINKAGE(symval)) {
+  if (symval->flags & SYMFLAG_STORE_STAT) {
+    if (symval->flags & SYMFLAG_LINK_NONE) {
       char temp[MAX_LABEL_LENGTH];
       sprintf(temp, "%s.%lu", ident->lexinfo, symval->static_id);
       set_op_ind(&lea_data->src, NO_DISP, RIP_VREG, temp);
@@ -2081,7 +2078,7 @@ int init_aggregate(const TypeSpec *agg_type, ptrdiff_t agg_disp,
 
 int translate_static_prelude(ASTree *declarator, SymbolValue *symval,
                              ListIter *where) {
-  if (TODO_EXTERNAL_LINKAGE(symval)) {
+  if (symval->flags & SYMFLAG_LINK_EXT) {
     InstructionData *globl_data = instr_init(OP_GLOBL);
     set_op_dir(&globl_data->dest, NO_DISP, declarator->lexinfo);
     int status = liter_push_back(where, &where, 1, globl_data);
@@ -2089,7 +2086,7 @@ int translate_static_prelude(ASTree *declarator, SymbolValue *symval,
   }
 
   char identifier[MAX_LABEL_LENGTH];
-  if (TODO_NO_LINKAGE(symval)) {
+  if (symval->flags & SYMFLAG_LINK_NONE) {
     sprintf(identifier, "%s.%lu", declarator->lexinfo, symval->static_id);
   } else {
     strcpy(identifier, declarator->lexinfo);
@@ -2117,7 +2114,7 @@ ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
                           strlen(declarator->lexinfo), &symval));
   assert(symval);
 
-  if (TODO_STORE_STATIC(symval)) {
+  if (symval->flags & SYMFLAG_STORE_STAT) {
     assign_static_space(declarator->lexinfo, symval);
     int status =
         translate_static_prelude(declarator, symval, before_definition);
@@ -2145,12 +2142,12 @@ ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
   assert(state_get_symbol(state, (char *)declarator->lexinfo,
                           strlen(declarator->lexinfo), &symval));
   assert(symval);
-  if (TODO_STORE_STATIC(symval)) {
+  if (symval->flags & SYMFLAG_STORE_STAT) {
     assign_static_space(declarator->lexinfo, symval);
     int status =
         translate_static_prelude(declarator, symval, before_definition);
     if (status) abort();
-  } else {
+  } else if (symval->flags & SYMFLAG_STORE_AUTO) {
     assign_stack_space(symval);
   }
   return astree_adopt(declaration, 1, declarator);
@@ -2195,17 +2192,19 @@ ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
                           strlen(declarator->lexinfo), &symval));
   assert(symval);
 
-  InstructionData *bss_data = instr_init(OP_BSS);
-  int status = llist_push_back(instructions, bss_data);
-  if (status) abort();
-  ListIter *temp = llist_iter_last(instructions);
-  status = translate_static_prelude(declarator, symval, temp);
-  free(temp);
-  if (status) abort();
-  InstructionData *zero_data = instr_init(OP_ZERO);
-  set_op_imm(&zero_data->dest, typespec_get_width(declarator->type));
-  status = llist_push_back(instructions, zero_data);
-  if (status) abort();
+  if (symval->flags & SYMFLAG_STORE_STAT) {
+    InstructionData *bss_data = instr_init(OP_BSS);
+    int status = llist_push_back(instructions, bss_data);
+    if (status) abort();
+    ListIter *temp = llist_iter_last(instructions);
+    status = translate_static_prelude(declarator, symval, temp);
+    free(temp);
+    if (status) abort();
+    InstructionData *zero_data = instr_init(OP_ZERO);
+    set_op_imm(&zero_data->dest, typespec_get_width(declarator->type));
+    status = llist_push_back(instructions, zero_data);
+    if (status) abort();
+  }
 
   free(before_definition);
   before_definition = llist_iter_last(instructions);
@@ -2221,7 +2220,7 @@ int translate_fn_prelude(ASTree *declarator) {
   state_get_symbol(state, declarator->lexinfo, strlen(declarator->lexinfo),
                    &symval);
   assert(symval != NULL);
-  if (TODO_EXTERNAL_LINKAGE(symval)) {
+  if (symval->flags & SYMFLAG_LINK_EXT) {
     InstructionData *globl_data = instr_init(OP_GLOBL);
     set_op_dir(&globl_data->dest, NO_DISP, declarator->lexinfo);
     status = llist_push_back(instructions, globl_data);
