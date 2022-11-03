@@ -535,8 +535,17 @@ int scalar_conversions(ASTree *expr, const TypeSpec *to) {
   }
 
   size_t to_width = typespec_get_width(to);
-  if (from_width >= to_width) {
+  if (from_width == to_width) {
     return 0;
+  } else if (from_width > to_width) {
+    /* unnecessary mov so that the width of the destination is set correctly,
+     * and the whole structure describing the operand can just be copied to the
+     * next instruction that needs it
+     */
+    InstructionData *mov_data = instr_init(OP_MOV);
+    set_op_reg(&mov_data->src, to_width, expr_data->dest.reg.num);
+    set_op_reg(&mov_data->dest, to_width, next_vreg());
+    return liter_push_back(expr->last_instr, &expr->last_instr, 1, mov_data);
   } else if (from->base == TYPE_SIGNED) {
     InstructionData *movs_data = instr_init(OP_MOVS);
     movs_data->src = expr_data->dest;
