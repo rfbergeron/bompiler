@@ -424,6 +424,7 @@ ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
     /* extern symval in block with outer symval declares nothing */
     symbol_value_destroy(symval);
     declarator->type = &exists->type;
+    exists->flags |= SYMFLAG_INHERIT;
     return declarator;
   } else {
     if (typespec_is_incomplete(&symval->type)) {
