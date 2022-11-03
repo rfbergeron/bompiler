@@ -685,7 +685,7 @@ ASTree *translate_intcon(ASTree *constant) {
   DEBUGS('g', "Translating integer constant");
   InstructionData *data = instr_init(OP_MOV);
   set_op_reg(&data->dest, typespec_get_width(constant->type), next_vreg());
-  set_op_imm(&data->src, constant->constval);
+  set_op_imm(&data->src, constant->constant.integral.value);
   int status = llist_push_back(instructions, data);
   if (status) abort();
   constant->first_instr = llist_iter_last(instructions);
@@ -770,10 +770,27 @@ ASTree *translate_comparison(ASTree *operator, ASTree * left, ASTree *right) {
   if (operator->first_instr == NULL) abort();
 
   const TypeSpec *common_type = NULL;
-  int status = determine_conversion(left->type, right->type, &common_type);
-  if (status) abort();
+  size_t left_width = typespec_get_width(left->type);
+  size_t right_width = typespec_get_width(right->type);
+  size_t max_width = left_width > right_width ? left_width : right_width;
+  switch (max_width) {
+    case X64_SIZEOF_LONG:
+      common_type = &SPEC_LONG;
+      break;
+    case X64_SIZEOF_INT:
+      common_type = &SPEC_INT;
+      break;
+    case X64_SIZEOF_SHORT:
+      common_type = &SPEC_SHRT;
+      break;
+    case X64_SIZEOF_CHAR:
+      common_type = &SPEC_CHAR;
+      break;
+    default:
+      abort();
+  }
 
-  status = scalar_conversions(left, common_type);
+  int status = scalar_conversions(left, common_type);
   if (status) abort();
   InstructionData *left_data = liter_get(left->last_instr);
 
@@ -1855,16 +1872,16 @@ int init_scalar(const TypeSpec *type, ptrdiff_t displacement,
         abort();
     }
     InstructionData *data = instr_init(directive);
-    set_op_imm(&data->dest, initializer->constval);
+    set_op_imm(&data->dest, initializer->constant.integral.value);
     return liter_push_back(where, &where, 1, data);
-  } else if (initializer->attributes & ATTR_EXPR_CONST1) {
+  } else if (initializer->attributes & ATTR_EXPR_CONST) {
     /* TODO(Robert): update flag once merged with main, and remove all
      * instructions there were emitted for this initializer. or, just don't
      * emit any instructions for valid constant expressions until they are
      * used in a non-constant expression
      */
     InstructionData *mov_data = instr_init(OP_MOV);
-    set_op_imm(&mov_data->src, initializer->constval);
+    set_op_imm(&mov_data->src, initializer->constant.integral.value);
     set_op_reg(&mov_data->dest, typespec_get_width(type), next_vreg());
     InstructionData *mov_data_2 = instr_init(OP_MOV);
     mov_data_2->src = mov_data->dest;

@@ -451,6 +451,126 @@ Parent nodes can then insert instructions before, after, or in between the
 instructions of their child nodes using these iterators. They can also use
 these iterators to add labels or modify the instructions.
 
+## Unique Identifier Construction
+It must be possible to create unnamed, unique structs, unions and enums. These
+values do not really need to go into the symbol table; none of the operations
+that use tags need any more information than a special value (like the empty
+string) indicating that the tag is unique.
+
+However, ownership of the resources allocated to store the tag's information
+becomes more difficult: the tag cannot go into the symbol table, so a tree
+node must be responsible for freeing the tag's resources.
+
+Similar complications happen when dealing with type names as function
+parameters, and type names used in casts and in the `sizeof` operator.
+
+I think a nice solution would be to construct unique names for these types that
+cannot conflict with other type names, and to put these types into the symbol
+table.
+
+Since the names aren't important beyond the fact that they need to be unique,
+they can be constructed from the source location and the type information.
+
+## Valid redeclarations
+The rules dictating when redeclarations are valid do not directly have to do
+with whether or not a symbol is external or block.
+
+If there is already at least one declaration for a symbol, subsequent
+declarations are only valid if the following are true:
+- neither symbol may have no linkage
+- if the symbol was declared with external linkage, it may not be redeclared
+  with internal linkage
+- if the symbol was declared with internal linkage, it may not be redeclared
+  with external linkage. as an exception, if the second declaration has external
+  storage class, then the declaration is valid
+
+## Enumeration constants and meaning of enum objects
+While most compilers will provide warnings when trying to assign an enum of a
+different type to another enum, they are not required to do so, since the
+standard says to evaluate enumeration constants and objects with enum type as
+if they were integers. Functions checking if a value is arithmetic, scalar, etc.
+should reflect this.
+
+## Minor type checker refactor
+I think part of the reason I get so confused when going through the type checker
+code, particularly for expressions, is because functions like `types_compatible`
+and `determine_conversion` are poorly named and not terribly useful. Many of the
+type checker functions for operators do their own checks on the validity of the
+types of their operands, so having a function check the compatibility of the
+common type they are converted to after the fact is unnecessary.
+
+### `types_compatible`
+`types_compatible` should be replaced with a `types_equivalent` function, that
+determines type equivalence as defined in the standard, and returns a boolean
+as opposed an enum representing the "degree" of compatibility.
+
+A new function will be added which determines compatibility as required by the
+assignment operator, for use in the assignment operator and also for function
+call arguments.
+
+Initialization will have its own dedicated function for determining
+compatibility between symbols and their initializers. This function may use the
+function(s) for determining compatibility for assigment and function call
+arguments in simple cases, but those functions are not to be dependent on any
+of the functions for type checking initializers.
+
+In all other places where `types_compatible` was previously used, the logic for
+determining the compatibility of expressions will be written directly.
+
+### `determine_conversion`
+This function will be replaced with a much more limited version that only
+operates on arithmetic types. Operators that require behavior for non-arithmetic
+types should encode that behavior in their own functions. This replacement
+function is called `arithmetic_conversions`.
+
+### `perform_pointer_conv`
+This function will be renamed and repurposed much like `determine_conversion`.
+Instead of inserting nodes into the syntax tree, it will replace the type of
+nodes which need to be converted. This replacement is named
+`pointer_conversions`.
+
+The only thing to watch out for in this function is to make sure that the
+original type still exists somewhere and can be freed. The standard uses
+language that makes it possible for expressions besides identifiers to have
+array or function type, but I can see no way that this is possible.
+
+### `convert_type`
+Will also be removed and not replaced. The assembly generator would have to do
+much of the same work regardless of whether or not automatic conversions get
+their own dedicated node.
+
+## Declaration refactor
+To accomodate storage class and linkage, the functions handling declarations
+must be fixed to better reflect the language of the standard and to make them
+easier to understand.
+
+For now, I will attempt to use `types_compatible` to determine equivalence of
+two types, but I am not sure that this function will produce the correct result.
+Type equivalence in the standard only takes into account type specifiers, not
+type qualifiers or storage class specifiers, so those should be compared
+separately.
+
+### External declarations
+External symbols may be declared multiple times, so long as they are defined
+at most once and their types are considered equivalent. If a an external symbol
+is meant to have internal linkage, the first declaration of the symbol must have
+the `static` keyword, and so must all subsequent declarations. Declarations of
+symbols with and without the `extern` keyword may be mixed arbitrarily, with the
+only restriction that an `extern` object must have storage allocated in exactly
+one other translation unit.
+
+### Block declarations
+Block symbols may be declared at most once in their scope. The exception to this
+rule is that block symbols with the `extern` keyword may be declared multiple
+times, but each declaration must use the `extern` keyword.
+
+### Initialization
+Currently, type checking for initilization reuses the code for type checking
+assignments. This seemed like a good idea at the time, but the type checking for
+initialization is actually much more complicated than for assignments, so the
+code would probably be considerably more understandable if I further separated
+the logic.
+
 ## Simpler structure handling
 Structure handling could be simplified, removing the need to have a second pass
 over the declarators of a structure's members. In this scheme, the members of a
@@ -543,6 +663,100 @@ Unless special measures are taken, getting and inserting symbols from a given
 name space always searches the table at the top of the stack first, followed by
 the table below, and so on. The only exception to this is the label name space,
 since there can only ever be one table.
+
+## More constant expression stuff
+After working with the compiler again, I've noticed a few flaws with the way I
+have been handling constant expressions. The flags, as I am using them, are not
+adequate for representing all the possible states a constant expression can be
+in.
+
+It is possible for an initializer constant to consist of an operation involving
+the subtraction of two pointers, given that the two pointers lie in the same
+static or extern array. This expression does not have an address in its value;
+it is just an offset, but it is no longer a valid arithmetic constant
+expression.
+
+It is also possible for an initializer constant to be an integral value that has
+been cast to a pointer and vice versa. Under these circumstances, the type of
+the expression is not enough to determine which flags need to be checked on
+which nodes.
+
+The set of flags will indicate the following:
+- the node as being a constant expression
+- whether or not the node is an initializer constant
+- whether or not the node's value includes an address
+
+These three flags should be sufficient to determine how to compute the value of
+a constant expression, and whether or not the constant expression is valid.
+
+### General logic
+If any of the operands of a node have the initializer constant flag set, then
+the node should set the initializer constant flag.
+
+### Making things easier
+To make this easier to do, I could omit constant expression evaluation for
+initializer constants. Unlike constants for case statements and array bounds,
+which must be known at compile time to check for semantic correctness, the
+actual values of these expressions do not need to be known. The only thing
+that needs to be tracked to ensure correctness is the presence of an address
+component in an initializer constant expression, which can be checked without
+knowing the actual value of the expression.
+
+If we do it this way, the only things that need to be tracked to ensure validity
+are a flag indicating that a value is a constant expression and a flag indicating
+that the constant expression is a valid array initializer.
+
+When the initializer flag is set, the tracked value is just an address. This
+value is used to make sure that when multiple addresses are used in an
+initializer constant certain conditions are met, namely that when subtracting,
+both addresses are the same, and that the address component of arguments to
+relation operators are identical. If the address is zero, that is taken to mean
+that the current value of the constant expression does not, at that point,
+have an address component.
+
+### Making things "harder"
+I've come up with some simplifications and additions that should make it
+possible to do a reasonable job evaluating expressions at compile time.
+
+I have made the following decisions about how the compiler should behave when
+evaluating constant expressions:
+1. For the purposes of the conditional operator and logical operators, the
+address of a static or extern object plus or minus an offset is considered to
+always be nonzero and therefore true.
+2. Relational operations whose operands are pointers to different static or
+extern objects are not considered to be constant expressions.
+3. Equality and relational operations whose operands consist of one pointer plus
+or minus an offset and one nonzero integral constant are not considered to be
+constant expressions.
+
+Attributes will need to be redone:
+1. mark expression as a constant expression
+2. indicate that a constant expression can only be used for initialization
+3. indicate that the value of the constant expression includes an address
+
+Fortunately, it seems like I got the logic right when just taking into account
+the addresses of initializer constants, and not too much work needs to be done
+to include offset calculations in addition.
+
+### Addition/subtraction logic
+If both operands contain an address, the operator must be subtraction and both
+addresses must be identical, in which case the value of the constant expression
+is the difference between the offsets.
+
+If only the right operand contains an address, the operator may not be
+subtraction.
+
+### Mul/div/mod, shift, and bitwise logic
+If the operands to any of these expressions are a static/extern address that has
+been cast to an arithmetic type, the result is not a constant expression.
+Operands may only be arithmetic constants.
+
+### Logical logic
+Static/extern addresses without an offset are always taken to be true. The
+operands can be any combination of addresses, offsets, and integral values.
+
+If either operand is an address with an offset, the result can't be known, but
+the expression is still a valid initializer constant expression.
 
 ## Constant expression flags
 Currently, there are two flags used to identify constant expressions: `CONST`
@@ -783,6 +997,47 @@ If the initializer counter equals the number of children of the init list, the
 stack is cleaned up and the function returns, indicating success. The
 intermediate language generator will ensure that the other members are zero-
 initialized.
+
+## Linkage, `static`, and `extern`
+In order to implement constant expressions, the compiler must first be aware of
+the linkage of symbols, so that it may determine which symbols may have their
+address taken in a constant expression.
+
+The default linkage of symbols, and their linkage when declared with the
+`static` or `extern` keyword, is determined by their scope.
+
+Also important is that `static` and `extern` can change linkage and storage
+class, which are two different things. Linkage can be internal, external, or
+none, and storage class can be static, automatic, or external.
+
+For external declarations:
+- external linkage, static storage class by default
+- `static` gives the symbol internal linkage
+- `extern` gives the symbol external storage class; this has no effect on
+  functions but causes no storage to be allocated for objects
+- `auto` and `register` are illegal
+
+If an external symbol is to have internal linkage, the `static` specifier must
+be given in the first declaration, and all subsequent declarations must also
+have the `static` keyword.
+
+For all other declarations:
+- no linkage, automatic storage class by default for objects and external
+  linkage, external storage class for functions
+- `auto` and `register` do nothing to objects, but are illegal for functions
+- `static` gives the symbol static storage class. objects are zero initialized
+  if no initializer is given. illegal for use on functions.
+- `extern` does one of two things:
+  - if the symbol is defined in an outer scope, this declaration basically does
+    nothing: the linkage matches that of the outer symbol, and this symbol uses
+    the same storage as the outer symbol
+  - if the symbol is not defined in an outer scope, give the symbol external
+    linkage and external storage class
+
+## External declarations
+External declarations behave differently from internal declarations. External
+symbols may be declared multiple times so long as they are defined at most once,
+and the types of the declarations are considered equivalent.
 
 ## Single pass to intermediate language
 With all the changes made to the type checker and parser, it is now possible to

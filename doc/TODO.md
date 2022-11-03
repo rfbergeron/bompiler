@@ -1,3 +1,16 @@
+# Harder TODOs
+These are necessary compiler features that I have been putting off because they
+require changes to existing features that may break things in new and exciting
+ways:
+- unnamed structs, unions, and enums
+- correct naming of function parameters in the presence of multiple declarations
+- do not allow function definition parameters to be type names
+- array size deduction
+- allow redeclarations when one declaration is complete and the other
+  incomplete. this should only need to be handled explicitly for arrays, since
+  structs and unions should complete themselves.
+- restrict function and array direct declarators
+
 # Parser and syntax tree changes
 I will be paring down the syntax tree data structure and rewriting some parser
 rules to accomodate for this. There is some unnecessary complexity and

@@ -203,7 +203,7 @@ int tag_value_print(const TagValue *tagval, char *buffer, size_t size) {
  * SymbolTable functions
  */
 SymbolTable *symbol_table_init(TableType type) {
-  SymbolTable *table = malloc(sizeof(*table));
+  SymbolTable *table = calloc(1, sizeof(*table));
   table->type = type;
   switch (type) {
     case FUNCTION_TABLE:

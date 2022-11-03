@@ -15,15 +15,13 @@ ASTree *define_params(ASTree *declarator, ASTree *param_list);
 ASTree *define_array(ASTree *declarator, ASTree *array);
 ASTree *define_pointer(ASTree *declarator, ASTree *pointer);
 ASTree *define_dirdecl(ASTree *declarator, ASTree *dirdecl);
-/* while assignments are expressions, the code for checking declarations
- * makes use of validate_assignment, so we implement it here instead.
- */
-ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src);
 ASTree *define_symbol(ASTree *declaration, ASTree *declarator,
                       ASTree *equal_sign, ASTree *initializer);
 ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body);
 ASTree *validate_fnbody_content(ASTree *function, ASTree *fnbody_content);
 ASTree *finalize_function(ASTree *function);
+ASTree *validate_unique_tag(ASTree *tag_type_node, ASTree *left_brace);
+ASTree *validate_tag_decl(ASTree *tag_type_node, ASTree *tag_name_node);
 ASTree *validate_tag_def(ASTree *tag_type_node, ASTree *tag_name_node,
                          ASTree *left_brace);
 ASTree *finalize_tag_def(ASTree *tag);

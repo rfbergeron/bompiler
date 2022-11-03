@@ -3,22 +3,21 @@
 
 #include "astree.h"
 
-enum type_checker_action {
-  TCHK_COMPATIBLE,
-  TCHK_IMPLICIT_CAST,
-  TCHK_EXPLICIT_CAST,
-  TCHK_INCOMPATIBLE,
-  TCHK_E_NO_FLAGS
+enum types_equivalent_flags {
+  IGNORE_QUALIFIERS = 1 << 0,
+  IGNORE_STORAGE_CLASS = 1 << 1,
+  IGNORE_ARRAY_BOUNDS = 1 << 2
 };
 
-ASTree *perform_pointer_conv(ASTree *expr);
-ASTree *convert_type(ASTree *expr, const TypeSpec *type);
-int compare_params(LinkedList *dests, LinkedList *srcs);
-int compare_members(LinkedList *dests, LinkedList *srcs);
-int compare_declspecs(const TypeSpec *dest, const TypeSpec *src);
-int compare_auxspecs(const LinkedList *dests, const LinkedList *srcs);
-int types_compatible(const TypeSpec *type1, const TypeSpec *type2);
-int determine_conversion(const TypeSpec *type1, const TypeSpec *type2,
-                         const TypeSpec **out);
-int merge_block_controls(ASTree *block, ASTree *stmt);
+int params_equivalent(const AuxSpec *aux1, const AuxSpec *aux2);
+int members_equivalent(const AuxSpec *aux1, const AuxSpec *aux2);
+int aux_equivalent(const AuxSpec *aux1, const AuxSpec *aux2,
+                   unsigned int flags);
+int types_equivalent(const TypeSpec *type1, const TypeSpec *type2,
+                     unsigned int flags);
+int is_const_zero(ASTree *tree);
+int types_assignable(const TypeSpec *dest_type, ASTree *src);
+void arithmetic_conversions(ASTree *operator, const TypeSpec * type1,
+                            const TypeSpec *type2);
+void pointer_conversions(ASTree *expr);
 #endif

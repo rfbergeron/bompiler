@@ -14,7 +14,15 @@ typedef struct astree {
   SymbolTable *symbol_table; /* symbol table for scope, if applicable */
   ListIter *first_instr;
   ListIter *last_instr;
-  unsigned long constval;
+  union {
+    struct {
+      long offset;
+      const char *label;
+    } address;
+    struct {
+      unsigned long value;
+    } integral;
+  } constant;
   Location loc; /* source location */
   size_t jump_id;
   size_t case_id;
@@ -23,10 +31,10 @@ typedef struct astree {
   unsigned int attributes; /* node-specific attributes */
 } ASTree;
 
-#define EMPTY_EXPR_VALUE                                                \
-  {                                                                     \
-    &SPEC_EMPTY, ";", NULL, NULL, NULL, 0UL, LOC_EMPTY_VALUE, 0UL, 0UL, \
-        BLIB_LLIST_EMPTY, ';', ATTR_NONE                                \
+#define EMPTY_EXPR_VALUE                                                    \
+  {                                                                         \
+    &SPEC_EMPTY, ";", NULL, NULL, NULL, {{0L, NULL}}, LOC_EMPTY_VALUE, 0UL, \
+        0UL, BLIB_LLIST_EMPTY, ';', ATTR_NONE                               \
   }
 #define UNWRAP(node) \
   (node->symbol == TOK_TYPE_ERROR ? astree_get(node, 0) : node)
