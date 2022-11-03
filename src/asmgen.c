@@ -491,15 +491,14 @@ void assign_stack_space(SymbolValue *symval) {
   symval->disp = -window_size;
 }
 
-int assign_static_space(const char *ident, SymbolValue *symval) {
+void assign_static_space(const char *ident, SymbolValue *symval) {
   size_t *static_count = map_get(static_locals, ident, strlen(ident));
   if (!static_count) {
     static_count = calloc(1, sizeof(size_t));
     int status = map_insert(static_locals, ident, strlen(ident), static_count);
-    if (status) return status;
+    if (status) abort();
   }
   symval->static_id = *static_count++;
-  return 0;
 }
 
 /* NOTE: on x64, most operations that write to the lower 32 bits of a
@@ -606,17 +605,17 @@ int restore_volatile_regs(void) {
   return 0;
 }
 
-int translate_empty_expr(ASTree *empty_expr) {
+ASTree *translate_empty_expr(ASTree *empty_expr) {
   InstructionData *nop_data = instr_init(OP_NOP);
   llist_push_back(instructions, nop_data);
   empty_expr->first_instr = llist_iter_last(instructions);
-  if (empty_expr->first_instr == NULL) return -1;
+  if (empty_expr->first_instr == NULL) abort();
   empty_expr->last_instr = llist_iter_last(instructions);
-  if (empty_expr->last_instr == NULL) return -1;
-  return 0;
+  if (empty_expr->last_instr == NULL) abort();
+  return empty_expr;
 }
 
-int translate_ident(ASTree *ident, CompilerState *state) {
+ASTree *translate_ident(ASTree *ident) {
   InstructionData *lea_data = instr_init(OP_LEA);
   SymbolValue *symval = NULL;
   state_get_symbol(state, ident->lexinfo, strlen(ident->lexinfo), &symval);
@@ -637,15 +636,15 @@ int translate_ident(ASTree *ident, CompilerState *state) {
   AuxSpec *ident_aux = llist_back(&ident_type->auxspecs);
   set_op_reg(&lea_data->dest, REG_QWORD, next_vreg());
   int status = llist_push_back(instructions, lea_data);
-  if (status) return status;
+  if (status) abort();
   ident->first_instr = llist_iter_last(instructions);
-  if (ident->first_instr == NULL) return -1;
+  if (ident->first_instr == NULL) abort();
   ident->last_instr = liter_copy(ident->first_instr);
-  if (ident->last_instr == NULL) return -1;
-  return 0;
+  if (ident->last_instr == NULL) abort();
+  return ident;
 }
 
-int translate_stringcon(ASTree *stringcon) {
+ASTree *translate_stringcon(ASTree *stringcon) {
   size_t *string_id =
       map_get(string_constants, stringcon->lexinfo, strlen(stringcon->lexinfo));
   if (!string_id) {
@@ -653,7 +652,7 @@ int translate_stringcon(ASTree *stringcon) {
     *string_id = map_size(string_constants);
     int status = map_insert(string_constants, stringcon->lexinfo,
                             strlen(stringcon->lexinfo), string_id);
-    if (status) return status;
+    if (status) abort();
     InstructionData *section_data = instr_init(OP_SECTION);
     set_op_dir(&section_data->dest, 0, ".rodata");
     /* TODO(Robert): determine when alignment needs to be set, if ever */
@@ -663,38 +662,37 @@ int translate_stringcon(ASTree *stringcon) {
     set_op_imm(&string_data->dest, (uintmax_t)stringcon->lexinfo);
     status = liter_push_back(before_definition, &before_definition, 3,
                              section_data, label_data, string_data);
-    if (status) return status;
+    if (status) abort();
   }
   /* TODO(Robert): set node constval to label */
-  return 0;
+  return stringcon;
 }
 
-int translate_cast(ASTree *cast) {
+ASTree *translate_cast(ASTree *cast, ASTree *expr) {
   DEBUGS('g', "Translating cast");
-  ASTree *expr = astree_get(cast, 1);
 
   int status = scalar_conversions(expr, cast->type);
-  if (status) return status;
+  if (status) abort();
 
   cast->first_instr = liter_copy(expr->first_instr);
-  if (cast->first_instr == NULL) return -1;
+  if (cast->first_instr == NULL) abort();
   cast->last_instr = liter_copy(expr->last_instr);
-  if (cast->last_instr == NULL) return -1;
-  return 0;
+  if (cast->last_instr == NULL) abort();
+  return astree_adopt(cast, 1, expr);
 }
 
-int translate_intcon(ASTree *constant) {
+ASTree *translate_intcon(ASTree *constant) {
   DEBUGS('g', "Translating integer constant");
   InstructionData *data = instr_init(OP_MOV);
   set_op_reg(&data->dest, typespec_get_width(constant->type), next_vreg());
   set_op_imm(&data->src, constant->constval);
   int status = llist_push_back(instructions, data);
-  if (status) return status;
+  if (status) abort();
   constant->first_instr = llist_iter_last(instructions);
-  if (constant->first_instr == NULL) return -1;
+  if (constant->first_instr == NULL) abort();
   constant->last_instr = liter_copy(constant->first_instr);
-  if (constant->last_instr == NULL) return -1;
-  return 0;
+  if (constant->last_instr == NULL) abort();
+  return constant;
 }
 
 /* Two classes of operators whose result is a boolean:
@@ -704,12 +702,10 @@ int translate_intcon(ASTree *constant) {
  * logical NOT does the same thing as the conversion from an arbitrary value
  * to a boolean except instead of using SETNZ it does SETZ
  */
-int translate_logical_not(ASTree * not ) {
-  ASTree *operand = astree_get(not, 0);
-
+ASTree *translate_logical_not(ASTree * not, ASTree *operand) {
   /* move lval into reg, if necessary */
   int status = scalar_conversions(operand, operand->type);
-  if (status) return status;
+  if (status) abort();
   InstructionData *operand_data = liter_get(operand->last_instr);
 
   /* TEST operand with itself */
@@ -724,36 +720,34 @@ int translate_logical_not(ASTree * not ) {
   set_op_reg(&movz_data->dest, REG_DWORD, next_vreg());
 
   not ->first_instr = liter_copy(operand->first_instr);
-  if (not ->first_instr == NULL) return -1;
+  if (not ->first_instr == NULL) abort();
   status = liter_push_back(operand->last_instr, &not ->first_instr, 3,
                            test_data, setz_data, movz_data);
-  if (status) return status;
-  return 0;
+  if (status) abort();
+  return astree_adopt(not, 1, operand);
 }
 
-int translate_logical(ASTree *operator) {
+ASTree *translate_logical(ASTree *operator, ASTree * left, ASTree *right) {
   /* test first operand; jump on false for && and true for || */
-  ASTree *first = astree_get(operator, 0);
-  int status = scalar_conversions(first, first->type);
-  if (status) return status;
-  InstructionData *first_data = liter_get(first->last_instr);
+  int status = scalar_conversions(left, left->type);
+  if (status) abort();
+  InstructionData *left_data = liter_get(left->last_instr);
 
-  InstructionData *test_first_data = instr_init(OP_TEST);
-  test_first_data->dest = test_first_data->src = first_data->dest;
-  InstructionData *jmp_first_data = instr_init(opcode_from_operator(operator));
-  set_op_dir(&jmp_first_data->dest, NO_DISP, BOOL_FMT, branch_count);
+  InstructionData *test_left_data = instr_init(OP_TEST);
+  test_left_data->dest = test_left_data->src = left_data->dest;
+  InstructionData *jmp_left_data = instr_init(opcode_from_operator(operator));
+  set_op_dir(&jmp_left_data->dest, NO_DISP, BOOL_FMT, branch_count);
 
-  status = liter_push_back(first->last_instr, NULL, 2, test_first_data,
-                           jmp_first_data);
-  if (status) return status;
+  status =
+      liter_push_back(left->last_instr, NULL, 2, test_left_data, jmp_left_data);
+  if (status) abort();
 
-  ASTree *second = astree_get(operator, 1);
-  status = scalar_conversions(second, second->type);
-  if (status) return status;
-  InstructionData *second_data = liter_get(second->last_instr);
+  status = scalar_conversions(right, right->type);
+  if (status) abort();
+  InstructionData *right_data = liter_get(right->last_instr);
 
-  InstructionData *test_second_data = instr_init(OP_TEST);
-  test_second_data->dest = test_second_data->src = second_data->dest;
+  InstructionData *test_right_data = instr_init(OP_TEST);
+  test_right_data->dest = test_right_data->src = right_data->dest;
 
   /* result will always be the truth value of the last evaluated expression */
   InstructionData *setnz_data = instr_init(OP_SETNZ);
@@ -763,74 +757,72 @@ int translate_logical(ASTree *operator) {
   movz_data->src = setnz_data->src;
   set_op_reg(&movz_data->dest, REG_DWORD, next_vreg());
 
-  operator->first_instr = liter_copy(first->first_instr);
-  if (operator->first_instr == NULL) return -1;
-  status = liter_push_back(second->last_instr, &operator->last_instr, 3,
-                           test_second_data, setnz_data, movz_data);
-  if (status) return status;
-  return 0;
+  operator->first_instr = liter_copy(left->first_instr);
+  if (operator->first_instr == NULL) abort();
+  status = liter_push_back(right->last_instr, &operator->last_instr, 3,
+                           test_right_data, setnz_data, movz_data);
+  if (status) abort();
+  return astree_adopt(operator, 2, left, right);
 }
 
-int translate_comparison(ASTree *operator) {
-  ASTree *first = astree_get(operator, 0);
-  operator->first_instr = liter_copy(first->first_instr);
-  if (operator->first_instr == NULL) return -1;
+ASTree *translate_comparison(ASTree *operator, ASTree * left, ASTree *right) {
+  operator->first_instr = liter_copy(left->first_instr);
+  if (operator->first_instr == NULL) abort();
 
-  ASTree *second = astree_get(operator, 1);
   const TypeSpec *common_type = NULL;
-  int status = determine_conversion(first->type, second->type, &common_type);
-  if (status) return status;
+  int status = determine_conversion(left->type, right->type, &common_type);
+  if (status) abort();
 
-  status = scalar_conversions(first, common_type);
-  if (status) return status;
-  InstructionData *first_data = liter_get(first->last_instr);
+  status = scalar_conversions(left, common_type);
+  if (status) abort();
+  InstructionData *left_data = liter_get(left->last_instr);
 
-  status = scalar_conversions(second, common_type);
-  if (status) return status;
-  InstructionData *second_data = liter_get(second->last_instr);
+  status = scalar_conversions(right, common_type);
+  if (status) abort();
+  InstructionData *right_data = liter_get(right->last_instr);
 
   InstructionData *cmp_data = instr_init(OP_CMP);
-  cmp_data->dest = first_data->dest;
-  cmp_data->src = second_data->dest;
+  cmp_data->dest = left_data->dest;
+  cmp_data->src = right_data->dest;
   InstructionData *setcc_data = instr_init(opcode_from_operator(operator));
   set_op_reg(&setcc_data->dest, REG_BYTE, next_vreg());
   InstructionData *movz_data = instr_init(OP_MOVZ);
   movz_data->src = setcc_data->dest;
   set_op_reg(&movz_data->dest, REG_DWORD, next_vreg());
-  return liter_push_back(second->last_instr, &operator->last_instr, 3, cmp_data,
-                         setcc_data, movz_data);
+  status = liter_push_back(right->last_instr, &operator->last_instr, 3,
+                           cmp_data, setcc_data, movz_data);
+  if (status) abort();
+  return astree_adopt(operator, 2, left, right);
 }
 
-int translate_indirection(ASTree *indirection) {
+ASTree *translate_indirection(ASTree *indirection, ASTree *operand) {
   DEBUGS('g', "Translating indirection operation.");
-  ASTree *operand = astree_get(indirection, 0);
   indirection->first_instr = liter_copy(operand->first_instr);
-  if (indirection->first_instr == NULL) return -1;
+  if (indirection->first_instr == NULL) abort();
 
   /* TODO(Robert): (void?) pointer type constant */
   int status = scalar_conversions(operand, &SPEC_LONG);
-  if (status) return status;
+  if (status) abort();
   InstructionData *operand_data = liter_get(operand->last_instr);
 
   TypeSpec element_type;
   status = strip_aux_type(&element_type, operand->type);
-  if (status) return status;
+  if (status) abort();
   InstructionData *load_data =
       instr_init(typespec_is_array(&element_type) ? OP_LEA : OP_MOV);
   status = typespec_destroy(&element_type);
-  if (status) return status;
+  if (status) abort();
   set_op_ind(&load_data->src, NO_DISP, operand_data->dest.reg.num, NULL);
   set_op_reg(&load_data->dest, typespec_get_width(indirection->type),
              next_vreg());
   status = liter_push_back(operand->last_instr, &indirection->last_instr, 1,
                            load_data);
-  if (status) return status;
-  return 0;
+  if (status) abort();
+  return astree_adopt(indirection, 1, operand);
 }
 
-int translate_addrof(ASTree *addrof) {
+ASTree *translate_addrof(ASTree *addrof, ASTree *operand) {
   DEBUGS('g', "Translating address operation.");
-  ASTree *operand = astree_get(addrof, 0);
   if (operand->symbol == TOK_INDIRECTION) {
     /* just remove the code if some idiot does &*&*&*&*&* */
     /* NOTE: liter_delete deletes the node (not the iterator) and moves the
@@ -841,34 +833,32 @@ int translate_addrof(ASTree *addrof) {
      * not the greatest interface, but it is a one-liner solution here
      */
     int status = liter_delete(operand->last_instr);
-    if (status) return -1;
+    if (status) abort();
   }
   addrof->first_instr = liter_copy(operand->first_instr);
-  if (addrof->first_instr == NULL) return -1;
+  if (addrof->first_instr == NULL) abort();
   addrof->last_instr = liter_copy(operand->last_instr);
-  if (addrof->last_instr == NULL) return -1;
-  return 0;
+  if (addrof->last_instr == NULL) abort();
+  return astree_adopt(addrof, 1, operand);
 }
 
-int translate_subscript(ASTree *subscript) {
+ASTree *translate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
   DEBUGS('g', "Translating pointer subscript");
   /* both the pointer and index must be in a register so that the displacement
    * and scale addressing mode can be used
    */
-  ASTree *pointer = astree_get(subscript, 0);
   /* TODO(Robert): (void?) pointer type constant */
   int status = scalar_conversions(pointer, &SPEC_LONG);
-  if (status) return status;
+  if (status) abort();
   InstructionData *pointer_data = liter_get(pointer->last_instr);
 
-  ASTree *index = astree_get(subscript, 1);
   /* TODO(Robert): ptrdiff_t type constant (maybe?) */
   status = scalar_conversions(index, &SPEC_LONG);
-  if (status) return status;
+  if (status) abort();
   InstructionData *index_data = liter_get(index->last_instr);
 
   subscript->first_instr = liter_copy(pointer->first_instr);
-  if (subscript->first_instr == NULL) return -1;
+  if (subscript->first_instr == NULL) abort();
 
   InstructionData *lea_data = instr_init(OP_LEA);
   set_op_reg(&lea_data->dest, REG_QWORD, next_vreg());
@@ -878,7 +868,7 @@ int translate_subscript(ASTree *subscript) {
                index_data->dest.reg.num, NULL);
     int status =
         liter_push_back(index->last_instr, &subscript->last_instr, 1, lea_data);
-    if (status) return status;
+    if (status) abort();
   } else {
     set_op_sca(&lea_data->src, SCALE_BYTE, NO_DISP, pointer_data->dest.ind.num,
                index_data->dest.reg.num, NULL);
@@ -887,17 +877,17 @@ int translate_subscript(ASTree *subscript) {
     set_op_imm(&mul_data->src, scale);
     int status = liter_push_back(index->last_instr, &subscript->last_instr, 2,
                                  mul_data, lea_data);
-    if (status) return status;
+    if (status) abort();
   }
-  return 0;
+  return astree_adopt(subscript, 2, pointer, index);
 }
 
-int translate_reference(ASTree *reference) {
+ASTree *translate_reference(ASTree *reference, ASTree *struct_,
+                            ASTree *member) {
   DEBUGS('g', "Translating reference operator");
-  ASTree *struct_ = astree_get(reference, 0);
   if (reference->symbol == TOK_ARROW) {
     int status = scalar_conversions(struct_, struct_->type);
-    if (status) return status;
+    if (status) abort();
   }
   InstructionData *struct_data = liter_get(struct_->last_instr);
 
@@ -905,7 +895,7 @@ int translate_reference(ASTree *reference) {
                             ? llist_get(&struct_->type->auxspecs, 1)
                             : llist_front(&struct_->type->auxspecs);
   SymbolTable *member_table = struct_aux->data.tag.val->data.members.by_name;
-  const char *member_name = astree_get(reference, 1)->lexinfo;
+  const char *member_name = member->lexinfo;
   size_t member_name_len = strlen(member_name);
   SymbolValue *member_symbol =
       symbol_table_get(member_table, member_name, member_name_len);
@@ -915,22 +905,21 @@ int translate_reference(ASTree *reference) {
   set_op_reg(&lea_data->dest, REG_QWORD, next_vreg());
 
   reference->first_instr = liter_copy(struct_->first_instr);
-  if (reference->first_instr == NULL) return -1;
+  if (reference->first_instr == NULL) abort();
   int status =
       liter_push_back(struct_->last_instr, &reference->last_instr, 1, lea_data);
-  if (status) return status;
-  return 0;
+  if (status) abort();
+  return astree_adopt(reference, 2, struct_, member);
 }
 
-int translate_post_inc_dec(ASTree *post_inc_dec) {
+ASTree *translate_post_inc_dec(ASTree *post_inc_dec, ASTree *operand) {
   DEBUGS('g', "Translating postfix increment/decrement");
-  ASTree *operand = astree_get(post_inc_dec, 0);
   post_inc_dec->first_instr = liter_copy(operand->first_instr);
-  if (post_inc_dec->first_instr == NULL) return -1;
+  if (post_inc_dec->first_instr == NULL) abort();
   InstructionData *lvalue_data = liter_get(operand->last_instr);
-  if (lvalue_data == NULL) return -1;
+  if (lvalue_data == NULL) abort();
   int status = scalar_conversions(operand, post_inc_dec->type);
-  if (status) return status;
+  if (status) abort();
   InstructionData *operand_data = liter_get(operand->last_instr);
 
   InstructionData *mov_data = instr_init(OP_MOV);
@@ -949,19 +938,20 @@ int translate_post_inc_dec(ASTree *post_inc_dec) {
 
   InstructionData *dummy_data = instr_init(OP_MOV);
   dummy_data->src = dummy_data->dest = mov_data->dest;
-  return liter_push_back(operand->last_instr, &post_inc_dec->last_instr, 4,
-                         mov_data, inc_dec_data, mov_data_2, dummy_data);
+  status = liter_push_back(operand->last_instr, &post_inc_dec->last_instr, 4,
+                           mov_data, inc_dec_data, mov_data_2, dummy_data);
+  if (status) abort();
+  return astree_adopt(post_inc_dec, 1, operand);
 }
 
-int translate_inc_dec(ASTree *inc_dec) {
+ASTree *translate_inc_dec(ASTree *inc_dec, ASTree *operand) {
   DEBUGS('g', "Translating prefix increment/decrement");
-  ASTree *operand = astree_get(inc_dec, 0);
   inc_dec->first_instr = liter_copy(operand->first_instr);
-  if (inc_dec->first_instr == NULL) return -1;
+  if (inc_dec->first_instr == NULL) abort();
   InstructionData *lvalue_data = liter_get(operand->last_instr);
-  if (lvalue_data == NULL) return -1;
+  if (lvalue_data == NULL) abort();
   int status = scalar_conversions(operand, inc_dec->type);
-  if (status) return status;
+  if (status) abort();
   InstructionData *operand_data = liter_get(operand->last_instr);
 
   InstructionData *inc_dec_data = instr_init(opcode_from_operator(inc_dec));
@@ -975,38 +965,37 @@ int translate_inc_dec(ASTree *inc_dec) {
   InstructionData *dummy_data = instr_init(OP_MOV);
   dummy_data->src = dummy_data->dest = operand_data->dest;
 
-  return liter_push_back(operand->last_instr, &inc_dec->first_instr, 3,
-                         inc_dec_data, mov_data, dummy_data);
+  status = liter_push_back(operand->last_instr, &inc_dec->first_instr, 3,
+                           inc_dec_data, mov_data, dummy_data);
+  if (status) abort();
+  return astree_adopt(inc_dec, 1, operand);
 }
 
-int translate_unop(ASTree *operator) {
+ASTree *translate_unop(ASTree *operator, ASTree * operand) {
   DEBUGS('g', "Translating unary operation");
-  ASTree *operand = astree_get(operator, 0);
   int status = scalar_conversions(operand, operator->type);
-  if (status) return status;
+  if (status) abort();
   InstructionData *operand_data = liter_get(operand->last_instr);
 
   InstructionData *operator_data = instr_init(opcode_from_operator(operator));
   operator_data->dest = operand_data->dest;
 
   operator->first_instr = liter_copy(operand->first_instr);
-  if (operator->first_instr == NULL) return -1;
+  if (operator->first_instr == NULL) abort();
   status = liter_push_back(operand->last_instr, &operator->last_instr, 1,
                            operator_data);
-  if (status) return status;
-  return 0;
+  if (status) abort();
+  return astree_adopt(operator, 1, operand);
 }
 
-int translate_addition(ASTree *operator) {
+ASTree *translate_addition(ASTree *operator, ASTree * left, ASTree *right) {
   DEBUGS('g', "Translating additive operation");
-  ASTree *left = astree_get(operator, 0);
   int status = scalar_conversions(left, operator->type);
-  if (status) return status;
+  if (status) abort();
   InstructionData *left_data = liter_get(left->last_instr);
 
-  ASTree *right = astree_get(operator, 1);
   status = scalar_conversions(right, operator->type);
-  if (status) return status;
+  if (status) abort();
   InstructionData *right_data = liter_get(right->last_instr);
 
   InstructionData *operator_data = instr_init(opcode_from_operator(operator));
@@ -1014,32 +1003,36 @@ int translate_addition(ASTree *operator) {
   operator_data->src = right_data->dest;
 
   operator->first_instr = liter_copy(left->first_instr);
-  if (operator->first_instr == NULL) return -1;
+  if (operator->first_instr == NULL) abort();
 
   /* use two-operand IMUL, since it is more convenient in this case */
   if (typespec_is_pointer(left->type) && !typespec_is_pointer(right->type)) {
     TypeSpec element_type;
-    status = strip_aux_type(&element_type, left->type);
-    if (status) return status;
+    int status = strip_aux_type(&element_type, left->type);
+    if (status) abort();
     InstructionData *mul_data = instr_init(OP_IMUL);
     mul_data->dest = right_data->dest;
     set_op_imm(&mul_data->src, typespec_get_width(&element_type));
-    return liter_push_back(right->last_instr, &operator->last_instr, 2,
-                           mul_data, operator_data);
+    status = liter_push_back(right->last_instr, &operator->last_instr, 2,
+                             mul_data, operator_data);
+    if (status) abort();
   } else if (!typespec_is_pointer(left->type) &&
              typespec_is_pointer(right->type)) {
     TypeSpec element_type;
     status = strip_aux_type(&element_type, right->type);
-    if (status) return status;
+    if (status) abort();
     InstructionData *mul_data = instr_init(OP_IMUL);
     mul_data->dest = left_data->dest;
     set_op_imm(&mul_data->src, typespec_get_width(&element_type));
-    return liter_push_back(right->last_instr, &operator->last_instr, 2,
-                           mul_data, operator_data);
+    status = liter_push_back(right->last_instr, &operator->last_instr, 2,
+                             mul_data, operator_data);
+    if (status) abort();
   } else {
-    return liter_push_back(right->last_instr, &operator->last_instr, 1,
-                           operator_data);
+    int status = liter_push_back(right->last_instr, &operator->last_instr, 1,
+                                 operator_data);
+    if (status) abort();
   }
+  return astree_adopt(operator, 2, left, right);
 }
 
 /* DIV/IDIV: divide ax by operand; quotient -> ax; remainder -> dx except
@@ -1053,16 +1046,15 @@ int translate_addition(ASTree *operator) {
  * because of integral promotion, the operands should be at least 32 bits, and
  * we don't need to worry about the case where the remainder is in ah
  */
-int translate_multiplication(ASTree *operator) {
+ASTree *translate_multiplication(ASTree *operator, ASTree * left,
+                                 ASTree *right) {
   DEBUGS('g', "Translating binary operation");
-  ASTree *left = astree_get(operator, 0);
   int status = scalar_conversions(left, operator->type);
-  if (status) return status;
+  if (status) abort();
   InstructionData *left_data = liter_get(left->last_instr);
 
-  ASTree *right = astree_get(operator, 1);
   status = scalar_conversions(right, operator->type);
-  if (status) return status;
+  if (status) abort();
   InstructionData *right_data = liter_get(right->last_instr);
 
   InstructionData *mov_rax_data = instr_init(OP_MOV);
@@ -1073,27 +1065,27 @@ int translate_multiplication(ASTree *operator) {
   operator_data->dest = right_data->dest;
 
   operator->first_instr = liter_copy(left->first_instr);
-  if (operator->first_instr == NULL) return -1;
+  if (operator->first_instr == NULL) abort();
 
   InstructionData *mov_data = instr_init(OP_MOV);
   /* mov from vreg representing rax/rdx to new vreg */
   set_op_reg(&mov_data->src, typespec_get_width(operator->type),
                              operator->symbol == '%' ? RDX_VREG : RAX_VREG);
   set_op_reg(&mov_data->dest, typespec_get_width(operator->type), next_vreg());
-  return liter_push_back(right->last_instr, &operator->last_instr, 3,
-                         mov_rax_data, operator_data, mov_data);
+  status = liter_push_back(right->last_instr, &operator->last_instr, 3,
+                           mov_rax_data, operator_data, mov_data);
+  if (status) abort();
+  return astree_adopt(operator, 2, left, right);
 }
 
-int translate_binop(ASTree *operator) {
+ASTree *translate_binop(ASTree *operator, ASTree * left, ASTree *right) {
   DEBUGS('g', "Translating binary operation");
-  ASTree *left = astree_get(operator, 0);
   int status = scalar_conversions(left, operator->type);
-  if (status) return status;
+  if (status) abort();
   InstructionData *left_data = liter_get(left->last_instr);
 
-  ASTree *right = astree_get(operator, 1);
   status = scalar_conversions(right, operator->type);
-  if (status) return status;
+  if (status) abort();
   InstructionData *right_data = liter_get(right->last_instr);
 
   InstructionData *operator_data = instr_init(opcode_from_operator(operator));
@@ -1101,16 +1093,18 @@ int translate_binop(ASTree *operator) {
   operator_data->src = right_data->dest;
 
   operator->first_instr = liter_copy(left->first_instr);
-  if (operator->first_instr == NULL) return -1;
+  if (operator->first_instr == NULL) abort();
 
-  return liter_push_back(right->last_instr, &operator->last_instr, 1,
-                         operator_data);
+  status = liter_push_back(right->last_instr, &operator->last_instr, 1,
+                           operator_data);
+  if (status) abort();
+  return astree_adopt(operator, 2, left, right);
 }
 
-int translate_conditional(ASTree *conditional) {
-  ASTree *condition = astree_get(conditional, 0);
+ASTree *translate_conditional(ASTree *qmark, ASTree *condition,
+                              ASTree *true_expr, ASTree *false_expr) {
   int status = scalar_conversions(condition, condition->type);
-  if (status) return status;
+  if (status) abort();
   InstructionData *condition_data = liter_get(condition->last_instr);
   InstructionData *test_data = instr_init(OP_TEST);
   test_data->dest = test_data->src = condition_data->dest;
@@ -1118,28 +1112,26 @@ int translate_conditional(ASTree *conditional) {
   set_op_dir(&jmp_false_data->dest, NO_DISP, BOOL_FMT, branch_count);
   status = liter_push_back(condition->last_instr, NULL, 2, test_data,
                            jmp_false_data);
-  if (status) return status;
+  if (status) abort();
 
-  ASTree *true_expr = astree_get(conditional, 1);
-  status = scalar_conversions(true_expr, conditional->type);
-  if (status) return status;
+  status = scalar_conversions(true_expr, qmark->type);
+  if (status) abort();
   InstructionData *true_expr_data = liter_get(true_expr->last_instr);
   InstructionData *mov_true_data = instr_init(OP_MOV);
   mov_true_data->src = true_expr_data->dest;
-  set_op_reg(&mov_true_data->dest, typespec_get_width(conditional->type),
+  set_op_reg(&mov_true_data->dest, typespec_get_width(qmark->type),
              next_vreg());
   InstructionData *jmp_end_data = instr_init(OP_JMP);
   set_op_dir(&jmp_end_data->dest, NO_DISP, BOOL_END_FMT, branch_count);
   status = liter_push_back(true_expr->last_instr, NULL, 2, mov_true_data,
                            jmp_end_data);
 
-  ASTree *false_expr = astree_get(conditional, 2);
-  status = scalar_conversions(false_expr, conditional->type);
-  if (status) return status;
+  status = scalar_conversions(false_expr, qmark->type);
+  if (status) abort();
   InstructionData *false_label = instr_init(OP_INVALID);
   sprintf(false_label->label, BOOL_FMT, branch_count);
   status = liter_push_front(false_expr->first_instr, NULL, 1, false_label);
-  if (status) return status;
+  if (status) abort();
   InstructionData *false_expr_data = liter_get(false_expr->last_instr);
   InstructionData *mov_false_data = instr_init(OP_MOV);
   mov_false_data->src = false_expr_data->dest;
@@ -1148,23 +1140,23 @@ int translate_conditional(ASTree *conditional) {
   InstructionData *end_label = instr_init(OP_MOV);
   sprintf(end_label->label, BOOL_END_FMT, branch_count++);
   end_label->src = end_label->dest = mov_false_data->dest;
-  status = liter_push_back(false_expr->last_instr, &conditional->last_instr, 2,
+  status = liter_push_back(false_expr->last_instr, &qmark->last_instr, 2,
                            mov_false_data, end_label);
-  if (status) return status;
+  if (status) abort();
 
-  conditional->first_instr = liter_copy(condition->first_instr);
-  if (conditional->first_instr == NULL) return -1;
-  return 0;
+  qmark->first_instr = liter_copy(condition->first_instr);
+  if (qmark->first_instr == NULL) abort();
+  return astree_adopt(qmark, 3, condition, true_expr, false_expr);
 }
 
-int assign_aggregate(ASTree *assignment, ASTree *lvalue, ASTree *expr) {
+int assign_aggregate(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   assignment->first_instr = liter_copy(lvalue->first_instr);
   if (assignment->first_instr == NULL) return -1;
 
   InstructionData *lvalue_data = liter_get(lvalue->last_instr);
-  InstructionData *expr_data = liter_get(expr->last_instr);
+  InstructionData *rvalue_data = liter_get(rvalue->last_instr);
   ListIter *temp = llist_iter_last(instructions);
-  int status = bulk_mtom(lvalue_data->dest.reg.num, expr_data->dest.reg.num,
+  int status = bulk_mtom(lvalue_data->dest.reg.num, rvalue_data->dest.reg.num,
                          assignment->type, temp);
   free(temp);
   if (status) return status;
@@ -1177,21 +1169,21 @@ int assign_aggregate(ASTree *assignment, ASTree *lvalue, ASTree *expr) {
   return 0;
 }
 
-int assign_scalar(ASTree *assignment, ASTree *lvalue, ASTree *expr) {
+int assign_scalar(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   InstructionData *lvalue_data = liter_get(lvalue->last_instr);
 
-  int status = scalar_conversions(expr, lvalue->type);
+  int status = scalar_conversions(rvalue, lvalue->type);
   if (status) return status;
-  InstructionData *expr_data = liter_get(expr->last_instr);
+  InstructionData *rvalue_data = liter_get(rvalue->last_instr);
 
   InstructionData *assignment_data = instr_init(OP_MOV);
   set_op_ind(&assignment_data->dest, NO_DISP, lvalue_data->dest.reg.num, NULL);
-  assignment_data->src = expr_data->dest;
+  assignment_data->src = rvalue_data->dest;
 
   InstructionData *dummy_data = instr_init(OP_MOV);
   set_op_reg(&dummy_data->dest, typespec_get_width(assignment->type),
              next_vreg());
-  dummy_data->src = expr_data->dest;
+  dummy_data->src = rvalue_data->dest;
 
   assignment->first_instr = liter_copy(lvalue->first_instr);
   if (assignment->first_instr == NULL) return -1;
@@ -1201,17 +1193,18 @@ int assign_scalar(ASTree *assignment, ASTree *lvalue, ASTree *expr) {
   return 0;
 }
 
-int translate_assignment(ASTree *assignment) {
+ASTree *translate_assignment(ASTree *assignment, ASTree *lvalue,
+                             ASTree *rvalue) {
   DEBUGS('g', "Translating assignment");
-  ASTree *lvalue = astree_get(assignment, 0);
-  ASTree *expr = astree_get(assignment, 1);
-
   if (typespec_is_union(assignment->type) ||
       typespec_is_struct(assignment->type)) {
-    return assign_aggregate(assignment, lvalue, expr);
+    int status = assign_aggregate(assignment, lvalue, rvalue);
+    if (status) abort();
   } else {
-    return assign_scalar(assignment, lvalue, expr);
+    int status = assign_scalar(assignment, lvalue, rvalue);
+    if (status) abort();
   }
+  return astree_adopt(assignment, 2, lvalue, rvalue);
 }
 
 int translate_agg_arg(ASTree *call, ASTree *arg) {
@@ -1300,36 +1293,36 @@ int translate_args(ASTree *call) {
   return 0;
 }
 
-int translate_call(ASTree *call) {
+ASTree *translate_call(ASTree *call) {
   DEBUGS('g', "Translating function call");
   ASTree *fn_pointer = astree_get(call, 0);
   call->first_instr = liter_copy(fn_pointer->first_instr);
-  if (call->first_instr == NULL) return -1;
+  if (call->first_instr == NULL) abort();
   int status = save_volatile_regs(call->first_instr);
-  if (status) return status;
+  if (status) abort();
   /* temporary iterator for inserting args in reverse order */
   call->last_instr = llist_iter_last(instructions);
-  if (call->last_instr == NULL) return -1;
+  if (call->last_instr == NULL) abort();
 
   status = translate_args(call);
-  if (status) return status;
+  if (status) abort();
   free(call->last_instr);
   call->last_instr = NULL;
 
   /* TODO(Robert): (void?) pointer type constant */
   status = scalar_conversions(fn_pointer, &SPEC_LONG);
-  if (status) return status;
+  if (status) abort();
   InstructionData *fn_pointer_data = liter_get(fn_pointer->last_instr);
   InstructionData *call_data = instr_init(OP_CALL);
   call_data->dest = fn_pointer_data->dest;
   status = llist_push_back(instructions, call_data);
-  if (status) return status;
+  if (status) abort();
 
   InstructionData *rsp_reset_data = instr_init(OP_ADD);
   set_op_reg(&rsp_reset_data->dest, REG_QWORD, RSP_VREG);
   set_op_imm(&rsp_reset_data->src, stack_eightbytes);
   status = llist_push_back(instructions, rsp_reset_data);
-  if (status) return status;
+  if (status) abort();
 
   if (!typespec_is_void(call->type)) {
     size_t result_vreg = next_vreg();
@@ -1339,41 +1332,40 @@ int translate_call(ASTree *call) {
         int status =
             bulk_rtom(RBP_VREG, -window_size, RETURN_REGS, call->type, temp);
         free(temp);
-        if (status) return status;
+        if (status) abort();
       }
       InstructionData *lea_data = instr_init(OP_LEA);
       set_op_ind(&lea_data->src, -window_size, RBP_VREG, NULL);
       set_op_reg(&lea_data->dest, REG_QWORD, result_vreg);
       int status = llist_push_back(instructions, lea_data);
-      if (status) return status;
+      if (status) abort();
     } else {
       InstructionData *mov_data = instr_init(OP_MOV);
       set_op_reg(&mov_data->src, typespec_get_width(call->type), RAX_VREG);
       set_op_reg(&mov_data->dest, typespec_get_width(call->type), result_vreg);
       int status = llist_push_back(instructions, mov_data);
-      if (status) return status;
+      if (status) abort();
     }
     status = restore_volatile_regs();
-    if (status) return status;
+    if (status) abort();
     /* dummy mov since parent expects last instr to have result */
     InstructionData *dummy_data = instr_init(OP_MOV);
     set_op_reg(&dummy_data->dest, REG_QWORD, result_vreg);
     set_op_reg(&dummy_data->src, REG_QWORD, result_vreg);
     status = llist_push_back(instructions, dummy_data);
-    if (status) return status;
+    if (status) abort();
   } else {
     int status = restore_volatile_regs();
-    if (status) return status;
+    if (status) abort();
   }
   call->last_instr = llist_iter_last(instructions);
-  if (call->last_instr == NULL) return -1;
-  return 0;
+  if (call->last_instr == NULL) abort();
+  return call;
 }
 
-int translate_params(ASTree *function, CompilerState *state) {
-  ASTree *fn_decl = astree_get(function, 1);
-  ASTree *fn_dirdecl = astree_get(fn_decl, astree_count(fn_decl) - 1);
-  const TypeSpec *fn_type = fn_decl->type;
+int translate_params(ASTree *declarator) {
+  ASTree *fn_dirdecl = astree_get(declarator, astree_count(declarator) - 1);
+  const TypeSpec *fn_type = declarator->type;
   TypeSpec ret_type;
   int status = strip_aux_type(&ret_type, fn_type);
   if (status) return status;
@@ -1420,63 +1412,61 @@ int translate_params(ASTree *function, CompilerState *state) {
   return 0;
 }
 
-static int translate_ifelse(ASTree *ifelse) {
-  ASTree *condition = astree_get(ifelse, 0);
+ASTree *translate_ifelse(ASTree *ifelse, ASTree *condition, ASTree *if_body,
+                         ASTree *else_body) {
   int status = scalar_conversions(condition, condition->type);
-  if (status) return status;
+  if (status) abort();
   InstructionData *condition_data = liter_get(condition->last_instr);
 
   ifelse->first_instr = liter_copy(condition->first_instr);
-  if (ifelse->first_instr == NULL) return -1;
+  if (ifelse->first_instr == NULL) abort();
 
   InstructionData *test_data = instr_init(OP_TEST);
   test_data->dest = test_data->src = condition_data->dest;
 
   InstructionData *end_label = instr_init(OP_NOP);
   sprintf(end_label->label, END_FMT, ifelse->jump_id);
-  ASTree *if_body = astree_get(ifelse, 1);
-  if (astree_count(ifelse) == 3) {
+  if (else_body != &EMPTY_EXPR) {
     ASTree *else_body = astree_get(ifelse, 2);
     InstructionData *else_label = instr_init(OP_NOP);
     sprintf(else_label->label, STMT_FMT, ifelse->jump_id);
     int status = liter_push_front(else_body->first_instr, NULL, 1, else_label);
-    if (status) return status;
+    if (status) abort();
 
     InstructionData *test_jmp_data = instr_init(OP_JZ);
     set_op_dir(&test_jmp_data->dest, NO_DISP, else_label->label);
     status = liter_push_back(condition->last_instr, NULL, 2, test_data,
                              test_jmp_data);
-    if (status) return status;
+    if (status) abort();
 
     InstructionData *jmp_data = instr_init(OP_JMP);
     set_op_dir(&jmp_data->dest, NO_DISP, end_label->label);
     status = liter_push_back(if_body->last_instr, NULL, 1, jmp_data);
-    if (status) return status;
+    if (status) abort();
     status = liter_push_back(else_body->last_instr, &ifelse->last_instr, 1,
                              end_label);
-    if (status) return status;
+    if (status) abort();
   } else {
     InstructionData *test_jmp_data = instr_init(OP_JZ);
     set_op_dir(&test_jmp_data->dest, NO_DISP, end_label->label);
     status = liter_push_back(condition->last_instr, NULL, 2, test_data,
                              test_jmp_data);
-    if (status) return status;
+    if (status) abort();
     status =
         liter_push_back(if_body->last_instr, &ifelse->last_instr, 1, end_label);
-    if (status) return status;
+    if (status) abort();
   }
-  return 0;
+  return astree_adopt(ifelse, 3, condition, if_body, else_body);
 }
 
-static int translate_switch(ASTree *switch_, CompilerState *state) {
-  ASTree *condition = astree_get(switch_, 0);
+ASTree *translate_switch(ASTree *switch_, ASTree *condition, ASTree *body) {
   const TypeSpec *control_type = state_get_control_type(state);
   int status = scalar_conversions(condition, control_type);
-  if (status) return status;
+  if (status) abort();
   InstructionData *cond_data = liter_get(condition->last_instr);
-  if (cond_data == NULL) return -1;
+  if (cond_data == NULL) abort();
   switch_->first_instr = liter_copy(condition->first_instr);
-  if (switch_->first_instr == NULL) return -1;
+  if (switch_->first_instr == NULL) abort();
 
   /* switch prologue */
   InstructionData *mov_data = instr_init(OP_MOV);
@@ -1487,7 +1477,7 @@ static int translate_switch(ASTree *switch_, CompilerState *state) {
   set_op_dir(&jmp_case1_data->dest, NO_DISP, CASE_FMT, switch_->jump_id, 0);
   status =
       liter_push_back(condition->last_instr, NULL, 2, mov_data, jmp_case1_data);
-  if (status) return status;
+  if (status) abort();
 
   /* switch epilogue */
   InstructionData *end_label = instr_init(OP_NOP);
@@ -1497,33 +1487,31 @@ static int translate_switch(ASTree *switch_, CompilerState *state) {
   InstructionData *dummy_case_label = instr_init(OP_NOP);
   sprintf(dummy_case_label->label, CASE_FMT, switch_->jump_id,
           state_get_case_id(state));
-  ASTree *body = astree_get(switch_, 1);
   if (state_get_selection_default(state)) {
     InstructionData *jmp_def_data = instr_init(OP_JMP);
     set_op_dir(&jmp_def_data->dest, NO_DISP, DEF_FMT, switch_->jump_id);
     int status =
         liter_push_back(body->last_instr, &switch_->last_instr, 4, jmp_end_data,
                         dummy_case_label, jmp_def_data, end_label);
-    if (status) return status;
+    if (status) abort();
   } else {
     int status = liter_push_back(body->last_instr, &switch_->last_instr, 3,
                                  jmp_end_data, dummy_case_label, end_label);
-    if (status) return status;
+    if (status) abort();
   }
-  return 0;
+  return astree_adopt(switch_, 2, condition, body);
 }
 
-static int translate_while(ASTree *while_) {
-  ASTree *condition = astree_get(while_, 0);
+ASTree *translate_while(ASTree *while_, ASTree *condition, ASTree *body) {
   InstructionData *condition_label = instr_init(OP_NOP);
   sprintf(condition_label->label, COND_FMT, while_->jump_id);
   /* set first instr to label */
   int status = liter_push_front(condition->first_instr, &while_->first_instr, 1,
                                 condition_label);
-  if (status) return status;
+  if (status) abort();
 
   status = scalar_conversions(condition, condition->type);
-  if (status) return status;
+  if (status) abort();
   InstructionData *condition_data = liter_get(condition->last_instr);
   InstructionData *test_data = instr_init(OP_TEST);
   test_data->src = test_data->dest = condition_data->dest;
@@ -1535,29 +1523,27 @@ static int translate_while(ASTree *while_) {
   set_op_dir(&test_jmp_data->dest, NO_DISP, end_label->label);
   status =
       liter_push_back(condition->last_instr, NULL, 2, test_data, test_jmp_data);
-  if (status) return status;
+  if (status) abort();
 
-  ASTree *body = astree_get(while_, 1);
   InstructionData *cond_jmp_data = instr_init(OP_JMP);
   set_op_dir(&cond_jmp_data->dest, NO_DISP, condition_label->label);
   /* set last instr to end label */
   status = liter_push_back(body->last_instr, &while_->last_instr, 2,
                            cond_jmp_data, end_label);
-  if (status) return status;
-  return 0;
+  if (status) abort();
+  return astree_adopt(while_, 2, condition, body);
 }
 
-static int translate_for(ASTree *for_, CompilerState *state) {
-  ASTree *initializer = astree_get(for_, 0);
+ASTree *translate_for(ASTree *for_, ASTree *initializer, ASTree *condition,
+                      ASTree *reinitializer, ASTree *body) {
   for_->first_instr = liter_copy(initializer->first_instr);
-  if (for_->first_instr == NULL) return -1;
+  if (for_->first_instr == NULL) abort();
 
-  ASTree *condition = astree_get(for_, 1);
   InstructionData *condition_start_data = liter_get(condition->first_instr);
   sprintf(condition_start_data->label, COND_FMT, for_->jump_id);
   if (condition->symbol != ';') {
     int status = scalar_conversions(condition, condition->type);
-    if (status) return status;
+    if (status) abort();
     InstructionData *condition_data = liter_get(condition->last_instr);
     InstructionData *test_data = instr_init(OP_TEST);
     test_data->dest = test_data->src = condition_data->dest;
@@ -1565,53 +1551,49 @@ static int translate_for(ASTree *for_, CompilerState *state) {
     set_op_dir(&test_jmp_data->dest, NO_DISP, END_FMT, for_->jump_id);
     status = liter_push_back(condition->last_instr, NULL, 2, test_data,
                              test_jmp_data);
-    if (status) return status;
+    if (status) abort();
   }
   InstructionData *body_jmp_data = instr_init(OP_JMP);
   set_op_dir(&body_jmp_data->dest, NO_DISP, STMT_FMT, for_->jump_id);
   int status = liter_push_back(condition->last_instr, NULL, 1, body_jmp_data);
-  if (status) return status;
+  if (status) abort();
 
-  ASTree *reinitializer = astree_get(for_, 2);
   InstructionData *reinit_start_data = liter_get(reinitializer->first_instr);
   sprintf(reinit_start_data->label, REINIT_FMT, for_->jump_id);
   InstructionData *cond_jmp_data = instr_init(OP_JMP);
   set_op_dir(&cond_jmp_data->dest, NO_DISP, COND_FMT, for_->jump_id);
   status = liter_push_back(reinitializer->last_instr, NULL, 1, cond_jmp_data);
-  if (status) return status;
+  if (status) abort();
 
-  ASTree *body = astree_get(for_, 3);
   InstructionData *body_label = instr_init(OP_NOP);
   sprintf(body_label->label, STMT_FMT, for_->jump_id);
   status = liter_push_front(body->first_instr, NULL, 1, body_label);
-  if (status) return status;
+  if (status) abort();
   InstructionData *reinit_jmp_data = instr_init(OP_JMP);
   set_op_dir(&reinit_jmp_data->dest, NO_DISP, COND_FMT, for_->jump_id);
   InstructionData *end_label = instr_init(OP_NOP);
   sprintf(end_label->label, END_FMT, for_->jump_id);
   status = liter_push_back(body->last_instr, &for_->last_instr, 2,
                            reinit_jmp_data, end_label);
-  if (status) return status;
-  return 0;
+  if (status) abort();
+  return astree_adopt(for_, 4, initializer, condition, reinitializer, body);
 }
 
-static int translate_do(ASTree *do_) {
+ASTree *translate_do(ASTree *do_, ASTree *body, ASTree *condition) {
   InstructionData *body_label = instr_init(OP_NOP);
   sprintf(body_label->label, STMT_FMT, do_->jump_id);
-  ASTree *body = astree_get(do_, 0);
   int status =
       liter_push_front(body->first_instr, &do_->first_instr, 1, body_label);
 
   InstructionData *condition_label = instr_init(OP_NOP);
   sprintf(condition_label->label, COND_FMT, do_->jump_id);
-  ASTree *condition = astree_get(do_, 1);
   status = liter_push_front(condition->first_instr, NULL, 1, condition_label);
-  if (status) return status;
+  if (status) abort();
 
   status = scalar_conversions(condition, condition->type);
-  if (status) return status;
+  if (status) abort();
   InstructionData *condition_data = liter_get(condition->last_instr);
-  if (condition_data == NULL) return status ? status : -1;
+  if (condition_data == NULL) abort();
   InstructionData *test_data = instr_init(OP_TEST);
   test_data->dest = test_data->src = condition_data->dest;
 
@@ -1622,28 +1604,28 @@ static int translate_do(ASTree *do_) {
   sprintf(end_label->label, END_FMT, do_->jump_id);
   status = liter_push_back(condition->last_instr, &do_->first_instr, 3,
                            test_data, test_jmp_data, end_label);
-  return 0;
+  return astree_adopt(do_, 2, body, condition);
 }
 
-static int translate_block(ASTree *block, CompilerState *state) {
+ASTree *translate_block(ASTree *block) {
   DEBUGS('g', "Translating compound statement");
   if (astree_count(block) == 0) {
     InstructionData *nop_data = instr_init(OP_NOP);
     int status = llist_push_back(instructions, nop_data);
-    if (status) return status;
+    if (status) abort();
     block->first_instr = llist_iter_last(instructions);
-    if (block->first_instr == NULL) return -1;
+    if (block->first_instr == NULL) abort();
     block->last_instr = liter_copy(block->first_instr);
-    if (block->last_instr == NULL) return -1;
+    if (block->last_instr == NULL) abort();
   } else {
     ASTree *first_stmt = astree_get(block, 0);
     ASTree *last_stmt = astree_get(block, astree_count(block) - 1);
     block->first_instr = liter_copy(first_stmt->first_instr);
-    if (block->first_instr == NULL) return -1;
+    if (block->first_instr == NULL) abort();
     block->last_instr = liter_copy(last_stmt->last_instr);
-    if (block->last_instr == NULL) return -1;
+    if (block->last_instr == NULL) abort();
   }
-  return 0;
+  return block;
 }
 
 int return_scalar(ASTree *ret, ASTree *expr) {
@@ -1729,85 +1711,83 @@ int return_void(ASTree *ret) {
   return 0;
 }
 
-int translate_return(ASTree *ret, CompilerState *state) {
+ASTree *translate_return(ASTree *ret, ASTree *expr) {
   DEBUGS('g', "Translating return statement");
-  if (astree_count(ret) == 0) {
-    return return_void(ret);
+  if (expr == &EMPTY_EXPR) {
+    int status = return_void(ret);
+    if (status) abort();
   } else {
-    ASTree *expr = astree_get(ret, 0);
     if (typespec_is_union(expr->type) || typespec_is_struct(expr->type)) {
-      return return_aggregate(ret, expr);
+      int status = return_aggregate(ret, expr);
+      if (status) abort();
     } else {
-      return return_scalar(ret, expr);
+      int status = return_scalar(ret, expr);
+      if (status) abort();
     }
   }
+  return astree_adopt(ret, 1, expr);
 }
 
-static int translate_continue(ASTree *continue_, CompilerState *state) {
+ASTree *translate_continue(ASTree *continue_) {
   InstructionData *cond_jmp_data = instr_init(OP_JMP);
   set_op_dir(&cond_jmp_data->dest, NO_DISP, COND_FMT, continue_->jump_id);
   int status = llist_push_back(instructions, cond_jmp_data);
-  if (status) return status;
+  if (status) abort();
   continue_->first_instr = llist_iter_last(instructions);
-  if (continue_->first_instr == NULL) return -1;
+  if (continue_->first_instr == NULL) abort();
   continue_->last_instr = liter_copy(continue_->first_instr);
-  if (continue_->last_instr == NULL) return -1;
-  return 0;
+  if (continue_->last_instr == NULL) abort();
+  return continue_;
 }
 
-static int translate_break(ASTree *break_, CompilerState *state) {
+ASTree *translate_break(ASTree *break_) {
   InstructionData *end_jmp_data = instr_init(OP_JMP);
   set_op_dir(&end_jmp_data->dest, NO_DISP, END_FMT, break_->jump_id);
   int status = llist_push_back(instructions, break_);
-  if (status) return status;
+  if (status) abort();
   break_->first_instr = llist_iter_last(instructions);
-  if (break_->first_instr == NULL) return -1;
+  if (break_->first_instr == NULL) abort();
   break_->last_instr = liter_copy(break_->first_instr);
-  if (break_->last_instr == NULL) return -1;
-  return 0;
+  if (break_->last_instr == NULL) abort();
+  return break_;
 }
 
-static int translate_goto(ASTree *goto_, CompilerState *state) {
-  ASTree *ident = astree_get(goto_, 0);
+ASTree *translate_goto(ASTree *goto_, ASTree *ident) {
   const char *ident_str = ident->lexinfo;
   InstructionData *jmp_data = instr_init(OP_JMP);
   set_op_dir(&jmp_data->dest, NO_DISP, ident_str);
   int status = llist_push_back(instructions, jmp_data);
-  if (status) return status;
+  if (status) abort();
   goto_->first_instr = llist_iter_last(instructions);
-  if (goto_->first_instr == NULL) return -1;
+  if (goto_->first_instr == NULL) abort();
   goto_->last_instr = liter_copy(goto_->first_instr);
-  if (goto_->last_instr == NULL) return -1;
-  return 0;
+  if (goto_->last_instr == NULL) abort();
+  return astree_adopt(goto_, 1, ident);
 }
 
-static int translate_label(ASTree *label, CompilerState *state) {
-  ASTree *ident = astree_get(label, 0);
+ASTree *translate_label(ASTree *label, ASTree *ident, ASTree *stmt) {
   const char *ident_str = ident->lexinfo;
   InstructionData *label_data = instr_init(OP_NOP);
   strcpy(label_data->label, ident_str);
 
-  ASTree *stmt = astree_get(label, 1);
   int status =
       liter_push_front(stmt->first_instr, &label->first_instr, 1, label_data);
-  if (status) return status;
+  if (status) abort();
   label->last_instr = liter_copy(stmt->last_instr);
-  if (label->last_instr == NULL) return -1;
-  return 0;
+  if (label->last_instr == NULL) abort();
+  return astree_adopt(label, 2, ident, stmt);
 }
 
-static int translate_case(ASTree *case_, CompilerState *state) {
-  ASTree *stmt = astree_get(case_, 1);
+ASTree *translate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
   case_->last_instr = liter_copy(stmt->last_instr);
-  if (case_->last_instr == 0) return -1;
+  if (case_->last_instr == 0) abort();
 
   const TypeSpec *control_type = state_get_control_type(state);
   if (control_type == &SPEC_EMPTY) abort();
 
-  ASTree *expr = astree_get(case_, 0);
   int status = scalar_conversions(expr, control_type);
   InstructionData *expr_data = liter_get(expr->last_instr);
-  if (expr_data == NULL) return -1;
+  if (expr_data == NULL) abort();
 
   InstructionData *test_data = instr_init(OP_TEST);
   set_op_reg(&test_data->dest, typespec_get_width(control_type),
@@ -1823,24 +1803,23 @@ static int translate_case(ASTree *case_, CompilerState *state) {
   set_op_dir(&fall_jmp_data->dest, NO_DISP, fall_label->label);
   status = liter_push_front(expr->first_instr, &case_->first_instr, 2,
                             fall_jmp_data, case_label);
-  if (status) return status;
+  if (status) abort();
   status = liter_push_back(expr->last_instr, NULL, 3, test_data, jmp_data,
                            fall_label);
-  if (status) return status;
-  return 0;
+  if (status) abort();
+  return astree_adopt(case_, 2, expr, stmt);
 }
 
-static int translate_default(ASTree *default_, CompilerState *state) {
+ASTree *translate_default(ASTree *default_, ASTree *stmt) {
   InstructionData *def_label = instr_init(OP_NOP);
   sprintf(def_label->label, DEF_FMT, default_->jump_id);
 
-  ASTree *stmt = astree_get(default_, 0);
   int status =
       liter_push_front(stmt->first_instr, &default_->first_instr, 1, def_label);
-  if (status) return status;
+  if (status) abort();
   default_->last_instr = liter_copy(stmt->last_instr);
-  if (default_->last_instr == NULL) return -1;
-  return 0;
+  if (default_->last_instr == NULL) abort();
+  return astree_adopt(default_, 1, stmt);
 }
 
 int init_scalar(const TypeSpec *type, ptrdiff_t displacement,
@@ -1933,7 +1912,7 @@ int init_array(const TypeSpec *arr_type, ptrdiff_t arr_disp, ASTree *init_list,
       }
     } else {
       int status = init_scalar(&elem_type, elem_disp, initializer, where);
-      if (status) return status;
+      if (status) return -1;
     }
   }
   if (arr_disp >= 0) {
@@ -2113,8 +2092,8 @@ int translate_static_prelude(ASTree *declarator, SymbolValue *symval,
                          label_data);
 }
 
-int translate_local_init(ASTree *assignment, ASTree *declarator,
-                         ASTree *initializer) {
+ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
+                             ASTree *declarator, ASTree *initializer) {
   DEBUGS('g', "Translating local initialization");
   SymbolValue *symval = NULL;
   assert(state_get_symbol(state, (char *)declarator->lexinfo,
@@ -2122,10 +2101,10 @@ int translate_local_init(ASTree *assignment, ASTree *declarator,
   assert(symval);
 
   if (TODO_STORE_STATIC(symval)) {
-    int status = assign_static_space(declarator->lexinfo, symval);
-    if (status) return status;
-    status = translate_static_prelude(declarator, symval, before_definition);
-    if (status) return status;
+    assign_static_space(declarator->lexinfo, symval);
+    int status =
+        translate_static_prelude(declarator, symval, before_definition);
+    if (status) abort();
   } else {
     assign_stack_space(symval);
   }
@@ -2133,32 +2112,35 @@ int translate_local_init(ASTree *assignment, ASTree *declarator,
   if (typespec_is_aggregate(declarator->type)) {
     int consumed = init_aggregate(declarator->type, symval->disp, initializer,
                                   0, before_definition);
-    if (consumed < 0) return consumed;
-    return 0;
+    if (consumed < 0) abort();
   } else {
-    return init_scalar(declarator->type, symval->disp, initializer,
-                       before_definition);
+    int status = init_scalar(declarator->type, symval->disp, initializer,
+                             before_definition);
+    if (status) abort();
   }
+  return astree_adopt(declaration, 1,
+                      astree_adopt(assignment, 2, declarator, initializer));
 }
 
-int translate_local_decl(ASTree *declarator) {
+ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
   DEBUGS('g', "Translating local declaration");
   SymbolValue *symval = NULL;
   assert(state_get_symbol(state, (char *)declarator->lexinfo,
                           strlen(declarator->lexinfo), &symval));
   assert(symval);
   if (TODO_STORE_STATIC(symval)) {
-    int status = assign_static_space(declarator->lexinfo, symval);
-    if (status) return status;
-    status = translate_static_prelude(declarator, symval, before_definition);
-    if (status) return status;
+    assign_static_space(declarator->lexinfo, symval);
+    int status =
+        translate_static_prelude(declarator, symval, before_definition);
+    if (status) abort();
   } else {
     assign_stack_space(symval);
   }
-  return 0;
+  return astree_adopt(declaration, 1, declarator);
 }
 
-int translate_global_init(ASTree *declarator, ASTree *initializer) {
+ASTree *translate_global_init(ASTree *declaration, ASTree *assignment,
+                              ASTree *declarator, ASTree *initializer) {
   DEBUGS('g', "Translating global initialization");
   SymbolValue *symval = NULL;
   assert(state_get_symbol(state, (char *)declarator->lexinfo,
@@ -2167,27 +2149,29 @@ int translate_global_init(ASTree *declarator, ASTree *initializer) {
 
   InstructionData *data_data = instr_init(OP_DATA);
   int status = llist_push_back(instructions, data_data);
-  if (status) return status;
+  if (status) abort();
   ListIter *temp = llist_iter_last(instructions);
   status = translate_static_prelude(declarator, symval, temp);
-  if (status) return status;
+  if (status) abort();
   if (typespec_is_aggregate(declarator->type)) {
     int consumed = init_aggregate(declarator->type, 0, initializer, 0, temp);
     free(temp);
-    if (consumed < 0) return consumed;
+    if (consumed < 0) abort();
   } else {
     int status = init_scalar(declarator->type, 0, initializer, temp);
     free(temp);
-    if (status) return status;
+    if (status) abort();
   }
 
   free(before_definition);
   before_definition = llist_iter_last(instructions);
-  if (before_definition == NULL) return -1;
-  return 0;
+  if (before_definition == NULL) abort();
+  return astree_adopt(declaration, 1,
+                      astree_adopt(assignment, 2, declarator, initializer));
+  ;
 }
 
-int translate_global_decl(ASTree *declarator) {
+ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
   DEBUGS('g', "Translating global declaration");
   SymbolValue *symval = NULL;
   assert(state_get_symbol(state, (char *)declarator->lexinfo,
@@ -2196,20 +2180,20 @@ int translate_global_decl(ASTree *declarator) {
 
   InstructionData *bss_data = instr_init(OP_BSS);
   int status = llist_push_back(instructions, bss_data);
-  if (status) return status;
+  if (status) abort();
   ListIter *temp = llist_iter_last(instructions);
   status = translate_static_prelude(declarator, symval, temp);
   free(temp);
-  if (status) return status;
+  if (status) abort();
   InstructionData *zero_data = instr_init(OP_ZERO);
   set_op_imm(&zero_data->dest, typespec_get_width(declarator->type));
   status = llist_push_back(instructions, zero_data);
-  if (status) return status;
+  if (status) abort();
 
   free(before_definition);
   before_definition = llist_iter_last(instructions);
-  if (before_definition == NULL) return -1;
-  return 0;
+  if (before_definition == NULL) abort();
+  return astree_adopt(declaration, 1, declarator);
 }
 
 int translate_fn_prelude(ASTree *declarator) {
@@ -2236,67 +2220,67 @@ int translate_fn_prelude(ASTree *declarator) {
   return llist_push_back(instructions, label_data);
 }
 
-int begin_translate_fn(ASTree *function, CompilerState *state) {
+ASTree *begin_translate_fn(ASTree *declaration, ASTree *declarator,
+                           ASTree *body) {
   DEBUGS('g', "Translating function prologue");
   branch_count = window_size = 0;
-  ASTree *declarator = astree_get(function, 1);
   int status = translate_fn_prelude(declarator);
-  if (status) return status;
+  if (status) abort();
 
-  function->first_instr = llist_iter_last(instructions);
-  if (function->first_instr == NULL) return -1;
+  declaration->first_instr = llist_iter_last(instructions);
+  if (declaration->first_instr == NULL) abort();
 
   status = save_preserved_regs();
-  if (status) return status;
+  if (status) abort();
 
   InstructionData *mov_data = instr_init(OP_MOV);
   set_op_reg(&mov_data->dest, REG_QWORD, RBP_VREG);
   set_op_reg(&mov_data->src, REG_QWORD, RSP_VREG);
   status = llist_push_back(instructions, mov_data);
-  if (status) return status;
+  if (status) abort();
 
   /* save location for later rsp adjustment */
-  function->last_instr = llist_iter_last(instructions);
-  if (function->last_instr == NULL) return -1;
+  declaration->last_instr = llist_iter_last(instructions);
+  if (declaration->last_instr == NULL) abort();
 
-  status = translate_params(function, state);
-  if (status) return status;
-  return 0;
+  status = translate_params(declarator);
+  if (status) abort();
+  return astree_adopt(declaration, 2, declarator, body);
 }
 
-int end_translate_fn(ASTree *function, CompilerState *state) {
+ASTree *end_translate_fn(ASTree *declaration) {
   /* emit rsp adjustment now that we know the amount of stack space */
   InstructionData *rsp_sub_data = instr_init(OP_SUB);
   set_op_reg(&rsp_sub_data->dest, REG_QWORD, RSP_VREG);
   set_op_imm(&rsp_sub_data->src, window_size);
-  int status = liter_push_back(function->last_instr, NULL, 1, rsp_sub_data);
-  if (status) return status;
-  free(function->last_instr);
-  function->last_instr = NULL;
+  int status = liter_push_back(declaration->last_instr, NULL, 1, rsp_sub_data);
+  if (status) abort();
+  free(declaration->last_instr);
+  declaration->last_instr = NULL;
 
   InstructionData *mov_data = instr_init(OP_MOV);
   set_op_reg(&mov_data->dest, REG_QWORD, RSP_VREG);
   set_op_reg(&mov_data->src, REG_QWORD, RBP_VREG);
   status = llist_push_back(instructions, mov_data);
-  if (status) return status;
+  if (status) abort();
   status = restore_preserved_regs();
-  if (status) return status;
+  if (status) abort();
   InstructionData *return_data = instr_init(OP_RET);
   status = llist_push_back(instructions, return_data);
-  if (status) return status;
-  ASTree *declarator = astree_get(function, 1);
+  if (status) abort();
+  ASTree *declarator = astree_get(declaration, 1);
   InstructionData *size_data = instr_init(OP_SIZE);
   set_op_dir(&size_data->dest, NO_DISP, declarator->lexinfo);
   set_op_dir(&size_data->src, NO_DISP, ".-%s", declarator->lexinfo);
   status = llist_push_back(instructions, size_data);
-  if (status) return status;
-  function->last_instr = llist_iter_last(instructions);
-  if (function->last_instr == NULL) return -1;
+  if (status) abort();
+  declaration->last_instr = llist_iter_last(instructions);
+  if (declaration->last_instr == NULL) abort();
 
   free(before_definition);
   before_definition = llist_iter_last(instructions);
-  if (before_definition == NULL) return -1;
-  return 0;
+  if (before_definition == NULL) abort();
+  return declaration;
 }
 
 int operand_to_str(Operand *operand, char *str, size_t size) {
