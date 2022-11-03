@@ -14,14 +14,13 @@
 #define X64_ALIGNOF_CHAR (size_t)1
 
 enum attribute {
-  ATTR_NONE = 0,           /* no attributes set */
-  ATTR_EXPR_LVAL = 1 << 0, /* refers to an assignable location */
-  ATTR_STMT_DEFAULT =
-      1 << 1, /* indicates that a switch statement has a default label */
-  ATTR_EXPR_CONST1 = 1 << 2,
-  ATTR_EXPR_CONST2 = 1 << 3,
-  NUM_ATTRIBUTES = 4, /* number of attribute flags */
-  ATTR_EXPR_CONST3 = ATTR_EXPR_CONST1 | ATTR_EXPR_CONST2
+  ATTR_NONE = 0,              /* no attributes set */
+  ATTR_EXPR_LVAL = 1 << 0,    /* refers to an assignable location */
+  ATTR_STMT_DEFAULT = 1 << 1, /* switch statement has a default label */
+  ATTR_EXPR_CONST = 1 << 2,   /* node refers to a valid constant expression */
+  ATTR_CONST_INIT = 1 << 3,   /* constant expression is only for initializers */
+  ATTR_CONST_ADDR = 1 << 4,   /* constant expression includes an address */
+  NUM_ATTRIBUTES = 5          /* number of attribute flags */
 };
 
 typedef enum base_type {
@@ -80,8 +79,6 @@ enum typespec_index {
   /* qualifiers */
   TYPESPEC_INDEX_CONST,
   TYPESPEC_INDEX_VOLATILE,
-  /* function only */
-  TYPESPEC_INDEX_INLINE,
   /* number of type specifiers */
   TYPESPEC_INDEX_COUNT
 };
@@ -107,9 +104,7 @@ enum typespec_flag {
   TYPESPEC_FLAG_TYPEDEF = 1 << TYPESPEC_INDEX_TYPEDEF,
   /* qualifiers */
   TYPESPEC_FLAG_CONST = 1 << TYPESPEC_INDEX_CONST,
-  TYPESPEC_FLAG_VOLATILE = 1 << TYPESPEC_INDEX_VOLATILE,
-  /* function only */
-  TYPESPEC_FLAG_INLINE = 1 << TYPESPEC_INDEX_INLINE
+  TYPESPEC_FLAG_VOLATILE = 1 << TYPESPEC_INDEX_VOLATILE
 };
 
 /* "char" is not included in any of these groups */
@@ -135,6 +130,7 @@ typedef enum bcc_type_err {
   BCC_TERR_INCOMPLETE_SPEC,
   BCC_TERR_INCOMPATIBLE_TYPES,
   BCC_TERR_INCOMPATIBLE_SPEC,
+  BCC_TERR_INCOMPATIBLE_DECL,
   BCC_TERR_EXPECTED_TAG,
   BCC_TERR_EXPECTED_TAG_PTR,
   BCC_TERR_EXPECTED_STRUCT,
@@ -143,6 +139,7 @@ typedef enum bcc_type_err {
   BCC_TERR_EXPECTED_FUNCTION,
   BCC_TERR_EXPECTED_FN_PTR,
   BCC_TERR_EXPECTED_TYPEID,
+  BCC_TERR_EXPECTED_DECLARATOR,
   BCC_TERR_EXPECTED_CONST,
   BCC_TERR_EXPECTED_INTEGER,
   BCC_TERR_EXPECTED_INTCONST,
@@ -249,10 +246,13 @@ size_t typespec_get_alignment(TypeSpec *spec);
 size_t typespec_get_eightbytes(const TypeSpec *spec);
 int typespec_append_auxspecs(TypeSpec *dest, TypeSpec *src);
 int strip_aux_type(TypeSpec *dest, const TypeSpec *src);
+int common_qualified_ptr(TypeSpec *dest, const TypeSpec *src1,
+                         const TypeSpec *src2);
 
 int typespec_is_incomplete(const TypeSpec *type);
-int typespec_is_arithmetic(const TypeSpec *type);
 int typespec_is_integer(const TypeSpec *type);
+int typespec_is_arithmetic(const TypeSpec *type);
+int typespec_is_void(const TypeSpec *type);
 int typespec_is_pointer(const TypeSpec *type);
 int typespec_is_array(const TypeSpec *type);
 int typespec_is_function(const TypeSpec *type);
@@ -266,4 +266,6 @@ int typespec_is_union(const TypeSpec *type);
 int typespec_is_unionptr(const TypeSpec *type);
 int typespec_is_aggregate(const TypeSpec *type);
 int typespec_is_enum(const TypeSpec *type);
+int typespec_is_chararray(const TypeSpec *type);
+int typespec_is_const(const TypeSpec *type);
 #endif

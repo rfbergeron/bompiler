@@ -67,15 +67,13 @@ const char STRING_INT_MAP[][32] = {
     "unsigned short int", "signed short int", "unsigned char", "signed char",
 };
 
-const char typespec_flag_string[][10] = {"int", "char", "short", "long",
-                                         "long long", "signed", "unsigned",
-                                         "void", "struct", "union", "enum",
-                                         /* storage class */
-                                         "register", "static", "extern", "auto",
-                                         /* qualifiers */
-                                         "const", "volatile",
-                                         /* function only */
-                                         "inline"};
+const char typespec_flag_string[][10] = {
+    "int", "char", "short", "long", "long long", "signed", "unsigned", "void",
+    "struct", "union", "enum",
+    /* storage class */
+    "register", "static", "extern", "auto", "typedef",
+    /* qualifiers */
+    "const", "volatile"};
 
 const char *STRING_ULONG = STRING_INT_MAP[INDEX_FROM_INT(UNSIGNED, LONG)];
 const char *STRING_LONG = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, LONG)];
@@ -105,7 +103,8 @@ const Location LOC_EMPTY = LOC_EMPTY_VALUE;
 
 const char type_map[][16] = {"void", "int", "float", "struct"};
 
-const char attr_map[][16] = {"LVAL", "DEFAULT", "CONST1", "CONST2"};
+const char attr_map[][16] = {"LVAL", "DEFAULT", "CONST", "INITIALIZER",
+                             "ADDRESS"};
 
 /* Precedence for conversions:
  * 1. long double
@@ -417,6 +416,20 @@ int strip_aux_type(TypeSpec *dest, const TypeSpec *src) {
   return 0;
 }
 
+int common_qualified_ptr(TypeSpec *dest, const TypeSpec *src1,
+                         const TypeSpec *src2) {
+  int status = strip_aux_type(dest, src1);
+  if (status) return status;
+  AuxSpec *aux1 = llist_front(&src1->auxspecs);
+  AuxSpec *aux2 = llist_front(&src2->auxspecs);
+  AuxSpec *ptr_aux = calloc(1, sizeof(*ptr_aux));
+  ptr_aux->aux = AUX_POINTER;
+  ptr_aux->data.memory_loc.qualifiers =
+      aux1->data.memory_loc.qualifiers | aux2->data.memory_loc.qualifiers;
+  llist_push_front(&dest->auxspecs, ptr_aux);
+  return 0;
+}
+
 int typespec_is_incomplete(const TypeSpec *type) {
   int is_void = type->base == TYPE_VOID && llist_size(&type->auxspecs) == 0;
   int is_struct =
@@ -430,12 +443,17 @@ int typespec_is_incomplete(const TypeSpec *type) {
   return is_void || is_struct || is_array;
 }
 
-int typespec_is_arithmetic(const TypeSpec *type) {
-  return (type->base == TYPE_SIGNED || type->base == TYPE_UNSIGNED);
+int typespec_is_integer(const TypeSpec *type) {
+  return (type->base == TYPE_SIGNED || type->base == TYPE_UNSIGNED) &&
+         llist_size(&type->auxspecs) == 0;
 }
 
-int typespec_is_integer(const TypeSpec *type) {
-  return (type->base == TYPE_SIGNED || type->base == TYPE_UNSIGNED);
+int typespec_is_arithmetic(const TypeSpec *type) {
+  return typespec_is_integer(type) || typespec_is_enum(type);
+}
+
+int typespec_is_void(const TypeSpec *type) {
+  return (type->base == TYPE_VOID) && llist_size(&type->auxspecs) == 0;
 }
 
 int typespec_is_aux(const TypeSpec *type, const AuxType aux,
@@ -465,10 +483,6 @@ int typespec_is_voidptr(const TypeSpec *type) {
          llist_size(&type->auxspecs) == 1;
 }
 
-int typespec_is_void(const TypeSpec *type) {
-  return llist_empty(&type->auxspecs) && type->base == TYPE_VOID;
-}
-
 int typespec_is_fnptr(const TypeSpec *type) {
   return typespec_is_pointer(type) && typespec_is_aux(type, AUX_FUNCTION, 1);
 }
@@ -496,4 +510,31 @@ int typespec_is_aggregate(const TypeSpec *type) {
 
 int typespec_is_enum(const TypeSpec *type) {
   return typespec_is_aux(type, AUX_ENUM, 0);
+}
+
+int typespec_is_chararray(const TypeSpec *type) {
+  return llist_size(&type->auxspecs) == 1 && typespec_is_array(type) &&
+         (type->flags & TYPESPEC_FLAG_CHAR);
+}
+
+int typespec_is_const(const TypeSpec *type) {
+  if (llist_empty(&type->auxspecs)) {
+    return !!(type->flags & TYPESPEC_FLAG_CONST);
+  } else {
+    AuxSpec *auxspec = llist_front(&type->auxspecs);
+    if (auxspec->aux == AUX_UNION || auxspec->aux == AUX_STRUCT) {
+      if (type->flags & TYPESPEC_FLAG_CONST) return 1;
+      LinkedList *members = &auxspec->data.tag.val->data.members.in_order;
+      size_t i;
+      for (i = 0; i < llist_size(members); ++i) {
+        SymbolValue *member = llist_get(members, i);
+        if (typespec_is_const(&member->type)) return 1;
+      }
+      return 0;
+    } else if (auxspec->aux == AUX_POINTER) {
+      return !!(auxspec->data.memory_loc.qualifiers & TYPESPEC_FLAG_CONST);
+    } else {
+      return 1;
+    }
+  }
 }

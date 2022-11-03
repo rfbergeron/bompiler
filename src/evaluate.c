@@ -3,32 +3,43 @@
 #include "ctype.h"
 #include "errno.h"
 #include "lyutils.h"
+#include "state.h"
 #include "stdlib.h"
 #include "yyparse.h"
 
-#define GEN_CASE(symbol, operator)                                     \
-  case symbol:                                                         \
-    binop->attributes |=                                               \
-        left_op->attributes & right_op->attributes & ATTR_EXPR_CONST2; \
-    if ((binop->attributes & ATTR_EXPR_CONST2) != ATTR_EXPR_CONST2)    \
-      return binop;                                                    \
-    binop->constval = left_op->constval operator right_op->constval;   \
+#define GEN_CASE(symbol, operator)                                            \
+  case symbol:                                                                \
+    if (!(left_op->attributes & right_op->attributes & ATTR_EXPR_CONST) ||    \
+        (left_op->attributes & right_op->attributes & ATTR_CONST_ADDR))       \
+      return binop;                                                           \
+    binop->attributes |=                                                      \
+        ATTR_EXPR_CONST |                                                     \
+        ((left_op->attributes | right_op->attributes) & ATTR_CONST_INIT);     \
+    binop->constant.integral.value =                                          \
+        left_op->constant.integral.value operator right_op->constant.integral \
+            .value;                                                           \
     return binop;
-#define GEN_CASE_SIGNED(symbol, operator)                              \
-  case symbol:                                                         \
-    binop->attributes |=                                               \
-        left_op->attributes & right_op->attributes & ATTR_EXPR_CONST2; \
-    if ((binop->attributes & ATTR_EXPR_CONST2) != ATTR_EXPR_CONST2)    \
-      return binop;                                                    \
-    if (left_op->type->base == TYPE_SIGNED) {                          \
-      binop->constval =                                                \
-          (long)left_op->constval operator(long) right_op->constval;   \
-    } else {                                                           \
-      binop->constval = left_op->constval operator right_op->constval; \
-    }                                                                  \
+#define GEN_CASE_SIGNED(symbol, operator)                                  \
+  case symbol:                                                             \
+    if (!(left_op->attributes & right_op->attributes & ATTR_EXPR_CONST) || \
+        (left_op->attributes & right_op->attributes & ATTR_CONST_ADDR))    \
+      return binop;                                                        \
+    binop->attributes |=                                                   \
+        ATTR_EXPR_CONST |                                                  \
+        ((left_op->attributes | right_op->attributes) & ATTR_CONST_INIT);  \
+    if (binop->type->base == TYPE_SIGNED) {                                \
+      binop->constant.integral.value =                                     \
+          (long)left_op->constant.integral.value operator(long)            \
+              right_op->constant.integral.value;                           \
+    } else {                                                               \
+      binop->constant.integral.value =                                     \
+          left_op->constant.integral.value operator right_op->constant     \
+              .integral.value;                                             \
+    }                                                                      \
     return binop;
 
 ASTree *evaluate_intcon(ASTree *intcon) {
+  intcon->attributes |= ATTR_EXPR_CONST;
   errno = 0;
   unsigned long unsigned_value = 0;
   long signed_value = strtol(intcon->lexinfo, NULL, 0);
@@ -42,14 +53,13 @@ ASTree *evaluate_intcon(ASTree *intcon) {
         return astree_create_errnode(intcon, BCC_TERR_CONST_TOO_SMALL, 1,
                                      intcon);
       } else {
-        intcon->constval = unsigned_value;
+        intcon->constant.integral.value = unsigned_value;
       }
     }
   } else {
-    intcon->constval = signed_value;
+    intcon->constant.integral.value = signed_value;
   }
 
-  intcon->attributes |= ATTR_EXPR_CONST2;
   size_t lexinfo_len = strlen(intcon->lexinfo);
   /* TODO(Robert): This is... disgusting. Perhaps there is a better way. */
   if (lexinfo_len == 1) {
@@ -95,69 +105,80 @@ ASTree *evaluate_intcon(ASTree *intcon) {
 }
 
 ASTree *evaluate_charcon(ASTree *charcon) {
-  charcon->attributes |= ATTR_EXPR_CONST2;
+  charcon->attributes |= ATTR_EXPR_CONST;
   const char *const_str = charcon->lexinfo + 1;
   size_t const_str_len = strlen(const_str) - 1;
   if (const_str[0] == '\\') {
     if (const_str[1] == 'x') {
       /* hex number */
-      charcon->constval = strtol(&const_str[2], NULL, 16);
+      charcon->constant.integral.value = strtol(&const_str[2], NULL, 16);
     } else if (isdigit(const_str[1])) {
       /* octal number */
-      charcon->constval = strtol(&const_str[1], NULL, 8);
+      charcon->constant.integral.value = strtol(&const_str[1], NULL, 8);
     } else {
       /* ASCII control sequence, \?, \", \', or \\ */
       switch (const_str[1]) {
         case 'n':
-          charcon->constval = '\n';
+          charcon->constant.integral.value = '\n';
           break;
         case 't':
-          charcon->constval = '\t';
+          charcon->constant.integral.value = '\t';
           break;
         case 'v':
-          charcon->constval = '\v';
+          charcon->constant.integral.value = '\v';
           break;
         case 'b':
-          charcon->constval = '\b';
+          charcon->constant.integral.value = '\b';
           break;
         case 'r':
-          charcon->constval = '\r';
+          charcon->constant.integral.value = '\r';
           break;
         case 'f':
-          charcon->constval = '\f';
+          charcon->constant.integral.value = '\f';
           break;
         case 'a':
-          charcon->constval = '\a';
+          charcon->constant.integral.value = '\a';
           break;
         case '\\':
-          charcon->constval = '\\';
+          charcon->constant.integral.value = '\\';
           break;
         case '\?':
-          charcon->constval = '\?';
+          charcon->constant.integral.value = '\?';
           break;
         case '\'':
-          charcon->constval = '\'';
+          charcon->constant.integral.value = '\'';
           break;
         case '"':
-          charcon->constval = '"';
+          charcon->constant.integral.value = '"';
           break;
         default:
-          charcon->constval = '\0';
+          charcon->constant.integral.value = '\0';
       }
     }
   } else {
-    charcon->constval = const_str[0];
+    charcon->constant.integral.value = const_str[0];
   }
   return charcon;
 }
 
 ASTree *evaluate_ident(ASTree *ident) {
-  if (ident->attributes & ATTR_EXPR_CONST2) {
+  const char *id_str = ident->lexinfo;
+  size_t id_str_len = strlen(id_str);
+  SymbolValue *symval = NULL;
+  (void)state_get_symbol(state, id_str, id_str_len, &symval);
+  if (symval->flags & (SYMFLAG_STORE_EXT | SYMFLAG_STORE_STAT)) {
+    ident->attributes |= ATTR_EXPR_CONST;
+    ident->attributes |= ATTR_CONST_INIT;
+    ident->attributes |= ATTR_CONST_ADDR;
+    ident->constant.address.label = ident->lexinfo;
+    ident->constant.address.offset = 0;
+  } else if (symval->flags & SYMFLAG_ENUM_CONST) {
+    ident->attributes |= ATTR_EXPR_CONST;
     AuxSpec *enum_aux = llist_back(&ident->type->auxspecs);
     TagValue *tagval = enum_aux->data.tag.val;
     int *value = map_get(&tagval->data.enumerators.by_name,
                          (char *)ident->lexinfo, strlen(ident->lexinfo));
-    ident->constval = *value;
+    ident->constant.integral.value = *value;
   }
   return ident;
 }
@@ -165,29 +186,70 @@ ASTree *evaluate_ident(ASTree *ident) {
 ASTree *evaluate_addition(ASTree *addition) {
   ASTree *left_op = astree_get(addition, 0);
   ASTree *right_op = astree_get(addition, 1);
-  addition->attributes |=
-      left_op->attributes & right_op->attributes & ATTR_EXPR_CONST2;
-  if ((addition->attributes & ATTR_EXPR_CONST2) != ATTR_EXPR_CONST2)
+  if (left_op->attributes & right_op->attributes & ATTR_CONST_ADDR) {
     return addition;
-  if (left_op->type->base == TYPE_SIGNED) {
-    addition->constval = (long)left_op->constval + (long)right_op->constval;
+  } else if ((left_op->attributes & ATTR_CONST_ADDR) &&
+             (right_op->attributes & ATTR_EXPR_CONST)) {
+    addition->attributes |= ATTR_EXPR_CONST | ATTR_CONST_ADDR | ATTR_CONST_INIT;
+    addition->constant.address.label = left_op->constant.address.label;
+    addition->constant.address.offset = (long)left_op->constant.address.offset +
+                                        (long)right_op->constant.integral.value;
+    return addition;
+  } else if ((left_op->attributes & ATTR_EXPR_CONST) &&
+             (right_op->attributes & ATTR_CONST_ADDR)) {
+    addition->attributes |= ATTR_EXPR_CONST | ATTR_CONST_ADDR | ATTR_CONST_INIT;
+    addition->constant.address.label = right_op->constant.address.label;
+    addition->constant.address.offset = (long)left_op->constant.integral.value +
+                                        (long)right_op->constant.address.offset;
+    return addition;
+  } else if (left_op->attributes & right_op->attributes & ATTR_EXPR_CONST) {
+    addition->attributes |=
+        ATTR_EXPR_CONST |
+        ((left_op->attributes | right_op->attributes) & ATTR_CONST_INIT);
+    if (addition->type->base == TYPE_SIGNED)
+      addition->constant.integral.value =
+          (long)left_op->constant.integral.value +
+          (long)right_op->constant.integral.value;
+    else
+      addition->constant.integral.value =
+          left_op->constant.integral.value + right_op->constant.integral.value;
+    return addition;
   } else {
-    addition->constval = left_op->constval + right_op->constval;
+    return addition;
   }
-  return addition;
 }
 
 ASTree *evaluate_subtraction(ASTree *subtraction) {
   ASTree *left_op = astree_get(subtraction, 0);
   ASTree *right_op = astree_get(subtraction, 1);
-  subtraction->attributes |=
-      left_op->attributes & right_op->attributes & ATTR_EXPR_CONST2;
-  if ((subtraction->attributes & ATTR_EXPR_CONST2) != ATTR_EXPR_CONST2)
-    return subtraction;
-  if (left_op->type->base == TYPE_SIGNED) {
-    subtraction->constval = (long)left_op->constval - (long)right_op->constval;
-  } else {
-    subtraction->constval = left_op->constval - right_op->constval;
+  if ((left_op->attributes & right_op->attributes & ATTR_CONST_ADDR) &&
+      (left_op->constant.address.label == right_op->constant.address.label)) {
+    subtraction->attributes |= ATTR_EXPR_CONST | ATTR_CONST_INIT;
+    subtraction->constant.integral.value =
+        (long)left_op->constant.address.offset -
+        (long)right_op->constant.address.offset;
+  } else if ((left_op->attributes & ATTR_CONST_ADDR) &&
+             (right_op->attributes & ATTR_EXPR_CONST) &&
+             !(right_op->attributes & ATTR_CONST_ADDR)) {
+    subtraction->attributes |=
+        ATTR_EXPR_CONST | ATTR_CONST_ADDR | ATTR_CONST_INIT;
+    subtraction->constant.address.label = left_op->constant.address.label;
+    subtraction->constant.address.offset =
+        (long)left_op->constant.address.offset -
+        (long)right_op->constant.integral.value;
+  } else if ((left_op->attributes & right_op->attributes & ATTR_EXPR_CONST) &&
+             !((left_op->attributes | right_op->attributes) &
+               ATTR_CONST_ADDR)) {
+    subtraction->attributes |=
+        ATTR_EXPR_CONST |
+        ((left_op->attributes | right_op->attributes) & ATTR_CONST_INIT);
+    if (subtraction->type->base == TYPE_SIGNED)
+      subtraction->constant.integral.value =
+          (long)left_op->constant.integral.value -
+          (long)right_op->constant.integral.value;
+    else
+      subtraction->constant.integral.value =
+          left_op->constant.integral.value - right_op->constant.integral.value;
   }
   return subtraction;
 }
@@ -195,14 +257,19 @@ ASTree *evaluate_subtraction(ASTree *subtraction) {
 ASTree *evaluate_shiftl(ASTree *shiftl) {
   ASTree *left_op = astree_get(shiftl, 0);
   ASTree *right_op = astree_get(shiftl, 1);
-  shiftl->attributes |=
-      left_op->attributes & right_op->attributes & ATTR_EXPR_CONST2;
-  if ((shiftl->attributes & ATTR_EXPR_CONST2) != ATTR_EXPR_CONST2)
-    return shiftl;
-  if (right_op->type->base == TYPE_SIGNED) {
-    shiftl->constval = left_op->constval << (long)right_op->constval;
-  } else {
-    shiftl->constval = left_op->constval << right_op->constval;
+  if ((left_op->attributes & right_op->attributes & ATTR_EXPR_CONST) &&
+      !((left_op->attributes | right_op->attributes) & ATTR_CONST_ADDR)) {
+    shiftl->attributes |=
+        ATTR_EXPR_CONST |
+        ((left_op->attributes | right_op->attributes) & ATTR_CONST_INIT);
+    if (right_op->type->base == TYPE_SIGNED) {
+      shiftl->constant.integral.value =
+          left_op->constant.integral.value
+          << (long)right_op->constant.integral.value;
+    } else {
+      shiftl->constant.integral.value = left_op->constant.integral.value
+                                        << right_op->constant.integral.value;
+    }
   }
   return shiftl;
 }
@@ -210,30 +277,191 @@ ASTree *evaluate_shiftl(ASTree *shiftl) {
 ASTree *evaluate_shiftr(ASTree *shiftr) {
   ASTree *left_op = astree_get(shiftr, 0);
   ASTree *right_op = astree_get(shiftr, 1);
-  shiftr->attributes |=
-      left_op->attributes & right_op->attributes & ATTR_EXPR_CONST2;
-  if ((shiftr->attributes & ATTR_EXPR_CONST2) != ATTR_EXPR_CONST2)
-    return shiftr;
-  if (left_op->type->base == TYPE_SIGNED) {
-    if (right_op->type->base == TYPE_SIGNED) {
-      shiftr->constval = (long)left_op->constval >> (long)right_op->constval;
+  if ((left_op->attributes & right_op->attributes & ATTR_EXPR_CONST) &&
+      !((left_op->attributes | right_op->attributes) & ATTR_CONST_ADDR)) {
+    shiftr->attributes |=
+        ATTR_EXPR_CONST |
+        ((left_op->attributes | right_op->attributes) & ATTR_CONST_INIT);
+    if (left_op->type->base == TYPE_SIGNED) {
+      if (right_op->type->base == TYPE_SIGNED) {
+        shiftr->constant.integral.value =
+            (long)left_op->constant.integral.value >>
+            (long)right_op->constant.integral.value;
+      } else {
+        shiftr->constant.integral.value =
+            (long)left_op->constant.integral.value >>
+            right_op->constant.integral.value;
+      }
+    } else if (right_op->type->base == TYPE_UNSIGNED) {
+      shiftr->constant.integral.value = left_op->constant.integral.value >>
+                                        (long)right_op->constant.integral.value;
     } else {
-      shiftr->constval = (long)left_op->constval >> right_op->constval;
+      shiftr->constant.integral.value =
+          left_op->constant.integral.value >> right_op->constant.integral.value;
     }
-  } else if (right_op->type->base == TYPE_UNSIGNED) {
-    shiftr->constval = left_op->constval >> (long)right_op->constval;
-  } else {
-    shiftr->constval = left_op->constval >> right_op->constval;
   }
   return shiftr;
 }
 
+ASTree *evaluate_relational(ASTree *relational) {
+  ASTree *left_op = astree_get(relational, 0);
+  ASTree *right_op = astree_get(relational, 1);
+  if ((left_op->attributes & right_op->attributes & ATTR_CONST_ADDR) &&
+      left_op->constant.address.label == right_op->constant.address.label) {
+    relational->attributes |= ATTR_EXPR_CONST | ATTR_CONST_INIT;
+    switch (relational->symbol) {
+      case '<':
+        relational->constant.integral.value =
+            (long)left_op->constant.address.offset <
+            (long)right_op->constant.address.offset;
+        break;
+      case TOK_GE:
+        relational->constant.integral.value =
+            (long)left_op->constant.address.offset >=
+            (long)right_op->constant.address.offset;
+        break;
+      case '>':
+        relational->constant.integral.value =
+            (long)left_op->constant.address.offset >
+            (long)right_op->constant.address.offset;
+        break;
+      case TOK_LE:
+        relational->constant.integral.value =
+            (long)left_op->constant.address.offset <=
+            (long)right_op->constant.address.offset;
+        break;
+      default:
+        abort();
+    }
+  } else if ((left_op->attributes & right_op->attributes & ATTR_EXPR_CONST) &&
+             !((left_op->attributes | right_op->attributes) &
+               ATTR_CONST_ADDR)) {
+    relational->attributes |=
+        ATTR_EXPR_CONST |
+        ((right_op->attributes | left_op->attributes) & ATTR_CONST_INIT);
+    int signed_compare = (left_op->type->width < X64_SIZEOF_LONG &&
+                          right_op->type->width < X64_SIZEOF_LONG) ||
+                         (left_op->type->base != TYPE_UNSIGNED &&
+                          right_op->type->base != TYPE_UNSIGNED);
+    if (signed_compare) {
+      switch (relational->symbol) {
+        case '<':
+          relational->constant.integral.value =
+              (long)left_op->constant.integral.value <
+              (long)right_op->constant.integral.value;
+          break;
+        case TOK_GE:
+          relational->constant.integral.value =
+              (long)left_op->constant.integral.value >=
+              (long)right_op->constant.integral.value;
+          break;
+        case '>':
+          relational->constant.integral.value =
+              (long)left_op->constant.integral.value >
+              (long)right_op->constant.integral.value;
+          break;
+        case TOK_LE:
+          relational->constant.integral.value =
+              (long)left_op->constant.integral.value <=
+              (long)right_op->constant.integral.value;
+          break;
+        default:
+          abort();
+      }
+    } else {
+      switch (relational->symbol) {
+        case '<':
+          relational->constant.integral.value =
+              left_op->constant.integral.value <
+              right_op->constant.integral.value;
+          break;
+        case TOK_GE:
+          relational->constant.integral.value =
+              left_op->constant.integral.value >=
+              right_op->constant.integral.value;
+          break;
+        case '>':
+          relational->constant.integral.value =
+              left_op->constant.integral.value >
+              right_op->constant.integral.value;
+          break;
+        case TOK_LE:
+          relational->constant.integral.value =
+              left_op->constant.integral.value <=
+              right_op->constant.integral.value;
+          break;
+        default:
+          abort();
+      }
+    }
+  }
+  return relational;
+}
+
+ASTree *evaluate_equality(ASTree *equality) {
+  ASTree *left_op = astree_get(equality, 0);
+  ASTree *right_op = astree_get(equality, 1);
+  if (left_op->attributes & right_op->attributes & ATTR_CONST_ADDR) {
+    equality->attributes |= ATTR_EXPR_CONST | ATTR_CONST_INIT;
+    equality->constant.integral.value =
+        (left_op->constant.address.label == right_op->constant.address.label) &&
+        (left_op->constant.address.offset == right_op->constant.address.offset);
+  } else if ((left_op->attributes & ATTR_CONST_ADDR) &&
+             (right_op->attributes & ATTR_EXPR_CONST) &&
+             right_op->constant.integral.value == 0) {
+    equality->attributes |= ATTR_EXPR_CONST | ATTR_CONST_INIT;
+    equality->constant.integral.value = equality->symbol == TOK_NE;
+  } else if ((right_op->attributes & ATTR_CONST_ADDR) &&
+             (left_op->attributes & ATTR_EXPR_CONST) &&
+             left_op->constant.integral.value == 0) {
+    equality->attributes |= ATTR_EXPR_CONST | ATTR_CONST_INIT;
+    equality->constant.integral.value = equality->symbol == TOK_NE;
+  } else if ((left_op->attributes & right_op->attributes & ATTR_EXPR_CONST) &&
+             !((left_op->attributes | right_op->attributes) &
+               ATTR_CONST_ADDR)) {
+    equality->attributes |= ATTR_EXPR_CONST;
+    if (equality->symbol == TOK_EQ) {
+      equality->constant.integral.value =
+          left_op->constant.integral.value == right_op->constant.integral.value;
+    } else {
+      equality->constant.integral.value =
+          left_op->constant.integral.value != right_op->constant.integral.value;
+    }
+  }
+  return equality;
+}
+
+ASTree *evaluate_logical(ASTree *logical) {
+  ASTree *left_op = astree_get(logical, 0);
+  ASTree *right_op = astree_get(logical, 1);
+  if (left_op->attributes & right_op->attributes & ATTR_EXPR_CONST) {
+    logical->attributes =
+        ATTR_EXPR_CONST |
+        ((left_op->attributes | right_op->attributes) & ATTR_CONST_INIT);
+    if (logical->symbol == TOK_OR) {
+      logical->constant.integral.value =
+          ((left_op->attributes & ATTR_CONST_ADDR) ||
+           left_op->constant.integral.value) ||
+          ((right_op->attributes & ATTR_CONST_ADDR) ||
+           right_op->constant.integral.value);
+    } else {
+      logical->constant.integral.value =
+          ((left_op->attributes & ATTR_CONST_ADDR) ||
+           left_op->constant.integral.value) &&
+          ((right_op->attributes & ATTR_CONST_ADDR) ||
+           right_op->constant.integral.value);
+    }
+  }
+  return logical;
+}
+
 ASTree *evaluate_cast(ASTree *cast) {
   ASTree *expr = astree_get(cast, astree_count(cast) == 1 ? 0 : 1);
-  if (typespec_is_arithmetic(cast->type) &&
-      (expr->attributes & ATTR_EXPR_CONST2)) {
-    cast->attributes |= ATTR_EXPR_CONST2;
-    cast->constval = expr->constval;
+  if (expr->attributes & ATTR_EXPR_CONST) {
+    cast->attributes |= expr->attributes &
+                        (ATTR_EXPR_CONST | ATTR_CONST_ADDR | ATTR_CONST_INIT);
+    if (typespec_is_pointer(cast->type)) cast->attributes |= ATTR_CONST_INIT;
+    cast->constant = expr->constant;
   }
   return cast;
 }
@@ -243,14 +471,22 @@ ASTree *evaluate_conditional(ASTree *conditional) {
   ASTree *true_expr = astree_get(conditional, 1);
   ASTree *false_expr = astree_get(conditional, 2);
 
-  conditional->attributes |= true_expr->attributes & false_expr->attributes &
-                             condition->attributes & ATTR_EXPR_CONST2;
-  if ((conditional->attributes & ATTR_EXPR_CONST2) != ATTR_EXPR_CONST2)
-    return conditional;
-  if (condition->constval) {
-    conditional->constval = true_expr->constval;
-  } else {
-    conditional->constval = false_expr->constval;
+  if (condition->attributes & true_expr->attributes & false_expr->attributes &
+      ATTR_EXPR_CONST) {
+    if ((condition->attributes & ATTR_CONST_ADDR) ||
+        condition->constant.integral.value) {
+      conditional->constant = true_expr->constant;
+      conditional->attributes |=
+          (true_expr->attributes &
+           (ATTR_EXPR_CONST | ATTR_CONST_ADDR | ATTR_CONST_INIT)) |
+          (condition->attributes & ATTR_CONST_INIT);
+    } else {
+      conditional->constant = false_expr->constant;
+      conditional->attributes |=
+          (false_expr->attributes &
+           (ATTR_EXPR_CONST | ATTR_CONST_ADDR | ATTR_CONST_INIT)) |
+          (condition->attributes & ATTR_CONST_INIT);
+    }
   }
   return conditional;
 }
@@ -259,20 +495,23 @@ ASTree *evaluate_binop(ASTree *binop) {
   ASTree *left_op = astree_get(binop, 0);
   ASTree *right_op = astree_get(binop, 1);
   switch (binop->symbol) {
-    GEN_CASE('*', *);
     GEN_CASE('&', &);
     GEN_CASE('|', |);
     GEN_CASE('^', ^);
-    GEN_CASE(TOK_AND, &&);
-    GEN_CASE(TOK_OR, ||);
     GEN_CASE_SIGNED('/', /);
     GEN_CASE_SIGNED('%', %);
-    GEN_CASE_SIGNED(TOK_EQ, ==);
-    GEN_CASE_SIGNED(TOK_NE, !=);
-    GEN_CASE_SIGNED(TOK_GE, >=);
-    GEN_CASE_SIGNED(TOK_LE, <=);
-    GEN_CASE_SIGNED('>', >);
-    GEN_CASE_SIGNED('<', <);
+    GEN_CASE_SIGNED('*', *);
+    case TOK_AND:
+    case TOK_OR:
+      return evaluate_logical(binop);
+    case TOK_EQ:
+    case TOK_NE:
+      return evaluate_equality(binop);
+    case '<':
+    case TOK_LE:
+    case '>':
+    case TOK_GE:
+      return evaluate_relational(binop);
     case TOK_SHL:
       return evaluate_shiftl(binop);
     case TOK_SHR:
@@ -294,32 +533,32 @@ ASTree *evaluate_unop(ASTree *unop) {
   ASTree *operand = astree_get(unop, 0);
   switch (unop->symbol) {
     case TOK_NEG:
-      unop->attributes = operand->attributes & ATTR_EXPR_CONST2;
-      if ((unop->attributes & ATTR_EXPR_CONST2) != ATTR_EXPR_CONST2)
+      if (!(unop->attributes & ATTR_EXPR_CONST) ||
+          (unop->attributes & ATTR_CONST_ADDR))
         return unop;
-      unop->constval = -operand->constval;
+      unop->constant.integral.value = -operand->constant.integral.value;
       return unop;
     case TOK_POS:
-      unop->attributes = operand->attributes & ATTR_EXPR_CONST2;
-      if ((unop->attributes & ATTR_EXPR_CONST2) != ATTR_EXPR_CONST2)
+      if (!(unop->attributes & ATTR_EXPR_CONST) ||
+          (unop->attributes & ATTR_CONST_ADDR))
         return unop;
-      unop->constval = operand->constval;
+      unop->constant.integral.value = +operand->constant.integral.value;
       return unop;
     case '~':
-      unop->attributes = operand->attributes & ATTR_EXPR_CONST2;
-      if ((unop->attributes & ATTR_EXPR_CONST2) != ATTR_EXPR_CONST2)
+      if (!(unop->attributes & ATTR_EXPR_CONST) ||
+          (unop->attributes & ATTR_CONST_ADDR))
         return unop;
-      unop->constval = ~operand->constval;
+      unop->constant.integral.value = ~operand->constant.integral.value;
       return unop;
     case '!':
-      unop->attributes = operand->attributes & ATTR_EXPR_CONST2;
-      if ((unop->attributes & ATTR_EXPR_CONST2) != ATTR_EXPR_CONST2)
+      if (!(unop->attributes & ATTR_EXPR_CONST) ||
+          (unop->attributes & ATTR_CONST_ADDR))
         return unop;
-      unop->constval = !operand->constval;
+      unop->constant.integral.value = !operand->constant.integral.value;
       return unop;
     case TOK_SIZEOF:
-      unop->attributes |= ATTR_EXPR_CONST2;
-      unop->constval = typespec_get_width((TypeSpec *)operand->type);
+      unop->constant.integral.value =
+          typespec_get_width((TypeSpec *)operand->type);
       return unop;
     case TOK_POST_INC:
     case TOK_POST_DEC:

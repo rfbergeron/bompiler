@@ -8,6 +8,8 @@
 #include "yyparse.h"
 
 ASTree *validate_return(ASTree *ret, ASTree *expr) {
+  if (expr->symbol == TOK_TYPE_ERROR)
+    return astree_propogate_errnode(ret, expr);
   SymbolValue *symval = state_get_function(state);
   TypeSpec ret_spec = SPEC_EMPTY;
   int status = strip_aux_type(&ret_spec, &symval->type);
@@ -17,33 +19,29 @@ ASTree *validate_return(ASTree *ret, ASTree *expr) {
                                  0);
   }
   if (expr != &EMPTY_EXPR) {
-    expr = perform_pointer_conv(expr);
-    if (expr->symbol == TOK_TYPE_ERROR) {
+    pointer_conversions(expr);
+    if (types_assignable(&ret_spec, expr)) {
       typespec_destroy(&ret_spec);
-      return astree_propogate_errnode(ret, expr);
-    }
-    expr = convert_type(expr, &ret_spec);
-    if (expr->symbol == TOK_TYPE_ERROR) {
+      return astree_adopt(ret, 1, expr);
+    } else {
       typespec_destroy(&ret_spec);
-      return astree_propogate_errnode(ret, expr);
+      return astree_create_errnode(astree_adopt(ret, 1, expr),
+                                   BCC_TERR_INCOMPATIBLE_TYPES, 3, ret,
+                                   &symval->type, expr->type);
     }
+  } else if (typespec_is_void(&ret_spec)) {
     typespec_destroy(&ret_spec);
     return astree_adopt(ret, 1, expr);
   } else {
-    int compatibility = types_compatible(&ret_spec, &SPEC_VOID);
-    if (compatibility != TCHK_COMPATIBLE) {
-      typespec_destroy(&ret_spec);
-      return astree_create_errnode(astree_adopt(ret, 1, expr),
-                                   BCC_TERR_EXPECTED_RETVAL, 0);
-    }
     typespec_destroy(&ret_spec);
-    return astree_adopt(ret, 1, expr);
+    return astree_create_errnode(astree_adopt(ret, 1, expr),
+                                 BCC_TERR_EXPECTED_RETVAL, 0);
   }
 }
 
 ASTree *validate_ifelse(ASTree *ifelse, ASTree *condition, ASTree *if_body,
                         ASTree *else_body) {
-  condition = perform_pointer_conv(condition);
+  pointer_conversions(condition);
   if (condition->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(ifelse, 3, condition, if_body, else_body);
   } else if (if_body->symbol == TOK_TYPE_ERROR) {
@@ -83,10 +81,10 @@ ASTree *validate_switch_expr(ASTree *expr) {
   if (!typespec_is_integer(expr->type)) {
     return astree_create_errnode(expr, BCC_TERR_EXPECTED_INTEGER, 1, expr);
   }
-  const TypeSpec *promoted_type;
-  int status = determine_conversion(expr->type, &SPEC_INT, &promoted_type);
-
-  state_set_control_type(state, expr->type);
+  ASTree dummy;
+  arithmetic_conversions(&dummy, expr->type, &SPEC_INT);
+  int status = state_set_control_type(state, dummy.type);
+  if (status) abort();
   return expr;
 }
 
@@ -94,7 +92,7 @@ ASTree *validate_while(ASTree *while_, ASTree *condition, ASTree *stmt) {
   /* TODO(Robert): safely process flow control statements before checking error
    * codes so that more things are cleaned up in the event of an error.
    */
-  condition = perform_pointer_conv(condition);
+  pointer_conversions(condition);
   if (condition->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(while_, 2, condition, stmt);
   } else if (stmt->symbol == TOK_TYPE_ERROR) {
@@ -115,7 +113,7 @@ ASTree *validate_while(ASTree *while_, ASTree *condition, ASTree *stmt) {
 }
 
 ASTree *validate_do(ASTree *do_, ASTree *stmt, ASTree *condition) {
-  condition = perform_pointer_conv(condition);
+  pointer_conversions(condition);
   if (condition->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(do_, 2, stmt, condition);
   } else if (stmt->symbol == TOK_TYPE_ERROR) {
@@ -210,7 +208,8 @@ ASTree *validate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
 
   const TypeSpec *case_const_spec = expr->type;
   if (!typespec_is_integer(case_const_spec) ||
-      !(expr->attributes & ATTR_EXPR_CONST2)) {
+      !(expr->attributes & ATTR_EXPR_CONST) ||
+      (expr->attributes & ATTR_CONST_INIT)) {
     return astree_create_errnode(astree_adopt(case_, 2, expr, stmt),
                                  BCC_TERR_EXPECTED_INTCONST, 2, case_, expr);
   }
@@ -285,13 +284,6 @@ ASTree *validate_block_content(ASTree *block, ASTree *block_content) {
     return astree_propogate_errnode(block, block_content);
   } else if (block_content->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(block, block_content);
-  }
-
-  /* TODO(Robert): handle control flow statements even in the case of errors */
-  int status = merge_block_controls(block, block_content);
-  if (status) {
-    return astree_create_errnode(astree_adopt(block, 1, block_content),
-                                 BCC_TERR_LIBRARY_FAILURE, 0);
   }
   return astree_adopt(block, 1, block_content);
 }
