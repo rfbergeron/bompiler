@@ -2142,13 +2142,15 @@ ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
   assert(state_get_symbol(state, (char *)declarator->lexinfo,
                           strlen(declarator->lexinfo), &symval));
   assert(symval);
-  if (symval->flags & SYMFLAG_STORE_STAT) {
-    assign_static_space(declarator->lexinfo, symval);
-    int status =
-        translate_static_prelude(declarator, symval, before_definition);
-    if (status) abort();
-  } else if (symval->flags & SYMFLAG_STORE_AUTO) {
-    assign_stack_space(symval);
+  if (!(symval->flags & SYMFLAG_INHERIT)) {
+    if (symval->flags & SYMFLAG_STORE_STAT) {
+      assign_static_space(declarator->lexinfo, symval);
+      int status =
+          translate_static_prelude(declarator, symval, before_definition);
+      if (status) abort();
+    } else if (symval->flags & SYMFLAG_STORE_AUTO) {
+      assign_stack_space(symval);
+    }
   }
   return astree_adopt(declaration, 1, declarator);
 }
