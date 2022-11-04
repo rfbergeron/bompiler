@@ -368,6 +368,8 @@ size_t typespec_get_width(TypeSpec *spec) {
       return aux->data.memory_loc.length * typespec_member_width(spec);
     } else if (aux->aux == AUX_POINTER || aux->aux == AUX_FUNCTION) {
       return X64_SIZEOF_LONG;
+    } else if (aux->aux == AUX_ENUM) {
+      return X64_SIZEOF_INT;
     }
   }
   return spec->width;

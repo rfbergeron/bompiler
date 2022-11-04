@@ -81,9 +81,8 @@ ASTree *validate_switch_expr(ASTree *expr) {
   if (!typespec_is_integer(expr->type)) {
     return astree_create_errnode(expr, BCC_TERR_EXPECTED_INTEGER, 1, expr);
   }
-  ASTree dummy;
-  arithmetic_conversions(&dummy, expr->type, &SPEC_INT);
-  int status = state_set_control_type(state, dummy.type);
+  const TypeSpec *promoted_type = arithmetic_conversions(expr->type, &SPEC_INT);
+  int status = state_set_control_type(state, promoted_type);
   if (status) abort();
   return expr;
 }
