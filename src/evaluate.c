@@ -20,7 +20,7 @@
 #define CAST_UNARY(operator, opnode, operand)                              \
   do {                                                                     \
     size_t width = typespec_get_width(opnode->type);                       \
-    int is_signed = opnode->type->base == TYPE_SIGNED;                     \
+    int is_signed = typespec_is_signed(opnode->type);                      \
     opnode->constant.integral.value =                                      \
         SELECT_CAST(operator SELECT_CAST(operand->constant.integral.value, \
                                          width, is_signed),                \
@@ -29,7 +29,7 @@
 #define CAST_BINARY(operator, opnode, left, right)                   \
   do {                                                               \
     size_t width = typespec_get_width(opnode->type);                 \
-    int is_signed = opnode->type->base == TYPE_SIGNED;               \
+    int is_signed = typespec_is_signed(opnode->type);                \
     opnode->constant.integral.value = SELECT_CAST(                   \
         SELECT_CAST(left->constant.integral.value, width, is_signed) \
         operator SELECT_CAST(right->constant.integral.value, width,  \
@@ -254,10 +254,11 @@ ASTree *evaluate_shiftl(ASTree *shiftl, ASTree *left, ASTree *right) {
         ATTR_EXPR_CONST |
         ((left->attributes | right->attributes) & ATTR_CONST_INIT);
     size_t width = typespec_get_width(shiftl->type);
-    shiftl->constant.integral.value = SELECT_CAST(
-        SELECT_CAST(left->constant.integral.value, width, shiftl->type->base)
-            << right->constant.integral.value,
-        width, shiftl->type->base);
+    int is_signed = typespec_is_signed(shiftl->type);
+    shiftl->constant.integral.value =
+        SELECT_CAST(SELECT_CAST(left->constant.integral.value, width, is_signed)
+                        << right->constant.integral.value,
+                    width, is_signed);
   }
   return astree_adopt(shiftl, 2, left, right);
 }
@@ -269,10 +270,11 @@ ASTree *evaluate_shiftr(ASTree *shiftr, ASTree *left, ASTree *right) {
         ATTR_EXPR_CONST |
         ((left->attributes | right->attributes) & ATTR_CONST_INIT);
     size_t width = typespec_get_width(shiftr->type);
-    shiftr->constant.integral.value = SELECT_CAST(
-        SELECT_CAST(left->constant.integral.value, width, shiftr->type->base)
-            << right->constant.integral.value,
-        width, shiftr->type->base);
+    int is_signed = typespec_is_signed(shiftr->type);
+    shiftr->constant.integral.value =
+        SELECT_CAST(SELECT_CAST(left->constant.integral.value, width, is_signed)
+                        << right->constant.integral.value,
+                    width, is_signed);
   }
   return astree_adopt(shiftr, 2, left, right);
 }
@@ -314,33 +316,30 @@ ASTree *evaluate_relational(ASTree *relational, ASTree *left, ASTree *right) {
     ASTree dummy;
     arithmetic_conversions(&dummy, left->type, right->type);
     size_t width = typespec_get_width(dummy.type);
+    int is_signed = typespec_is_signed(dummy.type);
     relational->constant.integral.value =
-        SELECT_CAST(left->constant.integral.value, width, dummy.type->base) <
-        SELECT_CAST(left->constant.integral.value, width, dummy.type->base);
+        SELECT_CAST(left->constant.integral.value, width, is_signed) <
+        SELECT_CAST(left->constant.integral.value, width, is_signed);
     switch (relational->symbol) {
       case '<':
         relational->constant.integral.value =
-            SELECT_CAST(left->constant.integral.value, width,
-                        dummy.type->base) <
-            SELECT_CAST(left->constant.integral.value, width, dummy.type->base);
+            SELECT_CAST(left->constant.integral.value, width, is_signed) <
+            SELECT_CAST(left->constant.integral.value, width, is_signed);
         break;
       case TOK_LE:
         relational->constant.integral.value =
-            SELECT_CAST(left->constant.integral.value, width,
-                        dummy.type->base) <=
-            SELECT_CAST(left->constant.integral.value, width, dummy.type->base);
+            SELECT_CAST(left->constant.integral.value, width, is_signed) <=
+            SELECT_CAST(left->constant.integral.value, width, is_signed);
         break;
       case '>':
         relational->constant.integral.value =
-            SELECT_CAST(left->constant.integral.value, width,
-                        dummy.type->base) >
-            SELECT_CAST(left->constant.integral.value, width, dummy.type->base);
+            SELECT_CAST(left->constant.integral.value, width, is_signed) >
+            SELECT_CAST(left->constant.integral.value, width, is_signed);
         break;
       case TOK_GE:
         relational->constant.integral.value =
-            SELECT_CAST(left->constant.integral.value, width,
-                        dummy.type->base) >=
-            SELECT_CAST(left->constant.integral.value, width, dummy.type->base);
+            SELECT_CAST(left->constant.integral.value, width, is_signed) >=
+            SELECT_CAST(left->constant.integral.value, width, is_signed);
         break;
       default:
         abort();
@@ -372,14 +371,15 @@ ASTree *evaluate_equality(ASTree *equality, ASTree *left, ASTree *right) {
     ASTree dummy;
     arithmetic_conversions(&dummy, left->type, right->type);
     size_t width = typespec_get_width(dummy.type);
+    int is_signed = typespec_is_signed(dummy.type);
     if (equality->symbol == TOK_EQ) {
       equality->constant.integral.value =
-          SELECT_CAST(left->constant.integral.value, width, dummy.type->base) ==
-          SELECT_CAST(right->constant.integral.value, width, dummy.type->base);
+          SELECT_CAST(left->constant.integral.value, width, is_signed) ==
+          SELECT_CAST(right->constant.integral.value, width, is_signed);
     } else {
       equality->constant.integral.value =
-          SELECT_CAST(left->constant.integral.value, width, dummy.type->base) !=
-          SELECT_CAST(right->constant.integral.value, width, dummy.type->base);
+          SELECT_CAST(left->constant.integral.value, width, is_signed) !=
+          SELECT_CAST(right->constant.integral.value, width, is_signed);
     }
   }
   return astree_adopt(equality, 2, left, right);
@@ -416,8 +416,9 @@ ASTree *evaluate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
     } else if (typespec_is_arithmetic(cast->type) &&
                typespec_is_arithmetic(expr->type)) {
       size_t width = typespec_get_width(cast->type);
+      int is_signed = typespec_is_signed(cast->type);
       cast->constant.integral.value =
-          SELECT_CAST(expr->constant.integral.value, width, cast->type->base);
+          SELECT_CAST(expr->constant.integral.value, width, is_signed);
     }
 
     cast->constant = expr->constant;
@@ -441,8 +442,9 @@ ASTree *evaluate_conditional(ASTree *qmark, ASTree *condition,
     if (typespec_is_arithmetic(qmark->type) &&
         !(selected_expr->attributes & ATTR_CONST_ADDR)) {
       size_t width = typespec_get_width(qmark->type);
-      qmark->constant.integral.value = SELECT_CAST(
-          selected_expr->constant.integral.value, width, qmark->type->base);
+      int is_signed = typespec_is_signed(qmark->type);
+      qmark->constant.integral.value =
+          SELECT_CAST(selected_expr->constant.integral.value, width, is_signed);
     } else if (typespec_is_pointer(qmark->type) &&
                !(selected_expr->attributes & ATTR_CONST_ADDR)) {
       qmark->constant.integral.value = SELECT_CAST(
@@ -500,8 +502,9 @@ ASTree *evaluate_unop(ASTree *operator, ASTree * operand) {
           !(operator->attributes & ATTR_CONST_ADDR)) {
         operator->attributes = operand->attributes;
         size_t width = typespec_get_width(operator->type);
+        int is_signed = typespec_is_signed(operator->type);
         operator->constant.integral.value = !SELECT_CAST(
-            operand->constant.integral.value, width, operator->type->base);
+            operand->constant.integral.value, width, is_signed);
       }
       return operator;
     case TOK_SIZEOF:
