@@ -20,7 +20,8 @@ enum attribute {
   ATTR_EXPR_CONST = 1 << 2,   /* node refers to a valid constant expression */
   ATTR_CONST_INIT = 1 << 3,   /* constant expression is only for initializers */
   ATTR_CONST_ADDR = 1 << 4,   /* constant expression includes an address */
-  NUM_ATTRIBUTES = 5          /* number of attribute flags */
+  NUM_ATTRIBUTES = 5,         /* number of attribute flags */
+  ATTR_MASK_CONST = ATTR_EXPR_CONST | ATTR_CONST_INIT | ATTR_CONST_ADDR
 };
 
 typedef enum base_type {

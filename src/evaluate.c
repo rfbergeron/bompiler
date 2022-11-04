@@ -205,19 +205,18 @@ ASTree *evaluate_addition(ASTree *addition, ASTree *left, ASTree *right) {
       (left->attributes & right->attributes & ATTR_CONST_ADDR)) {
     return astree_adopt(addition, 2, left, right);
   } else if ((left->attributes & ATTR_CONST_ADDR)) {
-    addition->attributes |= ATTR_EXPR_CONST | ATTR_CONST_ADDR | ATTR_CONST_INIT;
+    addition->attributes |= left->attributes & ATTR_MASK_CONST;
     addition->constant.address.label = left->constant.address.label;
     addition->constant.address.offset = (long)left->constant.address.offset +
                                         (long)right->constant.integral.value;
   } else if ((right->attributes & ATTR_CONST_ADDR)) {
-    addition->attributes |= ATTR_EXPR_CONST | ATTR_CONST_ADDR | ATTR_CONST_INIT;
+    addition->attributes |= right->attributes & ATTR_MASK_CONST;
     addition->constant.address.label = right->constant.address.label;
     addition->constant.address.offset = (long)left->constant.integral.value +
                                         (long)right->constant.address.offset;
   } else {
     addition->attributes |=
-        ATTR_EXPR_CONST |
-        ((left->attributes | right->attributes) & ATTR_CONST_INIT);
+        (left->attributes | right->attributes) & ATTR_MASK_CONST;
     CAST_BINARY(+, addition, left, right);
   }
   return astree_adopt(addition, 2, left, right);
@@ -232,16 +231,14 @@ ASTree *evaluate_subtraction(ASTree *subtraction, ASTree *left, ASTree *right) {
   } else if ((left->attributes & ATTR_CONST_ADDR) &&
              (right->attributes & ATTR_EXPR_CONST) &&
              !(right->attributes & ATTR_CONST_ADDR)) {
-    subtraction->attributes |=
-        ATTR_EXPR_CONST | ATTR_CONST_ADDR | ATTR_CONST_INIT;
+    subtraction->attributes |= left->attributes & ATTR_MASK_CONST;
     subtraction->constant.address.label = left->constant.address.label;
     subtraction->constant.address.offset = (long)left->constant.address.offset -
                                            (long)right->constant.integral.value;
   } else if ((left->attributes & right->attributes & ATTR_EXPR_CONST) &&
              !((left->attributes | right->attributes) & ATTR_CONST_ADDR)) {
     subtraction->attributes |=
-        ATTR_EXPR_CONST |
-        ((left->attributes | right->attributes) & ATTR_CONST_INIT);
+        (left->attributes | right->attributes) & ATTR_MASK_CONST;
     CAST_BINARY(-, subtraction, left, right);
   }
   return astree_adopt(subtraction, 2, left, right);
@@ -251,8 +248,7 @@ ASTree *evaluate_shiftl(ASTree *shiftl, ASTree *left, ASTree *right) {
   if ((left->attributes & right->attributes & ATTR_EXPR_CONST) &&
       !((left->attributes | right->attributes) & ATTR_CONST_ADDR)) {
     shiftl->attributes |=
-        ATTR_EXPR_CONST |
-        ((left->attributes | right->attributes) & ATTR_CONST_INIT);
+        (left->attributes | right->attributes) & ATTR_MASK_CONST;
     size_t width = typespec_get_width(shiftl->type);
     int is_signed = typespec_is_signed(shiftl->type);
     shiftl->constant.integral.value =
@@ -267,8 +263,7 @@ ASTree *evaluate_shiftr(ASTree *shiftr, ASTree *left, ASTree *right) {
   if ((left->attributes & right->attributes & ATTR_EXPR_CONST) &&
       !((left->attributes | right->attributes) & ATTR_CONST_ADDR)) {
     shiftr->attributes |=
-        ATTR_EXPR_CONST |
-        ((left->attributes | right->attributes) & ATTR_CONST_INIT);
+        (left->attributes | right->attributes) & ATTR_MASK_CONST;
     size_t width = typespec_get_width(shiftr->type);
     int is_signed = typespec_is_signed(shiftr->type);
     shiftr->constant.integral.value =
@@ -311,8 +306,7 @@ ASTree *evaluate_relational(ASTree *relational, ASTree *left, ASTree *right) {
   } else if ((left->attributes & right->attributes & ATTR_EXPR_CONST) &&
              !((left->attributes | right->attributes) & ATTR_CONST_ADDR)) {
     relational->attributes |=
-        ATTR_EXPR_CONST |
-        ((right->attributes | left->attributes) & ATTR_CONST_INIT);
+        (left->attributes | right->attributes) & ATTR_MASK_CONST;
     ASTree dummy;
     arithmetic_conversions(&dummy, left->type, right->type);
     size_t width = typespec_get_width(dummy.type);
@@ -409,8 +403,7 @@ ASTree *evaluate_logical(ASTree *logical, ASTree *left, ASTree *right) {
 
 ASTree *evaluate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
   if (expr->attributes & ATTR_EXPR_CONST) {
-    cast->attributes |= expr->attributes &
-                        (ATTR_EXPR_CONST | ATTR_CONST_ADDR | ATTR_CONST_INIT);
+    cast->attributes |= expr->attributes & ATTR_MASK_CONST;
     if (typespec_is_pointer(cast->type)) {
       cast->attributes |= ATTR_CONST_INIT;
     } else if (typespec_is_arithmetic(cast->type) &&
@@ -435,10 +428,8 @@ ASTree *evaluate_conditional(ASTree *qmark, ASTree *condition,
                                 ? true_expr
                                 : false_expr;
     qmark->constant = selected_expr->constant;
-    qmark->attributes |=
-        (selected_expr->attributes &
-         (ATTR_EXPR_CONST | ATTR_CONST_ADDR | ATTR_CONST_INIT)) |
-        (condition->attributes & ATTR_CONST_INIT);
+    qmark->attributes |= (selected_expr->attributes & ATTR_MASK_CONST) |
+                         (condition->attributes & ATTR_CONST_INIT);
     if (typespec_is_arithmetic(qmark->type) &&
         !(selected_expr->attributes & ATTR_CONST_ADDR)) {
       size_t width = typespec_get_width(qmark->type);
