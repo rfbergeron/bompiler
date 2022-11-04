@@ -452,6 +452,15 @@ int typespec_is_arithmetic(const TypeSpec *type) {
   return typespec_is_integer(type) || typespec_is_enum(type);
 }
 
+int typespec_is_signed(const TypeSpec *type) {
+  return (typespec_is_integer(type) && type->base == TYPE_SIGNED) ||
+         typespec_is_enum(type) || typespec_is_pointer(type);
+}
+
+int typespec_is_unsigned(const TypeSpec *type) {
+  return (typespec_is_integer(type) && type->base == TYPE_UNSIGNED);
+}
+
 int typespec_is_void(const TypeSpec *type) {
   return (type->base == TYPE_VOID) && llist_size(&type->auxspecs) == 0;
 }

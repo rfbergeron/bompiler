@@ -252,6 +252,8 @@ int common_qualified_ptr(TypeSpec *dest, const TypeSpec *src1,
 int typespec_is_incomplete(const TypeSpec *type);
 int typespec_is_integer(const TypeSpec *type);
 int typespec_is_arithmetic(const TypeSpec *type);
+int typespec_is_signed(const TypeSpec *type);
+int typespec_is_unsigned(const TypeSpec *type);
 int typespec_is_void(const TypeSpec *type);
 int typespec_is_pointer(const TypeSpec *type);
 int typespec_is_array(const TypeSpec *type);
