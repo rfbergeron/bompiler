@@ -36,15 +36,15 @@
                              is_signed),                             \
         width, is_signed);                                           \
   } while (0)
-#define BINOP_CASE(opchar, operator, opnode, left, right)                   \
-  case opchar:                                                              \
-    if ((left->attributes & right->attributes & ATTR_EXPR_CONST) &&         \
-        !((left->attributes | right->attributes) & ATTR_CONST_ADDR)) {      \
-      binop->attributes |=                                                  \
-          ATTR_EXPR_CONST |                                                 \
-          ((left_op->attributes | right_op->attributes) & ATTR_CONST_INIT); \
-      CAST_BINARY(operator, opnode, left, right);                           \
-    }                                                                       \
+#define BINOP_CASE(opchar, operator, opnode, left, right)              \
+  case opchar:                                                         \
+    if ((left->attributes & right->attributes & ATTR_EXPR_CONST) &&    \
+        !((left->attributes | right->attributes) & ATTR_CONST_ADDR)) { \
+      opnode->attributes |=                                            \
+          ATTR_EXPR_CONST |                                            \
+          ((left->attributes | right->attributes) & ATTR_CONST_INIT);  \
+      CAST_BINARY(operator, opnode, left, right);                      \
+    }                                                                  \
     return opnode
 #define UNOP_CASE(opchar, operator, opnode, operand) \
   case opchar:                                       \
@@ -200,247 +200,214 @@ ASTree *evaluate_ident(ASTree *ident) {
   return ident;
 }
 
-ASTree *evaluate_addition(ASTree *addition) {
-  ASTree *left_op = astree_get(addition, 0);
-  ASTree *right_op = astree_get(addition, 1);
-  if (left_op->attributes & right_op->attributes & ATTR_CONST_ADDR) {
-    return addition;
-  } else if ((left_op->attributes & ATTR_CONST_ADDR) &&
-             (right_op->attributes & ATTR_EXPR_CONST)) {
+ASTree *evaluate_addition(ASTree *addition, ASTree *left, ASTree *right) {
+  if (!(left->attributes & right->attributes & ATTR_EXPR_CONST) ||
+      (left->attributes & right->attributes & ATTR_CONST_ADDR)) {
+    return astree_adopt(addition, 2, left, right);
+  } else if ((left->attributes & ATTR_CONST_ADDR)) {
     addition->attributes |= ATTR_EXPR_CONST | ATTR_CONST_ADDR | ATTR_CONST_INIT;
-    addition->constant.address.label = left_op->constant.address.label;
-    addition->constant.address.offset = (long)left_op->constant.address.offset +
-                                        (long)right_op->constant.integral.value;
-    return addition;
-  } else if ((left_op->attributes & ATTR_EXPR_CONST) &&
-             (right_op->attributes & ATTR_CONST_ADDR)) {
+    addition->constant.address.label = left->constant.address.label;
+    addition->constant.address.offset = (long)left->constant.address.offset +
+                                        (long)right->constant.integral.value;
+  } else if ((right->attributes & ATTR_CONST_ADDR)) {
     addition->attributes |= ATTR_EXPR_CONST | ATTR_CONST_ADDR | ATTR_CONST_INIT;
-    addition->constant.address.label = right_op->constant.address.label;
-    addition->constant.address.offset = (long)left_op->constant.integral.value +
-                                        (long)right_op->constant.address.offset;
-    return addition;
-  } else if (left_op->attributes & right_op->attributes & ATTR_EXPR_CONST) {
+    addition->constant.address.label = right->constant.address.label;
+    addition->constant.address.offset = (long)left->constant.integral.value +
+                                        (long)right->constant.address.offset;
+  } else {
     addition->attributes |=
         ATTR_EXPR_CONST |
-        ((left_op->attributes | right_op->attributes) & ATTR_CONST_INIT);
-    CAST_BINARY(+, addition, left_op, right_op);
-    return addition;
-  } else {
-    return addition;
+        ((left->attributes | right->attributes) & ATTR_CONST_INIT);
+    CAST_BINARY(+, addition, left, right);
   }
+  return astree_adopt(addition, 2, left, right);
 }
 
-ASTree *evaluate_subtraction(ASTree *subtraction) {
-  ASTree *left_op = astree_get(subtraction, 0);
-  ASTree *right_op = astree_get(subtraction, 1);
-  if ((left_op->attributes & right_op->attributes & ATTR_CONST_ADDR) &&
-      (left_op->constant.address.label == right_op->constant.address.label)) {
+ASTree *evaluate_subtraction(ASTree *subtraction, ASTree *left, ASTree *right) {
+  if ((left->attributes & right->attributes & ATTR_CONST_ADDR) &&
+      (left->constant.address.label == right->constant.address.label)) {
     subtraction->attributes |= ATTR_EXPR_CONST | ATTR_CONST_INIT;
-    subtraction->constant.integral.value =
-        (long)left_op->constant.address.offset -
-        (long)right_op->constant.address.offset;
-  } else if ((left_op->attributes & ATTR_CONST_ADDR) &&
-             (right_op->attributes & ATTR_EXPR_CONST) &&
-             !(right_op->attributes & ATTR_CONST_ADDR)) {
+    subtraction->constant.integral.value = (long)left->constant.address.offset -
+                                           (long)right->constant.address.offset;
+  } else if ((left->attributes & ATTR_CONST_ADDR) &&
+             (right->attributes & ATTR_EXPR_CONST) &&
+             !(right->attributes & ATTR_CONST_ADDR)) {
     subtraction->attributes |=
         ATTR_EXPR_CONST | ATTR_CONST_ADDR | ATTR_CONST_INIT;
-    subtraction->constant.address.label = left_op->constant.address.label;
-    subtraction->constant.address.offset =
-        (long)left_op->constant.address.offset -
-        (long)right_op->constant.integral.value;
-  } else if ((left_op->attributes & right_op->attributes & ATTR_EXPR_CONST) &&
-             !((left_op->attributes | right_op->attributes) &
-               ATTR_CONST_ADDR)) {
+    subtraction->constant.address.label = left->constant.address.label;
+    subtraction->constant.address.offset = (long)left->constant.address.offset -
+                                           (long)right->constant.integral.value;
+  } else if ((left->attributes & right->attributes & ATTR_EXPR_CONST) &&
+             !((left->attributes | right->attributes) & ATTR_CONST_ADDR)) {
     subtraction->attributes |=
         ATTR_EXPR_CONST |
-        ((left_op->attributes | right_op->attributes) & ATTR_CONST_INIT);
-    CAST_BINARY(-, subtraction, left_op, right_op);
+        ((left->attributes | right->attributes) & ATTR_CONST_INIT);
+    CAST_BINARY(-, subtraction, left, right);
   }
-  return subtraction;
+  return astree_adopt(subtraction, 2, left, right);
 }
 
-ASTree *evaluate_shiftl(ASTree *shiftl) {
-  ASTree *left_op = astree_get(shiftl, 0);
-  ASTree *right_op = astree_get(shiftl, 1);
-  if ((left_op->attributes & right_op->attributes & ATTR_EXPR_CONST) &&
-      !((left_op->attributes | right_op->attributes) & ATTR_CONST_ADDR)) {
+ASTree *evaluate_shiftl(ASTree *shiftl, ASTree *left, ASTree *right) {
+  if ((left->attributes & right->attributes & ATTR_EXPR_CONST) &&
+      !((left->attributes | right->attributes) & ATTR_CONST_ADDR)) {
     shiftl->attributes |=
         ATTR_EXPR_CONST |
-        ((left_op->attributes | right_op->attributes) & ATTR_CONST_INIT);
+        ((left->attributes | right->attributes) & ATTR_CONST_INIT);
     size_t width = typespec_get_width(shiftl->type);
     shiftl->constant.integral.value = SELECT_CAST(
-        SELECT_CAST(left_op->constant.integral.value, width, shiftl->type->base)
-            << right_op->constant.integral.value,
+        SELECT_CAST(left->constant.integral.value, width, shiftl->type->base)
+            << right->constant.integral.value,
         width, shiftl->type->base);
   }
-  return shiftl;
+  return astree_adopt(shiftl, 2, left, right);
 }
 
-ASTree *evaluate_shiftr(ASTree *shiftr) {
-  ASTree *left_op = astree_get(shiftr, 0);
-  ASTree *right_op = astree_get(shiftr, 1);
-  if ((left_op->attributes & right_op->attributes & ATTR_EXPR_CONST) &&
-      !((left_op->attributes | right_op->attributes) & ATTR_CONST_ADDR)) {
+ASTree *evaluate_shiftr(ASTree *shiftr, ASTree *left, ASTree *right) {
+  if ((left->attributes & right->attributes & ATTR_EXPR_CONST) &&
+      !((left->attributes | right->attributes) & ATTR_CONST_ADDR)) {
     shiftr->attributes |=
         ATTR_EXPR_CONST |
-        ((left_op->attributes | right_op->attributes) & ATTR_CONST_INIT);
+        ((left->attributes | right->attributes) & ATTR_CONST_INIT);
     size_t width = typespec_get_width(shiftr->type);
     shiftr->constant.integral.value = SELECT_CAST(
-        SELECT_CAST(left_op->constant.integral.value, width, shiftr->type->base)
-            << right_op->constant.integral.value,
+        SELECT_CAST(left->constant.integral.value, width, shiftr->type->base)
+            << right->constant.integral.value,
         width, shiftr->type->base);
   }
-  return shiftr;
+  return astree_adopt(shiftr, 2, left, right);
 }
 
-ASTree *evaluate_relational(ASTree *relational) {
-  ASTree *left_op = astree_get(relational, 0);
-  ASTree *right_op = astree_get(relational, 1);
-  if ((left_op->attributes & right_op->attributes & ATTR_CONST_ADDR) &&
-      strcmp(left_op->constant.address.label,
-             right_op->constant.address.label) == 0) {
+ASTree *evaluate_relational(ASTree *relational, ASTree *left, ASTree *right) {
+  if ((left->attributes & right->attributes & ATTR_CONST_ADDR) &&
+      strcmp(left->constant.address.label, right->constant.address.label) ==
+          0) {
     relational->attributes |= ATTR_EXPR_CONST | ATTR_CONST_INIT;
     switch (relational->symbol) {
       case '<':
         relational->constant.integral.value =
-            (long)left_op->constant.address.offset <
-            (long)right_op->constant.address.offset;
+            (long)left->constant.address.offset <
+            (long)right->constant.address.offset;
         break;
       case TOK_GE:
         relational->constant.integral.value =
-            (long)left_op->constant.address.offset >=
-            (long)right_op->constant.address.offset;
+            (long)left->constant.address.offset >=
+            (long)right->constant.address.offset;
         break;
       case '>':
         relational->constant.integral.value =
-            (long)left_op->constant.address.offset >
-            (long)right_op->constant.address.offset;
+            (long)left->constant.address.offset >
+            (long)right->constant.address.offset;
         break;
       case TOK_LE:
         relational->constant.integral.value =
-            (long)left_op->constant.address.offset <=
-            (long)right_op->constant.address.offset;
+            (long)left->constant.address.offset <=
+            (long)right->constant.address.offset;
         break;
       default:
         abort();
     }
-  } else if ((left_op->attributes & right_op->attributes & ATTR_EXPR_CONST) &&
-             !((left_op->attributes | right_op->attributes) &
-               ATTR_CONST_ADDR)) {
+  } else if ((left->attributes & right->attributes & ATTR_EXPR_CONST) &&
+             !((left->attributes | right->attributes) & ATTR_CONST_ADDR)) {
     relational->attributes |=
         ATTR_EXPR_CONST |
-        ((right_op->attributes | left_op->attributes) & ATTR_CONST_INIT);
+        ((right->attributes | left->attributes) & ATTR_CONST_INIT);
     ASTree dummy;
-    arithmetic_conversions(&dummy, left_op->type, right_op->type);
+    arithmetic_conversions(&dummy, left->type, right->type);
     size_t width = typespec_get_width(dummy.type);
     relational->constant.integral.value =
-        SELECT_CAST(left_op->constant.integral.value, width, dummy.type->base) <
-        SELECT_CAST(left_op->constant.integral.value, width, dummy.type->base);
+        SELECT_CAST(left->constant.integral.value, width, dummy.type->base) <
+        SELECT_CAST(left->constant.integral.value, width, dummy.type->base);
     switch (relational->symbol) {
       case '<':
         relational->constant.integral.value =
-            SELECT_CAST(left_op->constant.integral.value, width,
+            SELECT_CAST(left->constant.integral.value, width,
                         dummy.type->base) <
-            SELECT_CAST(left_op->constant.integral.value, width,
-                        dummy.type->base);
+            SELECT_CAST(left->constant.integral.value, width, dummy.type->base);
         break;
       case TOK_LE:
         relational->constant.integral.value =
-            SELECT_CAST(left_op->constant.integral.value, width,
+            SELECT_CAST(left->constant.integral.value, width,
                         dummy.type->base) <=
-            SELECT_CAST(left_op->constant.integral.value, width,
-                        dummy.type->base);
+            SELECT_CAST(left->constant.integral.value, width, dummy.type->base);
         break;
       case '>':
         relational->constant.integral.value =
-            SELECT_CAST(left_op->constant.integral.value, width,
+            SELECT_CAST(left->constant.integral.value, width,
                         dummy.type->base) >
-            SELECT_CAST(left_op->constant.integral.value, width,
-                        dummy.type->base);
+            SELECT_CAST(left->constant.integral.value, width, dummy.type->base);
         break;
       case TOK_GE:
         relational->constant.integral.value =
-            SELECT_CAST(left_op->constant.integral.value, width,
+            SELECT_CAST(left->constant.integral.value, width,
                         dummy.type->base) >=
-            SELECT_CAST(left_op->constant.integral.value, width,
-                        dummy.type->base);
+            SELECT_CAST(left->constant.integral.value, width, dummy.type->base);
         break;
       default:
         abort();
     }
   }
-  return relational;
+  return astree_adopt(relational, 2, left, right);
 }
 
-ASTree *evaluate_equality(ASTree *equality) {
-  ASTree *left_op = astree_get(equality, 0);
-  ASTree *right_op = astree_get(equality, 1);
-  if (left_op->attributes & right_op->attributes & ATTR_CONST_ADDR) {
+ASTree *evaluate_equality(ASTree *equality, ASTree *left, ASTree *right) {
+  if (left->attributes & right->attributes & ATTR_CONST_ADDR) {
     equality->attributes |= ATTR_EXPR_CONST | ATTR_CONST_INIT;
     equality->constant.integral.value =
-        strcmp(left_op->constant.address.label,
-               right_op->constant.address.label) == 0 &&
-        (left_op->constant.address.offset == right_op->constant.address.offset);
-  } else if ((left_op->attributes & ATTR_CONST_ADDR) &&
-             (right_op->attributes & ATTR_EXPR_CONST) &&
-             right_op->constant.integral.value == 0) {
+        strcmp(left->constant.address.label, right->constant.address.label) ==
+            0 &&
+        (left->constant.address.offset == right->constant.address.offset);
+  } else if ((left->attributes & ATTR_CONST_ADDR) &&
+             (right->attributes & ATTR_EXPR_CONST) &&
+             right->constant.integral.value == 0) {
     equality->attributes |= ATTR_EXPR_CONST | ATTR_CONST_INIT;
     equality->constant.integral.value = equality->symbol == TOK_NE;
-  } else if ((right_op->attributes & ATTR_CONST_ADDR) &&
-             (left_op->attributes & ATTR_EXPR_CONST) &&
-             left_op->constant.integral.value == 0) {
+  } else if ((right->attributes & ATTR_CONST_ADDR) &&
+             (left->attributes & ATTR_EXPR_CONST) &&
+             left->constant.integral.value == 0) {
     equality->attributes |= ATTR_EXPR_CONST | ATTR_CONST_INIT;
     equality->constant.integral.value = equality->symbol == TOK_NE;
-  } else if ((left_op->attributes & right_op->attributes & ATTR_EXPR_CONST) &&
-             !((left_op->attributes | right_op->attributes) &
-               ATTR_CONST_ADDR)) {
+  } else if ((left->attributes & right->attributes & ATTR_EXPR_CONST) &&
+             !((left->attributes | right->attributes) & ATTR_CONST_ADDR)) {
     equality->attributes |= ATTR_EXPR_CONST;
     ASTree dummy;
-    arithmetic_conversions(&dummy, left_op->type, right_op->type);
+    arithmetic_conversions(&dummy, left->type, right->type);
     size_t width = typespec_get_width(dummy.type);
     if (equality->symbol == TOK_EQ) {
       equality->constant.integral.value =
-          SELECT_CAST(left_op->constant.integral.value, width,
-                      dummy.type->base) ==
-          SELECT_CAST(right_op->constant.integral.value, width,
-                      dummy.type->base);
+          SELECT_CAST(left->constant.integral.value, width, dummy.type->base) ==
+          SELECT_CAST(right->constant.integral.value, width, dummy.type->base);
     } else {
       equality->constant.integral.value =
-          SELECT_CAST(left_op->constant.integral.value, width,
-                      dummy.type->base) !=
-          SELECT_CAST(right_op->constant.integral.value, width,
-                      dummy.type->base);
+          SELECT_CAST(left->constant.integral.value, width, dummy.type->base) !=
+          SELECT_CAST(right->constant.integral.value, width, dummy.type->base);
     }
   }
-  return equality;
+  return astree_adopt(equality, 2, left, right);
 }
 
-ASTree *evaluate_logical(ASTree *logical) {
-  ASTree *left_op = astree_get(logical, 0);
-  ASTree *right_op = astree_get(logical, 1);
-  if (left_op->attributes & right_op->attributes & ATTR_EXPR_CONST) {
+ASTree *evaluate_logical(ASTree *logical, ASTree *left, ASTree *right) {
+  if (left->attributes & right->attributes & ATTR_EXPR_CONST) {
     logical->attributes =
         ATTR_EXPR_CONST |
-        ((left_op->attributes | right_op->attributes) & ATTR_CONST_INIT);
+        ((left->attributes | right->attributes) & ATTR_CONST_INIT);
     if (logical->symbol == TOK_OR) {
       logical->constant.integral.value =
-          ((left_op->attributes & ATTR_CONST_ADDR) ||
-           left_op->constant.integral.value) ||
-          ((right_op->attributes & ATTR_CONST_ADDR) ||
-           right_op->constant.integral.value);
+          ((left->attributes & ATTR_CONST_ADDR) ||
+           left->constant.integral.value) ||
+          ((right->attributes & ATTR_CONST_ADDR) ||
+           right->constant.integral.value);
     } else {
       logical->constant.integral.value =
-          ((left_op->attributes & ATTR_CONST_ADDR) ||
-           left_op->constant.integral.value) &&
-          ((right_op->attributes & ATTR_CONST_ADDR) ||
-           right_op->constant.integral.value);
+          ((left->attributes & ATTR_CONST_ADDR) ||
+           left->constant.integral.value) &&
+          ((right->attributes & ATTR_CONST_ADDR) ||
+           right->constant.integral.value);
     }
   }
-  return logical;
+  return astree_adopt(logical, 2, left, right);
 }
 
-ASTree *evaluate_cast(ASTree *cast) {
-  ASTree *expr = astree_get(cast, 1);
+ASTree *evaluate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
   if (expr->attributes & ATTR_EXPR_CONST) {
     cast->attributes |= expr->attributes &
                         (ATTR_EXPR_CONST | ATTR_CONST_ADDR | ATTR_CONST_INIT);
@@ -455,108 +422,96 @@ ASTree *evaluate_cast(ASTree *cast) {
 
     cast->constant = expr->constant;
   }
-  return cast;
+  return astree_adopt(cast, 2, declaration, expr);
 }
 
-ASTree *evaluate_conditional(ASTree *conditional) {
-  ASTree *condition = astree_get(conditional, 0);
-  ASTree *true_expr = astree_get(conditional, 1);
-  ASTree *false_expr = astree_get(conditional, 2);
-
+ASTree *evaluate_conditional(ASTree *qmark, ASTree *condition,
+                             ASTree *true_expr, ASTree *false_expr) {
   if (condition->attributes & true_expr->attributes & false_expr->attributes &
       ATTR_EXPR_CONST) {
     ASTree *selected_expr = (condition->attributes & ATTR_CONST_ADDR) ||
                                     condition->constant.integral.value
                                 ? true_expr
                                 : false_expr;
-    conditional->constant = selected_expr->constant;
-    conditional->attributes |=
+    qmark->constant = selected_expr->constant;
+    qmark->attributes |=
         (selected_expr->attributes &
          (ATTR_EXPR_CONST | ATTR_CONST_ADDR | ATTR_CONST_INIT)) |
         (condition->attributes & ATTR_CONST_INIT);
-    if (typespec_is_arithmetic(conditional->type) &&
+    if (typespec_is_arithmetic(qmark->type) &&
         !(selected_expr->attributes & ATTR_CONST_ADDR)) {
-      size_t width = typespec_get_width(conditional->type);
-      conditional->constant.integral.value =
-          SELECT_CAST(selected_expr->constant.integral.value, width,
-                      conditional->type->base);
-    } else if (typespec_is_pointer(conditional->type) &&
+      size_t width = typespec_get_width(qmark->type);
+      qmark->constant.integral.value = SELECT_CAST(
+          selected_expr->constant.integral.value, width, qmark->type->base);
+    } else if (typespec_is_pointer(qmark->type) &&
                !(selected_expr->attributes & ATTR_CONST_ADDR)) {
-      conditional->constant.integral.value = SELECT_CAST(
+      qmark->constant.integral.value = SELECT_CAST(
           selected_expr->constant.integral.value, X64_SIZEOF_LONG, TYPE_SIGNED);
     } else {
-      conditional->constant = selected_expr->constant;
+      qmark->constant = selected_expr->constant;
     }
   }
-  return conditional;
+  return astree_adopt(qmark, 3, condition, true_expr, false_expr);
 }
 
-ASTree *evaluate_binop(ASTree *binop) {
-  ASTree *left_op = astree_get(binop, 0);
-  ASTree *right_op = astree_get(binop, 1);
-  switch (binop->symbol) {
-    BINOP_CASE('&', &, binop, left_op, right_op);
-    BINOP_CASE('|', |, binop, left_op, right_op);
-    BINOP_CASE('^', ^, binop, left_op, right_op);
-    BINOP_CASE('/', /, binop, left_op, right_op);
-    BINOP_CASE('%', %, binop, left_op, right_op);
-    BINOP_CASE('*', *, binop, left_op, right_op);
+ASTree *evaluate_binop(ASTree *operator, ASTree * left, ASTree *right) {
+  switch (operator->symbol) {
+    BINOP_CASE('&', &, operator, left, right);
+    BINOP_CASE('|', |, operator, left, right);
+    BINOP_CASE('^', ^, operator, left, right);
+    BINOP_CASE('/', /, operator, left, right);
+    BINOP_CASE('%', %, operator, left, right);
+    BINOP_CASE('*', *, operator, left, right);
     case TOK_AND:
     case TOK_OR:
-      return evaluate_logical(binop);
+      return evaluate_logical(operator, left, right);
     case TOK_EQ:
     case TOK_NE:
-      return evaluate_equality(binop);
+      return evaluate_equality(operator, left, right);
     case '<':
     case TOK_LE:
     case '>':
     case TOK_GE:
-      return evaluate_relational(binop);
+      return evaluate_relational(operator, left, right);
     case TOK_SHL:
-      return evaluate_shiftl(binop);
+      return evaluate_shiftl(operator, left, right);
     case TOK_SHR:
-      return evaluate_shiftr(binop);
+      return evaluate_shiftr(operator, left, right);
     case '+':
-      return evaluate_addition(binop);
+      return evaluate_addition(operator, left, right);
     case '-':
-      return evaluate_subtraction(binop);
+      return evaluate_subtraction(operator, left, right);
     default:
       fprintf(stderr,
               "FATAL: attempted to evaluate constant expression with "
               "unknown binary operation %s\n",
-              parser_get_tname(binop->symbol));
+              parser_get_tname(operator->symbol));
       abort();
   }
 }
 
-ASTree *evaluate_unop(ASTree *unop) {
-  ASTree *operand = astree_get(unop, 0);
-  switch (unop->symbol) {
-    UNOP_CASE(TOK_NEG, -, unop, operand);
-    UNOP_CASE(TOK_POS, +, unop, operand);
-    UNOP_CASE('~', ~, unop, operand);
+ASTree *evaluate_unop(ASTree *operator, ASTree * operand) {
+  switch (operator->symbol) {
+    UNOP_CASE(TOK_NEG, -, operator, operand);
+    UNOP_CASE(TOK_POS, +, operator, operand);
+    UNOP_CASE('~', ~, operator, operand);
     case '!':
-      if ((unop->attributes & ATTR_EXPR_CONST) &&
-          !(unop->attributes & ATTR_CONST_ADDR)) {
-        unop->attributes = operand->attributes;
-        size_t width = typespec_get_width(unop->type);
-        unop->constant.integral.value = !SELECT_CAST(
-            operand->constant.integral.value, width, unop->type->base);
+      if ((operator->attributes & ATTR_EXPR_CONST) &&
+          !(operator->attributes & ATTR_CONST_ADDR)) {
+        operator->attributes = operand->attributes;
+        size_t width = typespec_get_width(operator->type);
+        operator->constant.integral.value = !SELECT_CAST(
+            operand->constant.integral.value, width, operator->type->base);
       }
-      return unop;
+      return operator;
     case TOK_SIZEOF:
-      unop->constant.integral.value = typespec_get_width(operand->type);
-      return unop;
-    case TOK_POST_INC:
-    case TOK_POST_DEC:
-    case TOK_INC:
-    case TOK_DEC:
-      return unop;
+      operator->constant.integral.value = typespec_get_width(operand->type);
+      return operator;
     default:
       fprintf(stderr,
               "FATAL: attempted to evaluate constant expression with "
               "unknown unary operation %s\n",
-              parser_get_tname(unop->symbol));
+              parser_get_tname(operator->symbol));
       abort();
   }
 }

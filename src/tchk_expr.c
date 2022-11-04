@@ -219,8 +219,7 @@ ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
     }
   }
 
-  return evaluate_conditional(
-      astree_adopt(qmark, 3, condition, true_expr, false_expr));
+  return evaluate_conditional(qmark, condition, true_expr, false_expr);
 }
 
 ASTree *validate_comma(ASTree *comma, ASTree *left_expr, ASTree *right_expr) {
@@ -251,7 +250,7 @@ ASTree *validate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
                                  type_name->type, expr->type);
   } else {
     cast->type = type_name->type;
-    return evaluate_cast(astree_adopt(cast, 2, declaration, expr));
+    return evaluate_cast(cast, declaration, expr);
   }
 }
 
@@ -269,11 +268,11 @@ ASTree *validate_addition(ASTree *operator, ASTree * left, ASTree *right) {
 
   if (typespec_is_arithmetic(left_type) && typespec_is_arithmetic(right_type)) {
     arithmetic_conversions(operator, left->type, right->type);
-    return evaluate_binop(astree_adopt(operator, 2, left, right));
+    return evaluate_binop(operator, left, right);
   } else if (typespec_is_pointer(left_type) &&
              typespec_is_integer(right_type)) {
     operator->type = left_type;
-    return evaluate_binop(astree_adopt(operator, 2, left, right));
+    return evaluate_binop(operator, left, right);
   } else if (typespec_is_integer(left_type) &&
              typespec_is_pointer(right_type)) {
     if (operator->symbol == '-') {
@@ -282,7 +281,7 @@ ASTree *validate_addition(ASTree *operator, ASTree * left, ASTree *right) {
                                    left_type, right_type);
     } else {
       operator->type = right_type;
-      return evaluate_binop(astree_adopt(operator, 2, left, right));
+      return evaluate_binop(operator, left, right);
     }
   } else if (typespec_is_pointer(left_type) &&
              typespec_is_pointer(right_type) && operator->symbol == '-') {
@@ -290,7 +289,7 @@ ASTree *validate_addition(ASTree *operator, ASTree * left, ASTree *right) {
                          IGNORE_QUALIFIERS | IGNORE_STORAGE_CLASS)) {
       /* TODO(Robert): dedicated pointer difference type constant */
       operator->type = & SPEC_LONG;
-      return evaluate_binop(astree_adopt(operator, 2, left, right));
+      return evaluate_binop(operator, left, right);
     } else {
       return astree_create_errnode(astree_adopt(operator, 2, left, right),
                                    BCC_TERR_INCOMPATIBLE_TYPES, 3, operator,
@@ -311,7 +310,7 @@ ASTree *validate_logical(ASTree *operator, ASTree * left, ASTree *right) {
   pointer_conversions(right);
   if (typespec_is_scalar(left->type) && typespec_is_scalar(right->type)) {
     operator->type = & SPEC_INT;
-    return evaluate_binop(astree_adopt(operator, 2, left, right));
+    return evaluate_binop(operator, left, right);
   } else {
     return astree_create_errnode(astree_adopt(operator, 2, left, right),
                                  BCC_TERR_EXPECTED_SCALAR, 3, operator, left,
@@ -330,12 +329,12 @@ ASTree *validate_relational(ASTree *operator, ASTree * left, ASTree *right) {
   operator->type = & SPEC_INT;
 
   if (typespec_is_arithmetic(left_type) && typespec_is_arithmetic(right_type)) {
-    return evaluate_binop(astree_adopt(operator, 2, left, right));
+    return evaluate_binop(operator, left, right);
   } else if (typespec_is_pointer(left_type) &&
              typespec_is_pointer(right_type)) {
     if (types_equivalent(left->type, right->type,
                          IGNORE_QUALIFIERS | IGNORE_STORAGE_CLASS)) {
-      return evaluate_binop(astree_adopt(operator, 2, left, right));
+      return evaluate_binop(operator, left, right);
     } else {
       return astree_create_errnode(astree_adopt(operator, 2, left, right),
                                    BCC_TERR_INCOMPATIBLE_TYPES, 3, operator,
@@ -359,24 +358,24 @@ ASTree *validate_equality(ASTree *operator, ASTree * left, ASTree *right) {
   operator->type = & SPEC_INT;
 
   if (typespec_is_arithmetic(left_type) && typespec_is_arithmetic(right_type)) {
-    return evaluate_binop(astree_adopt(operator, 2, left, right));
+    return evaluate_binop(operator, left, right);
   } else if (typespec_is_pointer(left_type) &&
              typespec_is_pointer(right_type)) {
     if (types_equivalent(left->type, right->type,
                          IGNORE_QUALIFIERS | IGNORE_STORAGE_CLASS)) {
-      return evaluate_binop(astree_adopt(operator, 2, left, right));
+      return evaluate_binop(operator, left, right);
     } else if (typespec_is_voidptr(left_type) ||
                typespec_is_voidptr(right_type)) {
-      return evaluate_binop(astree_adopt(operator, 2, left, right));
+      return evaluate_binop(operator, left, right);
     } else {
       return astree_create_errnode(astree_adopt(operator, 2, left, right),
                                    BCC_TERR_INCOMPATIBLE_TYPES, 3, operator,
                                    left->type, right->type);
     }
   } else if (typespec_is_pointer(right_type) && is_const_zero(left)) {
-    return evaluate_binop(astree_adopt(operator, 2, left, right));
+    return evaluate_binop(operator, left, right);
   } else if (typespec_is_pointer(left_type) && is_const_zero(right)) {
-    return evaluate_binop(astree_adopt(operator, 2, left, right));
+    return evaluate_binop(operator, left, right);
   } else {
     return astree_create_errnode(astree_adopt(operator, 2, left, right),
                                  BCC_TERR_INCOMPATIBLE_TYPES, 3, operator,
@@ -391,7 +390,7 @@ ASTree *validate_multiply(ASTree *operator, ASTree * left, ASTree *right) {
   if (typespec_is_arithmetic(left->type) &&
       typespec_is_arithmetic(right->type)) {
     arithmetic_conversions(operator, left->type, right->type);
-    return evaluate_binop(astree_adopt(operator, 2, left, right));
+    return evaluate_binop(operator, left, right);
   } else {
     return astree_create_errnode(astree_adopt(operator, 2, left, right),
                                  BCC_TERR_EXPECTED_ARITHMETIC, 3, operator,
@@ -405,7 +404,7 @@ ASTree *validate_shift(ASTree *operator, ASTree * left, ASTree *right) {
   }
   if (typespec_is_integer(left->type) && typespec_is_integer(right->type)) {
     arithmetic_conversions(operator, left->type, &SPEC_INT);
-    return evaluate_binop(astree_adopt(operator, 2, left, right));
+    return evaluate_binop(operator, left, right);
   } else {
     return astree_create_errnode(astree_adopt(operator, 2, left, right),
                                  BCC_TERR_EXPECTED_INTEGER, 3, operator, left,
@@ -419,7 +418,7 @@ ASTree *validate_bitwise(ASTree *operator, ASTree * left, ASTree *right) {
   }
   if (typespec_is_integer(left->type) && typespec_is_integer(right->type)) {
     arithmetic_conversions(operator, left->type, right->type);
-    return evaluate_binop(astree_adopt(operator, 2, left, right));
+    return evaluate_binop(operator, left, right);
   } else {
     return astree_create_errnode(astree_adopt(operator, 2, left, right),
                                  BCC_TERR_EXPECTED_INTEGER, 3, operator, left,
@@ -433,10 +432,10 @@ ASTree *validate_increment(ASTree *operator, ASTree * operand) {
   }
   if (typespec_is_pointer(operand->type)) {
     operator->type = operand->type;
-    return evaluate_unop(astree_adopt(operator, 1, operand));
+    return astree_adopt(operator, 1, operand);
   } else if (typespec_is_arithmetic(operand->type)) {
     arithmetic_conversions(operator, operand->type, &SPEC_INT);
-    return evaluate_unop(astree_adopt(operator, 1, operand));
+    return astree_adopt(operator, 1, operand);
   } else {
     return astree_create_errnode(astree_adopt(operator, 1, operand),
                                  BCC_TERR_EXPECTED_SCALAR, 2, operator,
@@ -451,7 +450,7 @@ ASTree *validate_not(ASTree *operator, ASTree * operand) {
   pointer_conversions(operand);
   operator->type = & SPEC_INT;
   if (typespec_is_scalar(operand->type)) {
-    return evaluate_unop(astree_adopt(operator, 1, operand));
+    return evaluate_unop(operator, operand);
   } else {
     return astree_create_errnode(astree_adopt(operator, 1, operand),
                                  BCC_TERR_EXPECTED_SCALAR, 2, operand, operand);
@@ -465,7 +464,7 @@ ASTree *validate_complement(ASTree *operator, ASTree * operand) {
   pointer_conversions(operand);
   if (typespec_is_integer(operand->type)) {
     arithmetic_conversions(operator, operand->type, &SPEC_INT);
-    return evaluate_unop(astree_adopt(operator, 1, operand));
+    return evaluate_unop(operator, operand);
   } else {
     return astree_create_errnode(astree_adopt(operator, 1, operand),
                                  BCC_TERR_EXPECTED_INTEGER, 2, operator,
@@ -480,7 +479,7 @@ ASTree *validate_negation(ASTree *operator, ASTree * operand) {
   pointer_conversions(operand);
   if (typespec_is_arithmetic(operand->type)) {
     arithmetic_conversions(operator, operand->type, &SPEC_INT);
-    return evaluate_unop(astree_adopt(operator, 1, operand));
+    return evaluate_unop(operator, operand);
   } else {
     return astree_create_errnode(astree_adopt(operator, 1, operand),
                                  BCC_TERR_EXPECTED_ARITHMETIC, 2, operator,
@@ -550,7 +549,7 @@ ASTree *validate_sizeof(ASTree *sizeof_, ASTree *type_node) {
    * platform
    */
   sizeof_->type = &SPEC_ULONG;
-  return evaluate_unop(astree_adopt(sizeof_, 1, type_node));
+  return evaluate_unop(sizeof_, type_node);
 }
 
 ASTree *validate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
