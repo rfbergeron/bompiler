@@ -120,22 +120,25 @@ int types_assignable(const TypeSpec *dest_type, ASTree *src) {
   }
 }
 
-void arithmetic_conversions(ASTree *operator, const TypeSpec * type1,
-                            const TypeSpec *type2) {
-  if ((type1->width < X64_SIZEOF_INT || type1->base == TYPE_ENUM) &&
-      (type2->width < X64_SIZEOF_INT || type2->base == TYPE_ENUM)) {
-    operator->type = & SPEC_INT;
-  } else if (type1->width > type2->width) {
-    operator->type = type1;
-  } else if (type1->width < type2->width) {
-    operator->type = type2;
-  } else if (type1->base == TYPE_UNSIGNED) {
-    operator->type = type1;
-  } else if (type2->base == TYPE_UNSIGNED) {
-    operator->type = type2;
+const TypeSpec *arithmetic_conversions(const TypeSpec *type1,
+                                       const TypeSpec *type2) {
+  size_t width1 = typespec_get_width(type1);
+  size_t width2 = typespec_get_width(type2);
+  const TypeSpec *ret;
+  if (width1 < X64_SIZEOF_INT && width2 < X64_SIZEOF_INT) {
+    ret = &SPEC_INT;
+  } else if (width1 > width2) {
+    ret = type1;
+  } else if (width1 < width2) {
+    ret = type2;
+  } else if (typespec_is_unsigned(type1)) {
+    ret = type1;
+  } else if (typespec_is_unsigned(type2)) {
+    ret = type2;
   } else {
-    operator->type = type1;
+    ret = type1;
   }
+  return typespec_is_enum(ret) ? &SPEC_INT : ret;
 }
 
 /* TODO(Robert): make sure that nodes which have had their type altered free the

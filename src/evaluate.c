@@ -362,10 +362,10 @@ ASTree *evaluate_equality(ASTree *equality, ASTree *left, ASTree *right) {
   } else if ((left->attributes & right->attributes & ATTR_EXPR_CONST) &&
              !((left->attributes | right->attributes) & ATTR_CONST_ADDR)) {
     equality->attributes |= ATTR_EXPR_CONST;
-    ASTree dummy;
-    arithmetic_conversions(&dummy, left->type, right->type);
-    size_t width = typespec_get_width(dummy.type);
-    int is_signed = typespec_is_signed(dummy.type);
+    const TypeSpec *promoted_type =
+        arithmetic_conversions(left->type, right->type);
+    size_t width = typespec_get_width(promoted_type);
+    int is_signed = typespec_is_signed(promoted_type);
     if (equality->symbol == TOK_EQ) {
       equality->constant.integral.value =
           SELECT_CAST(left->constant.integral.value, width, is_signed) ==
