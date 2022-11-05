@@ -511,11 +511,11 @@ ASTree *validate_indirection(ASTree *indirection, ASTree *operand) {
 }
 
 ASTree *validate_addrof(ASTree *addrof, ASTree *operand) {
-  /* TODO(Robert): check that operand is an lval */
-  /* TODO(Robert): set constexpr attribute if operand is static/extern */
   if (operand->symbol == TOK_TYPE_ERROR)
     return astree_propogate_errnode(addrof, operand);
   if (!(operand->attributes & ATTR_EXPR_LVAL)) {
+    return astree_create_errnode(astree_adopt(addrof, 1, operand),
+                                 BCC_TERR_EXPECTED_LVAL, 2, addrof, operand);
   }
   TypeSpec *addrof_spec = malloc(sizeof(*addrof_spec));
   int status = typespec_copy(addrof_spec, operand->type);
@@ -527,7 +527,7 @@ ASTree *validate_addrof(ASTree *addrof, ASTree *operand) {
   ptr_aux->aux = AUX_POINTER;
   llist_push_front(&addrof_spec->auxspecs, ptr_aux);
   addrof->type = addrof_spec;
-  return astree_adopt(addrof, 1, operand);
+  return evaluate_addrof(addrof, operand);
 }
 
 ASTree *validate_sizeof(ASTree *sizeof_, ASTree *type_node) {
