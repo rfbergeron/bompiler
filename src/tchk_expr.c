@@ -582,7 +582,7 @@ ASTree *validate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
         !typespec_is_function(subscript->type)) {
       subscript->attributes |= ATTR_EXPR_LVAL;
     }
-    return astree_adopt(subscript, 2, pointer, index);
+    return evaluate_subscript(subscript, pointer, index);
   }
 }
 
