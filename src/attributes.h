@@ -247,6 +247,7 @@ struct symbol_value *typespec_member_name(const TypeSpec *spec,
 struct symbol_value *typespec_member_index(const TypeSpec *spec, size_t index);
 struct symbol_value *typespec_param_index(const TypeSpec *spec, size_t index);
 size_t typespec_elem_width(const TypeSpec *spec);
+size_t typespec_member_count(const TypeSpec *spec);
 size_t typespec_get_width(const TypeSpec *spec);
 size_t typespec_get_alignment(const TypeSpec *spec);
 size_t typespec_get_eightbytes(const TypeSpec *spec);

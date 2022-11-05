@@ -929,15 +929,9 @@ ASTree *translate_reference(ASTree *reference, ASTree *struct_,
     if (status) abort();
   }
   InstructionData *struct_data = liter_get(struct_->last_instr);
-
-  AuxSpec *struct_aux = reference->symbol == TOK_ARROW
-                            ? llist_get(&struct_->type->auxspecs, 1)
-                            : llist_front(&struct_->type->auxspecs);
-  SymbolTable *member_table = struct_aux->data.tag.val->data.members.by_name;
-  const char *member_name = member->lexinfo;
-  size_t member_name_len = strlen(member_name);
   SymbolValue *member_symbol =
-      symbol_table_get(member_table, member_name, member_name_len);
+      typespec_member_name(struct_->type, member->lexinfo);
+  assert(member_symbol);
   InstructionData *lea_data = instr_init(OP_LEA);
   set_op_ind(&lea_data->src, member_symbol->disp, struct_data->dest.reg.num,
              NULL);
@@ -1271,15 +1265,10 @@ int translate_agg_arg(ASTree *call, ASTree *arg) {
   return 0;
 }
 
-int translate_scalar_arg(ASTree *call, ASTree *arg) {
+int translate_scalar_arg(ASTree *call, TypeSpec *param_type, ASTree *arg) {
   assert(typespec_get_eightbytes(arg->type) == 1);
-  ASTree *fn_pointer = astree_get(call, 0);
-  AuxSpec *fn_aux = llist_get(&fn_pointer->type->auxspecs, 1);
-  assert(fn_aux->aux == AUX_FUNCTION);
-  SymbolValue *param_symval =
-      llist_get(fn_aux->data.params, astree_count(call) - 1);
 
-  int status = scalar_conversions(arg, &param_symval->type);
+  int status = scalar_conversions(arg, param_type);
   if (status) return status;
   InstructionData *arg_data = liter_get(arg->last_instr);
 
@@ -1321,11 +1310,12 @@ int translate_args(ASTree *call) {
   for (i = 1; i < astree_count(call); ++i) {
     DEBUGS('g', "Translating parameter %i", i);
     ASTree *arg = astree_get(call, i);
+    SymbolValue *param_symval = typespec_param_index(call->type, i - 1);
     if (typespec_is_union(arg->type) || typespec_is_struct(arg->type)) {
       int status = translate_agg_arg(call, arg);
       if (status) return status;
     } else {
-      int status = translate_scalar_arg(call, arg);
+      int status = translate_scalar_arg(call, &param_symval->type, arg);
       if (status) return status;
     }
   }
@@ -1982,16 +1972,15 @@ int init_array(const TypeSpec *arr_type, ptrdiff_t arr_disp, ASTree *init_list,
 
 int init_struct(const TypeSpec *struct_type, ptrdiff_t struct_disp,
                 ASTree *init_list, size_t start, ListIter *where) {
-  AuxSpec *struct_aux = llist_front(&struct_type->auxspecs);
-  LinkedList *member_list = &struct_aux->data.tag.val->data.members.in_order;
-  size_t member_count = llist_size(member_list);
+  size_t member_count = typespec_member_count(struct_type);
   size_t init_count = astree_count(init_list);
   size_t bytes_initialized = 0;
   size_t init_index, member_index;
   for (member_index = 0, init_index = start;
        member_index < member_count && init_index < init_count;
        ++member_index, ++init_index) {
-    SymbolValue *member_symval = llist_get(member_list, member_index);
+    SymbolValue *member_symval =
+        typespec_member_index(struct_type, member_index);
     TypeSpec *member_type = &member_symval->type;
     ASTree *initializer = astree_get(init_list, init_index);
     size_t member_alignment = typespec_get_alignment(member_type);
@@ -2031,7 +2020,8 @@ int init_struct(const TypeSpec *struct_type, ptrdiff_t struct_disp,
     }
   } else {
     for (; member_index < member_count; ++member_index) {
-      SymbolValue *member_symval = llist_get(member_list, member_index);
+      SymbolValue *member_symval =
+          typespec_member_index(struct_type, member_index);
       TypeSpec *member_type = &member_symval->type;
       ptrdiff_t member_disp = struct_disp + member_symval->disp;
       InstructionData *mov_data = instr_init(OP_MOV);
@@ -2049,9 +2039,7 @@ int init_struct(const TypeSpec *struct_type, ptrdiff_t struct_disp,
 
 int init_union(const TypeSpec *union_type, ptrdiff_t union_disp,
                ASTree *init_list, size_t start, ListIter *where) {
-  AuxSpec *union_aux = llist_front(&union_type->auxspecs);
-  SymbolValue *member_symval =
-      llist_front(&union_aux->data.tag.val->data.members.in_order);
+  SymbolValue *member_symval = typespec_member_index(union_type, 0);
   TypeSpec *member_type = &member_symval->type;
   ASTree *initializer = astree_get(init_list, start);
   int consumed;
