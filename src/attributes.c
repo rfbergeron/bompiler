@@ -352,20 +352,48 @@ int typespec_copy(TypeSpec *dest, const TypeSpec *src) {
   return 0;
 }
 
-size_t typespec_member_width(TypeSpec *spec) {
+SymbolValue *typespec_member_name(const TypeSpec *spec, const char *name) {
+  assert(typespec_is_union(spec) || typespec_is_struct(spec) ||
+         typespec_is_unionptr(spec) || typespec_is_structptr(spec));
+  AuxSpec *struct_aux = typespec_is_pointer(spec)
+                            ? llist_get(&spec->auxspecs, 1)
+                            : llist_front(&spec->auxspecs);
+  return symbol_table_get(struct_aux->data.tag.val->data.members.by_name, name,
+                          strlen(name));
+}
+
+SymbolValue *typespec_member_index(const TypeSpec *spec, size_t index) {
+  assert(typespec_is_union(spec) || typespec_is_struct(spec) ||
+         typespec_is_unionptr(spec) || typespec_is_structptr(spec));
+  AuxSpec *struct_aux = typespec_is_pointer(spec)
+                            ? llist_get(&spec->auxspecs, 1)
+                            : llist_front(&spec->auxspecs);
+  return llist_get(&struct_aux->data.tag.val->data.members.in_order, index);
+}
+
+SymbolValue *typespec_param_index(const TypeSpec *spec, size_t index) {
+  assert(typespec_is_function(spec) || typespec_is_fnptr(spec));
+  AuxSpec *function_aux = typespec_is_pointer(spec)
+                              ? llist_get(&spec->auxspecs, 1)
+                              : llist_front(&spec->auxspecs);
+  return llist_get(function_aux->data.params, index);
+}
+
+size_t typespec_elem_width(const TypeSpec *spec) {
+  assert(typespec_is_array(spec) || typespec_is_pointer(spec));
   assert(!llist_empty(&spec->auxspecs));
   TypeSpec temp_spec;
   assert(!strip_aux_type(&temp_spec, spec));
-  size_t member_width = typespec_get_width(&temp_spec);
+  size_t elem_width = typespec_get_width(&temp_spec);
   assert(!typespec_destroy(&temp_spec));
-  return member_width;
+  return elem_width;
 }
 
-size_t typespec_get_width(TypeSpec *spec) {
+size_t typespec_get_width(const TypeSpec *spec) {
   if (!llist_empty(&spec->auxspecs)) {
     AuxSpec *aux = llist_front(&spec->auxspecs);
     if (aux->aux == AUX_ARRAY) {
-      return aux->data.memory_loc.length * typespec_member_width(spec);
+      return aux->data.memory_loc.length * typespec_elem_width(spec);
     } else if (aux->aux == AUX_POINTER || aux->aux == AUX_FUNCTION) {
       return X64_SIZEOF_LONG;
     } else if (aux->aux == AUX_ENUM) {
@@ -375,7 +403,7 @@ size_t typespec_get_width(TypeSpec *spec) {
   return spec->width;
 }
 
-size_t typespec_get_alignment(TypeSpec *spec) {
+size_t typespec_get_alignment(const TypeSpec *spec) {
   if (!llist_empty(&spec->auxspecs)) {
     AuxSpec *aux = llist_front(&spec->auxspecs);
     if (aux->aux == AUX_POINTER || aux->aux == AUX_FUNCTION) {
@@ -397,7 +425,7 @@ size_t typespec_get_eightbytes(const TypeSpec *spec) {
   }
 }
 
-int typespec_append_auxspecs(TypeSpec *dest, TypeSpec *src) {
+int typespec_append_auxspecs(TypeSpec *dest, const TypeSpec *src) {
   size_t i;
   for (i = 0; i < llist_size(&src->auxspecs); ++i) {
     AuxSpec *aux_copy = calloc(1, sizeof(*aux_copy));
