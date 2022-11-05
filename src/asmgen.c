@@ -612,6 +612,31 @@ ASTree *translate_empty_expr(ASTree *empty_expr) {
   return empty_expr;
 }
 
+void maybe_load_cexpr(ASTree *expr) {
+  if (expr->attributes & ATTR_CONST_ADDR) {
+    InstructionData *lea_data = instr_init(OP_LEA);
+    set_op_dir(&lea_data->src, expr->constant.address.offset,
+               expr->constant.address.label);
+    set_op_reg(&lea_data->dest, REG_QWORD, next_vreg());
+    int status = llist_push_back(instructions, lea_data);
+    if (status) abort();
+    expr->first_instr = llist_iter_last(instructions);
+    if (expr->first_instr == NULL) abort();
+    expr->last_instr = llist_iter_last(instructions);
+    if (expr->last_instr == NULL) abort();
+  } else if (expr->attributes & ATTR_EXPR_CONST) {
+    InstructionData *mov_data = instr_init(OP_MOV);
+    set_op_imm(&mov_data->src, expr->constant.integral.value);
+    set_op_reg(&mov_data->dest, typespec_get_width(expr->type), next_vreg());
+    int status = llist_push_back(instructions, mov_data);
+    if (status) abort();
+    expr->first_instr = llist_iter_last(instructions);
+    if (expr->first_instr == NULL) abort();
+    expr->last_instr = llist_iter_last(instructions);
+    if (expr->last_instr == NULL) abort();
+  }
+}
+
 ASTree *translate_ident(ASTree *ident) {
   InstructionData *lea_data = instr_init(OP_LEA);
   SymbolValue *symval = NULL;

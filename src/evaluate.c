@@ -1,5 +1,6 @@
 #include "evaluate.h"
 
+#include "asmgen.h"
 #include "ctype.h"
 #include "errno.h"
 #include "lyutils.h"
@@ -36,24 +37,30 @@
                              is_signed),                             \
         width, is_signed);                                           \
   } while (0)
-#define BINOP_CASE(opchar, operator, opnode, left, right)              \
+#define BINOP_CASE(opchar, optext, optrans)                            \
   case opchar:                                                         \
     if ((left->attributes & right->attributes & ATTR_EXPR_CONST) &&    \
         !((left->attributes | right->attributes) & ATTR_CONST_ADDR)) { \
-      opnode->attributes |=                                            \
-          ATTR_EXPR_CONST |                                            \
-          ((left->attributes | right->attributes) & ATTR_CONST_INIT);  \
-      CAST_BINARY(operator, opnode, left, right);                      \
-    }                                                                  \
-    return opnode
-#define UNOP_CASE(opchar, operator, opnode, operand) \
+      operator->attributes |= ATTR_EXPR_CONST |(                       \
+          (left->attributes | right->attributes) & ATTR_CONST_INIT);   \
+      CAST_BINARY(optext, operator, left, right);                      \
+      return astree_adopt(operator, 2, left, right);                   \
+    } else {                                                           \
+      maybe_load_cexpr(left);                                          \
+      maybe_load_cexpr(right);                                         \
+      return optrans(operator, left, right);                           \
+    }
+#define UNOP_CASE(opchar, optext, optrans)           \
   case opchar:                                       \
-    if ((opnode->attributes & ATTR_EXPR_CONST) &&    \
-        !(opnode->attributes & ATTR_CONST_ADDR)) {   \
-      opnode->attributes = operand->attributes;      \
-      CAST_UNARY(operator, opnode, operand);         \
-    }                                                \
-    return opnode
+    if ((operator->attributes & ATTR_EXPR_CONST) &&  \
+        !(operator->attributes & ATTR_CONST_ADDR)) { \
+      operator->attributes = operand->attributes;    \
+      CAST_UNARY(optext, operator, operand);         \
+      return astree_adopt(operator, 1, operand);     \
+    } else {                                         \
+      maybe_load_cexpr(operand);                     \
+      return optrans(operator, operand);             \
+    }
 
 ASTree *evaluate_intcon(ASTree *intcon) {
   intcon->attributes |= ATTR_EXPR_CONST;
@@ -203,7 +210,9 @@ ASTree *evaluate_ident(ASTree *ident) {
 ASTree *evaluate_addition(ASTree *addition, ASTree *left, ASTree *right) {
   if (!(left->attributes & right->attributes & ATTR_EXPR_CONST) ||
       (left->attributes & right->attributes & ATTR_CONST_ADDR)) {
-    return astree_adopt(addition, 2, left, right);
+    maybe_load_cexpr(left);
+    maybe_load_cexpr(right);
+    return translate_addition(addition, left, right);
   } else if ((left->attributes & ATTR_CONST_ADDR)) {
     addition->attributes |= left->attributes & ATTR_MASK_CONST;
     addition->constant.address.label = left->constant.address.label;
@@ -224,7 +233,8 @@ ASTree *evaluate_addition(ASTree *addition, ASTree *left, ASTree *right) {
 
 ASTree *evaluate_subtraction(ASTree *subtraction, ASTree *left, ASTree *right) {
   if ((left->attributes & right->attributes & ATTR_CONST_ADDR) &&
-      (left->constant.address.label == right->constant.address.label)) {
+      strcmp(left->constant.address.label, right->constant.address.label) ==
+          0) {
     subtraction->attributes |= ATTR_EXPR_CONST | ATTR_CONST_INIT;
     subtraction->constant.integral.value = (long)left->constant.address.offset -
                                            (long)right->constant.address.offset;
@@ -240,6 +250,10 @@ ASTree *evaluate_subtraction(ASTree *subtraction, ASTree *left, ASTree *right) {
     subtraction->attributes |=
         (left->attributes | right->attributes) & ATTR_MASK_CONST;
     CAST_BINARY(-, subtraction, left, right);
+  } else {
+    maybe_load_cexpr(left);
+    maybe_load_cexpr(right);
+    return translate_addition(subtraction, left, right);
   }
   return astree_adopt(subtraction, 2, left, right);
 }
@@ -255,8 +269,12 @@ ASTree *evaluate_shiftl(ASTree *shiftl, ASTree *left, ASTree *right) {
         SELECT_CAST(SELECT_CAST(left->constant.integral.value, width, is_signed)
                         << right->constant.integral.value,
                     width, is_signed);
+    return astree_adopt(shiftl, 2, left, right);
+  } else {
+    maybe_load_cexpr(left);
+    maybe_load_cexpr(right);
+    return translate_binop(shiftl, left, right);
   }
-  return astree_adopt(shiftl, 2, left, right);
 }
 
 ASTree *evaluate_shiftr(ASTree *shiftr, ASTree *left, ASTree *right) {
@@ -270,8 +288,12 @@ ASTree *evaluate_shiftr(ASTree *shiftr, ASTree *left, ASTree *right) {
         SELECT_CAST(SELECT_CAST(left->constant.integral.value, width, is_signed)
                         << right->constant.integral.value,
                     width, is_signed);
+    return astree_adopt(shiftr, 2, left, right);
+  } else {
+    maybe_load_cexpr(left);
+    maybe_load_cexpr(right);
+    return translate_binop(shiftr, left, right);
   }
-  return astree_adopt(shiftr, 2, left, right);
 }
 
 ASTree *evaluate_relational(ASTree *relational, ASTree *left, ASTree *right) {
@@ -315,8 +337,12 @@ ASTree *evaluate_relational(ASTree *relational, ASTree *left, ASTree *right) {
       default:
         abort();
     }
+    return astree_adopt(relational, 2, left, right);
+  } else {
+    maybe_load_cexpr(left);
+    maybe_load_cexpr(right);
+    return translate_comparison(relational, left, right);
   }
-  return astree_adopt(relational, 2, left, right);
 }
 
 ASTree *evaluate_equality(ASTree *equality, ASTree *left, ASTree *right) {
@@ -352,6 +378,10 @@ ASTree *evaluate_equality(ASTree *equality, ASTree *left, ASTree *right) {
           SELECT_CAST(left->constant.integral.value, width, is_signed) !=
           SELECT_CAST(right->constant.integral.value, width, is_signed);
     }
+  } else {
+    maybe_load_cexpr(left);
+    maybe_load_cexpr(right);
+    return translate_comparison(equality, left, right);
   }
   return astree_adopt(equality, 2, left, right);
 }
@@ -374,11 +404,15 @@ ASTree *evaluate_logical(ASTree *logical, ASTree *left, ASTree *right) {
           ((right->attributes & ATTR_CONST_ADDR) ||
            right->constant.integral.value);
     }
+    return astree_adopt(logical, 2, left, right);
+  } else {
+    maybe_load_cexpr(left);
+    maybe_load_cexpr(right);
+    return translate_logical(logical, left, right);
   }
-  return astree_adopt(logical, 2, left, right);
 }
 
-ASTree *evaluate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
+ASTree *evaluate_cast(ASTree *cast, ASTree *expr) {
   if (expr->attributes & ATTR_EXPR_CONST) {
     cast->attributes |= expr->attributes & ATTR_MASK_CONST;
     if (expr->attributes & ATTR_CONST_ADDR) {
@@ -391,8 +425,11 @@ ASTree *evaluate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
       cast->constant.integral.value =
           SELECT_CAST(expr->constant.integral.value, width, is_signed);
     }
+    return astree_adopt(cast, 1, expr);
+  } else {
+    maybe_load_cexpr(expr);
+    return translate_cast(cast, expr);
   }
-  return astree_adopt(cast, 2, declaration, expr);
 }
 
 ASTree *evaluate_conditional(ASTree *qmark, ASTree *condition,
@@ -419,18 +456,23 @@ ASTree *evaluate_conditional(ASTree *qmark, ASTree *condition,
     } else {
       qmark->constant = selected_expr->constant;
     }
+    return astree_adopt(qmark, 3, condition, true_expr, false_expr);
+  } else {
+    maybe_load_cexpr(condition);
+    maybe_load_cexpr(true_expr);
+    maybe_load_cexpr(false_expr);
+    return translate_conditional(qmark, condition, true_expr, false_expr);
   }
-  return astree_adopt(qmark, 3, condition, true_expr, false_expr);
 }
 
 ASTree *evaluate_binop(ASTree *operator, ASTree * left, ASTree *right) {
   switch (operator->symbol) {
-    BINOP_CASE('&', &, operator, left, right);
-    BINOP_CASE('|', |, operator, left, right);
-    BINOP_CASE('^', ^, operator, left, right);
-    BINOP_CASE('/', /, operator, left, right);
-    BINOP_CASE('%', %, operator, left, right);
-    BINOP_CASE('*', *, operator, left, right);
+    BINOP_CASE('&', &, translate_binop);
+    BINOP_CASE('|', |, translate_binop);
+    BINOP_CASE('^', ^, translate_binop);
+    BINOP_CASE('/', /, translate_multiplication);
+    BINOP_CASE('%', %, translate_multiplication);
+    BINOP_CASE('*', *, translate_multiplication);
     case TOK_AND:
     case TOK_OR:
       return evaluate_logical(operator, left, right);
@@ -461,9 +503,25 @@ ASTree *evaluate_binop(ASTree *operator, ASTree * left, ASTree *right) {
 
 ASTree *evaluate_unop(ASTree *operator, ASTree * operand) {
   switch (operator->symbol) {
-    UNOP_CASE(TOK_NEG, -, operator, operand);
-    UNOP_CASE(TOK_POS, +, operator, operand);
-    UNOP_CASE('~', ~, operator, operand);
+    UNOP_CASE(TOK_NEG, -, translate_unop);
+    UNOP_CASE('~', ~, translate_unop);
+    case TOK_POS:
+      if ((operator->attributes & ATTR_EXPR_CONST) &&
+          !(operator->attributes & ATTR_CONST_ADDR)) {
+        /* most of this is probably unnecessary since everything gets cast up
+         * to unsigned long when it is stored on the tree, but i have no idea
+         */
+        size_t width = typespec_get_width(operand->type);
+        int is_signed = typespec_is_signed(operand->type);
+        operator->attributes = operand->attributes;
+        operator->constant.integral.value = +
+            SELECT_CAST(operand->constant.integral.value, width, is_signed);
+        return astree_adopt(operator, 1, operand);
+      } else {
+        /* treat like a cast */
+        maybe_load_cexpr(operand);
+        return translate_cast(operator, operand);
+      }
     case '!':
       if ((operator->attributes & ATTR_EXPR_CONST) &&
           !(operator->attributes & ATTR_CONST_ADDR)) {
@@ -472,11 +530,15 @@ ASTree *evaluate_unop(ASTree *operator, ASTree * operand) {
         int is_signed = typespec_is_signed(operator->type);
         operator->constant.integral.value = !SELECT_CAST(
             operand->constant.integral.value, width, is_signed);
+        return astree_adopt(operator, 1, operand);
+      } else {
+        maybe_load_cexpr(operand);
+        return translate_logical_not(operator, operand);
       }
-      return operator;
     case TOK_SIZEOF:
+      operator->attributes |= ATTR_EXPR_CONST;
       operator->constant.integral.value = typespec_get_width(operand->type);
-      return operator;
+      return astree_adopt(operator, 1, operand);
     default:
       fprintf(stderr,
               "FATAL: attempted to evaluate constant expression with "
