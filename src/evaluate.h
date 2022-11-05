@@ -8,6 +8,7 @@ ASTree *evaluate_ident(ASTree *ident);
 ASTree *evaluate_cast(ASTree *cast, ASTree *expr);
 ASTree *evaluate_conditional(ASTree *qmark, ASTree *condition,
                              ASTree *true_expr, ASTree *false_expr);
+ASTree *evaluate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index);
 ASTree *evaluate_binop(ASTree *operator, ASTree * left, ASTree *right);
 ASTree *evaluate_unop(ASTree *operator, ASTree * operand);
 #endif

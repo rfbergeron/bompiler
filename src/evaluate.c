@@ -465,6 +465,40 @@ ASTree *evaluate_conditional(ASTree *qmark, ASTree *condition,
   }
 }
 
+ASTree *evaluate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
+  if ((pointer->attributes & ATTR_CONST_ADDR) &&
+      !(index->attributes & ATTR_CONST_ADDR) &&
+      (index->attributes & ATTR_EXPR_CONST)) {
+    subscript->attributes |= pointer->attributes & ATTR_MASK_CONST;
+    subscript->constant.address.label = pointer->constant.address.label;
+    subscript->constant.address.offset =
+        pointer->constant.address.offset +
+        (long)(index->constant.integral.value *
+               typespec_get_width(subscript->type));
+  } else if (!(pointer->attributes & ATTR_CONST_ADDR) &&
+             (pointer->attributes & ATTR_EXPR_CONST) &&
+             (index->attributes & ATTR_CONST_ADDR)) {
+    subscript->attributes |= index->attributes & ATTR_MASK_CONST;
+    subscript->constant.address.label = index->constant.address.label;
+    subscript->constant.address.offset =
+        index->constant.address.offset +
+        (long)(pointer->constant.integral.value *
+               typespec_get_width(subscript->type));
+  } else if (!((pointer->attributes | index->attributes) & ATTR_CONST_ADDR) &&
+             (pointer->attributes & index->attributes & ATTR_EXPR_CONST)) {
+    subscript->attributes |= pointer->attributes & ATTR_MASK_CONST;
+    subscript->constant.integral.value =
+        (long)pointer->constant.integral.value +
+        (long)(index->constant.integral.value *
+               typespec_get_width(subscript->type));
+  } else {
+    maybe_load_cexpr(pointer);
+    maybe_load_cexpr(index);
+    return translate_subscript(subscript, pointer, index);
+  }
+  return astree_adopt(subscript, 2, pointer, index);
+}
+
 ASTree *evaluate_binop(ASTree *operator, ASTree * left, ASTree *right) {
   switch (operator->symbol) {
     BINOP_CASE('&', &, translate_binop);
