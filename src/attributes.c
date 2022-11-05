@@ -389,6 +389,24 @@ size_t typespec_elem_width(const TypeSpec *spec) {
   return elem_width;
 }
 
+size_t typespec_member_count(const TypeSpec *spec) {
+  assert(typespec_is_array(spec) || typespec_is_struct(spec) ||
+         typespec_is_union(spec) || typespec_is_structptr(spec) ||
+         typespec_is_unionptr(spec));
+  AuxSpec *agg_aux = typespec_is_pointer(spec) ? llist_get(&spec->auxspecs, 1)
+                                               : llist_front(&spec->auxspecs);
+  switch (agg_aux->aux) {
+    case AUX_UNION:
+      return 1;
+    case AUX_STRUCT:
+      return llist_size(&agg_aux->data.tag.val->data.members.in_order);
+    case AUX_ARRAY:
+      return agg_aux->data.memory_loc.length;
+    default:
+      abort();
+  }
+}
+
 size_t typespec_get_width(const TypeSpec *spec) {
   if (!llist_empty(&spec->auxspecs)) {
     AuxSpec *aux = llist_front(&spec->auxspecs);

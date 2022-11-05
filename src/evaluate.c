@@ -522,19 +522,7 @@ ASTree *evaluate_addrof(ASTree *addrof, ASTree *operand) {
 ASTree *evaluate_reference(ASTree *reference, ASTree *struct_, ASTree *member) {
   if (struct_->attributes & ATTR_CONST_ADDR) {
     reference->attributes |= struct_->attributes & ATTR_MASK_CONST;
-    /* TODO(Robert): code like this has been copied and pasted all over the
-     * compiler; there should probably be a function for getting the symbol
-     * of a member of a struct type
-     */
-    const TypeSpec *struct_type = struct_->type;
-    const char *member_name = member->lexinfo;
-    const size_t member_name_len = strlen(member_name);
-    AuxSpec *struct_aux = reference->symbol == TOK_ARROW
-                              ? llist_get(&struct_type->auxspecs, 1)
-                              : llist_front(&struct_type->auxspecs);
-    SymbolTable *member_table = struct_aux->data.tag.val->data.members.by_name;
-    SymbolValue *symval =
-        symbol_table_get(member_table, (char *)member_name, member_name_len);
+    SymbolValue *symval = typespec_member_name(struct_->type, member->lexinfo);
     assert(symval);
     reference->constant.address.label = struct_->constant.address.label;
     reference->constant.address.offset =
