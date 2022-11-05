@@ -507,6 +507,17 @@ ASTree *evaluate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
   return astree_adopt(subscript, 2, pointer, index);
 }
 
+ASTree *evaluate_addrof(ASTree *addrof, ASTree *operand) {
+  if (operand->attributes & ATTR_EXPR_CONST) {
+    addrof->attributes |= operand->attributes & ATTR_MASK_CONST;
+    addrof->constant = operand->constant;
+    return astree_adopt(addrof, 1, operand);
+  } else {
+    maybe_load_cexpr(operand);
+    return translate_addrof(addrof, operand);
+  }
+}
+
 ASTree *evaluate_binop(ASTree *operator, ASTree * left, ASTree *right) {
   switch (operator->symbol) {
     BINOP_CASE('&', &, translate_binop);
