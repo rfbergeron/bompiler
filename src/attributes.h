@@ -13,6 +13,7 @@
 #define X64_SIZEOF_CHAR (size_t)1
 #define X64_ALIGNOF_CHAR (size_t)1
 
+struct symbol_value;
 enum attribute {
   ATTR_NONE = 0,              /* no attributes set */
   ATTR_EXPR_LVAL = 1 << 0,    /* refers to an assignable location */
@@ -241,11 +242,15 @@ int auxspec_copy(AuxSpec *dest, const AuxSpec *src);
 int typespec_init(TypeSpec *spec);
 int typespec_destroy(TypeSpec *spec);
 int typespec_copy(TypeSpec *dst, const TypeSpec *src);
-size_t typespec_member_width(TypeSpec *spec);
-size_t typespec_get_width(TypeSpec *spec);
-size_t typespec_get_alignment(TypeSpec *spec);
+struct symbol_value *typespec_member_name(const TypeSpec *spec,
+                                          const char *name);
+struct symbol_value *typespec_member_index(const TypeSpec *spec, size_t index);
+struct symbol_value *typespec_param_index(const TypeSpec *spec, size_t index);
+size_t typespec_elem_width(const TypeSpec *spec);
+size_t typespec_get_width(const TypeSpec *spec);
+size_t typespec_get_alignment(const TypeSpec *spec);
 size_t typespec_get_eightbytes(const TypeSpec *spec);
-int typespec_append_auxspecs(TypeSpec *dest, TypeSpec *src);
+int typespec_append_auxspecs(TypeSpec *dest, const TypeSpec *src);
 int strip_aux_type(TypeSpec *dest, const TypeSpec *src);
 int common_qualified_ptr(TypeSpec *dest, const TypeSpec *src1,
                          const TypeSpec *src2);
