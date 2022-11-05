@@ -250,7 +250,7 @@ ASTree *validate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
                                  type_name->type, expr->type);
   } else {
     cast->type = type_name->type;
-    return evaluate_cast(cast, declaration, expr);
+    return evaluate_cast(astree_adopt(cast, 1, declaration), expr);
   }
 }
 
