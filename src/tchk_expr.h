@@ -29,9 +29,6 @@ ASTree *validate_indirection(ASTree *indirection, ASTree *operand);
 ASTree *validate_addrof(ASTree *addrof, ASTree *operand);
 ASTree *validate_sizeof(ASTree *sizeof_, ASTree *type_node);
 ASTree *validate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index);
-ASTree *validate_reference(ASTree *reference, ASTree *struct_,
-                           ASTree *member_name_node);
-ASTree *validate_arrow(ASTree *arrow, ASTree *struct_,
-                       ASTree *member_name_node);
+ASTree *validate_reference(ASTree *reference, ASTree *struct_, ASTree *member);
 ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src);
 #endif

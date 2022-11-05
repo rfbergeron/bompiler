@@ -267,7 +267,7 @@ postfix_expr        : primary_expr                                      { $$ = b
                     | call                                              { $$ = bcc_yyval = $1; }
                     | postfix_expr '[' expr ']'                         { $$ = bcc_yyval = validate_subscript(parser_new_sym($2, TOK_SUBSCRIPT), $1, $3); parser_cleanup(1, $4); }
                     | postfix_expr '.' any_ident                        { $$ = bcc_yyval = validate_reference($2, $1, $3); }
-                    | postfix_expr TOK_ARROW any_ident                  { $$ = bcc_yyval = validate_arrow($2, $1, $3); }
+                    | postfix_expr TOK_ARROW any_ident                  { $$ = bcc_yyval = validate_reference($2, $1, $3); }
                     ;
 call                : postfix_expr '(' ')'                              { $$ = bcc_yyval = finalize_call(validate_call($1, parser_new_sym($2, TOK_CALL))); parser_cleanup(1, $3);}
                     | call_args ')'                                     { $$ = bcc_yyval = finalize_call($1); parser_cleanup(1, $2); }

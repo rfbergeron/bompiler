@@ -586,68 +586,42 @@ ASTree *validate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
   }
 }
 
-ASTree *validate_reference(ASTree *reference, ASTree *struct_,
-                           ASTree *member_name_node) {
+ASTree *validate_reference(ASTree *reference, ASTree *struct_, ASTree *member) {
+  if (reference->symbol == TOK_ARROW) pointer_conversions(struct_);
+  if (struct_->symbol == TOK_TYPE_ERROR)
+    return astree_propogate_errnode_v(reference, 2, struct_, member);
   const TypeSpec *struct_type = struct_->type;
-  if (!typespec_is_struct(struct_type) && !typespec_is_union(struct_type)) {
-    return astree_create_errnode(
-        astree_adopt(reference, 2, struct_, member_name_node),
-        BCC_TERR_EXPECTED_TAG, 2, reference, struct_);
+  if (reference->symbol == TOK_ARROW && !typespec_is_structptr(struct_type) &&
+      !typespec_is_unionptr(struct_type)) {
+    return astree_create_errnode(astree_adopt(reference, 2, struct_, member),
+                                 BCC_TERR_EXPECTED_TAG_PTR, 2, reference,
+                                 struct_type);
+  } else if (!typespec_is_struct(struct_type) &&
+             !typespec_is_union(struct_type)) {
+    return astree_create_errnode(astree_adopt(reference, 2, struct_, member),
+                                 BCC_TERR_EXPECTED_TAG, 2, reference,
+                                 struct_type);
   }
 
-  const char *member_name = member_name_node->lexinfo;
+  const char *member_name = member->lexinfo;
   const size_t member_name_len = strlen(member_name);
-  AuxSpec *struct_aux = llist_front(&struct_type->auxspecs);
+  AuxSpec *struct_aux = reference->symbol == TOK_ARROW
+                            ? llist_get(&struct_type->auxspecs, 1)
+                            : llist_front(&struct_type->auxspecs);
   SymbolTable *member_table = struct_aux->data.tag.val->data.members.by_name;
   SymbolValue *symval =
       symbol_table_get(member_table, (char *)member_name, member_name_len);
 
   if (symval == NULL) {
-    return astree_create_errnode(
-        astree_adopt(reference, 2, struct_, member_name_node),
-        BCC_TERR_SYM_NOT_FOUND, 1, member_name_node);
+    return astree_create_errnode(astree_adopt(reference, 2, struct_, member),
+                                 BCC_TERR_SYM_NOT_FOUND, 1, member);
   } else {
     reference->type = &symval->type;
     if (!typespec_is_array(reference->type) &&
         !typespec_is_function(reference->type)) {
       reference->attributes |= ATTR_EXPR_LVAL;
     }
-    return astree_adopt(reference, 2, struct_, member_name_node);
-  }
-}
-
-ASTree *validate_arrow(ASTree *arrow, ASTree *struct_,
-                       ASTree *member_name_node) {
-  pointer_conversions(struct_);
-  if (struct_->symbol == TOK_TYPE_ERROR) {
-    return astree_propogate_errnode_v(arrow, 2, struct_, member_name_node);
-  }
-
-  const TypeSpec *struct_type = struct_->type;
-  if (!typespec_is_structptr(struct_type) &&
-      !typespec_is_unionptr(struct_type)) {
-    return astree_create_errnode(
-        astree_adopt(arrow, 2, struct_, member_name_node),
-        BCC_TERR_EXPECTED_TAG_PTR, 2, arrow, struct_type);
-  }
-  const char *member_name = member_name_node->lexinfo;
-  const size_t member_name_len = strlen(member_name);
-  /* first auxtype is pointer; second is struct/union */
-  AuxSpec *strunion_aux = llist_get(&struct_type->auxspecs, 1);
-  SymbolTable *member_table = strunion_aux->data.tag.val->data.members.by_name;
-  SymbolValue *symval =
-      symbol_table_get(member_table, (char *)member_name, member_name_len);
-
-  if (symval == NULL) {
-    return astree_create_errnode(
-        astree_adopt(arrow, 2, struct_, member_name_node),
-        BCC_TERR_SYM_NOT_FOUND, 1, member_name_node);
-  } else {
-    arrow->type = &symval->type;
-    if (!typespec_is_array(arrow->type) && !typespec_is_function(arrow->type)) {
-      arrow->attributes |= ATTR_EXPR_LVAL;
-    }
-    return astree_adopt(arrow, 2, struct_, member_name_node);
+    return evaluate_reference(reference, struct_, member);
   }
 }
 

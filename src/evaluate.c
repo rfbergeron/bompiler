@@ -1,6 +1,7 @@
 #include "evaluate.h"
 
 #include "asmgen.h"
+#include "assert.h"
 #include "ctype.h"
 #include "errno.h"
 #include "lyutils.h"
@@ -515,6 +516,36 @@ ASTree *evaluate_addrof(ASTree *addrof, ASTree *operand) {
   } else {
     maybe_load_cexpr(operand);
     return translate_addrof(addrof, operand);
+  }
+}
+
+ASTree *evaluate_reference(ASTree *reference, ASTree *struct_, ASTree *member) {
+  if (struct_->attributes & ATTR_CONST_ADDR) {
+    reference->attributes |= struct_->attributes & ATTR_MASK_CONST;
+    /* TODO(Robert): code like this has been copied and pasted all over the
+     * compiler; there should probably be a function for getting the symbol
+     * of a member of a struct type
+     */
+    const TypeSpec *struct_type = struct_->type;
+    const char *member_name = member->lexinfo;
+    const size_t member_name_len = strlen(member_name);
+    AuxSpec *struct_aux = reference->symbol == TOK_ARROW
+                              ? llist_get(&struct_type->auxspecs, 1)
+                              : llist_front(&struct_type->auxspecs);
+    SymbolTable *member_table = struct_aux->data.tag.val->data.members.by_name;
+    SymbolValue *symval =
+        symbol_table_get(member_table, (char *)member_name, member_name_len);
+    assert(symval);
+    reference->constant.address.label = struct_->constant.address.label;
+    reference->constant.address.offset =
+        struct_->constant.address.offset + (long)symval->disp;
+    return astree_adopt(reference, 2, struct_, member);
+  } else {
+    /* scalars should not be castable to aggregates */
+    assert(!(struct_->attributes & ATTR_EXPR_CONST) ||
+           reference->symbol == TOK_ARROW);
+    maybe_load_cexpr(struct_);
+    return translate_reference(reference, struct_, member);
   }
 }
 
