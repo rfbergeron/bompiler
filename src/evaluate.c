@@ -194,8 +194,16 @@ ASTree *evaluate_ident(ASTree *ident) {
     ident->attributes |= ATTR_EXPR_CONST;
     ident->attributes |= ATTR_CONST_INIT;
     ident->attributes |= ATTR_CONST_ADDR;
-    ident->constant.address.label = ident->lexinfo;
-    ident->constant.address.offset = 0;
+    if (symval->flags & SYMFLAG_LINK_NONE) {
+      /* TODO(Robert): this needs to be freed by... someone... */
+      char *static_name = malloc(MAX_IDENT_LEN * 2);
+      sprintf(static_name, "%s.%lu", ident->lexinfo, symval->static_id);
+      ident->constant.address.label = static_name;
+      ident->constant.address.offset = 0;
+    } else {
+      ident->constant.address.label = ident->lexinfo;
+      ident->constant.address.offset = 0;
+    }
   } else if (symval->flags & SYMFLAG_ENUM_CONST) {
     ident->attributes |= ATTR_EXPR_CONST;
     AuxSpec *enum_aux = llist_back(&ident->type->auxspecs);
