@@ -16,7 +16,7 @@ typedef struct astree {
   ListIter *last_instr;
   union {
     struct {
-      long offset;
+      long disp;
       const char *label;
     } address;
     struct {

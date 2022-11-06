@@ -615,7 +615,7 @@ ASTree *translate_empty_expr(ASTree *empty_expr) {
 void maybe_load_cexpr(ASTree *expr) {
   if (expr->attributes & ATTR_CONST_ADDR) {
     InstructionData *lea_data = instr_init(OP_LEA);
-    set_op_dir(&lea_data->src, expr->constant.address.offset,
+    set_op_dir(&lea_data->src, expr->constant.address.disp,
                expr->constant.address.label);
     set_op_reg(&lea_data->dest, REG_QWORD, next_vreg());
     int status = llist_push_back(instructions, lea_data);
