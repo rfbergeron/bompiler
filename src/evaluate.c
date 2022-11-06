@@ -28,15 +28,14 @@
                                          width, is_signed),                \
                     width, is_signed);                                     \
   } while (0)
-#define CAST_BINARY(operator, opnode, left, right)                   \
-  do {                                                               \
-    size_t width = typespec_get_width(opnode->type);                 \
-    int is_signed = typespec_is_signed(opnode->type);                \
-    opnode->constant.integral.value = SELECT_CAST(                   \
-        SELECT_CAST(left->constant.integral.value, width, is_signed) \
-        operator SELECT_CAST(right->constant.integral.value, width,  \
-                             is_signed),                             \
-        width, is_signed);                                           \
+#define CAST_BINARY(operator, opnode, left, right)                  \
+  do {                                                              \
+    size_t width = typespec_get_width(opnode->type);                \
+    int is_signed = typespec_is_signed(opnode->type);               \
+    opnode->constant.integral.value = SELECT_CAST(                  \
+        SELECT_CAST((left), width, is_signed) operator SELECT_CAST( \
+            (right), width, is_signed),                             \
+        width, is_signed);                                          \
   } while (0)
 #define BINOP_CASE(opchar, optext, optrans)                            \
   case opchar:                                                         \
@@ -44,7 +43,8 @@
         !((left->attributes | right->attributes) & ATTR_CONST_ADDR)) { \
       operator->attributes |= ATTR_EXPR_CONST |(                       \
           (left->attributes | right->attributes) & ATTR_CONST_INIT);   \
-      CAST_BINARY(optext, operator, left, right);                      \
+      CAST_BINARY(optext, operator, left->constant.integral.value,     \
+                  right->constant.integral.value);                     \
       return astree_adopt(operator, 2, left, right);                   \
     } else {                                                           \
       maybe_load_cexpr(left);                                          \
@@ -200,10 +200,10 @@ ASTree *evaluate_ident(ASTree *ident) {
       char *static_name = malloc(MAX_IDENT_LEN * 2);
       sprintf(static_name, "%s.%lu", ident->lexinfo, symval->static_id);
       ident->constant.address.label = static_name;
-      ident->constant.address.offset = 0;
+      ident->constant.address.disp = 0;
     } else {
       ident->constant.address.label = ident->lexinfo;
-      ident->constant.address.offset = 0;
+      ident->constant.address.disp = 0;
     }
   } else if (symval->flags & SYMFLAG_ENUM_CONST) {
     ident->attributes |= ATTR_EXPR_CONST;
@@ -218,24 +218,39 @@ ASTree *evaluate_ident(ASTree *ident) {
 
 ASTree *evaluate_addition(ASTree *addition, ASTree *left, ASTree *right) {
   if (!(left->attributes & right->attributes & ATTR_EXPR_CONST) ||
-      (left->attributes & right->attributes & ATTR_CONST_ADDR)) {
+      (left->attributes & right->attributes & ATTR_CONST_ADDR) ||
+      ((left->attributes & ATTR_CONST_ADDR) &&
+       typespec_is_pointer(right->type)) ||
+      ((right->attributes & ATTR_CONST_ADDR) &&
+       typespec_is_pointer(left->type))) {
     maybe_load_cexpr(left);
     maybe_load_cexpr(right);
     return translate_addition(addition, left, right);
   } else if ((left->attributes & ATTR_CONST_ADDR)) {
+    size_t stride =
+        typespec_is_pointer(left->type) ? typespec_elem_width(left->type) : 1;
     addition->attributes |= left->attributes & ATTR_MASK_CONST;
     addition->constant.address.label = left->constant.address.label;
-    addition->constant.address.offset = (long)left->constant.address.offset +
-                                        (long)right->constant.integral.value;
+    addition->constant.address.disp =
+        left->constant.address.disp +
+        (long)(right->constant.integral.value * stride);
   } else if ((right->attributes & ATTR_CONST_ADDR)) {
+    size_t stride =
+        typespec_is_pointer(right->type) ? typespec_elem_width(right->type) : 1;
     addition->attributes |= right->attributes & ATTR_MASK_CONST;
     addition->constant.address.label = right->constant.address.label;
-    addition->constant.address.offset = (long)left->constant.integral.value +
-                                        (long)right->constant.address.offset;
+    addition->constant.address.disp =
+        (long)(left->constant.integral.value * stride) +
+        right->constant.address.disp;
   } else {
+    size_t left_stride =
+        typespec_is_pointer(right->type) ? typespec_elem_width(right->type) : 1;
+    size_t right_stride =
+        typespec_is_pointer(left->type) ? typespec_elem_width(left->type) : 1;
     addition->attributes |=
         (left->attributes | right->attributes) & ATTR_MASK_CONST;
-    CAST_BINARY(+, addition, left, right);
+    CAST_BINARY(+, addition, left->constant.integral.value * left_stride,
+                right->constant.integral.value * right_stride);
   }
   return astree_adopt(addition, 2, left, right);
 }
@@ -243,22 +258,34 @@ ASTree *evaluate_addition(ASTree *addition, ASTree *left, ASTree *right) {
 ASTree *evaluate_subtraction(ASTree *subtraction, ASTree *left, ASTree *right) {
   if ((left->attributes & right->attributes & ATTR_CONST_ADDR) &&
       strcmp(left->constant.address.label, right->constant.address.label) ==
-          0) {
+          0 &&
+      (typespec_is_pointer(right->type) || !typespec_is_pointer(left->type))) {
+    size_t stride =
+        typespec_is_pointer(left->type) ? typespec_elem_width(left->type) : 1;
     subtraction->attributes |= ATTR_EXPR_CONST | ATTR_CONST_INIT;
-    subtraction->constant.integral.value = (long)left->constant.address.offset -
-                                           (long)right->constant.address.offset;
+    subtraction->constant.integral.value =
+        (left->constant.address.disp - right->constant.address.disp) /
+        (long)stride;
   } else if ((left->attributes & ATTR_CONST_ADDR) &&
              (right->attributes & ATTR_EXPR_CONST) &&
              !(right->attributes & ATTR_CONST_ADDR)) {
+    size_t stride =
+        typespec_is_pointer(left->type) ? typespec_elem_width(left->type) : 1;
     subtraction->attributes |= left->attributes & ATTR_MASK_CONST;
     subtraction->constant.address.label = left->constant.address.label;
-    subtraction->constant.address.offset = (long)left->constant.address.offset -
-                                           (long)right->constant.integral.value;
+    subtraction->constant.address.disp =
+        left->constant.address.disp -
+        (long)(right->constant.integral.value * stride);
   } else if ((left->attributes & right->attributes & ATTR_EXPR_CONST) &&
              !((left->attributes | right->attributes) & ATTR_CONST_ADDR)) {
+    size_t left_stride =
+        typespec_is_pointer(right->type) ? typespec_elem_width(right->type) : 1;
+    size_t right_stride =
+        typespec_is_pointer(left->type) ? typespec_elem_width(left->type) : 1;
     subtraction->attributes |=
         (left->attributes | right->attributes) & ATTR_MASK_CONST;
-    CAST_BINARY(-, subtraction, left, right);
+    CAST_BINARY(-, subtraction, left->constant.integral.value * left_stride,
+                right->constant.integral.value * right_stride);
   } else {
     maybe_load_cexpr(left);
     maybe_load_cexpr(right);
@@ -360,7 +387,7 @@ ASTree *evaluate_equality(ASTree *equality, ASTree *left, ASTree *right) {
     equality->constant.integral.value =
         strcmp(left->constant.address.label, right->constant.address.label) ==
             0 &&
-        (left->constant.address.offset == right->constant.address.offset);
+        (left->constant.address.disp == right->constant.address.disp);
   } else if ((left->attributes & ATTR_CONST_ADDR) &&
              (right->attributes & ATTR_EXPR_CONST) &&
              right->constant.integral.value == 0) {
@@ -480,18 +507,9 @@ ASTree *evaluate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
       (index->attributes & ATTR_EXPR_CONST)) {
     subscript->attributes |= pointer->attributes & ATTR_MASK_CONST;
     subscript->constant.address.label = pointer->constant.address.label;
-    subscript->constant.address.offset =
-        pointer->constant.address.offset +
+    subscript->constant.address.disp =
+        pointer->constant.address.disp +
         (long)(index->constant.integral.value *
-               typespec_get_width(subscript->type));
-  } else if (!(pointer->attributes & ATTR_CONST_ADDR) &&
-             (pointer->attributes & ATTR_EXPR_CONST) &&
-             (index->attributes & ATTR_CONST_ADDR)) {
-    subscript->attributes |= index->attributes & ATTR_MASK_CONST;
-    subscript->constant.address.label = index->constant.address.label;
-    subscript->constant.address.offset =
-        index->constant.address.offset +
-        (long)(pointer->constant.integral.value *
                typespec_get_width(subscript->type));
   } else if (!((pointer->attributes | index->attributes) & ATTR_CONST_ADDR) &&
              (pointer->attributes & index->attributes & ATTR_EXPR_CONST)) {
@@ -525,8 +543,8 @@ ASTree *evaluate_reference(ASTree *reference, ASTree *struct_, ASTree *member) {
     SymbolValue *symval = typespec_member_name(struct_->type, member->lexinfo);
     assert(symval);
     reference->constant.address.label = struct_->constant.address.label;
-    reference->constant.address.offset =
-        struct_->constant.address.offset + (long)symval->disp;
+    reference->constant.address.disp =
+        struct_->constant.address.disp + (long)symval->disp;
     return astree_adopt(reference, 2, struct_, member);
   } else {
     /* scalars should not be castable to aggregates */
