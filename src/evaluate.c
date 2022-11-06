@@ -10,57 +10,125 @@
 #include "tchk_common.h"
 #include "yyparse.h"
 
-#define SELECT_CAST(expr, width, is_signed)                                        \
-  (is_signed                   ? width == X64_SIZEOF_CHAR    ? (signed char)(expr) \
-                                 : width == X64_SIZEOF_SHORT ? (short)(expr)       \
-                                 : width == X64_SIZEOF_INT   ? (int)(expr)         \
-                                                             : (long)(expr)        \
-                     : width == X64_SIZEOF_CHAR ? (unsigned char)(expr)            \
-   : width == X64_SIZEOF_SHORT ? (unsigned short)(expr)                            \
-   : width == X64_SIZEOF_INT   ? (unsigned)(expr)                                  \
-                               : (unsigned long)(expr))
-#define CAST_UNARY(operator, opnode, operand)                              \
-  do {                                                                     \
-    size_t width = typespec_get_width(opnode->type);                       \
-    int is_signed = typespec_is_signed(opnode->type);                      \
-    opnode->constant.integral.value =                                      \
-        SELECT_CAST(operator SELECT_CAST(operand->constant.integral.value, \
-                                         width, is_signed),                \
-                    width, is_signed);                                     \
+#define SHCA(optext, type, dest, left_value, right_value)       \
+  do {                                                          \
+    size_t selector = typespec_get_width(type)                  \
+                      << 4 * typespec_is_signed(type);          \
+    switch (selector) {                                         \
+      case X64_SIZEOF_CHAR:                                     \
+        dest = (unsigned char)(left_value)optext(right_value);  \
+        break;                                                  \
+      case X64_SIZEOF_SHORT:                                    \
+        dest = (unsigned short)(left_value)optext(right_value); \
+        break;                                                  \
+      case X64_SIZEOF_INT:                                      \
+        dest = (unsigned int)(left_value)optext(right_value);   \
+        break;                                                  \
+      case X64_SIZEOF_LONG:                                     \
+        dest = (unsigned long)(left_value)optext(right_value);  \
+        break;                                                  \
+      case X64_SIZEOF_CHAR << 4:                                \
+        dest = (signed char)(left_value)optext(right_value);    \
+        break;                                                  \
+      case X64_SIZEOF_SHORT << 4:                               \
+        dest = (short)(left_value)optext(right_value);          \
+        break;                                                  \
+      case X64_SIZEOF_INT << 4:                                 \
+        dest = (int)(left_value)optext(right_value);            \
+        break;                                                  \
+      case X64_SIZEOF_LONG << 4:                                \
+        dest = (long)(left_value)optext(right_value);           \
+        break;                                                  \
+    }                                                           \
   } while (0)
-#define CAST_BINARY(operator, opnode, left, right)                  \
-  do {                                                              \
-    size_t width = typespec_get_width(opnode->type);                \
-    int is_signed = typespec_is_signed(opnode->type);               \
-    opnode->constant.integral.value = SELECT_CAST(                  \
-        SELECT_CAST((left), width, is_signed) operator SELECT_CAST( \
-            (right), width, is_signed),                             \
-        width, is_signed);                                          \
+#define BINCA(optext, type, dest, left_value, right_value)                    \
+  do {                                                                        \
+    size_t selector = typespec_get_width(type)                                \
+                      << 4 * typespec_is_signed(type);                        \
+    switch (selector) {                                                       \
+      case X64_SIZEOF_CHAR:                                                   \
+        dest = (unsigned char)(left_value)optext(unsigned char)(right_value); \
+        break;                                                                \
+      case X64_SIZEOF_SHORT:                                                  \
+        dest =                                                                \
+            (unsigned short)(left_value)optext(unsigned short)(right_value);  \
+        break;                                                                \
+      case X64_SIZEOF_INT:                                                    \
+        dest = (unsigned int)(left_value)optext(unsigned int)(right_value);   \
+        break;                                                                \
+      case X64_SIZEOF_LONG:                                                   \
+        dest = (unsigned long)(left_value)optext(unsigned long)(right_value); \
+        break;                                                                \
+      case X64_SIZEOF_CHAR << 4:                                              \
+        dest = (signed char)(left_value)optext(signed char)(right_value);     \
+        break;                                                                \
+      case X64_SIZEOF_SHORT << 4:                                             \
+        dest = (short)(left_value)optext(short)(right_value);                 \
+        break;                                                                \
+      case X64_SIZEOF_INT << 4:                                               \
+        dest = (int)(left_value)optext(int)(right_value);                     \
+        break;                                                                \
+      case X64_SIZEOF_LONG << 4:                                              \
+        dest = (long)(left_value)optext(long)(right_value);                   \
+        break;                                                                \
+    }                                                                         \
   } while (0)
-#define BINOP_CASE(opchar, optext, optrans)                            \
-  case opchar:                                                         \
-    if ((left->attributes & right->attributes & ATTR_EXPR_CONST) &&    \
-        !((left->attributes | right->attributes) & ATTR_CONST_ADDR)) { \
-      operator->attributes |= ATTR_EXPR_CONST |(                       \
-          (left->attributes | right->attributes) & ATTR_CONST_INIT);   \
-      CAST_BINARY(optext, operator, left->constant.integral.value,     \
-                  right->constant.integral.value);                     \
-      return astree_adopt(operator, 2, left, right);                   \
-    } else {                                                           \
-      maybe_load_cexpr(left);                                          \
-      maybe_load_cexpr(right);                                         \
-      return optrans(operator, left, right);                           \
+#define UNCA(optext, type, dest, value)                \
+  do {                                                 \
+    size_t selector = typespec_get_width(type)         \
+                      << 4 * typespec_is_signed(type); \
+    switch (selector) {                                \
+      case X64_SIZEOF_CHAR:                            \
+        dest = optext(unsigned char)(value);           \
+        break;                                         \
+      case X64_SIZEOF_SHORT:                           \
+        dest = optext(unsigned short)(value);          \
+        break;                                         \
+      case X64_SIZEOF_INT:                             \
+        dest = optext(unsigned int)(value);            \
+        break;                                         \
+      case X64_SIZEOF_LONG:                            \
+        dest = optext(unsigned long)(value);           \
+        break;                                         \
+      case X64_SIZEOF_CHAR << 4:                       \
+        dest = optext(signed char)(value);             \
+        break;                                         \
+      case X64_SIZEOF_SHORT << 4:                      \
+        dest = optext(short)(value);                   \
+        break;                                         \
+      case X64_SIZEOF_INT << 4:                        \
+        dest = optext(int)(value);                     \
+        break;                                         \
+      case X64_SIZEOF_LONG << 4:                       \
+        dest = optext(long)(value);                    \
+        break;                                         \
+    }                                                  \
+  } while (0)
+#define BINOP_CASE(opchar, optext, optrans)                                 \
+  case opchar:                                                              \
+    if ((left->attributes & right->attributes & ATTR_EXPR_CONST) &&         \
+        !((left->attributes | right->attributes) & ATTR_CONST_ADDR)) {      \
+      operator->attributes |=(left->attributes | right->attributes) &       \
+          ATTR_MASK_CONST;                                                  \
+      BINCA(optext, operator->type, operator->constant.integral.value,      \
+            left->constant.integral.value, right->constant.integral.value); \
+      return astree_adopt(operator, 2, left, right);                        \
+    } else {                                                                \
+      maybe_load_cexpr(left);                                               \
+      maybe_load_cexpr(right);                                              \
+      return optrans(operator, left, right);                                \
     }
-#define UNOP_CASE(opchar, optext, optrans)           \
-  case opchar:                                       \
-    if ((operator->attributes & ATTR_EXPR_CONST) &&  \
-        !(operator->attributes & ATTR_CONST_ADDR)) { \
-      operator->attributes = operand->attributes;    \
-      CAST_UNARY(optext, operator, operand);         \
-      return astree_adopt(operator, 1, operand);     \
-    } else {                                         \
-      maybe_load_cexpr(operand);                     \
-      return optrans(operator, operand);             \
+#define UNOP_CASE(opchar, optext, optrans)                            \
+  case opchar:                                                        \
+    if ((operator->attributes & ATTR_EXPR_CONST) &&                   \
+        !(operator->attributes & ATTR_CONST_ADDR)) {                  \
+      operator->attributes |= operand->attributes & ATTR_MASK_CONST;  \
+      UNCA(optext, operator->type, operator->constant.integral.value, \
+           operand->constant.integral.value);                         \
+      return astree_adopt(operator, 1, operand);                      \
+    } else {                                                          \
+      maybe_load_cexpr(operand);                                      \
+      return optrans(operator, operand);                              \
     }
 
 ASTree *evaluate_intcon(ASTree *intcon) {
@@ -249,8 +317,9 @@ ASTree *evaluate_addition(ASTree *addition, ASTree *left, ASTree *right) {
         typespec_is_pointer(left->type) ? typespec_elem_width(left->type) : 1;
     addition->attributes |=
         (left->attributes | right->attributes) & ATTR_MASK_CONST;
-    CAST_BINARY(+, addition, left->constant.integral.value * left_stride,
-                right->constant.integral.value * right_stride);
+    BINCA(+, addition->type, addition->constant.integral.value,
+          left->constant.integral.value * left_stride,
+          right->constant.integral.value * right_stride);
   }
   return astree_adopt(addition, 2, left, right);
 }
@@ -284,8 +353,9 @@ ASTree *evaluate_subtraction(ASTree *subtraction, ASTree *left, ASTree *right) {
         typespec_is_pointer(left->type) ? typespec_elem_width(left->type) : 1;
     subtraction->attributes |=
         (left->attributes | right->attributes) & ATTR_MASK_CONST;
-    CAST_BINARY(-, subtraction, left->constant.integral.value * left_stride,
-                right->constant.integral.value * right_stride);
+    BINCA(-, subtraction->type, subtraction->constant.integral.value,
+          left->constant.integral.value * left_stride,
+          right->constant.integral.value * right_stride);
   } else {
     maybe_load_cexpr(left);
     maybe_load_cexpr(right);
@@ -299,12 +369,8 @@ ASTree *evaluate_shiftl(ASTree *shiftl, ASTree *left, ASTree *right) {
       !((left->attributes | right->attributes) & ATTR_CONST_ADDR)) {
     shiftl->attributes |=
         (left->attributes | right->attributes) & ATTR_MASK_CONST;
-    size_t width = typespec_get_width(shiftl->type);
-    int is_signed = typespec_is_signed(shiftl->type);
-    shiftl->constant.integral.value =
-        SELECT_CAST(SELECT_CAST(left->constant.integral.value, width, is_signed)
-                        << right->constant.integral.value,
-                    width, is_signed);
+    SHCA(<<, shiftl->type, shiftl->constant.integral.value,
+         left->constant.integral.value, right->constant.integral.value);
     return astree_adopt(shiftl, 2, left, right);
   } else {
     maybe_load_cexpr(left);
@@ -318,12 +384,8 @@ ASTree *evaluate_shiftr(ASTree *shiftr, ASTree *left, ASTree *right) {
       !((left->attributes | right->attributes) & ATTR_CONST_ADDR)) {
     shiftr->attributes |=
         (left->attributes | right->attributes) & ATTR_MASK_CONST;
-    size_t width = typespec_get_width(shiftr->type);
-    int is_signed = typespec_is_signed(shiftr->type);
-    shiftr->constant.integral.value =
-        SELECT_CAST(SELECT_CAST(left->constant.integral.value, width, is_signed)
-                        << right->constant.integral.value,
-                    width, is_signed);
+    SHCA(>>, shiftr->type, shiftr->constant.integral.value,
+         left->constant.integral.value, right->constant.integral.value);
     return astree_adopt(shiftr, 2, left, right);
   } else {
     maybe_load_cexpr(left);
@@ -347,28 +409,22 @@ ASTree *evaluate_relational(ASTree *relational, ASTree *left, ASTree *right) {
         typespec_is_pointer(left->type) || typespec_is_pointer(right->type)
             ? &SPEC_LONG
             : arithmetic_conversions(left->type, right->type);
-    size_t width = typespec_get_width(common_type);
-    int is_signed = typespec_is_signed(common_type);
     switch (relational->symbol) {
       case '<':
-        relational->constant.integral.value =
-            SELECT_CAST(left->constant.integral.value, width, is_signed) <
-            SELECT_CAST(left->constant.integral.value, width, is_signed);
+        BINCA(<, common_type, relational->constant.integral.value,
+              left->constant.integral.value, right->constant.integral.value);
         break;
       case TOK_LE:
-        relational->constant.integral.value =
-            SELECT_CAST(left->constant.integral.value, width, is_signed) <=
-            SELECT_CAST(left->constant.integral.value, width, is_signed);
+        BINCA(<=, common_type, relational->constant.integral.value,
+              left->constant.integral.value, right->constant.integral.value);
         break;
       case '>':
-        relational->constant.integral.value =
-            SELECT_CAST(left->constant.integral.value, width, is_signed) >
-            SELECT_CAST(left->constant.integral.value, width, is_signed);
+        BINCA(>, common_type, relational->constant.integral.value,
+              left->constant.integral.value, right->constant.integral.value);
         break;
       case TOK_GE:
-        relational->constant.integral.value =
-            SELECT_CAST(left->constant.integral.value, width, is_signed) >=
-            SELECT_CAST(left->constant.integral.value, width, is_signed);
+        BINCA(>=, common_type, relational->constant.integral.value,
+              left->constant.integral.value, right->constant.integral.value);
         break;
       default:
         abort();
@@ -403,17 +459,9 @@ ASTree *evaluate_equality(ASTree *equality, ASTree *left, ASTree *right) {
     equality->attributes |= ATTR_EXPR_CONST;
     const TypeSpec *promoted_type =
         arithmetic_conversions(left->type, right->type);
-    size_t width = typespec_get_width(promoted_type);
-    int is_signed = typespec_is_signed(promoted_type);
-    if (equality->symbol == TOK_EQ) {
-      equality->constant.integral.value =
-          SELECT_CAST(left->constant.integral.value, width, is_signed) ==
-          SELECT_CAST(right->constant.integral.value, width, is_signed);
-    } else {
-      equality->constant.integral.value =
-          SELECT_CAST(left->constant.integral.value, width, is_signed) !=
-          SELECT_CAST(right->constant.integral.value, width, is_signed);
-    }
+    BINCA(==, promoted_type, equality->constant.integral.value,
+          left->constant.integral.value, right->constant.integral.value);
+    equality->constant.integral.value ^= equality->symbol == TOK_NE;
   } else {
     maybe_load_cexpr(left);
     maybe_load_cexpr(right);
@@ -455,11 +503,9 @@ ASTree *evaluate_cast(ASTree *cast, ASTree *expr) {
       cast->constant = expr->constant;
     } else {
       if (typespec_is_pointer(cast->type)) cast->attributes |= ATTR_CONST_INIT;
-      size_t width = typespec_get_width(cast->type);
       /* is_signed can be used on pointers, and returns true */
-      int is_signed = typespec_is_signed(cast->type);
-      cast->constant.integral.value =
-          SELECT_CAST(expr->constant.integral.value, width, is_signed);
+      UNCA(+, cast->type, cast->constant.integral.value,
+           expr->constant.integral.value);
     }
     return astree_adopt(cast, 1, expr);
   } else {
@@ -479,16 +525,9 @@ ASTree *evaluate_conditional(ASTree *qmark, ASTree *condition,
     qmark->constant = selected_expr->constant;
     qmark->attributes |= (selected_expr->attributes & ATTR_MASK_CONST) |
                          (condition->attributes & ATTR_CONST_INIT);
-    if (typespec_is_arithmetic(qmark->type) &&
-        !(selected_expr->attributes & ATTR_CONST_ADDR)) {
-      size_t width = typespec_get_width(qmark->type);
-      int is_signed = typespec_is_signed(qmark->type);
-      qmark->constant.integral.value =
-          SELECT_CAST(selected_expr->constant.integral.value, width, is_signed);
-    } else if (typespec_is_pointer(qmark->type) &&
-               !(selected_expr->attributes & ATTR_CONST_ADDR)) {
-      qmark->constant.integral.value = SELECT_CAST(
-          selected_expr->constant.integral.value, X64_SIZEOF_LONG, TYPE_SIGNED);
+    if (!(selected_expr->attributes & ATTR_CONST_ADDR)) {
+      UNCA(+, qmark->type, qmark->constant.integral.value,
+           selected_expr->constant.integral.value);
     } else {
       qmark->constant = selected_expr->constant;
     }
@@ -595,31 +634,15 @@ ASTree *evaluate_unop(ASTree *operator, ASTree * operand) {
   switch (operator->symbol) {
     UNOP_CASE(TOK_NEG, -, translate_unop);
     UNOP_CASE('~', ~, translate_unop);
-    case TOK_POS:
-      if ((operator->attributes & ATTR_EXPR_CONST) &&
-          !(operator->attributes & ATTR_CONST_ADDR)) {
-        /* most of this is probably unnecessary since everything gets cast up
-         * to unsigned long when it is stored on the tree, but i have no idea
-         */
-        size_t width = typespec_get_width(operand->type);
-        int is_signed = typespec_is_signed(operand->type);
-        operator->attributes = operand->attributes;
-        operator->constant.integral.value = +
-            SELECT_CAST(operand->constant.integral.value, width, is_signed);
-        return astree_adopt(operator, 1, operand);
-      } else {
-        /* treat like a cast */
-        maybe_load_cexpr(operand);
-        return translate_cast(operator, operand);
-      }
+    /* treat like a cast */
+    UNOP_CASE(TOK_POS, +, translate_cast);
     case '!':
       if ((operator->attributes & ATTR_EXPR_CONST) &&
           !(operator->attributes & ATTR_CONST_ADDR)) {
-        operator->attributes = operand->attributes;
-        size_t width = typespec_get_width(operator->type);
-        int is_signed = typespec_is_signed(operator->type);
-        operator->constant.integral.value = !SELECT_CAST(
-            operand->constant.integral.value, width, is_signed);
+        operator->attributes |= operand->attributes & ATTR_MASK_CONST;
+        /* cast to operand type, not operator type */
+        UNCA(!, operand->type, operator->constant.integral.value,
+             operand->constant.integral.value);
         return astree_adopt(operator, 1, operand);
       } else {
         maybe_load_cexpr(operand);
