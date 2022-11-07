@@ -88,7 +88,8 @@
   GENERATOR(ALIGN, OPTYPE_DIRECTIVE, 0)   \
   GENERATOR(SIZE, OPTYPE_DIRECTIVE, 0)    \
   GENERATOR(TYPE, OPTYPE_DIRECTIVE, 0)    \
-  GENERATOR(STRING, OPTYPE_DIRECTIVE, 0)  \
+  GENERATOR(ASCII, OPTYPE_DIRECTIVE, 0)   \
+  GENERATOR(ASCIZ, OPTYPE_DIRECTIVE, 0)   \
   GENERATOR(SECTION, OPTYPE_DIRECTIVE, 0) \
   GENERATOR(BSS, OPTYPE_DIRECTIVE, 0)     \
   GENERATOR(TEXT, OPTYPE_DIRECTIVE, 0)    \
@@ -234,7 +235,12 @@ static ptrdiff_t window_size;
 
 static LinkedList *instructions;
 static ListIter *before_definition;
-static Map *string_constants;
+static struct {
+  const char *literal;
+  const char *label;
+} * literals;
+static size_t literals_cap = 10;
+static size_t literals_size;
 static Map *static_locals;
 
 size_t next_vreg(void) {
@@ -466,7 +472,8 @@ int opcode_is_directive(Opcode opcode) {
     case OP_ALIGN:
     case OP_SIZE:
     case OP_TYPE:
-    case OP_STRING:
+    case OP_ASCII:
+    case OP_ASCIZ:
     case OP_SECTION:
     case OP_BSS:
     case OP_TEXT:
@@ -475,6 +482,35 @@ int opcode_is_directive(Opcode opcode) {
     default:
       return 0;
   }
+}
+
+const char *asmgen_literal_label(const char *literal) {
+  size_t i;
+  for (i = 0; i < literals_size; ++i) {
+    if (strcmp(literals[i].literal, literal) == 0) {
+      return literals[i].label;
+    }
+  }
+
+  if (literals_size >= literals_cap) {
+    literals = realloc(literals, sizeof(*literals) * (literals_cap *= 2));
+  }
+
+  InstructionData *section_data = instr_init(OP_SECTION);
+  set_op_dir(&section_data->dest, 0, ".rodata");
+  /* TODO(Robert): determine when alignment needs to be set, if ever */
+  InstructionData *label_data = instr_init(OP_INVALID);
+  sprintf(label_data->label, STR_FMT, literals_size);
+  InstructionData *string_data = instr_init(OP_ASCIZ);
+  /* TODO(Robert): ugly cast */
+  set_op_imm(&string_data->dest, (uintmax_t)literal);
+  int status = liter_push_back(before_definition, &before_definition, 3,
+                               section_data, label_data, string_data);
+  if (status) abort();
+
+  literals[literals_size].literal = literal;
+  literals[literals_size++].label = label_data->label;
+  return label_data->label;
 }
 
 void assign_stack_space(SymbolValue *symval) {
@@ -664,30 +700,6 @@ ASTree *translate_ident(ASTree *ident) {
   ident->last_instr = liter_copy(ident->first_instr);
   if (ident->last_instr == NULL) abort();
   return ident;
-}
-
-ASTree *translate_stringcon(ASTree *stringcon) {
-  size_t *string_id =
-      map_get(string_constants, stringcon->lexinfo, strlen(stringcon->lexinfo));
-  if (!string_id) {
-    string_id = malloc(sizeof(size_t));
-    *string_id = map_size(string_constants);
-    int status = map_insert(string_constants, stringcon->lexinfo,
-                            strlen(stringcon->lexinfo), string_id);
-    if (status) abort();
-    InstructionData *section_data = instr_init(OP_SECTION);
-    set_op_dir(&section_data->dest, 0, ".rodata");
-    /* TODO(Robert): determine when alignment needs to be set, if ever */
-    InstructionData *label_data = instr_init(OP_INVALID);
-    strcpy(label_data->label, stringcon->lexinfo);
-    InstructionData *string_data = instr_init(OP_STRING);
-    set_op_imm(&string_data->dest, (uintmax_t)stringcon->lexinfo);
-    status = liter_push_back(before_definition, &before_definition, 3,
-                             section_data, label_data, string_data);
-    if (status) abort();
-  }
-  /* TODO(Robert): set node constval to label */
-  return stringcon;
 }
 
 ASTree *translate_cast(ASTree *cast, ASTree *expr) {
@@ -1913,6 +1925,61 @@ int init_scalar(const TypeSpec *type, ptrdiff_t displacement,
 int init_aggregate(const TypeSpec *agg_type, ptrdiff_t agg_disp,
                    ASTree *initializer, size_t start, ListIter *where);
 
+int init_literal(const TypeSpec *arr_type, ptrdiff_t arr_disp,
+                 ASTree *initializer, ListIter *where) {
+  if (arr_disp >= 0) {
+    size_t i;
+    for (i = 0; i < literals_size; ++i) {
+      if (literals[i].label == initializer->constant.address.label) {
+        InstructionData *ascii_data = instr_init(OP_ASCII);
+        /* TODO(Robert): ugly cast */
+        set_op_imm(&ascii_data->dest, (uintmax_t)literals[i].literal);
+        /* TODO(Robert): check that the string literal fits in the array
+         * during type checking
+         */
+        /* TODO(Robert): emit .asciz when the array size is deduced */
+        assert(typespec_get_width(arr_type) > strlen(literals[i].literal) - 2);
+        size_t zero_count =
+            typespec_get_width(arr_type) - (strlen(literals[i].literal) - 2);
+        if (zero_count > 0) {
+          InstructionData *zero_data = instr_init(OP_ZERO);
+          set_op_imm(&zero_data->dest, zero_count);
+          return liter_push_back(where, &where, 2, ascii_data, zero_data);
+        } else {
+          return liter_push_back(where, &where, 1, ascii_data);
+        }
+      }
+    }
+    /* literal not found */
+    abort();
+  } else {
+    InstructionData *literal_lea_data = instr_init(OP_LEA);
+    set_op_dir(&literal_lea_data->src, initializer->constant.address.disp,
+               initializer->constant.address.label);
+    set_op_reg(&literal_lea_data->dest, REG_QWORD, next_vreg());
+    InstructionData *arr_lea_data = instr_init(OP_LEA);
+    set_op_ind(&arr_lea_data->src, arr_disp, RBP_VREG, NULL);
+    set_op_reg(&arr_lea_data->dest, REG_QWORD, next_vreg());
+    int status =
+        liter_push_back(where, &where, 2, literal_lea_data, arr_lea_data);
+    if (status) abort();
+    /* TODO(Robert): make sure that iterators allow you to move freely to and
+     * from the anchor, just not over it
+     */
+    status = liter_advance(where, 1);
+    if (status) abort();
+    ListIter *saved_location = liter_prev(where, 1);
+    status =
+        bulk_mtom(arr_lea_data->dest.reg.num, literal_lea_data->dest.reg.num,
+                  arr_type, saved_location);
+    free(saved_location);
+    if (status) abort();
+    status = liter_advance(where, -1);
+    if (status) abort();
+    return 0;
+  }
+}
+
 int init_array(const TypeSpec *arr_type, ptrdiff_t arr_disp, ASTree *init_list,
                size_t start, ListIter *where) {
   TypeSpec elem_type;
@@ -2071,10 +2138,15 @@ int init_union(const TypeSpec *union_type, ptrdiff_t union_disp,
 int init_aggregate(const TypeSpec *agg_type, ptrdiff_t agg_disp,
                    ASTree *initializer, size_t start, ListIter *where) {
   assert(typespec_is_aggregate(agg_type) &&
-         initializer->symbol == TOK_INIT_LIST);
+         (initializer->symbol == TOK_INIT_LIST ||
+          initializer->symbol == TOK_STRINGCON));
   int consumed = -1;
   if (typespec_is_array(agg_type)) {
-    consumed = init_array(agg_type, agg_disp, initializer, start, where);
+    if (initializer->symbol == TOK_INIT_LIST) {
+      consumed = init_array(agg_type, agg_disp, initializer, start, where);
+    } else if (initializer->symbol == TOK_STRINGCON) {
+      consumed = init_literal(agg_type, agg_disp, initializer, where);
+    }
   } else if (typespec_is_struct(agg_type)) {
     consumed = init_struct(agg_type, agg_disp, initializer, start, where);
   } else if (typespec_is_union(agg_type)) {
@@ -2449,9 +2521,10 @@ int dir_to_str(InstructionData *data, char *str, size_t size) {
       assert(data->src.all.mode == MODE_DIRECT);
       return sprintf(str, ".%s %s, %s", OPCODES[OP_TYPE], data->dest.dir.lab,
                      data->src.dir.lab);
-    case OP_STRING:
+    case OP_ASCIZ:
+    case OP_ASCII:
       assert(data->dest.all.mode == MODE_IMMEDIATE);
-      return sprintf(str, ".%s %s", OPCODES[OP_STRING],
+      return sprintf(str, ".%s %s", OPCODES[data->opcode],
                      (const char *)data->dest.imm.val);
     case OP_BSS:
       /* fallthrough */
@@ -2546,9 +2619,7 @@ void asmgen_init_globals(const char *filename) {
   set_op_dir(&file_data->dest, NO_DISP, filename);
   assert(!llist_push_back(instructions, file_data));
   assert(before_definition = llist_iter_last(instructions));
-  string_constants = malloc(sizeof(*string_constants));
-  assert(!map_init(string_constants, DEFAULT_MAP_SIZE, NULL, free,
-                   strncmp_wrapper));
+  literals = malloc(sizeof(*literals) * literals_cap);
   static_locals = malloc(sizeof(*static_locals));
   assert(
       !map_init(static_locals, DEFAULT_MAP_SIZE, NULL, free, strncmp_wrapper));
@@ -2557,6 +2628,6 @@ void asmgen_init_globals(const char *filename) {
 void asmgen_free_globals(void) {
   free(before_definition);
   assert(!llist_destroy(instructions));
-  assert(!map_destroy(string_constants));
+  free(literals);
   assert(!map_destroy(static_locals));
 }
