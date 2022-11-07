@@ -254,6 +254,14 @@ ASTree *evaluate_charcon(ASTree *charcon) {
   return charcon;
 }
 
+ASTree *evaluate_stringcon(ASTree *stringcon) {
+  stringcon->attributes |= ATTR_CONST_INIT | ATTR_CONST_ADDR | ATTR_EXPR_CONST;
+  /* this function will emit the necessary directives */
+  stringcon->constant.address.label = asmgen_literal_label(stringcon->lexinfo);
+  stringcon->constant.address.disp = 0;
+  return stringcon;
+}
+
 ASTree *evaluate_ident(ASTree *ident) {
   const char *id_str = ident->lexinfo;
   size_t id_str_len = strlen(id_str);

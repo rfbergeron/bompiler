@@ -31,7 +31,7 @@ ASTree *validate_stringcon(ASTree *stringcon) {
   array_aux->data.memory_loc.length = strlen(stringcon->lexinfo) - 1;
 
   stringcon->type = stringcon_type;
-  return stringcon;
+  return evaluate_stringcon(stringcon);
 }
 
 ASTree *validate_ident(ASTree *ident) {
