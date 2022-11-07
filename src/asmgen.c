@@ -715,20 +715,6 @@ ASTree *translate_cast(ASTree *cast, ASTree *expr) {
   return astree_adopt(cast, 1, expr);
 }
 
-ASTree *translate_intcon(ASTree *constant) {
-  DEBUGS('g', "Translating integer constant");
-  InstructionData *data = instr_init(OP_MOV);
-  set_op_reg(&data->dest, typespec_get_width(constant->type), next_vreg());
-  set_op_imm(&data->src, constant->constant.integral.value);
-  int status = llist_push_back(instructions, data);
-  if (status) abort();
-  constant->first_instr = llist_iter_last(instructions);
-  if (constant->first_instr == NULL) abort();
-  constant->last_instr = liter_copy(constant->first_instr);
-  if (constant->last_instr == NULL) abort();
-  return constant;
-}
-
 /* Two classes of operators whose result is a boolean:
  * - comparison: >, <, >=, <=, ==, !=
  * - logical: &&, ||, !
@@ -1821,19 +1807,18 @@ ASTree *translate_label(ASTree *label, ASTree *ident, ASTree *stmt) {
 
 ASTree *translate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
   case_->last_instr = liter_copy(stmt->last_instr);
-  if (case_->last_instr == 0) abort();
+  if (case_->last_instr == NULL) abort();
 
   const TypeSpec *control_type = state_get_control_type(state);
   if (control_type == &SPEC_EMPTY) abort();
 
-  int status = scalar_conversions(expr, control_type);
-  InstructionData *expr_data = liter_get(expr->last_instr);
-  if (expr_data == NULL) abort();
-
+  InstructionData *mov_data = instr_init(OP_MOV);
+  set_op_reg(&mov_data->dest, typespec_get_width(control_type), next_vreg());
+  set_op_imm(&mov_data->src, expr->constant.integral.value);
   InstructionData *test_data = instr_init(OP_TEST);
   set_op_reg(&test_data->dest, typespec_get_width(control_type),
              state_get_control_reg(state));
-  test_data->src = expr_data->dest;
+  test_data->src = mov_data->dest;
   InstructionData *jmp_data = instr_init(OP_JNE);
   set_op_dir(&jmp_data->dest, NO_DISP, CASE_FMT, state_get_case_id(state));
   InstructionData *fall_label = instr_init(OP_NOP);
@@ -1842,11 +1827,9 @@ ASTree *translate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
   sprintf(case_label->label, CASE_FMT, case_->jump_id, case_->case_id);
   InstructionData *fall_jmp_data = instr_init(OP_JMP);
   set_op_dir(&fall_jmp_data->dest, NO_DISP, fall_label->label);
-  status = liter_push_front(expr->first_instr, &case_->first_instr, 2,
-                            fall_jmp_data, case_label);
-  if (status) abort();
-  status = liter_push_back(expr->last_instr, NULL, 3, test_data, jmp_data,
-                           fall_label);
+  int status =
+      liter_push_front(stmt->first_instr, &case_->first_instr, 6, fall_jmp_data,
+                       case_label, mov_data, test_data, jmp_data, fall_label);
   if (status) abort();
   return astree_adopt(case_, 2, expr, stmt);
 }
@@ -1896,7 +1879,12 @@ int init_scalar(const TypeSpec *type, ptrdiff_t displacement,
         abort();
     }
     InstructionData *data = instr_init(directive);
-    set_op_imm(&data->dest, initializer->constant.integral.value);
+    if (initializer->attributes & ATTR_CONST_ADDR) {
+      set_op_dir(&data->dest, initializer->constant.address.disp,
+                 initializer->constant.address.label);
+    } else {
+      set_op_imm(&data->dest, initializer->constant.integral.value);
+    }
     return liter_push_back(where, &where, 1, data);
   } else if (initializer->attributes & ATTR_EXPR_CONST) {
     /* TODO(Robert): update flag once merged with main, and remove all
@@ -1904,13 +1892,20 @@ int init_scalar(const TypeSpec *type, ptrdiff_t displacement,
      * emit any instructions for valid constant expressions until they are
      * used in a non-constant expression
      */
-    InstructionData *mov_data = instr_init(OP_MOV);
-    set_op_imm(&mov_data->src, initializer->constant.integral.value);
-    set_op_reg(&mov_data->dest, typespec_get_width(type), next_vreg());
+    InstructionData *load_data;
+    if (initializer->attributes & ATTR_CONST_ADDR) {
+      load_data = instr_init(OP_LEA);
+      set_op_dir(&load_data->src, initializer->constant.address.disp,
+                 initializer->constant.address.label);
+    } else {
+      load_data = instr_init(OP_MOV);
+      set_op_imm(&load_data->src, initializer->constant.integral.value);
+    }
+    set_op_reg(&load_data->dest, typespec_get_width(type), next_vreg());
     InstructionData *mov_data_2 = instr_init(OP_MOV);
-    mov_data_2->src = mov_data->dest;
+    mov_data_2->src = load_data->dest;
     set_op_ind(&mov_data_2->dest, displacement, RBP_VREG, NULL);
-    return liter_push_back(where, &where, 2, mov_data, mov_data_2);
+    return liter_push_back(where, &where, 2, load_data, mov_data_2);
   } else {
     int status = scalar_conversions(initializer, type);
     if (status) return status;

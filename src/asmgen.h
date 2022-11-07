@@ -10,7 +10,6 @@ const char *asmgen_literal_label(const char *literal);
 ASTree *translate_empty_expr(ASTree *empty_expr);
 ASTree *translate_ident(ASTree *ident);
 ASTree *translate_cast(ASTree *cast, ASTree *expr);
-ASTree *translate_intcon(ASTree *constant);
 ASTree *translate_logical_not(ASTree * not, ASTree *operand);
 ASTree *translate_logical(ASTree *operator, ASTree * left, ASTree *right);
 ASTree *translate_comparison(ASTree *operator, ASTree * left, ASTree *right);
