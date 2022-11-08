@@ -7,6 +7,7 @@ ASTree *validate_return(ASTree *ret, ASTree *expr);
 ASTree *validate_ifelse(ASTree *ifelse, ASTree *condition, ASTree *if_body,
                         ASTree *else_body);
 ASTree *validate_switch(ASTree *switch_, ASTree *expr, ASTree *stmt);
+ASTree *validate_switch_expr(ASTree *expr);
 ASTree *validate_while(ASTree *while_, ASTree *condition, ASTree *stmt);
 ASTree *validate_do(ASTree *do_, ASTree *stmt, ASTree *condition);
 ASTree *validate_for(ASTree *for_, ASTree *init_expr, ASTree *pre_iter_expr,
