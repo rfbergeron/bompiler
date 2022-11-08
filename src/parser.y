@@ -210,7 +210,7 @@ while               : TOK_WHILE '(' expr ')' stmt                       { $$ = b
 ifelse              : TOK_IF '(' expr ')' stmt TOK_ELSE stmt            { $$ = bcc_yyval = validate_ifelse($1, $3, $5, $7); parser_cleanup (3, $2, $4, $6); }
                     | TOK_IF '(' expr ')' stmt %prec TOK_ELSE           { $$ = bcc_yyval = validate_ifelse($1, $3, $5, &EMPTY_EXPR); parser_cleanup (2, $2, $4); }
                     ;
-switch              : TOK_SWITCH '(' expr ')' stmt                      { $$ = bcc_yyval = validate_switch($1, $3, $5); parser_cleanup(2, $2, $4); }
+switch              : TOK_SWITCH '(' switch_expr ')' stmt               { $$ = bcc_yyval = validate_switch($1, $3, $5); parser_cleanup(2, $2, $4); }
                     ;
 switch_expr         : expr                                              { $$ = bcc_yyval = validate_switch_expr($1); }
                     ;

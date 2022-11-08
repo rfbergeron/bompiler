@@ -9,7 +9,6 @@ PROC_STACK(size_t_stack, size_t)
 CompilerState *state_init(void) {
   CompilerState *state = malloc(sizeof(*state));
   llist_init(&state->table_stack, NULL, NULL);
-  llist_init(&state->jump_stack, NULL, NULL);
   llist_init(&state->switch_stack, NULL, NULL);
   size_t_stack_init(&state->break_stack, 4);
   size_t_stack_init(&state->continue_stack, 4);
@@ -19,7 +18,6 @@ CompilerState *state_init(void) {
 
 int state_destroy(CompilerState *state) {
   llist_destroy(&state->table_stack);
-  llist_destroy(&state->jump_stack);
   llist_destroy(&state->switch_stack);
   size_t_stack_destroy(&state->break_stack);
   size_t_stack_destroy(&state->continue_stack);
@@ -48,44 +46,6 @@ int state_pop_table(CompilerState *state) {
 
 SymbolTable *state_peek_table(CompilerState *state) {
   return llist_front(&state->table_stack);
-}
-
-int state_push_jump(CompilerState *state, JumpEntry *jump_entry) {
-  if (llist_front(&state->jump_stack) == jump_entry) {
-    fprintf(stderr, "ERROR: attempted to push same jump target twice.\n");
-    return -1;
-  } else {
-    return llist_push_front(&state->jump_stack, jump_entry);
-  }
-}
-
-int state_pop_jump(CompilerState *state) {
-  if (llist_empty(&state->jump_stack)) {
-    fprintf(stderr, "ERROR: attempted to pop jump target from empty stack.\n");
-    return -1;
-  } else {
-    llist_pop_front(&state->jump_stack);
-    return 0;
-  }
-}
-
-int state_push_type_error(CompilerState *state, TypeSpec *errtype) {
-  if (llist_front(&state->error_stack) == errtype) {
-    fprintf(stderr, "ERROR: attempted to push same type error twice.\n");
-    return -1;
-  } else {
-    return llist_push_front(&state->error_stack, errtype);
-  }
-}
-
-int state_pop_type_error(CompilerState *state) {
-  if (llist_empty(&state->error_stack)) {
-    fprintf(stderr, "ERROR: attempted to pop type error from empty stack.\n");
-    return -1;
-  } else {
-    llist_pop_front(&state->error_stack);
-    return 0;
-  }
 }
 
 int state_get_symbol(CompilerState *state, const char *ident,
@@ -183,43 +143,6 @@ int state_insert_label(CompilerState *state, const char *ident,
     return -1;
   }
   return symbol_table_insert_label(function_table, ident, ident_len, labval);
-}
-
-JumpEntry *state_get_iteration(CompilerState *state) {
-  if (!llist_empty(&state->jump_stack)) {
-    size_t i;
-    for (i = 0; i < llist_size(&state->jump_stack); ++i) {
-      JumpEntry *entry = llist_get(&state->jump_stack, i);
-      if (entry->type == JUMP_ITERATION) {
-        return entry;
-      }
-    }
-  }
-  fprintf(stderr, "ERROR: no valid iteration context.\n");
-  return NULL;
-}
-
-JumpEntry *state_get_switch(CompilerState *state) {
-  if (!llist_empty(&state->jump_stack)) {
-    size_t i;
-    for (i = 0; i < llist_size(&state->jump_stack); ++i) {
-      JumpEntry *entry = llist_get(&state->jump_stack, i);
-      if (entry->type == JUMP_SWITCH) {
-        return entry;
-      }
-    }
-  }
-  fprintf(stderr, "ERROR: no valid switch context.\n");
-  return NULL;
-}
-
-JumpEntry *state_get_jump(CompilerState *state) {
-  if (llist_empty(&state->jump_stack)) {
-    fprintf(stderr, "ERROR: no valid jump context.\n");
-    return NULL;
-  } else {
-    return llist_front(&state->jump_stack);
-  }
 }
 
 size_t state_get_selection_id(CompilerState *state) {
