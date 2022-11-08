@@ -12,7 +12,7 @@ ASTree *validate_arg(ASTree *call, ASTree *arg);
 ASTree *validate_call(ASTree *call, ASTree *function);
 ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
                              ASTree *true_expr, ASTree *false_expr);
-ASTree *validate_comma(ASTree *comma, ASTree *left_expr, ASTree *right_expr);
+ASTree *validate_comma(ASTree *comma, ASTree *left, ASTree *right);
 ASTree *validate_cast(ASTree *cast, ASTree *declaration, ASTree *expr);
 ASTree *validate_addition(ASTree *operator, ASTree * left, ASTree *right);
 ASTree *validate_logical(ASTree *operator, ASTree * left, ASTree *right);

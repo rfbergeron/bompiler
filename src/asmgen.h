@@ -26,6 +26,7 @@ ASTree *translate_multiplication(ASTree *operator, ASTree * left,
 ASTree *translate_binop(ASTree *operator, ASTree * left, ASTree *right);
 ASTree *translate_conditional(ASTree *qmark, ASTree *condition,
                               ASTree *true_expr, ASTree *false_expr);
+ASTree *translate_comma(ASTree *comma, ASTree *left, ASTree *right);
 ASTree *translate_assignment(ASTree *assignment, ASTree *lvalue,
                              ASTree *rvalue);
 ASTree *translate_call(ASTree *call);

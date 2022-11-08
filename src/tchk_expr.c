@@ -222,15 +222,14 @@ ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
   return evaluate_conditional(qmark, condition, true_expr, false_expr);
 }
 
-ASTree *validate_comma(ASTree *comma, ASTree *left_expr, ASTree *right_expr) {
-  if (left_expr->symbol == TOK_TYPE_ERROR ||
-      right_expr->symbol == TOK_TYPE_ERROR) {
-    return astree_propogate_errnode_v(comma, 2, left_expr, right_expr);
+ASTree *validate_comma(ASTree *comma, ASTree *left, ASTree *right) {
+  if (left->symbol == TOK_TYPE_ERROR || right->symbol == TOK_TYPE_ERROR) {
+    return astree_propogate_errnode_v(comma, 2, left, right);
   }
-  pointer_conversions(left_expr);
-  pointer_conversions(right_expr);
-  comma->type = right_expr->type;
-  return astree_adopt(comma, 2, left_expr, right_expr);
+  pointer_conversions(left);
+  pointer_conversions(right);
+  comma->type = right->type;
+  return astree_adopt(comma, 2, left, right);
 }
 
 ASTree *validate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
