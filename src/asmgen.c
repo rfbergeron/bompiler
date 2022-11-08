@@ -1272,6 +1272,14 @@ ASTree *translate_conditional(ASTree *qmark, ASTree *condition,
   return astree_adopt(qmark, 3, condition, true_expr, false_expr);
 }
 
+ASTree *translate_comma(ASTree *comma, ASTree *left, ASTree *right) {
+  comma->first_instr = liter_copy(left->first_instr);
+  if (comma->first_instr == NULL) abort();
+  comma->last_instr = liter_copy(right->last_instr);
+  if (comma->last_instr == NULL) abort();
+  return astree_adopt(comma, 2, left, right);
+}
+
 int assign_aggregate(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   assignment->first_instr = liter_copy(lvalue->first_instr);
   if (assignment->first_instr == NULL) return -1;
