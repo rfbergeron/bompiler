@@ -114,8 +114,8 @@
             left->constant.integral.value, right->constant.integral.value); \
       return astree_adopt(operator, 2, left, right);                        \
     } else {                                                                \
-      maybe_load_cexpr(left);                                               \
-      maybe_load_cexpr(right);                                              \
+      maybe_load_cexpr(right, NULL);                                        \
+      maybe_load_cexpr(left, right->first_instr);                           \
       return optrans(operator, left, right);                                \
     }
 #define UNOP_CASE(opchar, optext, optrans)                            \
@@ -127,7 +127,7 @@
            operand->constant.integral.value);                         \
       return astree_adopt(operator, 1, operand);                      \
     } else {                                                          \
-      maybe_load_cexpr(operand);                                      \
+      maybe_load_cexpr(operand, NULL);                                \
       return optrans(operator, operand);                              \
     }
 
@@ -299,8 +299,8 @@ ASTree *evaluate_addition(ASTree *addition, ASTree *left, ASTree *right) {
        typespec_is_pointer(right->type)) ||
       ((right->attributes & ATTR_CONST_ADDR) &&
        typespec_is_pointer(left->type))) {
-    maybe_load_cexpr(left);
-    maybe_load_cexpr(right);
+    maybe_load_cexpr(right, NULL);
+    maybe_load_cexpr(left, right->first_instr);
     return translate_addition(addition, left, right);
   } else if ((left->attributes & ATTR_CONST_ADDR)) {
     size_t stride =
@@ -365,8 +365,8 @@ ASTree *evaluate_subtraction(ASTree *subtraction, ASTree *left, ASTree *right) {
           left->constant.integral.value * left_stride,
           right->constant.integral.value * right_stride);
   } else {
-    maybe_load_cexpr(left);
-    maybe_load_cexpr(right);
+    maybe_load_cexpr(right, NULL);
+    maybe_load_cexpr(left, right->first_instr);
     return translate_addition(subtraction, left, right);
   }
   return astree_adopt(subtraction, 2, left, right);
@@ -381,8 +381,8 @@ ASTree *evaluate_shiftl(ASTree *shiftl, ASTree *left, ASTree *right) {
          left->constant.integral.value, right->constant.integral.value);
     return astree_adopt(shiftl, 2, left, right);
   } else {
-    maybe_load_cexpr(left);
-    maybe_load_cexpr(right);
+    maybe_load_cexpr(right, NULL);
+    maybe_load_cexpr(left, right->first_instr);
     return translate_binop(shiftl, left, right);
   }
 }
@@ -396,8 +396,8 @@ ASTree *evaluate_shiftr(ASTree *shiftr, ASTree *left, ASTree *right) {
          left->constant.integral.value, right->constant.integral.value);
     return astree_adopt(shiftr, 2, left, right);
   } else {
-    maybe_load_cexpr(left);
-    maybe_load_cexpr(right);
+    maybe_load_cexpr(right, NULL);
+    maybe_load_cexpr(left, right->first_instr);
     return translate_binop(shiftr, left, right);
   }
 }
@@ -439,8 +439,8 @@ ASTree *evaluate_relational(ASTree *relational, ASTree *left, ASTree *right) {
     }
     return astree_adopt(relational, 2, left, right);
   } else {
-    maybe_load_cexpr(left);
-    maybe_load_cexpr(right);
+    maybe_load_cexpr(right, NULL);
+    maybe_load_cexpr(left, right->first_instr);
     return translate_comparison(relational, left, right);
   }
 }
@@ -471,8 +471,8 @@ ASTree *evaluate_equality(ASTree *equality, ASTree *left, ASTree *right) {
           left->constant.integral.value, right->constant.integral.value);
     equality->constant.integral.value ^= equality->symbol == TOK_NE;
   } else {
-    maybe_load_cexpr(left);
-    maybe_load_cexpr(right);
+    maybe_load_cexpr(right, NULL);
+    maybe_load_cexpr(left, right->first_instr);
     return translate_comparison(equality, left, right);
   }
   return astree_adopt(equality, 2, left, right);
@@ -498,8 +498,8 @@ ASTree *evaluate_logical(ASTree *logical, ASTree *left, ASTree *right) {
     }
     return astree_adopt(logical, 2, left, right);
   } else {
-    maybe_load_cexpr(left);
-    maybe_load_cexpr(right);
+    maybe_load_cexpr(right, NULL);
+    maybe_load_cexpr(left, right->first_instr);
     return translate_logical(logical, left, right);
   }
 }
@@ -517,7 +517,7 @@ ASTree *evaluate_cast(ASTree *cast, ASTree *expr) {
     }
     return astree_adopt(cast, 1, expr);
   } else {
-    maybe_load_cexpr(expr);
+    maybe_load_cexpr(expr, NULL);
     return translate_cast(cast, expr);
   }
 }
@@ -541,9 +541,9 @@ ASTree *evaluate_conditional(ASTree *qmark, ASTree *condition,
     }
     return astree_adopt(qmark, 3, condition, true_expr, false_expr);
   } else {
-    maybe_load_cexpr(condition);
-    maybe_load_cexpr(true_expr);
-    maybe_load_cexpr(false_expr);
+    maybe_load_cexpr(false_expr, NULL);
+    maybe_load_cexpr(true_expr, false_expr->first_instr);
+    maybe_load_cexpr(condition, true_expr->first_instr);
     return translate_conditional(qmark, condition, true_expr, false_expr);
   }
 }
@@ -566,8 +566,8 @@ ASTree *evaluate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
         (long)(index->constant.integral.value *
                typespec_get_width(subscript->type));
   } else {
-    maybe_load_cexpr(pointer);
-    maybe_load_cexpr(index);
+    maybe_load_cexpr(index, NULL);
+    maybe_load_cexpr(pointer, index->first_instr);
     return translate_subscript(subscript, pointer, index);
   }
   return astree_adopt(subscript, 2, pointer, index);
@@ -579,7 +579,7 @@ ASTree *evaluate_addrof(ASTree *addrof, ASTree *operand) {
     addrof->constant = operand->constant;
     return astree_adopt(addrof, 1, operand);
   } else {
-    maybe_load_cexpr(operand);
+    maybe_load_cexpr(operand, NULL);
     return translate_addrof(addrof, operand);
   }
 }
@@ -597,7 +597,7 @@ ASTree *evaluate_reference(ASTree *reference, ASTree *struct_, ASTree *member) {
     /* scalars should not be castable to aggregates */
     assert(!(struct_->attributes & ATTR_EXPR_CONST) ||
            reference->symbol == TOK_ARROW);
-    maybe_load_cexpr(struct_);
+    maybe_load_cexpr(struct_, NULL);
     return translate_reference(reference, struct_, member);
   }
 }
@@ -653,7 +653,7 @@ ASTree *evaluate_unop(ASTree *operator, ASTree * operand) {
              operand->constant.integral.value);
         return astree_adopt(operator, 1, operand);
       } else {
-        maybe_load_cexpr(operand);
+        maybe_load_cexpr(operand, NULL);
         return translate_logical_not(operator, operand);
       }
     case TOK_SIZEOF:
