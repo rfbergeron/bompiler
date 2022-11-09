@@ -3,9 +3,10 @@
 
 #include "astree.h"
 #include "attributes.h"
+#include "badllist.h"
 #include "lyutils.h"
 
-void maybe_load_cexpr(ASTree *expr);
+void maybe_load_cexpr(ASTree *expr, ListIter *where);
 const char *asmgen_literal_label(const char *literal);
 ASTree *translate_empty_expr(ASTree *empty_expr);
 ASTree *translate_ident(ASTree *ident);

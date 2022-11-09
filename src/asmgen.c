@@ -738,28 +738,31 @@ ASTree *translate_empty_expr(ASTree *empty_expr) {
   return empty_expr;
 }
 
-void maybe_load_cexpr(ASTree *expr) {
-  if (expr->attributes & ATTR_CONST_ADDR) {
-    InstructionData *lea_data = instr_init(OP_LEA);
-    set_op_dir(&lea_data->src, expr->constant.address.disp,
-               expr->constant.address.label);
-    set_op_reg(&lea_data->dest, REG_QWORD, next_vreg());
-    int status = llist_push_back(instructions, lea_data);
-    if (status) abort();
-    expr->first_instr = llist_iter_last(instructions);
-    if (expr->first_instr == NULL) abort();
-    expr->last_instr = llist_iter_last(instructions);
-    if (expr->last_instr == NULL) abort();
-  } else if (expr->attributes & ATTR_EXPR_CONST) {
-    InstructionData *mov_data = instr_init(OP_MOV);
-    set_op_imm(&mov_data->src, expr->constant.integral.value);
-    set_op_reg(&mov_data->dest, typespec_get_width(expr->type), next_vreg());
-    int status = llist_push_back(instructions, mov_data);
-    if (status) abort();
-    expr->first_instr = llist_iter_last(instructions);
-    if (expr->first_instr == NULL) abort();
-    expr->last_instr = llist_iter_last(instructions);
-    if (expr->last_instr == NULL) abort();
+void maybe_load_cexpr(ASTree *expr, ListIter *where) {
+  if (expr->attributes & ATTR_EXPR_CONST) {
+    InstructionData *load_data;
+    if (expr->attributes & ATTR_CONST_ADDR) {
+      load_data = instr_init(OP_LEA);
+      set_op_dir(&load_data->src, expr->constant.address.disp,
+                 expr->constant.address.label);
+    } else {
+      load_data = instr_init(OP_MOV);
+      set_op_imm(&load_data->src, expr->constant.integral.value);
+    }
+    set_op_reg(&load_data->dest, typespec_get_width(expr->type), next_vreg());
+    if (where) {
+      int status = liter_push_front(where, &expr->first_instr, 1, load_data);
+      if (status) abort();
+      expr->last_instr = liter_copy(expr->first_instr);
+      if (expr->last_instr == NULL) abort();
+    } else {
+      int status = llist_push_back(instructions, load_data);
+      if (status) abort();
+      expr->first_instr = llist_iter_last(instructions);
+      if (expr->first_instr == NULL) abort();
+      expr->last_instr = llist_iter_last(instructions);
+      if (expr->last_instr == NULL) abort();
+    }
   }
 }
 
@@ -1273,7 +1276,8 @@ ASTree *translate_conditional(ASTree *qmark, ASTree *condition,
 }
 
 ASTree *translate_comma(ASTree *comma, ASTree *left, ASTree *right) {
-  comma->first_instr = liter_copy(left->first_instr);
+  comma->first_instr = liter_copy(
+      left->first_instr == NULL ? right->first_instr : left->first_instr);
   if (comma->first_instr == NULL) abort();
   comma->last_instr = liter_copy(right->last_instr);
   if (comma->last_instr == NULL) abort();
@@ -2297,38 +2301,77 @@ ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
     int status =
         translate_static_prelude(declarator, symval, before_definition);
     if (status) abort();
+    if (typespec_is_aggregate(declarator->type)) {
+      int consumed = init_aggregate(declarator->type, symval->disp, initializer,
+                                    0, before_definition);
+      if (consumed < 0) abort();
+    } else {
+      int status = init_scalar(declarator->type, symval->disp, initializer,
+                               before_definition);
+      if (status) abort();
+    }
+    if (declaration->first_instr == NULL) {
+      InstructionData *nop_data = instr_init(OP_NOP);
+      int status = llist_push_back(instructions, nop_data);
+      if (status) abort();
+      declaration->first_instr = llist_iter_last(instructions);
+      if (declaration->first_instr == NULL) abort();
+      declaration->last_instr = llist_iter_last(instructions);
+      if (declaration->last_instr == NULL) abort();
+    }
   } else {
     assign_stack_space(symval);
+    if (declaration->first_instr == NULL) {
+      declaration->first_instr = llist_iter_last(instructions);
+      if (declaration->first_instr == NULL) abort();
+    }
+
+    if (typespec_is_aggregate(declarator->type)) {
+      int consumed = init_aggregate(declarator->type, symval->disp, initializer,
+                                    0, before_definition);
+      if (consumed < 0) abort();
+    } else {
+      int status = init_scalar(declarator->type, symval->disp, initializer,
+                               before_definition);
+      if (status) abort();
+    }
+    int status = liter_advance(declaration->first_instr, 1);
+    if (status) abort();
+    free(declaration->last_instr);
+    declaration->last_instr = llist_iter_last(instructions);
+    if (declaration->last_instr == NULL) abort();
   }
 
-  if (typespec_is_aggregate(declarator->type)) {
-    int consumed = init_aggregate(declarator->type, symval->disp, initializer,
-                                  0, before_definition);
-    if (consumed < 0) abort();
-  } else {
-    int status = init_scalar(declarator->type, symval->disp, initializer,
-                             before_definition);
-    if (status) abort();
-  }
   return astree_adopt(declaration, 1,
                       astree_adopt(assignment, 2, declarator, initializer));
 }
 
 ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
   DEBUGS('g', "Translating local declaration");
-  SymbolValue *symval = NULL;
-  assert(state_get_symbol(state, (char *)declarator->lexinfo,
-                          strlen(declarator->lexinfo), &symval));
-  assert(symval);
-  if (!(symval->flags & SYMFLAG_INHERIT)) {
-    if (symval->flags & SYMFLAG_STORE_STAT) {
-      assign_static_space(declarator->lexinfo, symval);
-      int status =
-          translate_static_prelude(declarator, symval, before_definition);
-      if (status) abort();
-    } else if (symval->flags & SYMFLAG_STORE_AUTO) {
-      assign_stack_space(symval);
+  if (declarator->symbol != TOK_TYPE_NAME) {
+    SymbolValue *symval = NULL;
+    assert(state_get_symbol(state, (char *)declarator->lexinfo,
+                            strlen(declarator->lexinfo), &symval));
+    assert(symval);
+    if (!(symval->flags & SYMFLAG_INHERIT)) {
+      if (symval->flags & SYMFLAG_STORE_STAT) {
+        assign_static_space(declarator->lexinfo, symval);
+        int status =
+            translate_static_prelude(declarator, symval, before_definition);
+        if (status) abort();
+      } else if (symval->flags & SYMFLAG_STORE_AUTO) {
+        assign_stack_space(symval);
+      }
     }
+  }
+  if (declaration->first_instr == NULL) {
+    InstructionData *nop_data = instr_init(OP_NOP);
+    int status = llist_push_back(instructions, nop_data);
+    if (status) abort();
+    declaration->first_instr = llist_iter_last(instructions);
+    if (declaration->first_instr == NULL) abort();
+    declaration->last_instr = llist_iter_last(instructions);
+    if (declaration->last_instr == NULL) abort();
   }
   return astree_adopt(declaration, 1, declarator);
 }
@@ -2367,6 +2410,8 @@ ASTree *translate_global_init(ASTree *declaration, ASTree *assignment,
 
 ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
   DEBUGS('g', "Translating global declaration");
+  if (declarator->symbol == TOK_TYPE_NAME)
+    return astree_adopt(declaration, 1, declarator);
   SymbolValue *symval = NULL;
   assert(state_get_symbol(state, (char *)declarator->lexinfo,
                           strlen(declarator->lexinfo), &symval));

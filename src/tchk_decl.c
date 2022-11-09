@@ -1,5 +1,6 @@
 #include "tchk_decl.h"
 
+#include "asmgen.h"
 #include "assert.h"
 #include "badalist.h"
 #include "lyutils.h"
@@ -825,36 +826,25 @@ ASTree *define_symbol(ASTree *declaration, ASTree *declarator,
       typespec_is_union(declarator->type)) {
     initializer =
         validate_struct_init((TypeSpec *)declarator->type, initializer);
-    if (initializer->symbol == TOK_TYPE_ERROR) {
-      return astree_propogate_errnode_v(
-          declaration, 1,
-          astree_propogate_errnode_v(equal_sign, 2, declarator, initializer));
-    } else {
-      return astree_adopt(declaration, 1,
-                          astree_adopt(equal_sign, 2, declarator, initializer));
-    }
   } else if (typespec_is_array(declarator->type)) {
     initializer =
         validate_array_init((TypeSpec *)declarator->type, initializer);
-    if (initializer->symbol == TOK_TYPE_ERROR) {
-      return astree_propogate_errnode_v(
-          declaration, 1,
-          astree_propogate_errnode_v(equal_sign, 2, declarator, initializer));
-    } else {
-      return astree_adopt(declaration, 1,
-                          astree_adopt(equal_sign, 2, declarator, initializer));
-    }
   } else {
     initializer =
         validate_scalar_init((TypeSpec *)declarator->type, initializer);
-    if (initializer->symbol == TOK_TYPE_ERROR) {
-      return astree_propogate_errnode_v(
-          declaration, 1,
-          astree_propogate_errnode_v(equal_sign, 2, declarator, initializer));
-    } else {
-      return astree_adopt(declaration, 1,
-                          astree_adopt(equal_sign, 2, declarator, initializer));
-    }
+  }
+  if (initializer->symbol == TOK_TYPE_ERROR) {
+    return astree_propogate_errnode_v(
+        declaration, 1,
+        astree_propogate_errnode_v(equal_sign, 2, declarator, initializer));
+  } else if (symval->flags & SYMFLAG_LINK_NONE) {
+    maybe_load_cexpr(initializer, NULL);
+    return translate_local_init(declaration, equal_sign, declarator,
+                                initializer);
+  } else {
+    maybe_load_cexpr(initializer, NULL);
+    return translate_global_init(declaration, equal_sign, declarator,
+                                 initializer);
   }
 }
 
@@ -927,7 +917,7 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
   if (status)
     return astree_create_errnode(astree_adopt(declaration, 2, declarator, body),
                                  BCC_TERR_FAILURE, 0);
-  return astree_adopt(declaration, 2, declarator, body);
+  return begin_translate_fn(declaration, declarator, body);
 }
 
 ASTree *validate_fnbody_content(ASTree *function, ASTree *fnbody_content) {
@@ -985,7 +975,8 @@ ASTree *finalize_function(ASTree *function) {
    */
   status = state_pop_table(state);
   if (status) ret = astree_create_errnode(ret, BCC_TERR_LIBRARY_FAILURE, 0);
-  return ret;
+  if (ret->symbol == TOK_TYPE_ERROR) return ret;
+  return end_translate_fn(function);
 }
 
 TagType tag_from_symbol(int symbol) {
@@ -1394,7 +1385,12 @@ ASTree *declare_symbol(ASTree *declaration, ASTree *declarator) {
   } else if (declaration->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(declaration, err_or_decl);
   } else {
-    return astree_adopt(declaration, 1, declarator);
+    SymbolValue *symval = sym_from_type((TypeSpec *)declarator->type);
+    if (symval->flags & SYMFLAG_LINK_NONE) {
+      return translate_local_decl(declaration, declarator);
+    } else {
+      return translate_global_decl(declaration, declarator);
+    }
   }
 }
 

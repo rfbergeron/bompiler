@@ -1,5 +1,6 @@
 #include "tchk_expr.h"
 
+#include "asmgen.h"
 #include "ctype.h"
 #include "evaluate.h"
 #include "inttypes.h"
@@ -91,6 +92,7 @@ ASTree *validate_arg(ASTree *call, ASTree *arg) {
   SymbolValue *symval = llist_get(param_list, param_index);
   DEBUGS('t', "Comparing types");
   if (types_assignable(&symval->type, arg)) {
+    maybe_load_cexpr(arg, NULL);
     return astree_adopt(call, 1, arg);
   } else {
     return astree_create_errnode(astree_adopt(call, 1, arg),
@@ -130,6 +132,7 @@ ASTree *validate_call(ASTree *expr, ASTree *call) {
   /* free temporaries created by stripping */
   typespec_destroy(&temp_spec);
   call->type = return_spec;
+  maybe_load_cexpr(expr, NULL);
   return astree_adopt(call, 1, expr);
 }
 
@@ -229,7 +232,8 @@ ASTree *validate_comma(ASTree *comma, ASTree *left, ASTree *right) {
   pointer_conversions(left);
   pointer_conversions(right);
   comma->type = right->type;
-  return astree_adopt(comma, 2, left, right);
+  maybe_load_cexpr(right, NULL);
+  return translate_comma(comma, left, right);
 }
 
 ASTree *validate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
@@ -428,13 +432,23 @@ ASTree *validate_bitwise(ASTree *operator, ASTree * left, ASTree *right) {
 ASTree *validate_increment(ASTree *operator, ASTree * operand) {
   if (operand->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(operator, operand);
+  } else if (!(operand->attributes & ATTR_EXPR_LVAL)) {
+    return astree_create_errnode(astree_adopt(operator, 1, operand),
+                                 BCC_TERR_EXPECTED_LVAL, 2, operator, operand);
   }
+
   if (typespec_is_pointer(operand->type)) {
     operator->type = operand->type;
-    return astree_adopt(operator, 1, operand);
+    maybe_load_cexpr(operand, NULL);
+    return operator->symbol == TOK_POST_INC || operator->symbol == TOK_POST_DEC
+               ? translate_post_inc_dec(operator, operand)
+               : translate_inc_dec(operator, operand);
   } else if (typespec_is_arithmetic(operand->type)) {
     operator->type = arithmetic_conversions(operand->type, &SPEC_INT);
-    return astree_adopt(operator, 1, operand);
+    maybe_load_cexpr(operand, NULL);
+    return operator->symbol == TOK_POST_INC || operator->symbol == TOK_POST_DEC
+               ? translate_post_inc_dec(operator, operand)
+               : translate_inc_dec(operator, operand);
   } else {
     return astree_create_errnode(astree_adopt(operator, 1, operand),
                                  BCC_TERR_EXPECTED_SCALAR, 2, operator,
@@ -501,7 +515,8 @@ ASTree *validate_indirection(ASTree *indirection, ASTree *operand) {
     }
     indirection->type = indirection_spec;
     indirection->attributes |= ATTR_EXPR_LVAL;
-    return astree_adopt(indirection, 1, operand);
+    maybe_load_cexpr(operand, NULL);
+    return translate_indirection(indirection, operand);
   } else {
     return astree_create_errnode(astree_adopt(indirection, 1, operand),
                                  BCC_TERR_EXPECTED_POINTER, 2, indirection,
@@ -638,7 +653,8 @@ ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src) {
                                  BCC_TERR_EXPECTED_LVAL, 2, assignment, dest);
   } else if (types_assignable(dest->type, src)) {
     assignment->type = dest->type;
-    return astree_adopt(assignment, 2, dest, src);
+    maybe_load_cexpr(src, NULL);
+    return translate_assignment(assignment, dest, src);
   } else {
     return astree_create_errnode(astree_adopt(assignment, 2, dest, src),
                                  BCC_TERR_INCOMPATIBLE_TYPES, 3, assignment,

@@ -1,5 +1,6 @@
 #include "tchk_stmt.h"
 
+#include "asmgen.h"
 #include "assert.h"
 #include "bcc_err.h"
 #include "state.h"
@@ -22,7 +23,9 @@ ASTree *validate_return(ASTree *ret, ASTree *expr) {
     pointer_conversions(expr);
     if (types_assignable(&ret_spec, expr)) {
       typespec_destroy(&ret_spec);
-      return astree_adopt(ret, 1, expr);
+      maybe_load_cexpr(expr, NULL);
+      return translate_return(ret, expr);
+      ;
     } else {
       typespec_destroy(&ret_spec);
       return astree_create_errnode(astree_adopt(ret, 1, expr),
@@ -31,7 +34,8 @@ ASTree *validate_return(ASTree *ret, ASTree *expr) {
     }
   } else if (typespec_is_void(&ret_spec)) {
     typespec_destroy(&ret_spec);
-    return astree_adopt(ret, 1, expr);
+    maybe_load_cexpr(expr, NULL);
+    return translate_return(ret, expr);
   } else {
     typespec_destroy(&ret_spec);
     return astree_create_errnode(astree_adopt(ret, 1, expr),
@@ -56,7 +60,8 @@ ASTree *validate_ifelse(ASTree *ifelse, ASTree *condition, ASTree *if_body,
         BCC_TERR_EXPECTED_SCALAR, 2, ifelse, condition);
   }
 
-  return astree_adopt(ifelse, 3, condition, if_body, else_body);
+  maybe_load_cexpr(condition, if_body->first_instr);
+  return translate_ifelse(ifelse, condition, if_body, else_body);
 }
 
 ASTree *validate_switch(ASTree *switch_, ASTree *expr, ASTree *stmt) {
@@ -74,7 +79,7 @@ ASTree *validate_switch(ASTree *switch_, ASTree *expr, ASTree *stmt) {
   state_pop_break_id(state);
   state_pop_selection(state);
 
-  return astree_adopt(switch_, 2, expr, stmt);
+  return translate_switch(switch_, expr, stmt);
 }
 
 ASTree *validate_switch_expr(ASTree *expr) {
@@ -84,6 +89,7 @@ ASTree *validate_switch_expr(ASTree *expr) {
   const TypeSpec *promoted_type = arithmetic_conversions(expr->type, &SPEC_INT);
   int status = state_set_control_type(state, promoted_type);
   if (status) abort();
+  maybe_load_cexpr(expr, NULL);
   return expr;
 }
 
@@ -108,7 +114,9 @@ ASTree *validate_while(ASTree *while_, ASTree *condition, ASTree *stmt) {
                                  BCC_TERR_EXPECTED_INTEGER, 2, while_,
                                  condition);
   }
-  return astree_adopt(while_, 2, condition, stmt);
+
+  maybe_load_cexpr(condition, stmt->first_instr);
+  return translate_while(while_, condition, stmt);
 }
 
 ASTree *validate_do(ASTree *do_, ASTree *stmt, ASTree *condition) {
@@ -133,7 +141,9 @@ ASTree *validate_do(ASTree *do_, ASTree *stmt, ASTree *condition) {
     return astree_create_errnode(astree_adopt(do_, 2, condition, stmt),
                                  BCC_TERR_EXPECTED_INTEGER, 2, do_, condition);
   }
-  return astree_adopt(do_, 2, condition, stmt);
+
+  maybe_load_cexpr(condition, NULL);
+  return translate_do(do_, stmt, condition);
 }
 
 ASTree *validate_for(ASTree *for_, ASTree *init_expr, ASTree *pre_iter_expr,
@@ -158,7 +168,10 @@ ASTree *validate_for(ASTree *for_, ASTree *init_expr, ASTree *pre_iter_expr,
   state_pop_break_id(state);
   state_pop_continue_id(state);
 
-  return astree_adopt(for_, 4, init_expr, pre_iter_expr, reinit_expr, body);
+  maybe_load_cexpr(reinit_expr, body->first_instr);
+  maybe_load_cexpr(pre_iter_expr, reinit_expr->first_instr);
+  maybe_load_cexpr(init_expr, pre_iter_expr->first_instr);
+  return translate_for(for_, init_expr, pre_iter_expr, reinit_expr, body);
 }
 
 ASTree *validate_label(ASTree *label, ASTree *ident_node, ASTree *stmt) {
@@ -176,7 +189,7 @@ ASTree *validate_label(ASTree *label, ASTree *ident_node, ASTree *stmt) {
     } else {
       existing_entry->tree = ident_node;
       existing_entry->is_defined = 1;
-      return astree_adopt(label, 2, ident_node, stmt);
+      return translate_label(label, ident_node, stmt);
     }
   } else {
     LabelValue *labval = malloc(sizeof(*labval));
@@ -186,7 +199,7 @@ ASTree *validate_label(ASTree *label, ASTree *ident_node, ASTree *stmt) {
     if (status) {
       abort();
     }
-    return astree_adopt(label, 2, ident_node, stmt);
+    return translate_label(label, ident_node, stmt);
   }
 }
 
@@ -213,7 +226,8 @@ ASTree *validate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
                                  BCC_TERR_EXPECTED_INTCONST, 2, case_, expr);
   }
 
-  return astree_adopt(case_, 2, expr, stmt);
+  maybe_load_cexpr(expr, stmt->first_instr);
+  return translate_case(case_, expr, stmt);
 }
 
 ASTree *validate_default(ASTree *default_, ASTree *stmt) {
@@ -231,7 +245,7 @@ ASTree *validate_default(ASTree *default_, ASTree *stmt) {
                                  BCC_TERR_UNEXPECTED_TOKEN, 1, default_);
   }
 
-  return astree_adopt(default_, 1, stmt);
+  return translate_default(default_, stmt);
 }
 
 ASTree *validate_goto(ASTree *goto_, ASTree *ident) {
@@ -247,7 +261,7 @@ ASTree *validate_goto(ASTree *goto_, ASTree *ident) {
       abort();
     }
   }
-  return astree_adopt(goto_, 1, ident);
+  return translate_goto(goto_, ident);
 }
 
 ASTree *validate_continue(ASTree *continue_) {
@@ -257,7 +271,7 @@ ASTree *validate_continue(ASTree *continue_) {
                                  continue_);
   }
 
-  return continue_;
+  return translate_continue(continue_);
 }
 
 ASTree *validate_break(ASTree *break_) {
@@ -266,7 +280,7 @@ ASTree *validate_break(ASTree *break_) {
     return astree_create_errnode(break_, BCC_TERR_UNEXPECTED_TOKEN, 1, break_);
   }
 
-  return break_;
+  return translate_break(break_);
 }
 
 ASTree *validate_block(ASTree *block) {
@@ -292,5 +306,5 @@ ASTree *finalize_block(ASTree *block) {
   if (status) {
     return astree_create_errnode(block, BCC_TERR_LIBRARY_FAILURE, 0);
   }
-  return block;
+  return translate_block(block);
 }
