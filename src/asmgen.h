@@ -6,6 +6,8 @@
 #include "badllist.h"
 #include "lyutils.h"
 
+const char *mk_static_label(const char *name, size_t unique_id);
+const char *mk_fnptr_text(const char *name);
 void maybe_load_cexpr(ASTree *expr, ListIter *where);
 const char *asmgen_literal_label(const char *literal);
 ASTree *translate_empty_expr(ASTree *empty_expr);

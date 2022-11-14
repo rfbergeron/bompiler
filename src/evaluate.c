@@ -271,10 +271,13 @@ ASTree *evaluate_ident(ASTree *ident) {
     ident->attributes |= ATTR_EXPR_CONST;
     ident->attributes |= ATTR_CONST_INIT;
     ident->attributes |= ATTR_CONST_ADDR;
-    if (symval->flags & SYMFLAG_LINK_NONE) {
-      /* TODO(Robert): this needs to be freed by... someone... */
-      char *static_name = malloc(MAX_IDENT_LEN * 2);
-      sprintf(static_name, "%s.%lu", ident->lexinfo, symval->static_id);
+    if (typespec_is_function(&symval->type)) {
+      const char *fnptr_text = mk_fnptr_text(ident->lexinfo);
+      ident->constant.address.label = fnptr_text;
+      ident->constant.address.disp = 0;
+    } else if (symval->flags & SYMFLAG_LINK_NONE) {
+      const char *static_name =
+          mk_static_label(ident->lexinfo, symval->static_id);
       ident->constant.address.label = static_name;
       ident->constant.address.disp = 0;
     } else {

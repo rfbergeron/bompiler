@@ -300,6 +300,10 @@ const char *mk_static_label(const char *name, size_t unique_id) {
   return deduplicate_text(label_len, STATIC_FMT, name, unique_id);
 }
 
+const char *mk_fnptr_text(const char *name) {
+  return deduplicate_text(strlen(name) + 10, "%s@GOTPCREL", name);
+}
+
 const char *mk_fallthru_label(size_t switch_id, size_t case_id) {
   char temp1[64];
   sprintf(temp1, "%lu", switch_id);
