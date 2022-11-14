@@ -55,6 +55,8 @@ NOTSTRING       (\"[^"]*)
 "extern"        { return lexer_token (TOK_EXTERN); }
 "auto"          { return lexer_token (TOK_AUTO); }
 "register"      { return lexer_token (TOK_REGISTER); }
+"const"         { return lexer_token (TOK_CONST); }
+"volatile"      { return lexer_token (TOK_VOLATILE); }
 "if"            { return lexer_if (); }
 "else"          { return lexer_token (TOK_ELSE); }
 "switch"        { return lexer_switch(); }

@@ -114,6 +114,8 @@ typespec            : TOK_LONG                                          { $$ = b
                     | TOK_AUTO                                          { $$ = bcc_yyval = $1; }
                     | TOK_STATIC                                        { $$ = bcc_yyval = $1; }
                     | TOK_EXTERN                                        { $$ = bcc_yyval = $1; }
+                    | TOK_CONST                                         { $$ = bcc_yyval = $1; }
+                    | TOK_VOLATILE                                      { $$ = bcc_yyval = $1; }
                     | struct_spec                                       { $$ = bcc_yyval = $1; }
                     | enum_spec                                         { $$ = bcc_yyval = $1; }
                     ;
