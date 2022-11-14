@@ -87,10 +87,29 @@ int symbol_value_print(const SymbolValue *symbol, char *buffer, size_t size) {
   type_to_string(&symbol->type, typestr, LINESIZE);
   size_t sym_width = typespec_get_width((TypeSpec *)&symbol->type);
   size_t sym_align = typespec_get_alignment((TypeSpec *)&symbol->type);
+  const char *link_str;
+  if (symbol->flags & SYMFLAG_LINK_EXT)
+    link_str = "EXTERNAL";
+  else if (symbol->flags & SYMFLAG_LINK_INT)
+    link_str = "INTERNAL";
+  else if (symbol->flags & SYMFLAG_LINK_NONE)
+    link_str = "NONE";
+  else
+    link_str = "UNSPECIFIED";
+  const char *stor_str;
+  if (symbol->flags & SYMFLAG_STORE_EXT)
+    stor_str = "EXTERNAL";
+  else if (symbol->flags & SYMFLAG_STORE_STAT)
+    stor_str = "STATIC";
+  else if (symbol->flags & SYMFLAG_STORE_AUTO)
+    stor_str = "AUTO";
+  else
+    stor_str = "UNSPECIFIED";
 
   /* TODO(Robert): check size without snprintf */
-  return sprintf(buffer, "{%s} {%s} {width: %lu, align: %lu}", locstr, typestr,
-                 sym_width, sym_align);
+  return sprintf(buffer,
+                 "{%s} {%s} {WIDTH: %lu, ALIGN: %lu} {LINK: %s, STORE: %s}",
+                 locstr, typestr, sym_width, sym_align, link_str, stor_str);
 }
 #endif
 
