@@ -50,9 +50,9 @@ int aux_equivalent(const AuxSpec *aux1, const AuxSpec *aux2,
       if (flags & IGNORE_QUALIFIERS)
         return 1;
       else
-        return !!((aux1->data.memory_loc.qualifiers ^
-                   aux2->data.memory_loc.qualifiers) &
-                  (TYPESPEC_FLAG_CONST | TYPESPEC_FLAG_VOLATILE));
+        return !((aux1->data.memory_loc.qualifiers ^
+                  aux2->data.memory_loc.qualifiers) &
+                 (TYPESPEC_FLAG_CONST | TYPESPEC_FLAG_VOLATILE));
     default:
       return 0;
   }

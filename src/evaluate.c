@@ -284,6 +284,7 @@ ASTree *evaluate_ident(ASTree *ident) {
       ident->constant.address.label = ident->lexinfo;
       ident->constant.address.disp = 0;
     }
+    return ident;
   } else if (symval->flags & SYMFLAG_ENUM_CONST) {
     ident->attributes |= ATTR_EXPR_CONST;
     AuxSpec *enum_aux = llist_back(&ident->type->auxspecs);
@@ -291,8 +292,10 @@ ASTree *evaluate_ident(ASTree *ident) {
     int *value = map_get(&tagval->data.enumerators.by_name,
                          (char *)ident->lexinfo, strlen(ident->lexinfo));
     ident->constant.integral.value = *value;
+    return ident;
+  } else {
+    return translate_ident(ident);
   }
-  return ident;
 }
 
 ASTree *evaluate_addition(ASTree *addition, ASTree *left, ASTree *right) {

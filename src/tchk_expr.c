@@ -30,6 +30,9 @@ ASTree *validate_stringcon(ASTree *stringcon) {
    * subtract one.
    */
   array_aux->data.memory_loc.length = strlen(stringcon->lexinfo) - 1;
+  status = llist_push_back(&stringcon_type->auxspecs, array_aux);
+  if (status)
+    return astree_create_errnode(stringcon, BCC_TERR_LIBRARY_FAILURE, 0);
 
   stringcon->type = stringcon_type;
   return evaluate_stringcon(stringcon);
@@ -68,7 +71,7 @@ ASTree *finalize_call(ASTree *call) {
   if (astree_count(call) - 1 > llist_size(param_list)) {
     return astree_create_errnode(call, BCC_TERR_INSUFF_PARAMS, 1, call);
   }
-  return call;
+  return translate_call(call);
 }
 
 ASTree *validate_arg(ASTree *call, ASTree *arg) {
@@ -654,6 +657,7 @@ ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src) {
   } else if (types_assignable(dest->type, src)) {
     assignment->type = dest->type;
     maybe_load_cexpr(src, NULL);
+    maybe_load_cexpr(dest, src->first_instr);
     return translate_assignment(assignment, dest, src);
   } else {
     return astree_create_errnode(astree_adopt(assignment, 2, dest, src),
