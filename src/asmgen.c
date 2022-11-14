@@ -1635,6 +1635,13 @@ ASTree *translate_switch(ASTree *switch_, ASTree *condition, ASTree *body) {
                                  jmp_end_data, dummy_case_label, end_label);
     if (status) abort();
   }
+
+  /* cleanup state */
+  assert(state_get_break_id(state) == switch_->jump_id);
+  assert(state_get_selection_id(state) == switch_->jump_id);
+  state_pop_break_id(state);
+  state_pop_selection(state);
+
   return astree_adopt(switch_, 2, condition, body);
 }
 
@@ -1667,6 +1674,11 @@ ASTree *translate_while(ASTree *while_, ASTree *condition, ASTree *body) {
   status = liter_push_back(body->last_instr, &while_->last_instr, 2,
                            cond_jmp_data, end_label);
   if (status) abort();
+
+  assert(state_get_break_id(state) == while_->jump_id);
+  assert(state_get_continue_id(state) == while_->jump_id);
+  state_pop_break_id(state);
+  state_pop_continue_id(state);
   return astree_adopt(while_, 2, condition, body);
 }
 
@@ -1712,6 +1724,11 @@ ASTree *translate_for(ASTree *for_, ASTree *initializer, ASTree *condition,
   status = liter_push_back(body->last_instr, &for_->last_instr, 2,
                            reinit_jmp_data, end_label);
   if (status) abort();
+
+  assert(state_get_break_id(state) == for_->jump_id);
+  assert(state_get_continue_id(state) == for_->jump_id);
+  state_pop_break_id(state);
+  state_pop_continue_id(state);
   return astree_adopt(for_, 4, initializer, condition, reinitializer, body);
 }
 
@@ -1740,6 +1757,16 @@ ASTree *translate_do(ASTree *do_, ASTree *body, ASTree *condition) {
   end_label->label = mk_end_label(do_->jump_id);
   status = liter_push_back(condition->last_instr, &do_->first_instr, 3,
                            test_data, test_jmp_data, end_label);
+
+  /* fix bogus jump id information */
+  state_pop_break_id(state);
+  state_pop_continue_id(state);
+  state_dec_jump_id_count(state);
+
+  assert(state_get_break_id(state) == do_->jump_id);
+  assert(state_get_continue_id(state) == do_->jump_id);
+  state_pop_break_id(state);
+  state_pop_continue_id(state);
   return astree_adopt(do_, 2, body, condition);
 }
 

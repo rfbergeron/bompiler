@@ -316,9 +316,10 @@ void set_link_and_store(SymbolValue *symval) {
     } else {
       symval->flags |= (SYMFLAG_LINK_EXT | SYMFLAG_STORE_STAT);
     }
-  } else if (symval->type.flags & TYPESPEC_FLAG_EXTERN) {
+  } else if ((symval->type.flags & TYPESPEC_FLAG_EXTERN) ||
+             typespec_is_function(&symval->type)) {
     /* validate_declaration will handle extern block symbols */
-    symval->type.flags |= (SYMFLAG_LINK_EXT | SYMFLAG_STORE_EXT);
+    symval->flags |= (SYMFLAG_LINK_EXT | SYMFLAG_STORE_EXT);
   } else if (symval->type.flags & TYPESPEC_FLAG_STATIC) {
     symval->flags |= (SYMFLAG_LINK_NONE | SYMFLAG_STORE_STAT);
   } else {
@@ -838,11 +839,9 @@ ASTree *define_symbol(ASTree *declaration, ASTree *declarator,
         declaration, 1,
         astree_propogate_errnode_v(equal_sign, 2, declarator, initializer));
   } else if (symval->flags & SYMFLAG_LINK_NONE) {
-    maybe_load_cexpr(initializer, NULL);
     return translate_local_init(declaration, equal_sign, declarator,
                                 initializer);
   } else {
-    maybe_load_cexpr(initializer, NULL);
     return translate_global_init(declaration, equal_sign, declarator,
                                  initializer);
   }
@@ -1384,13 +1383,13 @@ ASTree *declare_symbol(ASTree *declaration, ASTree *declarator) {
     return astree_propogate_errnode(declaration, err_or_decl);
   } else if (declaration->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(declaration, err_or_decl);
+  } else if (state_peek_table(state)->type == MEMBER_TABLE) {
+    return astree_adopt(declaration, 1, declarator);
+  } else if (sym_from_type((TypeSpec *)declarator->type)->flags &
+             SYMFLAG_LINK_NONE) {
+    return translate_local_decl(declaration, declarator);
   } else {
-    SymbolValue *symval = sym_from_type((TypeSpec *)declarator->type);
-    if (symval->flags & SYMFLAG_LINK_NONE) {
-      return translate_local_decl(declaration, declarator);
-    } else {
-      return translate_global_decl(declaration, declarator);
-    }
+    return translate_global_decl(declaration, declarator);
   }
 }
 

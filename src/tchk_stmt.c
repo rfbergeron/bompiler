@@ -25,7 +25,6 @@ ASTree *validate_return(ASTree *ret, ASTree *expr) {
       typespec_destroy(&ret_spec);
       maybe_load_cexpr(expr, NULL);
       return translate_return(ret, expr);
-      ;
     } else {
       typespec_destroy(&ret_spec);
       return astree_create_errnode(astree_adopt(ret, 1, expr),
@@ -71,14 +70,6 @@ ASTree *validate_switch(ASTree *switch_, ASTree *expr, ASTree *stmt) {
     return astree_propogate_errnode_v(switch_, 2, expr, stmt);
   }
 
-  assert(state_get_break_id(state) == switch_->jump_id);
-  assert(state_get_selection_id(state) == switch_->jump_id);
-  if (state_get_selection_default(state)) {
-    switch_->attributes |= ATTR_STMT_DEFAULT;
-  }
-  state_pop_break_id(state);
-  state_pop_selection(state);
-
   return translate_switch(switch_, expr, stmt);
 }
 
@@ -104,11 +95,6 @@ ASTree *validate_while(ASTree *while_, ASTree *condition, ASTree *stmt) {
     return astree_propogate_errnode_v(while_, 2, condition, stmt);
   }
 
-  assert(state_get_break_id(state) == while_->jump_id);
-  assert(state_get_continue_id(state) == while_->jump_id);
-  state_pop_break_id(state);
-  state_pop_continue_id(state);
-
   if (!typespec_is_scalar(condition->type)) {
     return astree_create_errnode(astree_adopt(while_, 2, condition, stmt),
                                  BCC_TERR_EXPECTED_INTEGER, 2, while_,
@@ -126,16 +112,6 @@ ASTree *validate_do(ASTree *do_, ASTree *stmt, ASTree *condition) {
   } else if (stmt->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(do_, 2, stmt, condition);
   }
-
-  /* fix bogus jump id information */
-  state_pop_break_id(state);
-  state_pop_continue_id(state);
-  state_dec_jump_id_count(state);
-
-  assert(state_get_break_id(state) == do_->jump_id);
-  assert(state_get_continue_id(state) == do_->jump_id);
-  state_pop_break_id(state);
-  state_pop_continue_id(state);
 
   if (!typespec_is_scalar(condition->type)) {
     return astree_create_errnode(astree_adopt(do_, 2, condition, stmt),
@@ -162,11 +138,6 @@ ASTree *validate_for(ASTree *for_, ASTree *init_expr, ASTree *pre_iter_expr,
           BCC_TERR_EXPECTED_SCALCONST, 2, for_, pre_iter_expr);
     }
   }
-
-  assert(state_get_break_id(state) == for_->jump_id);
-  assert(state_get_continue_id(state) == for_->jump_id);
-  state_pop_break_id(state);
-  state_pop_continue_id(state);
 
   maybe_load_cexpr(reinit_expr, body->first_instr);
   maybe_load_cexpr(pre_iter_expr, reinit_expr->first_instr);
