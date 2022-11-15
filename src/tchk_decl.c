@@ -1383,7 +1383,8 @@ ASTree *declare_symbol(ASTree *declaration, ASTree *declarator) {
     return astree_propogate_errnode(declaration, err_or_decl);
   } else if (declaration->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(declaration, err_or_decl);
-  } else if (state_peek_table(state)->type == MEMBER_TABLE) {
+  } else if (state_peek_table(state)->type == MEMBER_TABLE ||
+             (declarator->type->flags & TYPESPEC_FLAG_TYPEDEF)) {
     return astree_adopt(declaration, 1, declarator);
   } else if (sym_from_type((TypeSpec *)declarator->type)->flags &
              SYMFLAG_LINK_NONE) {
