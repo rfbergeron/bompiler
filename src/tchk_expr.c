@@ -530,7 +530,8 @@ ASTree *validate_indirection(ASTree *indirection, ASTree *operand) {
 ASTree *validate_addrof(ASTree *addrof, ASTree *operand) {
   if (operand->symbol == TOK_TYPE_ERROR)
     return astree_propogate_errnode(addrof, operand);
-  if (!(operand->attributes & ATTR_EXPR_LVAL)) {
+  if (!(operand->attributes & ATTR_EXPR_LVAL) &&
+      !typespec_is_array(operand->type)) {
     return astree_create_errnode(astree_adopt(addrof, 1, operand),
                                  BCC_TERR_EXPECTED_LVAL, 2, addrof, operand);
   }
@@ -608,12 +609,13 @@ ASTree *validate_reference(ASTree *reference, ASTree *struct_, ASTree *member) {
   if (struct_->symbol == TOK_TYPE_ERROR)
     return astree_propogate_errnode_v(reference, 2, struct_, member);
   const TypeSpec *struct_type = struct_->type;
-  if (reference->symbol == TOK_ARROW && !typespec_is_structptr(struct_type) &&
-      !typespec_is_unionptr(struct_type)) {
+  if (reference->symbol == TOK_ARROW && !(typespec_is_structptr(struct_type) ||
+                                          typespec_is_unionptr(struct_type))) {
     return astree_create_errnode(astree_adopt(reference, 2, struct_, member),
                                  BCC_TERR_EXPECTED_TAG_PTR, 2, reference,
                                  struct_type);
-  } else if (!typespec_is_struct(struct_type) &&
+  } else if (reference->symbol != TOK_ARROW &&
+             !typespec_is_struct(struct_type) &&
              !typespec_is_union(struct_type)) {
     return astree_create_errnode(astree_adopt(reference, 2, struct_, member),
                                  BCC_TERR_EXPECTED_TAG, 2, reference,
