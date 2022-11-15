@@ -27,6 +27,7 @@ const char *TOK_EXT = ".tok";
 const char *AST_EXT = ".ast";
 const char *SYM_EXT = ".sym";
 const char *IL_EXT = ".il";
+const char *ASM_EXT = ".asm";
 const char *ERR_EXT = ".err";
 char cppcmd[LINESIZE];
 char name[LINESIZE];
@@ -35,14 +36,15 @@ char tokname[LINESIZE];
 char astname[LINESIZE];
 char symname[LINESIZE];
 char ilname[LINESIZE];
+char asmname[LINESIZE];
 char errname[LINESIZE];
 
-/* cpp options go here */
 FILE *strfile;
 FILE *tokfile;
 FILE *astfile;
 FILE *symfile;
 FILE *ilfile;
+FILE *asmfile;
 FILE *errfile;
 
 int skip_type_check = 0;
@@ -123,6 +125,8 @@ int main(int argc, char **argv) {
   strcat(symname, SYM_EXT);
   strcpy(ilname, name);
   strcat(ilname, IL_EXT);
+  strcpy(asmname, name);
+  strcat(asmname, ASM_EXT);
   strcpy(errname, name);
   strcat(errname, ERR_EXT);
   strcpy(cppcmd, CPP);
@@ -190,6 +194,10 @@ int main(int argc, char **argv) {
   if (ilfile == NULL) {
     err(1, "%s", ilname);
   }
+  asmfile = fopen(asmname, "w");
+  if (asmfile == NULL) {
+    err(1, "%s", asmname);
+  }
   errfile = fopen(errname, "w");
   if (errfile == NULL) {
     err(1, "%s", ilname);
@@ -210,21 +218,8 @@ int main(int argc, char **argv) {
   string_set_print(strfile);
   astree_print_symbols(UNWRAP(parser_root), symfile, 0);
   astree_print_tree(UNWRAP(parser_root), astfile, 0);
-
-  /*
-  if (skip_asm || skip_type_check) goto cleanup;
-  status = translate_file(parser_root);
-  if (status) {
-    warnx("Assembly translation failed.");
-    goto cleanup;
-  }
-
-  status = write_asm(ilfile);
-  if (status) {
-    warnx("Failed to emit assembly instructions.");
-    goto cleanup;
-  }
-  */
+  generator_debug_il(ilfile);
+  generator_print_il(asmfile);
 
 cleanup:
   if (parser_root->symbol == TOK_TYPE_ERROR) {
@@ -244,6 +239,7 @@ cleanup:
   fclose(astfile);
   fclose(symfile);
   fclose(ilfile);
+  fclose(asmfile);
   fclose(errfile);
 
   DEBUGS('m', "global state cleanup");

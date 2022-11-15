@@ -58,6 +58,7 @@ ASTree *begin_translate_fn(ASTree *declaration, ASTree *declarator,
                            ASTree *body);
 ASTree *end_translate_fn(ASTree *declaration);
 int generator_print_il(FILE *out);
+int generator_debug_il(FILE *out);
 void asmgen_init_globals(const char *filename);
 void asmgen_free_globals(void);
 
