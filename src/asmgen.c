@@ -2789,6 +2789,71 @@ int dir_to_str(InstructionData *data, char *str, size_t size) {
   }
 }
 
+int operand_debug(Operand *operand, char *str) {
+  switch (operand->all.mode) {
+    case MODE_REGISTER:
+      return sprintf(str,
+                     " (REGISTER):\n"
+                     "\t\tRegister width: %u\n"
+                     "\t\tRegister number: %lu\n",
+                     operand->reg.width, operand->reg.num);
+    case MODE_IMMEDIATE:
+      return sprintf(str,
+                     " (IMMEDIATE):\n"
+                     "\t\tImmediate value: (unsigned) %lu, "
+                     "(signed) %li, (pointer) %p\n",
+                     operand->imm.val, (intmax_t)operand->imm.val,
+                     (void *)operand->imm.val);
+    case MODE_DIRECT:
+      return sprintf(str, " (DIRECT):\n\t\tLabel: %p \"%s\"\n",
+                     (void *)operand->dir.lab,
+                     operand->dir.lab == NULL ? "" : operand->dir.lab);
+    case MODE_PIC:
+      return sprintf(str,
+                     " (PIC):\n"
+                     "\t\tExternal Variable: %p \"%s\"\n"
+                     "\t\tDisplacement: %li\n",
+                     (void *)operand->pic.lab,
+                     operand->pic.lab == NULL ? "" : operand->pic.lab,
+                     operand->pic.disp);
+    case MODE_INDIRECT:
+      return sprintf(str,
+                     " (INDIRECT):\n"
+                     "\t\tRegister number: %lu\n"
+                     "\t\tDisplacement: %li\n",
+                     operand->ind.num, operand->ind.disp);
+    case MODE_SCALE:
+      return sprintf(str,
+                     " (SCALED):\n"
+                     "\t\tBase register number: %lu\n"
+                     "\t\tIndex register number: %lu\n"
+                     "\t\tDisplacement: %li\n"
+                     "\t\tScale: %u\n",
+                     operand->sca.base, operand->sca.index, operand->sca.disp,
+                     operand->sca.scale);
+    case MODE_NONE:
+      return sprintf(str, " (NONE):\n");
+    default:
+      abort();
+  }
+}
+
+int instr_debug(InstructionData *data, char *str) {
+  char src_buf[1024], dest_buf[1024];
+  int status = operand_debug(&data->src, src_buf);
+  if (status < 0) return status;
+  status = operand_debug(&data->dest, dest_buf);
+  if (status < 0) return status;
+  return sprintf(str,
+                 "Instruction %p {\n"
+                 "\tLabel: %p \"%s\"\n"
+                 "\tOpcode: %i %s\n"
+                 "\tSource Operand%s"
+                 "\tDestination Operand%s}",
+                 (void *)data, (void *)data->label, data->label, data->opcode,
+                 OPCODES[data->opcode], src_buf, dest_buf);
+}
+
 int instr_to_str(InstructionData *data, char *str, size_t size) {
   int ret = 0;
   if (data->label != NULL) {
@@ -2860,6 +2925,19 @@ int generator_print_il(FILE *out) {
   for (i = 0; i < llist_size(instructions); ++i) {
     InstructionData *data = llist_get(instructions, i);
     int chars_written = instr_to_str(data, buffer, 1024);
+    if (chars_written < 0) return chars_written;
+    chars_written = fprintf(out, "%s\n", buffer);
+    if (chars_written < 0) return chars_written;
+  }
+  return 0;
+}
+
+int generator_debug_il(FILE *out) {
+  char buffer[8192];
+  size_t i;
+  for (i = 0; i < llist_size(instructions); ++i) {
+    InstructionData *data = llist_get(instructions, i);
+    int chars_written = instr_debug(data, buffer);
     if (chars_written < 0) return chars_written;
     chars_written = fprintf(out, "%s\n", buffer);
     if (chars_written < 0) return chars_written;

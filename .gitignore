@@ -4,4 +4,6 @@ build/*
 **.ast
 **.sym
 **.il
+**.asm
+**.s
 **.err
