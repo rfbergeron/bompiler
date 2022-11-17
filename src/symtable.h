@@ -111,10 +111,4 @@ int symbol_table_insert_label(SymbolTable *table, const char *ident,
                               const size_t ident_len, LabelValue *labval);
 LabelValue *symbol_table_get_label(SymbolTable *table, const char *ident,
                                    const size_t ident_len);
-int symbol_table_merge_control(SymbolTable *dest, SymbolTable *src);
-TypeSpec *symbol_table_process_control(SymbolTable *table, int parent_symbol);
-int symbol_table_add_control(SymbolTable *table, ControlValue *ctrlval);
-ControlValue *symbol_table_remove_control(SymbolTable *table, size_t i);
-ControlValue *symbol_table_get_control(SymbolTable *table, size_t i);
-size_t symbol_table_count_control(SymbolTable *table);
 #endif
