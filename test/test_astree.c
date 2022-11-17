@@ -1,8 +1,9 @@
 #include <setjmp.h>
 #include <stdarg.h>
 #include <stddef.h>
-/* get rid of inlinie in cmocka */
+/* get rid of inline in cmocka */
 #define inline
+#undef UNIT_TESTING
 #include <cmocka.h>
 #include <stdlib.h>
 
@@ -14,30 +15,71 @@ int skip_type_check = 0;
 /* duplicate global... regret... */
 const TypeSpec SPEC_EMPTY = {0, 0, BLIB_LLIST_EMPTY, TYPESPEC_FLAG_NONE,
                              TYPE_NONE};
-
-/* badllist mocks */
-#include "wrap_badllist.c"
+const Location LOC_EMPTY = LOC_EMPTY_VALUE;
 
 const char *__wrap_string_set_intern(const char *string) {
+  check_expected_ptr(string);
   return mock_ptr_type(const char *);
 }
 
 const char *__wrap_parser_get_tname(int symbol) {
+  check_expected(symbol);
   return mock_ptr_type(const char *);
 }
 
-int __wrap_symbol_table_destroy(SymbolTable *table) { return mock_type(int); }
+int __wrap_symbol_table_destroy(SymbolTable *table) {
+  check_expected_ptr(table);
+  return mock_type(int);
+}
 
 int __wrap_auxspec_destroy(AuxSpec *aux) {
   check_expected_ptr(aux);
   return mock_type(int);
 }
 
-int __wrap_typespec_destroy(TypeSpec *spec) { return mock_type(int); }
+int __wrap_typespec_destroy(TypeSpec *type) {
+  check_expected_ptr(type);
+  return mock_type(int);
+}
+
+int __wrap_typespec_append_auxspecs(TypeSpec *dest, const TypeSpec *src) {
+  check_expected_ptr(dest);
+  check_expected_ptr(src);
+  return mock_type(int);
+}
+
+int __wrap_typespec_append_aux(TypeSpec *type, AuxSpec *aux) {
+  check_expected_ptr(type);
+  check_expected_ptr(aux);
+  return mock_type(int);
+}
+
+int __wrap_typespec_prepend_aux(TypeSpec *type, AuxSpec *aux) {
+  check_expected_ptr(type);
+  check_expected_ptr(aux);
+  return mock_type(int);
+}
+
+AuxSpec *__wrap_typespec_get_aux(TypeSpec *type) {
+  check_expected_ptr(type);
+  return mock_ptr_type(AuxSpec *);
+}
+
+AuxSpec *__wrap_create_erraux_v(int errcode, size_t info_count,
+                                va_list info_ptrs) {
+  check_expected(errcode);
+  check_expected(info_count);
+  return mock_ptr_type(AuxSpec *);
+}
+
+int __wrap_typespec_init(TypeSpec *type) {
+  check_expected_ptr(type);
+  return mock_type(int);
+}
 
 void destroy_null(void **state) {
   int status = astree_destroy(NULL);
-  assert_true(status);
+  assert_false(status);
 }
 
 void destroy_empty(void **state) {
@@ -49,60 +91,86 @@ void destroy_empty(void **state) {
 }
 
 void destroy_addrof(void **state) {
-  ASTree *addrof = test_malloc(sizeof(ASTree));
-  *addrof = (ASTree)EMPTY_EXPR_VALUE;
-  addrof->symbol = TOK_ADDROF;
-  TypeSpec *addrof_spec = test_malloc(sizeof(TypeSpec));
-  addrof->type = addrof_spec;
-  AuxSpec expected_ptr_aux = {0};
+  expect_any(__wrap_string_set_intern, string);
+  will_return(__wrap_string_set_intern, "&");
 
-  will_return_always(__wrap_typespec_destroy, 0);
-  will_return_always(__wrap_auxspec_destroy, 0);
-  will_return_always(__wrap_llist_destroy, 0);
-  will_return(__wrap_llist_pop_front, &expected_ptr_aux);
+  ASTree *addrof = astree_init(TOK_ADDROF, LOC_EMPTY, NULL);
+  TypeSpec *addrof_spec = test_malloc(sizeof(TypeSpec));
+  AuxSpec expected_ptr_aux = {0};
+  addrof->type = addrof_spec;
+
+  expect_value(__wrap_typespec_get_aux, type, addrof_spec);
+  will_return(__wrap_typespec_get_aux, &expected_ptr_aux);
   expect_value(__wrap_auxspec_destroy, aux, &expected_ptr_aux);
+  will_return(__wrap_auxspec_destroy, 0);
+  expect_value(__wrap_typespec_destroy, type, addrof_spec);
+  will_return(__wrap_typespec_destroy, 0);
 
   int status = astree_destroy(addrof);
   assert_false(status);
 }
 
 void adopt_too_many(void **state) {
-  ASTree errnode = EMPTY_EXPR_VALUE;
-  errnode.symbol = TOK_TYPE_ERROR;
-  ASTree child = EMPTY_EXPR_VALUE;
+  expect_any_count(__wrap_string_set_intern, string, 3);
+  will_return(__wrap_string_set_intern, "_terr");
+  will_return_count(__wrap_string_set_intern, ";", 2);
 
-  will_return(__wrap_llist_size, 1);
-  expect_assert_failure(astree_adopt(&errnode, 1, &child));
+  ASTree *errnode = astree_init(TOK_TYPE_ERROR, LOC_EMPTY, NULL);
+  ASTree *child1 = astree_init(';', LOC_EMPTY, NULL);
+  ASTree *child2 = astree_init(';', LOC_EMPTY, NULL);
+
+  expect_assert_failure(astree_adopt(errnode, 2, child1, child2));
+  assert_false(astree_destroy(errnode));
+  assert_false(astree_destroy(child1));
+  assert_false(astree_destroy(child2));
 }
 
 void adopt_again(void **state) {
-  ASTree parent = EMPTY_EXPR_VALUE;
-  ASTree child = EMPTY_EXPR_VALUE;
+  expect_any_count(__wrap_string_set_intern, string, 2);
+  will_return_count(__wrap_string_set_intern, ";", 2);
+  ASTree *parent = astree_init(';', LOC_EMPTY, NULL);
+  ASTree *child = astree_init(';', LOC_EMPTY, NULL);
 
-  will_return(__wrap_llist_find, 1);
-  expect_assert_failure(astree_adopt(&parent, 1, &child));
+  expect_assert_failure(astree_adopt(parent, 2, child, child));
+  assert_false(astree_destroy(parent));
 }
 
 void adopt_empty_again(void **state) {
-  ASTree parent = EMPTY_EXPR_VALUE;
-  will_return(__wrap_llist_push_back, 0);
-  astree_adopt(&parent, 1, &EMPTY_EXPR);
+  expect_any(__wrap_string_set_intern, string);
+  will_return(__wrap_string_set_intern, ";");
+  ASTree *parent = astree_init(';', LOC_EMPTY, NULL);
+  (void)astree_adopt(parent, 2, &EMPTY_EXPR, &EMPTY_EXPR);
+  assert_false(astree_destroy(parent));
 }
 
 void adopt_null_child(void **state) {
-  ASTree parent = EMPTY_EXPR_VALUE;
-  expect_assert_failure(astree_adopt(&parent, 1, NULL));
+  expect_any(__wrap_string_set_intern, string);
+  will_return(__wrap_string_set_intern, ";");
+  ASTree *parent = astree_init(';', LOC_EMPTY, NULL);
+
+  expect_assert_failure(astree_adopt(parent, 1, NULL));
+  assert_false(astree_destroy(parent));
 }
 
 void replace_out_of_bounds(void **state) {
-  ASTree parent = EMPTY_EXPR_VALUE;
-  will_return(__wrap_llist_size, 1);
-  assert_null(astree_replace(&parent, 1, &EMPTY_EXPR));
+  expect_any_count(__wrap_string_set_intern, string, 2);
+  will_return_count(__wrap_string_set_intern, ";", 2);
+
+  ASTree *parent = astree_init(';', LOC_EMPTY, NULL);
+  assert_null(astree_replace(parent, 1, &EMPTY_EXPR));
+
+  (void)astree_adopt(parent, 3, &EMPTY_EXPR, &EMPTY_EXPR, &EMPTY_EXPR);
+  ASTree *child = astree_init(';', LOC_EMPTY, NULL);
+  assert_null(astree_replace(parent, 4, child));
+
+  assert_ptr_equal(astree_replace(parent, 1, child), &EMPTY_EXPR);
+  assert_ptr_equal(astree_get(parent, 1), child);
+
+  assert_false(astree_destroy(parent));
 }
 
 void replace_null_child(void **state) {
   ASTree parent = EMPTY_EXPR_VALUE;
-  will_return(__wrap_llist_size, 1);
   expect_assert_failure(astree_replace(&parent, 0, NULL));
 }
 

@@ -252,7 +252,10 @@ size_t typespec_get_width(const TypeSpec *spec);
 size_t typespec_get_alignment(const TypeSpec *spec);
 size_t typespec_get_eightbytes(const TypeSpec *spec);
 int typespec_append_auxspecs(TypeSpec *dest, const TypeSpec *src);
+int typespec_append_aux(TypeSpec *type, AuxSpec *aux);
+int typespec_prepend_aux(TypeSpec *type, AuxSpec *aux);
 int strip_aux_type(TypeSpec *dest, const TypeSpec *src);
+AuxSpec *typespec_get_aux(const TypeSpec *type, size_t index);
 int common_qualified_ptr(TypeSpec *dest, const TypeSpec *src1,
                          const TypeSpec *src2);
 
