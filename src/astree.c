@@ -23,8 +23,11 @@ extern void *_test_malloc(const size_t size, const char *file, const int line);
 #define malloc(size) _test_malloc(size, __FILE__, __LINE__)
 extern void _test_free(void *ptr, const char *file, const int line);
 #define free(ptr) _test_free(ptr, __FILE__, __LINE__)
+extern void mock_assert(const int result, const char *const expression,
+                        const char *const file, const int line);
 #undef assert
-#define assert mock_assert
+#define assert(expression) \
+  mock_assert((int)(expression), #expression, __FILE__, __LINE__);
 #endif
 
 extern int skip_type_check;
@@ -41,6 +44,8 @@ ASTree *astree_init(int symbol, const Location location, const char *info) {
   tree->loc = location;
   tree->type = &SPEC_EMPTY;
   tree->attributes = ATTR_NONE;
+  tree->first_instr = NULL;
+  tree->last_instr = NULL;
   /* casting function pointers is undefined behavior but it seems like most
    * compiler implementations make it work, and here we're just changing the
    * type of a pointer argument */
@@ -52,10 +57,7 @@ ASTree *astree_init(int symbol, const Location location, const char *info) {
 }
 
 int astree_destroy(ASTree *tree) {
-  if (tree == NULL) {
-    fprintf(stderr, "WARNING: null pointer supplied to astree_destroy.\n");
-    return 1;
-  } else if (tree == &EMPTY_EXPR) {
+  if (tree == NULL || tree == &EMPTY_EXPR) {
     return 0;
   }
 
@@ -90,7 +92,10 @@ int astree_destroy(ASTree *tree) {
     switch (tree->symbol) {
       case TOK_ADDROF:
         /* free pointer auxspec that was added */
-        auxspec_destroy(llist_pop_front((LinkedList *)&tree->type->auxspecs));
+        /* NOTE: leaving the auxspec in the list is fine since the memory
+         * should not be touched by typespec_destroy
+         */
+        auxspec_destroy(typespec_get_aux(tree->type, 0));
         /* fallthrough */
       case TOK_SUBSCRIPT:
       case TOK_INDIRECTION:
@@ -119,6 +124,7 @@ ASTree *astree_adopt(ASTree *parent, const size_t count, ...) {
   size_t i;
   for (i = 0; i < count; ++i) {
     ASTree *child = va_arg(args, ASTree *);
+    assert(child != NULL);
     assert((child == &EMPTY_EXPR) ||
            (llist_find(&parent->children, child) == (size_t)-1L));
     DEBUGS('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
@@ -134,6 +140,7 @@ ASTree *astree_adopt(ASTree *parent, const size_t count, ...) {
 }
 
 ASTree *astree_replace(ASTree *parent, const size_t index, ASTree *child) {
+  assert(child != NULL);
   if (index >= astree_count(parent)) return NULL;
   ASTree *old_child = llist_extract(&parent->children, index);
   /* TODO(Robert): check status and indicate errors */
@@ -156,7 +163,7 @@ ASTree *astree_create_errnode(ASTree *child, int errcode, size_t info_count,
   AuxSpec *erraux = create_erraux_v(errcode, info_count, info_ptrs);
   va_end(info_ptrs);
   if (child->symbol == TOK_TYPE_ERROR) {
-    int status = llist_push_back((LinkedList *)&child->type->auxspecs, erraux);
+    int status = typespec_append_aux((TypeSpec *)child->type, erraux);
     if (status) abort();
     return child;
   } else {

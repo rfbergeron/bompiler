@@ -453,6 +453,14 @@ int typespec_append_auxspecs(TypeSpec *dest, const TypeSpec *src) {
   return 0;
 }
 
+int typespec_append_aux(TypeSpec *type, AuxSpec *aux) {
+  return llist_push_back(&type->auxspecs, aux);
+}
+
+int typespec_prepend_aux(TypeSpec *type, AuxSpec *aux) {
+  return llist_push_front(&type->auxspecs, aux);
+}
+
 int strip_aux_type(TypeSpec *dest, const TypeSpec *src) {
   int status = typespec_copy(dest, src);
   if (status) return status;
@@ -462,6 +470,10 @@ int strip_aux_type(TypeSpec *dest, const TypeSpec *src) {
     return -1;
   }
   return 0;
+}
+
+AuxSpec *typespec_get_aux(const TypeSpec *type, size_t index) {
+  return llist_get(&type->auxspecs, index);
 }
 
 int common_qualified_ptr(TypeSpec *dest, const TypeSpec *src1,
