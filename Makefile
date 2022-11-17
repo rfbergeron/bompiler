@@ -39,7 +39,6 @@ ${EXE}: ${OBJFILES}
 	${CC} ${CFLAGS} ${CWARN} $^ -o $@
 
 build/test_astree: LDFLAGS += ${WRAP_ATTRS} ${WRAP_SYMTABLE} ${WRAP_STRSET} ${WRAP_LYUTILS}
-build/test_symtable: LDFLAGS += ${WRAP_ATTRS} ${WRAP_STRSET} ${WRAP_LYUTILS} ${WRAP_STATE}
 build/test_%: build/%.o build/test_%.o build/debug.o ${LIBOBJ:%=build/%}
 	${CC} ${CFLAGS} ${LDFLAGS} $^ -o $@
 
@@ -77,8 +76,8 @@ clean:
 	rm -f ${OBJFILES} ${OBJFILES:build/%.o=build/test_%.o} ${GENSRC:%=build/%} ${GENHDR:%=build/%} build/yyparse.output
 
 ci: 
-	git add ${HDR:%=src/%} ${SRC:%=src/%} test/test_astree.c test/test_symtable.c ${MKFILE} README.md doc/*.md .gitignore .gitmodules \
+	git add ${HDR:%=src/%} ${SRC:%=src/%} test/test_astree.c ${MKFILE} README.md doc/*.md .gitignore .gitmodules \
 		src/parser.y src/scanner.l badlib
 
 format:
-	clang-format --style=Google -i ${SRC:%=src/%} ${HDR:%=src/%} test/test_astree.c test/test_symtable.c src/parser.y
+	clang-format --style=Google -i ${SRC:%=src/%} ${HDR:%=src/%} test/test_astree.c src/parser.y
