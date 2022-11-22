@@ -53,13 +53,13 @@ const unsigned int INCOMPATIBLE_FLAGSETS[] = {
     TYPESPEC_FLAGS_SIGNEDNESS | TYPESPEC_FLAGS_NON_INTEGER, /* signed */
     TYPESPEC_FLAGS_SIGNEDNESS | TYPESPEC_FLAGS_NON_INTEGER, /* unsigned */
     TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_NON_INTEGER |
-        TYPESPEC_FLAGS_SIGNEDNESS, /* void */
+        TYPESPEC_FLAGS_SIGNEDNESS | TYPESPEC_FLAG_CHAR, /* void */
     TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_NON_INTEGER |
-        TYPESPEC_FLAGS_SIGNEDNESS, /* struct */
+        TYPESPEC_FLAGS_SIGNEDNESS | TYPESPEC_FLAG_CHAR, /* struct */
     TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_NON_INTEGER |
-        TYPESPEC_FLAGS_SIGNEDNESS, /* union */
+        TYPESPEC_FLAGS_SIGNEDNESS | TYPESPEC_FLAG_CHAR, /* union */
     TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_NON_INTEGER |
-        TYPESPEC_FLAGS_SIGNEDNESS, /* enum */
+        TYPESPEC_FLAGS_SIGNEDNESS | TYPESPEC_FLAG_CHAR, /* enum */
 };
 
 const char STRING_INT_MAP[][32] = {
@@ -433,14 +433,8 @@ size_t typespec_get_alignment(const TypeSpec *spec) {
 
 size_t typespec_get_eightbytes(const TypeSpec *spec) {
   assert(!typespec_is_function(spec) && !typespec_is_array(spec));
-  if (typespec_is_union(spec) || typespec_is_struct(spec)) {
-    size_t ret = spec->width;
-    size_t padding = 8 - (ret % 8);
-    if (padding < 8) ret += padding;
-    return ret / 8;
-  } else {
-    return 1;
-  }
+  size_t width = typespec_get_width(spec);
+  return (width / 8) + ((width % 8 == 0) ? 0 : 1);
 }
 
 int typespec_append_auxspecs(TypeSpec *dest, const TypeSpec *src) {

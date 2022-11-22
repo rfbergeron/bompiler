@@ -68,7 +68,7 @@ ASTree *finalize_call(ASTree *call) {
   AuxSpec *param_spec = llist_get(&function_spec->auxspecs, 1);
   LinkedList *param_list = param_spec->data.params;
   /* subtract one since function expression is also a child */
-  if (astree_count(call) - 1 > llist_size(param_list)) {
+  if (astree_count(call) - 1 < llist_size(param_list)) {
     return astree_create_errnode(call, BCC_TERR_INSUFF_PARAMS, 1, call);
   }
   return translate_call(call);

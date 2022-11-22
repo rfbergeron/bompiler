@@ -902,26 +902,10 @@ ASTree *translate_comparison(ASTree *operator, ASTree * left, ASTree *right) {
   operator->first_instr = liter_copy(left->first_instr);
   if (operator->first_instr == NULL) abort();
 
-  const TypeSpec *common_type = NULL;
-  size_t left_width = typespec_get_width(left->type);
-  size_t right_width = typespec_get_width(right->type);
-  size_t max_width = left_width > right_width ? left_width : right_width;
-  switch (max_width) {
-    case X64_SIZEOF_LONG:
-      common_type = &SPEC_LONG;
-      break;
-    case X64_SIZEOF_INT:
-      common_type = &SPEC_INT;
-      break;
-    case X64_SIZEOF_SHORT:
-      common_type = &SPEC_SHRT;
-      break;
-    case X64_SIZEOF_CHAR:
-      common_type = &SPEC_CHAR;
-      break;
-    default:
-      abort();
-  }
+  const TypeSpec *common_type =
+      (typespec_is_pointer(left->type) || typespec_is_pointer(right->type))
+          ? &SPEC_LONG
+          : arithmetic_conversions(left->type, right->type);
 
   int status = scalar_conversions(left, common_type);
   if (status) abort();
@@ -1315,17 +1299,17 @@ int assign_aggregate(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
 
   InstructionData *lvalue_data = liter_get(lvalue->last_instr);
   InstructionData *rvalue_data = liter_get(rvalue->last_instr);
-  ListIter *temp = llist_iter_last(instructions);
+  assignment->last_instr = liter_next(rvalue->last_instr, 1);
+  if (assignment->last_instr == NULL) return -1;
   int status = bulk_mtom(lvalue_data->dest.reg.num, rvalue_data->dest.reg.num,
-                         assignment->type, temp);
-  free(temp);
+                         assignment->type, rvalue->last_instr);
   if (status) return status;
   InstructionData *dummy_data = instr_init(OP_MOV);
   dummy_data->src = dummy_data->dest = lvalue_data->dest;
-  status = llist_push_back(instructions, dummy_data);
+  /* push_front since iter is current past the last instruction */
+  status = liter_push_front(assignment->last_instr, &assignment->last_instr, 1,
+                            dummy_data);
   if (status) return status;
-  assignment->last_instr = llist_iter_last(instructions);
-  if (assignment->last_instr == NULL) return -1;
   return 0;
 }
 
@@ -1341,9 +1325,7 @@ int assign_scalar(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   assignment_data->src = rvalue_data->dest;
 
   InstructionData *dummy_data = instr_init(OP_MOV);
-  set_op_reg(&dummy_data->dest, typespec_get_width(assignment->type),
-             next_vreg());
-  dummy_data->src = rvalue_data->dest;
+  dummy_data->src = dummy_data->dest = rvalue_data->dest;
 
   assignment->first_instr = liter_copy(lvalue->first_instr);
   if (assignment->first_instr == NULL) return -1;
@@ -1427,7 +1409,7 @@ int translate_args(ASTree *call) {
   arg_reg_eightbytes = out_param ? 1 : 0;
   arg_stack_eightbytes = 0;
   if (typespec_is_struct(call->type) || typespec_is_union(call->type)) {
-    SymbolValue dummy;
+    SymbolValue dummy = {0};
     dummy.type = *call->type;
     assign_stack_space(&dummy);
     if (out_param) {
@@ -1542,14 +1524,15 @@ int translate_params(ASTree *declarator) {
   if (status) return status;
   /* account for hidden out param */
   param_reg_eightbytes = typespec_get_eightbytes(&ret_type) > 2 ? 1 : 0;
+  typespec_destroy(&ret_type);
   if (param_reg_eightbytes == 1) {
-    SymbolValue dummy;
+    SymbolValue dummy = {0};
     /* TODO(Robert): (void?) pointer type constant */
     dummy.type = SPEC_LONG;
     assign_stack_space(&dummy);
     InstructionData *mov_data = instr_init(OP_MOV);
     set_op_reg(&mov_data->src, REG_QWORD, RDI_VREG);
-    set_op_ind(&mov_data->dest, -window_size, RBP_VREG);
+    set_op_ind(&mov_data->dest, dummy.disp, RBP_VREG);
     int status = llist_push_back(instructions, mov_data);
     if (status) return status;
   }
@@ -2426,7 +2409,7 @@ ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
       declaration->first_instr = liter_copy(declarator->first_instr);
     if (declaration->first_instr == NULL) abort();
     free(declaration->last_instr);
-    declaration->last_instr = liter_copy(initializer->last_instr);
+    declaration->last_instr = liter_copy(assignment->last_instr);
     if (declaration->last_instr == NULL) abort();
     return astree_adopt(declaration, 1, assignment);
   } else {

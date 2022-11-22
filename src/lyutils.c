@@ -30,12 +30,11 @@ struct {
 
 /* internal functions */
 void push_linenr(size_t linenr) {
-  if (lexer_include_linenrs.count == lexer_include_linenrs.size) {
-    size_t new_size = lexer_include_linenrs.size * 2;
-    size_t *new_data = malloc(lexer_include_linenrs.size * sizeof(*new_data));
-    memcpy(new_data, lexer_include_linenrs.data, lexer_include_linenrs.size);
-    free(lexer_include_linenrs.data);
-    lexer_include_linenrs.size = new_size;
+  if (lexer_include_linenrs.count >= lexer_include_linenrs.size) {
+    lexer_include_linenrs.size *= 2;
+    lexer_include_linenrs.data =
+        realloc(lexer_include_linenrs.data,
+                lexer_include_linenrs.size * sizeof(size_t));
   }
   lexer_include_linenrs.data[lexer_include_linenrs.count++] = linenr;
 }
