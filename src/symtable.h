@@ -44,7 +44,7 @@ typedef struct symbol_value {
   Location loc;       /* declaration location */
   TypeSpec type;      /* type of symbol */
   unsigned int flags; /* flags, as enumerated above */
-  size_t disp;        /* displacement on stack/in struct */
+  ptrdiff_t disp;     /* displacement on stack/in struct */
   size_t static_id;   /* unique id for static local variables */
 } SymbolValue;
 
