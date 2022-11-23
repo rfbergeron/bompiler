@@ -68,11 +68,12 @@ SymbolValue *symbol_value_init(const Location *loc, const size_t sequence) {
 
 int symbol_value_destroy(SymbolValue *symbol_value) {
   DEBUGS('t', "freeing symbol value");
-  typespec_destroy(&(symbol_value->type));
+  if (symbol_value == NULL) return 0;
+  int status = typespec_destroy(&(symbol_value->type));
   free(symbol_value);
 
   DEBUGS('t', "done");
-  return 0;
+  return status;
 }
 
 #ifndef UNIT_TESTING
@@ -151,7 +152,9 @@ TagValue *tag_value_init(TagType tag) {
 }
 
 int tag_value_destroy(TagValue *tagval) {
-  if (tagval->tag == TAG_STRUCT || tagval->tag == TAG_UNION) {
+  if (tagval == NULL) {
+    return 0;
+  } else if (tagval->tag == TAG_STRUCT || tagval->tag == TAG_UNION) {
     int status = llist_destroy(&tagval->data.members.in_order);
     if (status) {
       fprintf(stderr, "your data structures library sucks\n");
@@ -248,6 +251,7 @@ SymbolTable *symbol_table_init(TableType type) {
 
 int symbol_table_destroy(SymbolTable *table) {
   DEBUGS('t', "Freeing symbol table");
+  if (table == NULL) return 0;
   switch (table->type) {
     case FUNCTION_TABLE:
       assert(!map_destroy(table->label_namespace));

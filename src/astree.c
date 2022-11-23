@@ -75,12 +75,10 @@ int astree_destroy(ASTree *tree) {
   }
 
   /* free symbol table if present */
-  if (tree->symbol_table != NULL) {
-    int status = symbol_table_destroy(tree->symbol_table);
-    if (status) {
-      fprintf(stderr, "unable to destroy symbol table\n");
-      abort();
-    }
+  status = symbol_table_destroy(tree->symbol_table);
+  if (status) {
+    fprintf(stderr, "unable to destroy symbol table\n");
+    abort();
   }
 
   /* free instruction iterators */
