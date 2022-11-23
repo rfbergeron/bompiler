@@ -84,6 +84,12 @@ const char *STRING_SHRT = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, SHORT)];
 const char *STRING_UCHAR = STRING_INT_MAP[INDEX_FROM_INT(UNSIGNED, CHAR)];
 const char *STRING_SCHAR = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, CHAR)];
 
+const AuxSpec AUXSPEC_PTR = {{{0, 0}}, AUX_POINTER};
+const AuxSpec AUXSPEC_CONST_PTR = {{{0, TYPESPEC_FLAG_CONST}}, AUX_POINTER};
+const AuxSpec AUXSPEC_VOLATILE_PTR = {{{0, TYPESPEC_FLAG_VOLATILE}},
+                                      AUX_POINTER};
+const AuxSpec AUXSPEC_CONST_VOLATILE_PTR = {
+    {{0, TYPESPEC_FLAG_CONST | TYPESPEC_FLAG_VOLATILE}}, AUX_POINTER};
 const TypeSpec SPEC_EMPTY = {0, 0, BLIB_LLIST_EMPTY, TYPESPEC_FLAG_NONE,
                              TYPE_NONE};
 const TypeSpec SPEC_VOID = {0, 0, BLIB_LLIST_EMPTY, TYPESPEC_FLAG_VOID,
@@ -192,7 +198,15 @@ int type_to_string(const TypeSpec *type, char *buf, size_t size) {
         }
         break;
       case AUX_POINTER:
-        ret += sprintf((buf + ret), "pointer to ");
+        if (!(auxspec->data.memory_loc.qualifiers ^
+              (TYPESPEC_FLAG_CONST | TYPESPEC_FLAG_VOLATILE)))
+          ret += sprintf((buf + ret), "const volatile pointer to ");
+        else if (auxspec->data.memory_loc.qualifiers & TYPESPEC_FLAG_CONST)
+          ret += sprintf((buf + ret), "const pointer to ");
+        else if (auxspec->data.memory_loc.qualifiers & TYPESPEC_FLAG_VOLATILE)
+          ret += sprintf((buf + ret), "volatile pointer to ");
+        else
+          ret += sprintf((buf + ret), "pointer to ");
         break;
       case AUX_FUNCTION:
         ret += sprintf((buf + ret), "function with parameters (");
@@ -206,23 +220,21 @@ int type_to_string(const TypeSpec *type, char *buf, size_t size) {
         }
         ret += sprintf((buf + ret), ") returning ");
         break;
-      case AUX_STRUCT:
-        ret += sprintf((buf + ret), "struct %s", auxspec->data.tag.name);
-        break;
-      case AUX_UNION:
-        ret += sprintf((buf + ret), "union %s", auxspec->data.tag.name);
-        break;
-      case AUX_ENUM:
-        ret += sprintf((buf + ret), "enum %s", auxspec->data.tag.name);
-        break;
       default:
         break;
     }
+  }
+  if (type->flags & TYPESPEC_FLAG_CONST) {
+    ret += sprintf((buf + ret), "const ");
+  }
+  if (type->flags & TYPESPEC_FLAG_VOLATILE) {
+    ret += sprintf((buf + ret), "volatile ");
   }
   /* TODO(Robert): use the mappings defined above to print instead of this
    * silly shit
    */
   switch (type->base) {
+    AuxSpec *tag_aux;
     case TYPE_NONE:
       /* ret += sprintf(buf + ret, " none"); */
       buf[ret] = 0;
@@ -270,8 +282,22 @@ int type_to_string(const TypeSpec *type, char *buf, size_t size) {
           break;
       }
       break;
-    default:
+    case TYPE_STRUCT:
+      tag_aux = llist_back(&type->auxspecs);
+      ret += sprintf(buf + ret, "struct %s", tag_aux->data.tag.name);
       break;
+    case TYPE_UNION:
+      tag_aux = llist_back(&type->auxspecs);
+      ret += sprintf(buf + ret, "union %s", tag_aux->data.tag.name);
+      break;
+    case TYPE_ENUM:
+      tag_aux = llist_back(&type->auxspecs);
+      ret += sprintf(buf + ret, "enum %s", tag_aux->data.tag.name);
+      break;
+    case TYPE_ERROR:
+      break;
+    default:
+      abort();
   }
 
   return ret;
@@ -476,12 +502,20 @@ int common_qualified_ptr(TypeSpec *dest, const TypeSpec *src1,
   if (status) return status;
   AuxSpec *aux1 = llist_front(&src1->auxspecs);
   AuxSpec *aux2 = llist_front(&src2->auxspecs);
-  AuxSpec *ptr_aux = calloc(1, sizeof(*ptr_aux));
-  ptr_aux->aux = AUX_POINTER;
-  ptr_aux->data.memory_loc.qualifiers =
+  unsigned int qualifiers =
       aux1->data.memory_loc.qualifiers | aux2->data.memory_loc.qualifiers;
-  llist_push_front(&dest->auxspecs, ptr_aux);
-  return 0;
+  if (!(qualifiers ^ (TYPESPEC_FLAG_CONST | TYPESPEC_FLAG_VOLATILE))) {
+    status = llist_push_front(&dest->auxspecs,
+                              (AuxSpec *)&AUXSPEC_CONST_VOLATILE_PTR);
+  } else if (qualifiers & TYPESPEC_FLAG_CONST) {
+    status = llist_push_front(&dest->auxspecs, (AuxSpec *)&AUXSPEC_CONST_PTR);
+  } else if (qualifiers & TYPESPEC_FLAG_VOLATILE) {
+    status =
+        llist_push_front(&dest->auxspecs, (AuxSpec *)&AUXSPEC_VOLATILE_PTR);
+  } else {
+    status = llist_push_front(&dest->auxspecs, (AuxSpec *)&AUXSPEC_PTR);
+  }
+  return status;
 }
 
 int typespec_is_incomplete(const TypeSpec *type) {

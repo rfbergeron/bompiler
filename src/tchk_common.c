@@ -167,9 +167,7 @@ void pointer_conversions(ASTree *expr) {
         abort();
       }
     }
-    AuxSpec *pointer_aux = calloc(1, sizeof(*pointer_aux));
-    pointer_aux->aux = AUX_POINTER;
-    int status = llist_push_front(&pointer_type->auxspecs, pointer_aux);
+    int status = typespec_prepend_aux(pointer_type, (AuxSpec *)&AUXSPEC_PTR);
     if (status) {
       llist_destroy(&pointer_type->auxspecs);
       free(pointer_type);

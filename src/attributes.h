@@ -173,14 +173,14 @@ typedef enum bcc_type_err {
 typedef struct auxspec {
   union {
     struct {
+      size_t length;
+      unsigned int qualifiers;
+    } memory_loc;
+    struct {
       const char *name;
       struct tag_value *val;
     } tag;
     LinkedList *params;
-    struct {
-      size_t length;
-      unsigned int qualifiers;
-    } memory_loc;
     struct {
       void **info;
       size_t info_count;
@@ -211,7 +211,10 @@ typedef struct location {
 
 /* TODO(Robert): maybe define this in some other common file? */
 extern const size_t MAX_IDENT_LEN;
-extern const TypeSpec SPEC_PTR;
+extern const AuxSpec AUXSPEC_PTR;
+extern const AuxSpec AUXSPEC_CONST_PTR;
+extern const AuxSpec AUXSPEC_VOLATILE_PTR;
+extern const AuxSpec AUXSPEC_CONST_VOLATILE_PTR;
 extern const TypeSpec SPEC_FUNCTION;
 extern const TypeSpec SPEC_STRUCT;
 extern const TypeSpec SPEC_EMPTY;

@@ -87,7 +87,7 @@ topdecl             : declarations ';'                                  { $$ = b
 function_def        : typespec_list declarator '{'                      { $$ = bcc_yyval = define_function(parser_make_declaration($1), $2, parser_new_sym($3, TOK_BLOCK)); }
                     | typespec_list abs_declarator '{'                  { $$ = bcc_yyval = define_function(parser_make_declaration($1), $2, parser_new_sym($3, TOK_BLOCK)); }
                     | function_def stmt                                 { $$ = bcc_yyval = validate_fnbody_content($1, $2); }
-                    | function_def declarations ';'                     { $$ = bcc_yyval = validate_fnbody_content($1, $2); parser_cleanup(1, $3); }
+                    | function_def declarations ';'                     { $$ = bcc_yyval = validate_fnbody_content($1, finalize_declaration($2)); parser_cleanup(1, $3); }
                     ;
 declarations        : typespec_list declarator                          { $$ = bcc_yyval = declare_symbol(parser_make_declaration($1), $2); } /* make_declaration, declare_symbol */
                     | typespec_list abs_declarator                      { $$ = bcc_yyval = declare_symbol(parser_make_declaration($1), $2); } /* make_declaration, declare_symbol */

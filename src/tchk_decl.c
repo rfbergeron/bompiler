@@ -149,7 +149,7 @@ ASTree *validate_tag_typespec(ASTree *spec_list, ASTree *tag) {
 ASTree *validate_qualifier(ASTree *spec_list, ASTree *qualifier,
                            enum typespec_flag flag) {
   TypeSpec *out = (TypeSpec *)spec_list->type;
-  if (out->flags & (TYPESPEC_FLAG_CONST | TYPESPEC_FLAG_VOLATILE)) {
+  if (out->flags & flag & (TYPESPEC_FLAG_CONST | TYPESPEC_FLAG_VOLATILE)) {
     return astree_create_errnode(astree_adopt(spec_list, 1, qualifier),
                                  BCC_TERR_INCOMPATIBLE_SPEC, 2, spec_list,
                                  qualifier);
@@ -501,8 +501,9 @@ ASTree *validate_param(ASTree *param_list, ASTree *declaration,
     return astree_propogate_errnode(
         param_list, astree_propogate_errnode(declaration, declarator));
   }
-
-  return astree_adopt(param_list, 1, astree_adopt(declaration, 1, declarator));
+  return astree_adopt(
+      param_list, 1,
+      finalize_declaration(astree_adopt(declaration, 1, declarator)));
 }
 
 ASTree *finalize_param_list(ASTree *param_list) {
@@ -1324,6 +1325,7 @@ ASTree *define_enumerator(ASTree *enum_, ASTree *ident_node, ASTree *equal_sign,
 }
 
 ASTree *define_struct_member(ASTree *struct_, ASTree *member) {
+  (void)finalize_declaration(member);
   ASTree *left_brace =
       astree_get(UNWRAP(struct_), astree_count(UNWRAP(struct_)) == 2 ? 1 : 0);
   if (struct_->symbol == TOK_TYPE_ERROR) {

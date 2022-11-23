@@ -191,7 +191,6 @@ ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
       return astree_create_errnode(
           astree_adopt(qmark, 3, condition, true_expr, false_expr),
           BCC_TERR_FAILURE, 0);
-    /* TODO(Robert): free resources used to create new type/auxspec */
     qmark->type = common_type;
   } else if (typespec_is_voidptr(true_expr->type) &&
              typespec_is_pointer(false_expr->type)) {
@@ -202,7 +201,6 @@ ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
       return astree_create_errnode(
           astree_adopt(qmark, 3, condition, true_expr, false_expr),
           BCC_TERR_FAILURE, 0);
-    /* TODO(Robert): free resources used to create new type/auxspec */
     qmark->type = common_type;
   } else if (typespec_is_pointer(true_expr->type) &&
              typespec_is_pointer(false_expr->type)) {
@@ -215,7 +213,6 @@ ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
         return astree_create_errnode(
             astree_adopt(qmark, 3, condition, true_expr, false_expr),
             BCC_TERR_FAILURE, 0);
-      /* TODO(Robert): free resources used to create new type/auxspec */
       qmark->type = common_type;
     } else {
       return astree_create_errnode(
@@ -541,9 +538,11 @@ ASTree *validate_addrof(ASTree *addrof, ASTree *operand) {
     return astree_create_errnode(astree_adopt(addrof, 1, operand),
                                  BCC_TERR_LIBRARY_FAILURE, 0);
   }
-  AuxSpec *ptr_aux = calloc(1, sizeof(*ptr_aux));
-  ptr_aux->aux = AUX_POINTER;
-  llist_push_front(&addrof_spec->auxspecs, ptr_aux);
+  status = typespec_prepend_aux(addrof_spec, (AuxSpec *)&AUXSPEC_PTR);
+  if (status) {
+    return astree_create_errnode(astree_adopt(addrof, 1, operand),
+                                 BCC_TERR_LIBRARY_FAILURE, 0);
+  }
   addrof->type = addrof_spec;
   return evaluate_addrof(addrof, operand);
 }
