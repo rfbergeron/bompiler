@@ -90,16 +90,22 @@ int astree_destroy(ASTree *tree) {
   /* free one-off TypeSpec objects */
   if (!skip_type_check && tree->type != &SPEC_EMPTY) {
     switch (tree->symbol) {
+      AuxSpec *front_aux;
+      default:
+        front_aux = typespec_get_aux(tree->type, 0);
+        if (front_aux != &AUXSPEC_PTR && front_aux != &AUXSPEC_CONST_PTR &&
+            front_aux != &AUXSPEC_VOLATILE_PTR &&
+            front_aux != &AUXSPEC_CONST_VOLATILE_PTR)
+          break;
+        /* fallthrough */
       case TOK_ADDROF:
-        /* free pointer auxspec that was added */
-        /* NOTE: leaving the auxspec in the list is fine since the memory
-         * should not be touched by typespec_destroy
-         */
-        auxspec_destroy(typespec_get_aux(tree->type, 0));
         /* fallthrough */
       case TOK_SUBSCRIPT:
+        /* fallthrough */
       case TOK_INDIRECTION:
+        /* fallthrough */
       case TOK_CALL:
+        /* fallthrough */
       case TOK_TYPE_ERROR:
         typespec_destroy((TypeSpec *)tree->type);
         free((TypeSpec *)tree->type);
