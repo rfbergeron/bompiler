@@ -17,6 +17,7 @@ CompilerState *state_init(void) {
 }
 
 int state_destroy(CompilerState *state) {
+  if (state == NULL) return 0;
   llist_destroy(&state->table_stack);
   llist_destroy(&state->switch_stack);
   size_t_stack_destroy(&state->break_stack);
