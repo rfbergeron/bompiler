@@ -308,7 +308,9 @@ int location_is_empty(Location *loc) {
 }
 
 void set_link_and_store(SymbolValue *symval) {
-  if (llist_size(&state->table_stack) == 1) {
+  if (symval->type.flags & TYPESPEC_FLAG_TYPEDEF) {
+    symval->flags |= SYMFLAG_TYPEDEF;
+  } else if (llist_size(&state->table_stack) == 1) {
     if (symval->type.flags & TYPESPEC_FLAG_EXTERN) {
       symval->flags |= (SYMFLAG_LINK_EXT | SYMFLAG_STORE_EXT);
     } else if (symval->type.flags & TYPESPEC_FLAG_STATIC) {
