@@ -94,7 +94,11 @@ int symbol_value_print(const SymbolValue *symbol, char *buffer, size_t size) {
   size_t sym_width = typespec_get_width((TypeSpec *)&symbol->type);
   size_t sym_align = typespec_get_alignment((TypeSpec *)&symbol->type);
   const char *link_str;
-  if (symbol->flags & SYMFLAG_LINK_EXT)
+  if (symbol->flags & SYMFLAG_TYPENAME)
+    link_str = "TYPENAME";
+  else if (symbol->flags & SYMFLAG_TYPEDEF)
+    link_str = "TYPEDEF";
+  else if (symbol->flags & SYMFLAG_LINK_EXT)
     link_str = "EXTERNAL";
   else if (symbol->flags & SYMFLAG_LINK_INT)
     link_str = "INTERNAL";
@@ -103,7 +107,11 @@ int symbol_value_print(const SymbolValue *symbol, char *buffer, size_t size) {
   else
     link_str = "UNSPECIFIED";
   const char *stor_str;
-  if (symbol->flags & SYMFLAG_STORE_EXT)
+  if (symbol->flags & SYMFLAG_TYPENAME)
+    stor_str = "TYPENAME";
+  else if (symbol->flags & SYMFLAG_TYPEDEF)
+    stor_str = "TYPEDEF";
+  else if (symbol->flags & SYMFLAG_STORE_EXT)
     stor_str = "EXTERNAL";
   else if (symbol->flags & SYMFLAG_STORE_STAT)
     stor_str = "STATIC";
