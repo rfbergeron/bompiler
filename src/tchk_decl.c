@@ -46,8 +46,7 @@ ASTree *validate_integer_typespec(ASTree *spec_list, enum typespec_index i,
         spec_list, BCC_TERR_INCOMPATIBLE_SPEC, 2, spec_list,
         astree_get(spec_list, astree_count(spec_list) - 1));
   } else {
-    out->flags |= f;
-    if (bytes > 0) {
+    if ((out->width == 0 || out->flags & TYPESPEC_FLAG_INT) && bytes > 0) {
       out->width = bytes;
       out->alignment = bytes;
     } else if (f == TYPESPEC_FLAG_SIGNED) {
@@ -55,6 +54,7 @@ ASTree *validate_integer_typespec(ASTree *spec_list, enum typespec_index i,
     } else {
       out->base = TYPE_UNSIGNED;
     }
+    out->flags |= f;
     return spec_list;
   }
 }
