@@ -134,12 +134,13 @@ ASTree *validate_tag_typespec(ASTree *spec_list, ASTree *tag) {
     typespec_init(out);
   }
 
+  /* NOTE: combine_types calls typespec_append_auxspecs, which actually copies
+   * the auxspecs, so the original can simply be freed
+   */
   assert(!combine_types((TypeSpec *)spec_list->type, tag->type));
   /* free temporary typespec */
-  TypeSpec *tag_type = (TypeSpec *)tag->type;
-  (void)llist_pop_back(&tag_type->auxspecs);
   assert(!typespec_destroy((TypeSpec *)tag->type));
-  free(tag_type);
+  free((TypeSpec *)tag->type);
   tag->type = &SPEC_EMPTY;
   out->flags |= flag_from_symbol(tag->symbol);
 
@@ -1163,7 +1164,7 @@ ASTree *validate_tag_def(ASTree *tag_type_node, ASTree *tag_name_node,
         BCC_TERR_REDEFINITION, 1, tag_name_node);
   } else {
     /* TODO(Robert): error handling */
-    TagValue *tagval = tag_value_init(tag_type);
+    TagValue *tagval;
     if (exists) {
       tagval = exists;
     } else {
@@ -1193,7 +1194,7 @@ ASTree *validate_tag_def(ASTree *tag_type_node, ASTree *tag_name_node,
     } else {
       int status = state_push_table(state, tagval->data.members.by_name);
     }
-    return astree_adopt(tag_type_node, 1, tag_name_node);
+    return astree_adopt(tag_type_node, 2, tag_name_node, left_brace);
   }
 }
 

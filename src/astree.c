@@ -67,6 +67,40 @@ int astree_destroy(ASTree *tree) {
     /* print tree contents to stderr */
   }
 
+  /* free one-off TypeSpec objects */
+  if (!skip_type_check && tree->type != &SPEC_EMPTY) {
+    switch (tree->symbol) {
+      AuxSpec *front_aux;
+      size_t i;
+      int owns_type;
+      default:
+        front_aux = typespec_get_aux(tree->type, 0);
+        if (front_aux != &AUXSPEC_PTR && front_aux != &AUXSPEC_CONST_PTR &&
+            front_aux != &AUXSPEC_VOLATILE_PTR &&
+            front_aux != &AUXSPEC_CONST_VOLATILE_PTR)
+          break;
+        for (i = 0, owns_type = 1; i < llist_size(&tree->children) && owns_type;
+             ++i) {
+          ASTree *child = llist_get(&tree->children, i);
+          if (tree->type == child->type) owns_type = 0;
+        }
+        if (!owns_type) break;
+        /* fallthrough */
+      case TOK_ADDROF:
+        /* fallthrough */
+      case TOK_SUBSCRIPT:
+        /* fallthrough */
+      case TOK_INDIRECTION:
+        /* fallthrough */
+      case TOK_CALL:
+        /* fallthrough */
+      case TOK_TYPE_ERROR:
+        typespec_destroy((TypeSpec *)tree->type);
+        free((TypeSpec *)tree->type);
+        break;
+    }
+  }
+
   /* llist should handle destruction of children */
   int status = llist_destroy(&tree->children);
   if (status) {
@@ -84,32 +118,6 @@ int astree_destroy(ASTree *tree) {
   /* free instruction iterators */
   free(tree->first_instr);
   free(tree->last_instr);
-
-  /* free one-off TypeSpec objects */
-  if (!skip_type_check && tree->type != &SPEC_EMPTY) {
-    switch (tree->symbol) {
-      AuxSpec *front_aux;
-      default:
-        front_aux = typespec_get_aux(tree->type, 0);
-        if (front_aux != &AUXSPEC_PTR && front_aux != &AUXSPEC_CONST_PTR &&
-            front_aux != &AUXSPEC_VOLATILE_PTR &&
-            front_aux != &AUXSPEC_CONST_VOLATILE_PTR)
-          break;
-        /* fallthrough */
-      case TOK_ADDROF:
-        /* fallthrough */
-      case TOK_SUBSCRIPT:
-        /* fallthrough */
-      case TOK_INDIRECTION:
-        /* fallthrough */
-      case TOK_CALL:
-        /* fallthrough */
-      case TOK_TYPE_ERROR:
-        typespec_destroy((TypeSpec *)tree->type);
-        free((TypeSpec *)tree->type);
-        break;
-    }
-  }
 
   free(tree);
   return 0;
