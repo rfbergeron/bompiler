@@ -363,7 +363,8 @@ ASTree *parser_make_cast(ASTree *left_paren, ASTree *spec_list,
                          ASTree *type_name, ASTree *expr) {
   ASTree *cast = parser_new_sym(left_paren, TOK_CAST);
   ASTree *declaration = parser_make_declaration(spec_list);
-  return validate_cast(cast, declare_symbol(declaration, type_name), expr);
+  return validate_cast(
+      cast, finalize_declaration(declare_symbol(declaration, type_name)), expr);
 }
 
 ASTree *parser_make_label(ASTree *ident) {
@@ -372,8 +373,8 @@ ASTree *parser_make_label(ASTree *ident) {
 
 ASTree *parse_sizeof(ASTree *sizeof_, ASTree *spec_list, ASTree *declarator) {
   ASTree *declaration = parser_make_declaration(spec_list);
-  ASTree *declaration_or_err = declare_symbol(declaration, declarator);
-  return validate_sizeof(sizeof_, declaration_or_err);
+  return validate_sizeof(
+      sizeof_, finalize_declaration(declare_symbol(declaration, declarator)));
 }
 
 void parser_cleanup(size_t count, ...) {

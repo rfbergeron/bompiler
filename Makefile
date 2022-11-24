@@ -27,10 +27,13 @@ OBJFILES := ${OBJ:%=build/%} ${GENOBJ:%=build/%} ${LIBOBJ:%=build/%}
 all: CFLAGS += -O1
 all: ${EXE}
 
-debug: CFLAGS += -Og -pg -ggdb
+debug: CFLAGS += -Og -pg -g -fstack-protector-all
 debug: ${EXE}
 
-test: CFLAGS += -Itest -Og -pg -ggdb
+sanitize: CFLAGS += -Og -pg -g -fsanitize=address -fstack-protector-all
+sanitize: ${EXE}
+
+test: CFLAGS += -Itest -Og -pg -g
 test: LDFLAGS += -lcmocka
 test: export CPPFLAGS = -DUNIT_TESTING
 test: ${TESTS}
