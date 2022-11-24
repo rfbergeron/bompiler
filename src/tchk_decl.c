@@ -371,6 +371,39 @@ int is_array_completion(SymbolValue *symval, SymbolValue *exists) {
   return ret;
 }
 
+const char *create_unique_name(ASTree *tree) {
+  const char *node_str;
+  switch (tree->symbol) {
+    case TOK_TYPE_NAME:
+      node_str = "type_name";
+      break;
+    case TOK_STRUCT:
+      node_str = "struct";
+      break;
+    case TOK_ENUM:
+      node_str = "enum";
+      break;
+    case TOK_UNION:
+      node_str = "union";
+      break;
+    default:
+      fprintf(stderr, "ERROR: unable to create unique name for symbol %s\n",
+              parser_get_tname(tree->symbol));
+      abort();
+  }
+
+  char filenr_str[32], linenr_str[32], offset_str[32];
+  sprintf(filenr_str, "%lu", tree->loc.filenr);
+  sprintf(linenr_str, "%lu", tree->loc.linenr);
+  sprintf(offset_str, "%lu", tree->loc.offset);
+  size_t name_len = strlen(filenr_str) + strlen(linenr_str) +
+                    strlen(offset_str) + strlen(node_str) + 3;
+  char *name = malloc(sizeof(char) * (name_len + 1));
+
+  sprintf(name, "%s_%s_%s_%s", filenr_str, linenr_str, offset_str, node_str);
+  return name;
+}
+
 /*
  * Combines type specifier and declarator information and inserts symbol value
  * into the table at the current scope. Sets source location of the declaration
@@ -390,10 +423,15 @@ ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
   int status = combine_types((TypeSpec *)declarator->type, spec_list->type);
   if (status)
     return astree_create_errnode(declarator, BCC_TERR_LIBRARY_FAILURE, 0);
-  if (declarator->symbol == TOK_TYPE_NAME) return declarator;
   SymbolValue *symval = sym_from_type((TypeSpec *)declarator->type);
-  set_link_and_store(symval);
-  const char *identifier = declarator->lexinfo;
+  const char *identifier;
+  if (declarator->symbol == TOK_TYPE_NAME) {
+    symval->flags |= SYMFLAG_TYPENAME;
+    identifier = create_unique_name(declarator);
+  } else {
+    set_link_and_store(symval);
+    identifier = declarator->lexinfo;
+  }
   size_t identifier_len = strlen(identifier);
   SymbolValue *exists = NULL;
   int is_redeclaration =
@@ -1011,43 +1049,13 @@ void fill_tag_spec(TypeSpec *spec, TagValue *tagval) {
   spec->width = tagval->width;
 }
 
-const char *create_unique_name(ASTree *tree) {
-  /* TODO(Robert): calculate buffer size */
-  char *name = malloc(64 * sizeof(char));
-  const char *node_string;
-  switch (tree->symbol) {
-    case TOK_TYPE_NAME:
-      node_string = "type_name";
-      break;
-    case TOK_STRUCT:
-      node_string = "struct";
-      break;
-    case TOK_ENUM:
-      node_string = "enum";
-      break;
-    case TOK_UNION:
-      node_string = "union";
-      break;
-    default:
-      node_string = NULL;
-  }
-  if (node_string == NULL) {
-    fprintf(stderr, "ERROR: unable to create unqiue name for symbol %s\n",
-            parser_get_tname(tree->symbol));
-    abort();
-  }
-
-  sprintf(name, "%lu_%lu_%lu_%s", tree->loc.filenr, tree->loc.linenr,
-          tree->loc.offset, node_string);
-  return name;
-}
-
 ASTree *validate_unique_tag(ASTree *tag_type_node, ASTree *left_brace) {
   const char *tag_name = create_unique_name(tag_type_node);
   const size_t tag_name_len = strlen(tag_name);
   TagType tag_type = tag_from_symbol(tag_type_node->symbol);
   /* TODO(Robert): error handling */
   TagValue *tagval = tag_value_init(tag_type);
+  int status = state_insert_tag(state, tag_name, tag_name_len, tagval);
   tag_type_node->type = calloc(1, sizeof(TypeSpec));
   assert(!typespec_init((TypeSpec *)tag_type_node->type));
   AuxSpec *tag_aux = calloc(1, sizeof(AuxSpec));

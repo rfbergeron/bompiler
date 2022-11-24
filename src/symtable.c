@@ -7,6 +7,7 @@
 #include "badllist.h"
 #include "badmap.h"
 #include "bcc_err.h"
+#include "ctype.h"
 #include "debug.h"
 #include "err.h"
 #include "simplestack.h"
@@ -49,6 +50,10 @@ static int strncmp_wrapper(void *s1, void *s2) {
     ret = !strncmp(s1, s2, MAX_IDENT_LEN);
   }
   return ret;
+}
+
+void destroy_unique_name(const char *str) {
+  if (isdigit(str[0])) free((char *)str);
 }
 
 /*
@@ -236,12 +241,14 @@ SymbolTable *symbol_table_init(TableType type) {
     case TRANS_UNIT_TABLE:
     case BLOCK_TABLE:
       table->tag_namespace = malloc(sizeof(Map));
-      assert(!map_init(table->tag_namespace, DEFAULT_MAP_SIZE, NULL,
+      assert(!map_init(table->tag_namespace, DEFAULT_MAP_SIZE,
+                       (void (*)(void *))destroy_unique_name,
                        (void (*)(void *))tag_value_destroy, strncmp_wrapper));
       /* fallthrough */
     case MEMBER_TABLE:
       table->primary_namespace = malloc(sizeof(Map));
-      assert(!map_init(table->primary_namespace, DEFAULT_MAP_SIZE, NULL,
+      assert(!map_init(table->primary_namespace, DEFAULT_MAP_SIZE,
+                       (void (*)(void *))destroy_unique_name,
                        (void (*)(void *))symbol_value_destroy,
                        strncmp_wrapper));
       break;
