@@ -220,6 +220,7 @@ static const char CASE_FMT[] = ".LS%luC%lu";
 static const char FALL_FMT[] = ".LS%luF%lu";
 static const char STR_FMT[] = ".LSTR%lu";
 static const char FN_SIZE_FMT[] = ".-%s";
+static const char FN_PTR_FMT[] = "%s@GOTPCREL";
 
 /* Base and index are registers; scale is limited to {1, 2, 4, 8}, and
  * displacement is a signed 32-bit integer.
@@ -278,7 +279,7 @@ static Map *static_locals;
 static Map *generated_text;
 
 static const char *deduplicate_text(size_t size, const char *fmt, ...) {
-  char *label = malloc(size + 1);
+  char *label = malloc(size);
   va_list args;
   va_start(args, fmt);
   int status = vsprintf(label, fmt, args);
@@ -287,12 +288,12 @@ static const char *deduplicate_text(size_t size, const char *fmt, ...) {
     free(label);
     return NULL;
   } else {
-    const char *existing = map_get(generated_text, label, size);
+    const char *existing = map_get(generated_text, label, size - 1);
     if (existing) {
       free(label);
       return existing;
     } else {
-      int status = map_insert(generated_text, label, size, label);
+      int status = map_insert(generated_text, label, size - 1, label);
       if (status) {
         free(label);
         return NULL;
@@ -306,7 +307,7 @@ static const char *deduplicate_text(size_t size, const char *fmt, ...) {
 const char *mk_generic_label(const char *fmt, size_t unique_id) {
   char temp[64];
   sprintf(temp, "%lu", unique_id);
-  size_t label_len = (strlen(fmt) - 3) + strlen(temp);
+  size_t label_len = (strlen(fmt) - 3) + strlen(temp) + 1;
   return deduplicate_text(label_len, fmt, unique_id);
 }
 
@@ -322,12 +323,13 @@ const char *mk_generic_label(const char *fmt, size_t unique_id) {
 const char *mk_static_label(const char *name, size_t unique_id) {
   char temp[64];
   sprintf(temp, "%lu", unique_id);
-  size_t label_len = strlen(name) + strlen(temp) + 1;
+  size_t label_len = strlen(name) + strlen(temp) + sizeof(STATIC_FMT) - 3;
   return deduplicate_text(label_len, STATIC_FMT, name, unique_id);
 }
 
 const char *mk_fnptr_text(const char *name) {
-  return deduplicate_text(strlen(name) + 10, "%s@GOTPCREL", name);
+  size_t text_len = strlen(name) + sizeof(FN_PTR_FMT) - 2;
+  return deduplicate_text(text_len, FN_PTR_FMT, name);
 }
 
 const char *mk_fallthru_label(size_t switch_id, size_t case_id) {
@@ -335,7 +337,7 @@ const char *mk_fallthru_label(size_t switch_id, size_t case_id) {
   sprintf(temp1, "%lu", switch_id);
   char temp2[64];
   sprintf(temp2, "%lu", case_id);
-  size_t label_len = strlen(temp1) + strlen(temp2) + 3;
+  size_t label_len = strlen(temp1) + strlen(temp2) + sizeof(FALL_FMT) - 6;
   return deduplicate_text(label_len, FALL_FMT, switch_id, case_id);
 }
 
@@ -344,17 +346,17 @@ const char *mk_case_label(size_t switch_id, size_t case_id) {
   sprintf(temp1, "%lu", switch_id);
   char temp2[64];
   sprintf(temp2, "%lu", case_id);
-  size_t label_len = strlen(temp1) + strlen(temp2) + 3;
+  size_t label_len = strlen(temp1) + strlen(temp2) + sizeof(CASE_FMT) - 6;
   return deduplicate_text(label_len, CASE_FMT, switch_id, case_id);
 }
 
 const char *mk_local_label(const char *name) {
-  size_t label_len = strlen(name) + 2;
+  size_t label_len = strlen(name) + sizeof(LOCAL_FMT) - 2;
   return deduplicate_text(label_len, LOCAL_FMT, name);
 }
 
 const char *mk_fn_size(const char *name) {
-  size_t text_len = strlen(name) + 2;
+  size_t text_len = strlen(name) + sizeof(FN_SIZE_FMT) - 2;
   return deduplicate_text(text_len, FN_SIZE_FMT, name);
 }
 
@@ -1774,7 +1776,7 @@ ASTree *translate_do(ASTree *do_, ASTree *body, ASTree *condition) {
 
   InstructionData *end_label = instr_init(OP_NONE);
   end_label->label = mk_end_label(do_->jump_id);
-  status = liter_push_back(condition->last_instr, &do_->first_instr, 3,
+  status = liter_push_back(condition->last_instr, &do_->last_instr, 3,
                            test_data, test_jmp_data, end_label);
 
   /* fix bogus jump id information */

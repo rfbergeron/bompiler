@@ -720,9 +720,16 @@ TypeSpec *get_agg_member_spec(TypeSpec *spec, size_t index) {
   }
 }
 
-void cleanup_agg_member_spec(TypeSpec *spec) {
-  assert(!typespec_destroy(spec));
-  free(spec);
+struct agg_entry {
+  TypeSpec *spec;
+  size_t index;
+};
+
+void cleanup_agg_entry(struct agg_entry *entry) {
+  int status = typespec_destroy(entry->spec);
+  if (status) abort();
+  free(entry->spec);
+  free(entry);
 }
 
 ASTree *validate_scalar_init(TypeSpec *dest_type, ASTree *initializer);
@@ -730,17 +737,16 @@ ASTree *validate_init_list(TypeSpec *dest_spec, ASTree *init_list) {
   assert(typespec_is_array(dest_spec) || typespec_is_union(dest_spec) ||
          typespec_is_struct(dest_spec));
   if (init_list->symbol == TOK_TYPE_ERROR) return init_list;
-  struct agg_entry {
-    TypeSpec *spec;
-    size_t index;
-  };
   size_t initializer_index = 0;
   LinkedList agg_stack;
   int status =
-      llist_init(&agg_stack, (void (*)(void *))cleanup_agg_member_spec, NULL);
+      llist_init(&agg_stack, (void (*)(void *))cleanup_agg_entry, NULL);
   if (status) abort();
   struct agg_entry *first_entry = malloc(sizeof(struct agg_entry));
-  first_entry->spec = dest_spec;
+  /* must copy dest_spec so that cleanup_agg_entry can work on it */
+  first_entry->spec = malloc(sizeof(TypeSpec));
+  status = typespec_copy(first_entry->spec, dest_spec);
+  if (status) abort();
   first_entry->index = 0;
   status = llist_push_front(&agg_stack, first_entry);
   if (status) abort();
@@ -760,7 +766,9 @@ ASTree *validate_init_list(TypeSpec *dest_spec, ASTree *init_list) {
       /* intentionally leak member type resources in case the member type needs
        * to be printed in the error message
        */
-      cleanup_agg_member_spec(member_spec);
+      int status = typespec_destroy(member_spec);
+      if (status) abort();
+      free(member_spec);
     } else if (initializer->symbol == TOK_INIT_LIST) {
       ASTree *errnode = validate_init_list(member_spec, initializer);
       if (errnode->symbol == TOK_TYPE_ERROR) {
@@ -770,7 +778,9 @@ ASTree *validate_init_list(TypeSpec *dest_spec, ASTree *init_list) {
       }
       ++initializer_index;
       ++entry->index;
-      cleanup_agg_member_spec(member_spec);
+      int status = typespec_destroy(member_spec);
+      if (status) abort();
+      free(member_spec);
     } else {
       struct agg_entry *new_entry = malloc(sizeof(struct agg_entry));
       new_entry->index = 0;
@@ -779,7 +789,7 @@ ASTree *validate_init_list(TypeSpec *dest_spec, ASTree *init_list) {
       if (status) abort();
     }
     if (entry->index >= count_agg_members(entry->spec)) {
-      cleanup_agg_member_spec(llist_pop_front(&agg_stack));
+      cleanup_agg_entry(llist_pop_front(&agg_stack));
     } else if (initializer_index >= astree_count(init_list)) {
       break;
     }
@@ -1165,7 +1175,7 @@ ASTree *validate_tag_def(ASTree *tag_type_node, ASTree *tag_name_node,
   } else {
     /* TODO(Robert): error handling */
     TagValue *tagval;
-    if (exists) {
+    if (exists && is_redeclaration) {
       tagval = exists;
     } else {
       tagval = tag_value_init(tag_type);
@@ -1263,17 +1273,6 @@ ASTree *define_enumerator(ASTree *enum_, ASTree *ident_node, ASTree *equal_sign,
 
   SymbolValue *symval =
       symbol_value_init(&ident_node->loc, state_get_sequence(state));
-  int status = typespec_init(&symval->type);
-  if (status) {
-    if (equal_sign != NULL) {
-      astree_adopt(left_brace, 1,
-                   astree_adopt(equal_sign, 2, ident_node, expr));
-      return astree_create_errnode(enum_, BCC_TERR_LIBRARY_FAILURE, 0);
-    } else {
-      astree_adopt(left_brace, 1, ident_node);
-      return astree_create_errnode(enum_, BCC_TERR_LIBRARY_FAILURE, 0);
-    }
-  }
   symval->type.alignment = X64_ALIGNOF_INT;
   symval->type.width = X64_SIZEOF_INT;
   symval->type.base = TYPE_ENUM;
@@ -1284,7 +1283,7 @@ ASTree *define_enumerator(ASTree *enum_, ASTree *ident_node, ASTree *equal_sign,
   assert(!auxspec_copy(enum_aux, llist_front(&enum_->type->auxspecs)));
   llist_push_back(&symval->type.auxspecs, enum_aux);
 
-  status = state_insert_symbol(state, ident, ident_len, symval);
+  int status = state_insert_symbol(state, ident, ident_len, symval);
   if (status) {
     if (equal_sign != NULL) {
       astree_adopt(left_brace, 1,
