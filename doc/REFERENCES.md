@@ -11,6 +11,7 @@ or the meaning of the C standard.
 - https://stackoverflow.com/questions/4317677/c-c-preprocessor-single-quote
 - https://stackoverflow.com/questions/11442708/type-punning-and-unions-in-c
 - https://stackoverflow.com/questions/12164855/common-initial-sequence-in-structures-nested-within-union-definition-in-c-stan
+- https://eklitzke.org/c-functions-without-arguments
 - http://unixwiz.net/techtips/reading-cdecl.html
   A note about this one: I figured out how to read types a while ago, but did
   not realize that pointers are read right to left, which only matters when they

@@ -66,7 +66,7 @@ ASTree *finalize_call(ASTree *call) {
   TypeSpec *function_spec = (TypeSpec *)function->type;
   /* second auxspec will be the function; first is pointer */
   AuxSpec *param_spec = llist_get(&function_spec->auxspecs, 1);
-  LinkedList *param_list = param_spec->data.params;
+  LinkedList *param_list = param_spec->data.fn.params;
   /* subtract one since function expression is also a child */
   if (astree_count(call) - 1 < llist_size(param_list)) {
     return astree_create_errnode(call, BCC_TERR_INSUFF_PARAMS, 1, call);
@@ -84,12 +84,18 @@ ASTree *validate_arg(ASTree *call, ASTree *arg) {
   TypeSpec *function_spec = (TypeSpec *)function->type;
   /* second auxspec will be the function; first is pointer */
   AuxSpec *param_spec = llist_get(&function_spec->auxspecs, 1);
-  LinkedList *param_list = param_spec->data.params;
+  LinkedList *param_list = param_spec->data.fn.params;
   /* subtract one since function expression is also a child */
   size_t param_index = astree_count(call) - 1;
   if (param_index >= llist_size(param_list)) {
-    return astree_create_errnode(astree_adopt(call, 1, arg),
-                                 BCC_TERR_EXCESS_PARAMS, 1, call);
+    if (typespec_is_varfn(function_spec)) {
+      DEBUGS('t', "Found variadic function parameter number %lu", param_index);
+      maybe_load_cexpr(arg, NULL);
+      return astree_adopt(call, 1, arg);
+    } else {
+      return astree_create_errnode(astree_adopt(call, 1, arg),
+                                   BCC_TERR_EXCESS_PARAMS, 1, call);
+    }
   }
   DEBUGS('t', "Validating argument %d", param_index);
   SymbolValue *symval = llist_get(param_list, param_index);

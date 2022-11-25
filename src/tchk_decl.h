@@ -10,7 +10,7 @@ ASTree *validate_array_size(ASTree *array, ASTree *expr);
 ASTree *validate_param_list(ASTree *param_list);
 ASTree *validate_param(ASTree *param_list, ASTree *declaration,
                        ASTree *declarator);
-ASTree *finalize_param_list(ASTree *param_list);
+ASTree *finalize_param_list(ASTree *param_list, ASTree *ellipsis);
 ASTree *define_params(ASTree *declarator, ASTree *param_list);
 ASTree *define_array(ASTree *declarator, ASTree *array);
 ASTree *define_pointer(ASTree *declarator, ASTree *pointer);
