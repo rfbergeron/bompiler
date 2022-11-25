@@ -53,7 +53,7 @@ static int strncmp_wrapper(void *s1, void *s2) {
 }
 
 void destroy_unique_name(const char *str) {
-  if (isdigit(str[0])) free((char *)str);
+  if (isdigit(str[0]) && str != VA_LIST_STRUCT_NAME) free((char *)str);
 }
 
 /*

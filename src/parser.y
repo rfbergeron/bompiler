@@ -303,6 +303,78 @@ any_ident           : TOK_IDENT                                         { $$ = b
   return yytname[YYTRANSLATE(symbol)];
 }
 
+void make_va_list_type(void) {
+  /* TODO(Robert): This was copied/based on code in `validate_tag_def` and
+   * `define_struct_member` in `tchk_decl`. Attempt to deduplicate later, if
+   * possible.
+   */
+  TagValue *builtin_tagval = tag_value_init(TAG_STRUCT);
+  int status = state_insert_tag(state, VA_LIST_STRUCT_NAME,
+                                strlen(VA_LIST_STRUCT_NAME), builtin_tagval);
+  if (status) abort();
+  status = state_push_table(state, builtin_tagval->data.members.by_name);
+  if (status) abort();
+  builtin_tagval->alignment = X64_ALIGNOF_LONG;
+  builtin_tagval->width = 2 * X64_SIZEOF_LONG + 2 * X64_SIZEOF_INT;
+  builtin_tagval->is_defined = 1;
+  LinkedList *member_list = &builtin_tagval->data.members.in_order;
+  size_t i;
+  ptrdiff_t displacement;
+  for (i = 0, displacement = 0; i < 4; ++i) {
+    SymbolValue *member_symval =
+        symbol_value_init(&LOC_EMPTY, state_get_sequence(state));
+    member_symval->disp = displacement;
+    if (i < 2) {
+      displacement += X64_SIZEOF_INT;
+      member_symval->type.base = TYPE_UNSIGNED;
+      member_symval->type.alignment = X64_ALIGNOF_INT;
+      member_symval->type.width = X64_SIZEOF_INT;
+      member_symval->type.flags = TYPESPEC_FLAG_INT | TYPESPEC_FLAG_UNSIGNED;
+    } else {
+      displacement += X64_SIZEOF_LONG;
+      member_symval->type.base = TYPE_VOID;
+      member_symval->type.alignment = 0;
+      member_symval->type.width = 0;
+      member_symval->type.flags = TYPESPEC_FLAG_VOID;
+      AuxSpec *ptr_aux = malloc(sizeof(AuxSpec));
+      ptr_aux->aux = AUX_POINTER;
+      ptr_aux->data.memory_loc.qualifiers = TYPESPEC_FLAG_NONE;
+      ptr_aux->data.memory_loc.length = 0;
+      int status = llist_push_front(&member_symval->type.auxspecs, ptr_aux);
+      if (status) abort();
+    }
+    int status = llist_push_back(member_list, member_symval);
+    if (status) abort();
+    const char *symname = VA_LIST_MEMBER_NAMES[i];
+    status =
+        state_insert_symbol(state, symname, strlen(symname), member_symval);
+    if (status) abort();
+  }
+  status = state_pop_table(state);
+  if (status) abort();
+  SymbolValue *builtin_symval =
+      symbol_value_init(&LOC_EMPTY, state_get_sequence(state));
+  builtin_symval->type.alignment = X64_ALIGNOF_LONG;
+  builtin_symval->type.width = 2 * X64_SIZEOF_LONG + 2 * X64_SIZEOF_INT;
+  builtin_symval->type.base = TYPE_STRUCT;
+  builtin_symval->type.flags = TYPESPEC_FLAG_STRUCT | TYPESPEC_FLAG_TYPEDEF;
+  builtin_symval->flags = SYMFLAG_DEFINED | SYMFLAG_TYPEDEF;
+  AuxSpec *aux_array = malloc(sizeof(AuxSpec));
+  aux_array->aux = AUX_ARRAY;
+  aux_array->data.memory_loc.length = 1;
+  status = llist_push_back(&builtin_symval->type.auxspecs, aux_array);
+  if (status) abort();
+  AuxSpec *aux_struct = malloc(sizeof(AuxSpec));
+  aux_struct->aux = AUX_STRUCT;
+  aux_struct->data.tag.name = VA_LIST_STRUCT_NAME;
+  aux_struct->data.tag.val = builtin_tagval;
+  status = llist_push_back(&builtin_symval->type.auxspecs, aux_struct);
+  if (status) abort();
+  status = state_insert_symbol(state, VA_LIST_TYPEDEF_NAME,
+                               strlen(VA_LIST_TYPEDEF_NAME), builtin_symval);
+  if (status) abort();
+}
+
 ASTree *parser_make_root() {
   DEBUGS('p', "Initializing AST, root token code: %d", TOK_ROOT);
   DEBUGS('p', "Translation of token code: %s", parser_get_tname(TOK_ROOT));
@@ -311,6 +383,7 @@ ASTree *parser_make_root() {
   DEBUGS('t', "Making symbol table");
   root->symbol_table = symbol_table_init(TRANS_UNIT_TABLE);
   state_push_table(state, root->symbol_table);
+  make_va_list_type();
   return root;
 }
 

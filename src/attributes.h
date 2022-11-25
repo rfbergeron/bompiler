@@ -214,6 +214,9 @@ typedef struct location {
 
 /* TODO(Robert): maybe define this in some other common file? */
 extern const size_t MAX_IDENT_LEN;
+extern const char VA_LIST_TYPEDEF_NAME[];
+extern const char VA_LIST_STRUCT_NAME[];
+extern const char VA_LIST_MEMBER_NAMES[][sizeof("overflow_arg_area")];
 extern const AuxSpec AUXSPEC_PTR;
 extern const AuxSpec AUXSPEC_CONST_PTR;
 extern const AuxSpec AUXSPEC_VOLATILE_PTR;
