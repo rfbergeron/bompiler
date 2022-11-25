@@ -4,8 +4,8 @@
 #include "yyparse.h"
 
 int params_equivalent(const AuxSpec *aux1, const AuxSpec *aux2) {
-  LinkedList *params1 = aux1->data.params;
-  LinkedList *params2 = aux2->data.params;
+  LinkedList *params1 = aux1->data.fn.params;
+  LinkedList *params2 = aux2->data.fn.params;
   if (llist_size(params1) != llist_size(params2)) return 0;
   size_t i;
   for (i = 0; i < llist_size(params1); ++i) {
@@ -35,7 +35,8 @@ int aux_equivalent(const AuxSpec *aux1, const AuxSpec *aux2,
                    unsigned int flags) {
   switch (aux1->aux) {
     case AUX_FUNCTION:
-      return params_equivalent(aux1, aux2);
+      return params_equivalent(aux1, aux2) &&
+             (aux1->data.fn.is_variadic == aux2->data.fn.is_variadic);
     case AUX_ARRAY:
       if ((flags & IGNORE_ARRAY_BOUNDS) && aux1->data.memory_loc.length == 0)
         return 1;

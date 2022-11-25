@@ -74,6 +74,7 @@ NOTSTRING       (\"[^"]*)
 "enum"          { return lexer_token (TOK_ENUM); }
 "typedef"       { return lexer_token (TOK_TYPEDEF); }
 "sizeof"        { return lexer_token (TOK_SIZEOF); }
+"\.\.\."        { return lexer_token(TOK_ELLIPSIS); }
 {IDENT}         { return lexer_ident (); }
 {STRINGCON}     { return lexer_token (TOK_STRINGCON); }
 {INTCON}        { return lexer_token (TOK_INTCON); }

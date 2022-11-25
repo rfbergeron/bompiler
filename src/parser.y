@@ -40,6 +40,7 @@
 %token TOK_POS TOK_NEG TOK_POST_INC TOK_POST_DEC TOK_INDIRECTION TOK_ADDROF TOK_CALL TOK_SUBSCRIPT
 %token TOK_BLOCK TOK_ARRAY TOK_CAST TOK_POINTER TOK_LABEL TOK_INIT_LIST TOK_PARAM_LIST
 /* tokens constructed by lexer */
+%token TOK_ELLIPSIS
 %token TOK_VOID TOK_INT TOK_SHORT TOK_LONG TOK_CHAR TOK_UNSIGNED TOK_SIGNED
 %token TOK_CONST TOK_VOLATILE TOK_TYPEDEF TOK_STATIC TOK_EXTERN TOK_AUTO TOK_REGISTER
 %token TOK_IF TOK_ELSE TOK_SWITCH TOK_DO TOK_WHILE TOK_FOR TOK_STRUCT TOK_UNION TOK_ENUM
@@ -167,9 +168,10 @@ pointer             : '*'                                               { $$ = b
                     ;
 direct_decl         : '[' ']'                                           { $$ = bcc_yyval = parser_new_sym($1, TOK_ARRAY); astree_destroy($2); } /* do nothing */
                     | '[' cond_expr   ']'                               { $$ = bcc_yyval = validate_array_size(parser_new_sym($1, TOK_ARRAY), $2); astree_destroy($3); } /* validate_array_size */
-                    | param_list ')'                                    { $$ = bcc_yyval = finalize_param_list($1); astree_destroy($2); } /* exit parameter table */
+                    | param_list ')'                                    { $$ = bcc_yyval = finalize_param_list($1, NULL); astree_destroy($2); } /* exit parameter table */
+                    | param_list ',' TOK_ELLIPSIS ')'                   { $$ = bcc_yyval = finalize_param_list($1, $3); astree_destroy($2); astree_destroy($4); } /* exit parameter table */
                     | '(' ')'                                           { $$ = bcc_yyval = parser_new_sym($1, TOK_PARAM_LIST); astree_destroy($2); } /* create param table */
-                    | '(' TOK_VOID ')'                                  { $$ = bcc_yyval = parser_new_sym($1, TOK_PARAM_LIST); parser_cleanup(2, $2, $3); } /* create param table */
+                    | '(' TOK_VOID ')'                                  { $$ = bcc_yyval = astree_adopt(parser_new_sym($1, TOK_PARAM_LIST), 1, $2); astree_destroy($3); } /* create param table */
                     ;
 param_list          : '(' typespec_list declarator                      { $$ = bcc_yyval = parser_make_param_list($1, $2, $3); } /* create param table; define_param */
                     | '(' typespec_list abs_declarator                  { $$ = bcc_yyval = parser_make_param_list($1, $2, $3); } /* create param table; define_param */

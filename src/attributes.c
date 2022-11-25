@@ -209,8 +209,11 @@ int type_to_string(const TypeSpec *type, char *buf, size_t size) {
           ret += sprintf((buf + ret), "pointer to ");
         break;
       case AUX_FUNCTION:
-        ret += sprintf((buf + ret), "function with parameters (");
-        LinkedList *params = auxspec->data.params;
+        if (auxspec->data.fn.is_variadic)
+          ret += sprintf((buf + ret), "variadic function with parameters (");
+        else
+          ret += sprintf((buf + ret), "function with parameters (");
+        LinkedList *params = auxspec->data.fn.params;
         for (j = 0; j < llist_size(params); ++j) {
           SymbolValue *param_symval = llist_get(params, j);
           ret += type_to_string(&(param_symval->type), (buf + ret), size - ret);
@@ -316,8 +319,8 @@ int auxspec_destroy(AuxSpec *auxspec) {
       free(auxspec->data.err.info);
       break;
     case AUX_FUNCTION:
-      llist_destroy(auxspec->data.params);
-      free(auxspec->data.params);
+      llist_destroy(auxspec->data.fn.params);
+      free(auxspec->data.fn.params);
       break;
   }
   free(auxspec);
@@ -338,8 +341,8 @@ int auxspec_copy(AuxSpec *dest, const AuxSpec *src) {
       dest->data.tag = src->data.tag;
       break;
     case AUX_FUNCTION:
-      dest->data.params = malloc(sizeof(*dest->data.params));
-      status = llist_copy(dest->data.params, src->data.params);
+      dest->data.fn.params = malloc(sizeof(*dest->data.fn.params));
+      status = llist_copy(dest->data.fn.params, src->data.fn.params);
       if (status) return status;
       break;
     case AUX_ERROR:
@@ -402,7 +405,7 @@ SymbolValue *typespec_param_index(const TypeSpec *spec, size_t index) {
   AuxSpec *function_aux = typespec_is_pointer(spec)
                               ? llist_get(&spec->auxspecs, 1)
                               : llist_front(&spec->auxspecs);
-  return llist_get(function_aux->data.params, index);
+  return llist_get(function_aux->data.fn.params, index);
 }
 
 size_t typespec_elem_width(const TypeSpec *spec) {
@@ -582,6 +585,16 @@ int typespec_is_voidptr(const TypeSpec *type) {
 
 int typespec_is_fnptr(const TypeSpec *type) {
   return typespec_is_pointer(type) && typespec_is_aux(type, AUX_FUNCTION, 1);
+}
+
+int typespec_is_varfn(const TypeSpec *type) {
+  if (typespec_is_fnptr(type)) {
+    return typespec_get_aux(type, 1)->data.fn.is_variadic;
+  } else if (typespec_is_function(type)) {
+    return typespec_get_aux(type, 0)->data.fn.is_variadic;
+  } else {
+    return 0;
+  }
 }
 
 int typespec_is_struct(const TypeSpec *type) {

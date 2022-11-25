@@ -180,7 +180,10 @@ typedef struct auxspec {
       const char *name;
       struct tag_value *val;
     } tag;
-    LinkedList *params;
+    struct {
+      LinkedList *params;
+      int is_variadic;
+    } fn;
     struct {
       void **info;
       size_t info_count;
@@ -275,6 +278,7 @@ int typespec_is_scalar(const TypeSpec *type);
 int typespec_is_voidptr(const TypeSpec *type);
 int typespec_is_void(const TypeSpec *type);
 int typespec_is_fnptr(const TypeSpec *type);
+int typespec_is_varfn(const TypeSpec *type);
 int typespec_is_struct(const TypeSpec *type);
 int typespec_is_structptr(const TypeSpec *type);
 int typespec_is_union(const TypeSpec *type);
