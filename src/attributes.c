@@ -84,6 +84,10 @@ const char *STRING_SHRT = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, SHORT)];
 const char *STRING_UCHAR = STRING_INT_MAP[INDEX_FROM_INT(UNSIGNED, CHAR)];
 const char *STRING_SCHAR = STRING_INT_MAP[INDEX_FROM_INT(SIGNED, CHAR)];
 
+const char VA_LIST_TYPEDEF_NAME[] = "__builtin_va_list";
+const char VA_LIST_STRUCT_NAME[] = "0_0_0_struct";
+const char VA_LIST_MEMBER_NAMES[][sizeof("overflow_arg_area")] = {
+    "gp_offset", "fp_offset", "overflow_arg_area", "reg_save_area"};
 const AuxSpec AUXSPEC_PTR = {{{0, 0}}, AUX_POINTER};
 const AuxSpec AUXSPEC_CONST_PTR = {{{0, TYPESPEC_FLAG_CONST}}, AUX_POINTER};
 const AuxSpec AUXSPEC_VOLATILE_PTR = {{{0, TYPESPEC_FLAG_VOLATILE}},
