@@ -10,6 +10,9 @@ ASTree *validate_ident(ASTree *ident);
 ASTree *finalize_call(ASTree *call);
 ASTree *validate_arg(ASTree *call, ASTree *arg);
 ASTree *validate_call(ASTree *call, ASTree *function);
+ASTree *validate_va_start(ASTree *va_start_, ASTree *expr, ASTree *ident);
+ASTree *validate_va_end(ASTree *va_end_, ASTree *expr);
+ASTree *validate_va_arg(ASTree *va_arg_, ASTree *expr, ASTree *type_name);
 ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
                              ASTree *true_expr, ASTree *false_expr);
 ASTree *validate_comma(ASTree *comma, ASTree *left, ASTree *right);

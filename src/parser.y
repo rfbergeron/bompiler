@@ -40,7 +40,7 @@
 %token TOK_POS TOK_NEG TOK_POST_INC TOK_POST_DEC TOK_INDIRECTION TOK_ADDROF TOK_CALL TOK_SUBSCRIPT
 %token TOK_BLOCK TOK_ARRAY TOK_CAST TOK_POINTER TOK_LABEL TOK_INIT_LIST TOK_PARAM_LIST
 /* tokens constructed by lexer */
-%token TOK_ELLIPSIS
+%token TOK_VA_ARG TOK_VA_START TOK_VA_END TOK_ELLIPSIS
 %token TOK_VOID TOK_INT TOK_SHORT TOK_LONG TOK_CHAR TOK_UNSIGNED TOK_SIGNED
 %token TOK_CONST TOK_VOLATILE TOK_TYPEDEF TOK_STATIC TOK_EXTERN TOK_AUTO TOK_REGISTER
 %token TOK_IF TOK_ELSE TOK_SWITCH TOK_DO TOK_WHILE TOK_FOR TOK_STRUCT TOK_UNION TOK_ENUM
@@ -269,6 +269,9 @@ postfix_expr        : primary_expr                                      { $$ = b
                     | postfix_expr TOK_INC                              { $$ = bcc_yyval = validate_increment(parser_new_sym($2, TOK_POST_INC), $1); }
                     | postfix_expr TOK_DEC                              { $$ = bcc_yyval = validate_increment(parser_new_sym($2, TOK_POST_DEC), $1); }
                     | call                                              { $$ = bcc_yyval = $1; }
+                    | TOK_VA_START '(' expr ',' TOK_IDENT ')'           { $$ = bcc_yyval = validate_va_start($1, $3, $5); parser_cleanup(3, $2, $4, $6); }
+                    | TOK_VA_END '(' expr ')'                           { $$ = bcc_yyval = validate_va_end($1, $3); parser_cleanup(2, $2, $4); }
+                    | TOK_VA_ARG '(' expr ',' typespec_list abs_declarator ')'   { $$ = bcc_yyval = parse_va_arg($1, $3, $5, $6); parser_cleanup(3, $2, $4, $7); }
                     | postfix_expr '[' expr ']'                         { $$ = bcc_yyval = validate_subscript(parser_new_sym($2, TOK_SUBSCRIPT), $1, $3); parser_cleanup(1, $4); }
                     | postfix_expr '.' any_ident                        { $$ = bcc_yyval = validate_reference($2, $1, $3); }
                     | postfix_expr TOK_ARROW any_ident                  { $$ = bcc_yyval = validate_reference($2, $1, $3); }
@@ -450,6 +453,14 @@ ASTree *parse_sizeof(ASTree *sizeof_, ASTree *spec_list, ASTree *declarator) {
   ASTree *declaration = parser_make_declaration(spec_list);
   return validate_sizeof(
       sizeof_, finalize_declaration(declare_symbol(declaration, declarator)));
+}
+
+ASTree *parse_va_arg(ASTree *va_arg_, ASTree *expr, ASTree *spec_list,
+                     ASTree *declarator) {
+  ASTree *declaration = parser_make_declaration(spec_list);
+  return validate_va_arg(
+      va_arg_, expr,
+      finalize_declaration(declare_symbol(declaration, declarator)));
 }
 
 void parser_cleanup(size_t count, ...) {

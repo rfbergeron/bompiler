@@ -33,6 +33,9 @@ ASTree *translate_comma(ASTree *comma, ASTree *left, ASTree *right);
 ASTree *translate_assignment(ASTree *assignment, ASTree *lvalue,
                              ASTree *rvalue);
 ASTree *translate_call(ASTree *call);
+ASTree *translate_va_start(ASTree *va_start_, ASTree *expr, ASTree *ident);
+ASTree *translate_va_end(ASTree *va_end_, ASTree *expr);
+ASTree *translate_va_arg(ASTree *va_arg_, ASTree *expr, ASTree *type_name);
 ASTree *translate_ifelse(ASTree *ifelse, ASTree *condition, ASTree *if_body,
                          ASTree *else_body);
 ASTree *translate_switch(ASTree *switch_, ASTree *condition, ASTree *body);

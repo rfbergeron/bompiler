@@ -74,6 +74,9 @@ NOTSTRING       (\"[^"]*)
 "enum"          { return lexer_token (TOK_ENUM); }
 "typedef"       { return lexer_token (TOK_TYPEDEF); }
 "sizeof"        { return lexer_token (TOK_SIZEOF); }
+"__builtin_va_arg" { return lexer_token(TOK_VA_ARG); }
+"__builtin_va_start" { return lexer_token(TOK_VA_START); }
+"__builtin_va_end" { return lexer_token(TOK_VA_END); }
 "\.\.\."        { return lexer_token(TOK_ELLIPSIS); }
 {IDENT}         { return lexer_ident (); }
 {STRINGCON}     { return lexer_token (TOK_STRINGCON); }
