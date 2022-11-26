@@ -145,6 +145,101 @@ ASTree *validate_call(ASTree *expr, ASTree *call) {
   return astree_adopt(call, 1, expr);
 }
 
+ASTree *validate_va_start(ASTree *va_start_, ASTree *expr, ASTree *ident) {
+  pointer_conversions(expr);
+  if (expr->symbol == TOK_TYPE_ERROR) {
+    return astree_propogate_errnode_v(va_start_, 2, expr, ident);
+  } else {
+    ASTree dummy;
+    SymbolValue *va_list_symbol = NULL;
+    int status =
+        state_get_symbol(state, VA_LIST_TYPEDEF_NAME,
+                         strlen(VA_LIST_TYPEDEF_NAME), &va_list_symbol);
+    if (va_list_symbol == NULL)
+      return astree_create_errnode(astree_adopt(va_start_, 2, expr, ident),
+                                   BCC_TERR_LIBRARY_FAILURE, 0);
+    dummy.type = &va_list_symbol->type;
+    pointer_conversions(&dummy);
+    if (!types_assignable(dummy.type, expr))
+      /* NOTE: unfortunately because of how errors are structured we must leak
+       * the memory created by pointer_conversions so that the type can be
+       * printed later
+       */
+      return astree_create_errnode(astree_adopt(va_start_, 2, expr, ident),
+                                   BCC_TERR_INCOMPATIBLE_TYPES, 3, va_start_,
+                                   dummy.type, expr->type);
+    typespec_destroy((TypeSpec *)dummy.type);
+    free((TypeSpec *)dummy.type);
+    va_start_->type = &SPEC_VOID;
+    return astree_adopt(va_start_, 2, expr, ident);
+  }
+}
+
+ASTree *validate_va_end(ASTree *va_end_, ASTree *expr) {
+  pointer_conversions(expr);
+  if (expr->symbol == TOK_TYPE_ERROR) {
+    return astree_propogate_errnode(va_end_, expr);
+  } else {
+    ASTree dummy;
+    SymbolValue *va_list_symbol = NULL;
+    int status =
+        state_get_symbol(state, VA_LIST_TYPEDEF_NAME,
+                         strlen(VA_LIST_TYPEDEF_NAME), &va_list_symbol);
+    if (va_list_symbol == NULL)
+      return astree_create_errnode(astree_adopt(va_end_, 1, expr),
+                                   BCC_TERR_LIBRARY_FAILURE, 0);
+    dummy.type = &va_list_symbol->type;
+    pointer_conversions(&dummy);
+    if (!types_assignable(dummy.type, expr))
+      /* NOTE: unfortunately because of how errors are structured we must leak
+       * the memory created by pointer_conversions so that the type can be
+       * printed later
+       */
+      return astree_create_errnode(astree_adopt(va_end_, 1, expr),
+                                   BCC_TERR_INCOMPATIBLE_TYPES, 3, va_end_,
+                                   dummy.type, expr->type);
+    typespec_destroy((TypeSpec *)dummy.type);
+    free((TypeSpec *)dummy.type);
+    va_end_->type = &SPEC_VOID;
+    return astree_adopt(va_end_, 1, expr);
+  }
+}
+
+ASTree *validate_va_arg(ASTree *va_arg_, ASTree *expr, ASTree *type_name) {
+  pointer_conversions(expr);
+  if (expr->symbol == TOK_TYPE_ERROR || type_name->symbol == TOK_TYPE_ERROR) {
+    return astree_propogate_errnode_v(va_arg_, 2, expr, type_name);
+  } else if (typespec_is_incomplete(type_name->type)) {
+    return astree_create_errnode(astree_adopt(va_arg_, 2, expr, type_name),
+                                 BCC_TERR_INCOMPLETE_TYPE, 2, va_arg_,
+                                 type_name->type);
+  } else {
+    ASTree dummy;
+    SymbolValue *va_list_symbol = NULL;
+    int status =
+        state_get_symbol(state, VA_LIST_TYPEDEF_NAME,
+                         strlen(VA_LIST_TYPEDEF_NAME), &va_list_symbol);
+    if (va_list_symbol == NULL)
+      return astree_create_errnode(astree_adopt(va_arg_, 2, expr, type_name),
+                                   BCC_TERR_LIBRARY_FAILURE, 0);
+    dummy.type = &va_list_symbol->type;
+    pointer_conversions(&dummy);
+    if (!types_assignable(dummy.type, expr))
+      /* NOTE: unfortunately because of how errors are structured we must leak
+       * the memory created by pointer_conversions so that the type can be
+       * printed later
+       */
+      return astree_create_errnode(astree_adopt(va_arg_, 2, expr, type_name),
+                                   BCC_TERR_INCOMPATIBLE_TYPES, 3, va_arg_,
+                                   dummy.type, expr->type);
+    typespec_destroy((TypeSpec *)dummy.type);
+    free((TypeSpec *)dummy.type);
+    va_arg_->type = astree_get(type_name, 1)->type;
+    va_arg_->attributes |= ATTR_EXPR_LVAL;
+    return astree_adopt(va_arg_, 2, expr, type_name);
+  }
+}
+
 ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
                              ASTree *true_expr, ASTree *false_expr) {
   if (condition->symbol == TOK_TYPE_ERROR ||

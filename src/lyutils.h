@@ -62,6 +62,8 @@ ASTree *parser_make_cast(ASTree *left_paren, ASTree *spec_list,
                          ASTree *type_name, ASTree *expr);
 ASTree *parser_make_label(ASTree *ident);
 ASTree *parse_sizeof(ASTree *sizeof_, ASTree *spec_list, ASTree *declarator);
+ASTree *parse_va_arg(ASTree *va_arg_, ASTree *expr, ASTree *spec_list,
+                     ASTree *declarator);
 void parser_cleanup(size_t count, ...);
 
 #define YYSTYPE_IS_DECLARED
