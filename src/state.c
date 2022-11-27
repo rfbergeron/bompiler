@@ -13,6 +13,7 @@ CompilerState *state_init(void) {
   size_t_stack_init(&state->break_stack, 4);
   size_t_stack_init(&state->continue_stack, 4);
   state->enclosing_function = NULL;
+  state->jump_id_count = 0;
   return state;
 }
 
