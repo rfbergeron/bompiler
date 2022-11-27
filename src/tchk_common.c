@@ -142,10 +142,6 @@ const TypeSpec *arithmetic_conversions(const TypeSpec *type1,
   return typespec_is_enum(ret) ? &SPEC_INT : ret;
 }
 
-/* TODO(Robert): make sure that nodes which have had their type altered free the
- * resulting type. it should work much the same as freeing types created by the
- * address operator.
- */
 /*
  * Performs automatic conversions from function and array types to pointer
  * types. Replaces old type with appropriately converted type. Can safely be
@@ -173,6 +169,11 @@ void pointer_conversions(ASTree *expr) {
       llist_destroy(&pointer_type->auxspecs);
       free(pointer_type);
       abort();
+    }
+    if (expr->symbol == TOK_STRINGCON) {
+      int status = typespec_destroy((TypeSpec *)expr->type);
+      if (status) abort();
+      free((TypeSpec *)expr->type);
     }
     expr->type = pointer_type;
   }
