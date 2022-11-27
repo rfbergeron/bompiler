@@ -607,6 +607,20 @@ ASTree *define_params(ASTree *declarator, ASTree *param_list) {
       ASTree *param_declarator = astree_get(param_declaration, 1);
       SymbolValue *param_symval =
           sym_from_type((TypeSpec *)param_declarator->type);
+      /* TODO(Robert): sort-of copied from `pointer_conversions` */
+      if (typespec_is_function(&param_symval->type) ||
+          typespec_is_array(&param_symval->type)) {
+        if (typespec_is_array(&param_symval->type))
+          free(llist_pop_front(&param_symval->type.auxspecs));
+        AuxSpec *ptr_aux = malloc(sizeof(AuxSpec));
+        ptr_aux->aux = AUX_POINTER;
+        ptr_aux->data.memory_loc.length = 0;
+        ptr_aux->data.memory_loc.qualifiers = TYPESPEC_FLAG_NONE;
+        int status = llist_push_front(&param_symval->type.auxspecs, ptr_aux);
+        if (status)
+          return astree_create_errnode(astree_adopt(declarator, 1, param_list),
+                                       BCC_TERR_LIBRARY_FAILURE, 0);
+      }
       int status = llist_push_back(param_entries, param_symval);
       if (status) {
         return astree_create_errnode(astree_adopt(declarator, 1, param_list),
