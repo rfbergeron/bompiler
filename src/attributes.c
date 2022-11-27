@@ -440,6 +440,13 @@ size_t typespec_member_count(const TypeSpec *spec) {
   }
 }
 
+size_t typespec_param_count(const TypeSpec *spec) {
+  assert(typespec_is_function(spec) || typespec_is_fnptr(spec));
+  AuxSpec *fn_aux = typespec_is_pointer(spec) ? llist_get(&spec->auxspecs, 1)
+                                              : llist_front(&spec->auxspecs);
+  return llist_size(fn_aux->data.fn.params);
+}
+
 size_t typespec_get_width(const TypeSpec *spec) {
   if (!llist_empty(&spec->auxspecs)) {
     AuxSpec *aux = llist_front(&spec->auxspecs);

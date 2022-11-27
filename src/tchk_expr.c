@@ -171,7 +171,7 @@ ASTree *validate_va_start(ASTree *va_start_, ASTree *expr, ASTree *ident) {
     typespec_destroy((TypeSpec *)dummy.type);
     free((TypeSpec *)dummy.type);
     va_start_->type = &SPEC_VOID;
-    return astree_adopt(va_start_, 2, expr, ident);
+    return translate_va_start(va_start_, expr, ident);
   }
 }
 
@@ -201,7 +201,7 @@ ASTree *validate_va_end(ASTree *va_end_, ASTree *expr) {
     typespec_destroy((TypeSpec *)dummy.type);
     free((TypeSpec *)dummy.type);
     va_end_->type = &SPEC_VOID;
-    return astree_adopt(va_end_, 1, expr);
+    return translate_va_end(va_end_, expr);
   }
 }
 
@@ -236,7 +236,7 @@ ASTree *validate_va_arg(ASTree *va_arg_, ASTree *expr, ASTree *type_name) {
     free((TypeSpec *)dummy.type);
     va_arg_->type = astree_get(type_name, 1)->type;
     va_arg_->attributes |= ATTR_EXPR_LVAL;
-    return astree_adopt(va_arg_, 2, expr, type_name);
+    return translate_va_arg(va_arg_, expr, type_name);
   }
 }
 

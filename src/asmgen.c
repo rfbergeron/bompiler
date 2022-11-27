@@ -261,10 +261,18 @@ static const char VREG_REG_TABLE[][5] = {
     GENERATE_T3_REGS(R12), GENERATE_T3_REGS(R13), GENERATE_T3_REGS(R14),
     GENERATE_T3_REGS(R15)};
 
-static size_t arg_reg_eightbytes;
-static size_t arg_stack_eightbytes;
-static size_t param_reg_eightbytes;
-static size_t param_stack_eightbytes;
+static const ptrdiff_t FP_OFFSET = 304;
+static const ptrdiff_t GP_OFFSET_MAX = 48;
+static const ptrdiff_t GP_OFFSET_MEMBER_DISP = NO_DISP;
+static const ptrdiff_t FP_OFFSET_MEMBER_DISP = X64_SIZEOF_INT;
+static const ptrdiff_t OVERFLOW_ARG_AREA_MEMBER_DISP = 2 * X64_SIZEOF_INT;
+static const ptrdiff_t REG_SAVE_AREA_MEMBER_DISP =
+    2 * X64_SIZEOF_INT + X64_SIZEOF_LONG;
+static ptrdiff_t reg_save_area_disp;
+static size_t arg_reg_index;
+static ptrdiff_t arg_stack_disp;
+static size_t param_reg_index;
+static ptrdiff_t param_stack_disp;
 static ptrdiff_t window_size;
 
 static LinkedList *instructions;
@@ -1357,17 +1365,16 @@ int translate_agg_arg(ASTree *call, ASTree *arg) {
   int status = liter_advance(call->last_instr, -1);
   if (status) return status;
   if (arg_eightbytes <= 2 &&
-      arg_eightbytes + arg_reg_eightbytes <= PARAM_REG_COUNT) {
-    int status =
-        bulk_mtor(PARAM_REGS + arg_reg_eightbytes, arg_data->dest.reg.num,
-                  NO_DISP, arg->type, call->last_instr);
-    arg_reg_eightbytes += arg_eightbytes;
+      arg_eightbytes + arg_reg_index <= PARAM_REG_COUNT) {
+    int status = bulk_mtor(PARAM_REGS + arg_reg_index, arg_data->dest.reg.num,
+                           NO_DISP, arg->type, call->last_instr);
+    arg_reg_index += arg_eightbytes;
     if (status) return status;
   } else {
     int status = bulk_mtom(RSP_VREG, arg_data->dest.reg.num, arg->type,
                            call->last_instr);
     if (status) return status;
-    arg_stack_eightbytes += arg_eightbytes;
+    arg_stack_disp += arg_eightbytes * X64_SIZEOF_LONG;
     InstructionData *sub_data = instr_init(OP_SUB);
     set_op_reg(&sub_data->dest, REG_QWORD, RSP_VREG);
     set_op_imm(&sub_data->src, arg_eightbytes * 8, IMM_UNSIGNED);
@@ -1386,11 +1393,11 @@ int translate_scalar_arg(ASTree *call, const TypeSpec *param_type,
   if (status) return status;
   InstructionData *arg_data = liter_get(arg->last_instr);
 
-  if (arg_reg_eightbytes < PARAM_REG_COUNT) {
+  if (arg_reg_index < PARAM_REG_COUNT) {
     InstructionData *mov_data = instr_init(OP_MOV);
     mov_data->src = arg_data->dest;
     set_op_reg(&mov_data->dest, typespec_get_width(param_type),
-               PARAM_REGS[arg_reg_eightbytes++]);
+               PARAM_REGS[arg_reg_index++]);
     int status =
         liter_push_front(call->last_instr, &call->last_instr, 1, mov_data);
     if (status) return status;
@@ -1400,7 +1407,7 @@ int translate_scalar_arg(ASTree *call, const TypeSpec *param_type,
     int status =
         liter_push_front(call->last_instr, &call->last_instr, 1, push_data);
     if (status) return status;
-    ++arg_stack_eightbytes;
+    arg_stack_disp += X64_SIZEOF_LONG;
   }
   return 0;
 }
@@ -1408,8 +1415,8 @@ int translate_scalar_arg(ASTree *call, const TypeSpec *param_type,
 int translate_args(ASTree *call) {
   /* account for hidden out param */
   int out_param = typespec_get_eightbytes(call->type) > 2;
-  arg_reg_eightbytes = out_param ? 1 : 0;
-  arg_stack_eightbytes = 0;
+  arg_reg_index = out_param ? 1 : 0;
+  arg_stack_disp = 0;
   if (typespec_is_struct(call->type) || typespec_is_union(call->type)) {
     SymbolValue dummy = {0};
     dummy.type = *call->type;
@@ -1424,16 +1431,20 @@ int translate_args(ASTree *call) {
     }
   }
   ASTree *fn_pointer = astree_get(call, 0);
-  size_t i;
+  size_t i, param_count = typespec_param_count(fn_pointer->type);
   for (i = 1; i < astree_count(call); ++i) {
     DEBUGS('g', "Translating parameter %i", i);
     ASTree *arg = astree_get(call, i);
-    SymbolValue *param_symval = typespec_param_index(fn_pointer->type, i - 1);
+    assert(arg->type != &SPEC_EMPTY && !typespec_is_array(arg->type));
+    const TypeSpec *param_type =
+        ((i - 1) < param_count)
+            ? &typespec_param_index(fn_pointer->type, i - 1)->type
+            : &SPEC_ULONG;
     if (typespec_is_union(arg->type) || typespec_is_struct(arg->type)) {
       int status = translate_agg_arg(call, arg);
       if (status) return status;
     } else {
-      int status = translate_scalar_arg(call, &param_symval->type, arg);
+      int status = translate_scalar_arg(call, param_type, arg);
       if (status) return status;
     }
   }
@@ -1466,9 +1477,24 @@ ASTree *translate_call(ASTree *call) {
   call->last_instr = NULL;
 
   /* set sub_data's src op now that we know stack param space */
-  size_t padding = arg_stack_eightbytes % 2;
-  arg_stack_eightbytes += padding;
-  set_op_imm(&sub_data->src, (padding)*8, IMM_UNSIGNED);
+  assert(arg_stack_disp % X64_SIZEOF_LONG == 0);
+  /* align stack to 16-byte boundary; we can use a bitand since we know the
+   * stack should already be aligned to an 8-byte boundary
+   */
+  if (arg_stack_disp & X64_SIZEOF_LONG) {
+    set_op_imm(&sub_data->src, X64_SIZEOF_LONG, IMM_UNSIGNED);
+    arg_stack_disp += X64_SIZEOF_LONG;
+  } else {
+    set_op_imm(&sub_data->src, 0, IMM_UNSIGNED);
+  }
+
+  if (typespec_is_varfn(fn_pointer->type)) {
+    InstructionData *zero_eax_data = instr_init(OP_MOV);
+    set_op_imm(&zero_eax_data->src, 0, IMM_UNSIGNED);
+    set_op_reg(&zero_eax_data->dest, REG_DWORD, RAX_VREG);
+    int status = llist_push_back(instructions, zero_eax_data);
+    if (status) abort();
+  }
 
   InstructionData *fn_pointer_data = liter_get(fn_pointer->last_instr);
   InstructionData *call_data = instr_init(OP_CALL);
@@ -1478,7 +1504,7 @@ ASTree *translate_call(ASTree *call) {
 
   InstructionData *rsp_reset_data = instr_init(OP_ADD);
   set_op_reg(&rsp_reset_data->dest, REG_QWORD, RSP_VREG);
-  set_op_imm(&rsp_reset_data->src, arg_stack_eightbytes, IMM_UNSIGNED);
+  set_op_imm(&rsp_reset_data->src, arg_stack_disp, IMM_UNSIGNED);
   status = llist_push_back(instructions, rsp_reset_data);
   if (status) abort();
 
@@ -1518,6 +1544,191 @@ ASTree *translate_call(ASTree *call) {
   return call;
 }
 
+ASTree *translate_va_start(ASTree *va_start_, ASTree *expr, ASTree *ident) {
+  va_start_->first_instr = liter_copy(expr->first_instr);
+  if (va_start_->first_instr == NULL) abort();
+  int status = scalar_conversions(expr, &SPEC_LONG);
+  if (status) abort();
+  InstructionData *expr_data = liter_get(expr->last_instr);
+  if (expr_data == NULL) abort();
+  size_t va_list_vreg = expr_data->dest.reg.num;
+
+  /* `list->gp_offset = param_reg_index * X64_SIZEOF_LONG;` */
+  InstructionData *load_gp_offset_data = instr_init(OP_MOV);
+  set_op_imm(&load_gp_offset_data->src, param_reg_index * X64_SIZEOF_LONG,
+             IMM_UNSIGNED);
+  set_op_reg(&load_gp_offset_data->dest, REG_DWORD, next_vreg());
+
+  InstructionData *store_gp_offset_data = instr_init(OP_MOV);
+  store_gp_offset_data->src = load_gp_offset_data->dest;
+  set_op_ind(&store_gp_offset_data->dest, GP_OFFSET_MEMBER_DISP, va_list_vreg);
+
+  /* `list->fp_offset = 304;` */
+  InstructionData *load_fp_offset_data = instr_init(OP_MOV);
+  set_op_imm(&load_fp_offset_data->src, FP_OFFSET, IMM_UNSIGNED);
+  set_op_reg(&load_fp_offset_data->dest, REG_DWORD, next_vreg());
+
+  InstructionData *store_fp_offset_data = instr_init(OP_MOV);
+  store_fp_offset_data->src = load_fp_offset_data->dest;
+  set_op_ind(&store_fp_offset_data->dest, FP_OFFSET_MEMBER_DISP, va_list_vreg);
+
+  /* `list->overflow_arg_area = param_stack_disp + %rbp;` */
+  InstructionData *param_stack_disp_data = instr_init(OP_MOV);
+  set_op_imm(&param_stack_disp_data->src, param_stack_disp, IMM_SIGNED);
+  set_op_reg(&param_stack_disp_data->dest, REG_QWORD, next_vreg());
+
+  InstructionData *add_rbp_data_2 = instr_init(OP_ADD);
+  set_op_reg(&add_rbp_data_2->src, REG_QWORD, RBP_VREG);
+  add_rbp_data_2->dest = param_stack_disp_data->dest;
+
+  InstructionData *store_overflow_arg_area_data = instr_init(OP_MOV);
+  store_overflow_arg_area_data->src = add_rbp_data_2->dest;
+  set_op_ind(&store_overflow_arg_area_data->dest, OVERFLOW_ARG_AREA_MEMBER_DISP,
+             va_list_vreg);
+
+  /* `list->reg_save_area = reg_save_area_disp + %rbp` */
+  InstructionData *reg_save_area_disp_data = instr_init(OP_MOV);
+  set_op_imm(&reg_save_area_disp_data->src, reg_save_area_disp, IMM_SIGNED);
+  set_op_reg(&reg_save_area_disp_data->dest, REG_QWORD, next_vreg());
+
+  InstructionData *add_rbp_data = instr_init(OP_ADD);
+  set_op_reg(&add_rbp_data->src, REG_QWORD, RBP_VREG);
+  add_rbp_data->dest = reg_save_area_disp_data->dest;
+
+  InstructionData *store_reg_save_area_data = instr_init(OP_MOV);
+  store_reg_save_area_data->src = add_rbp_data->dest;
+  set_op_ind(&store_reg_save_area_data->dest, REG_SAVE_AREA_MEMBER_DISP,
+             va_list_vreg);
+
+  ListIter *temp = llist_iter_last(instructions);
+  status = liter_push_back(
+      temp, &va_start_->last_instr, 10, load_gp_offset_data,
+      store_gp_offset_data, load_fp_offset_data, store_fp_offset_data,
+      reg_save_area_disp_data, add_rbp_data, store_reg_save_area_data,
+      param_stack_disp_data, add_rbp_data_2, store_overflow_arg_area_data);
+  free(temp);
+  if (status) abort();
+  return astree_adopt(va_start_, 2, expr, ident);
+}
+
+ASTree *translate_va_end(ASTree *va_end_, ASTree *expr) {
+  va_end_->first_instr = liter_copy(expr->first_instr);
+  if (va_end_->first_instr == NULL) abort();
+  va_end_->last_instr = liter_copy(expr->last_instr);
+  if (va_end_->last_instr == NULL) abort();
+
+  return astree_adopt(va_end_, 1, expr);
+}
+
+/* NOTE: since floating point arithmetic has not been implemented whatsoever,
+ * the `fp_offset` field is ignored by `va_arg`.
+ */
+int helper_va_arg_reg_param(size_t eightbytes, size_t result_vreg,
+                            size_t va_list_vreg, size_t current_branch) {
+  InstructionData *load_gp_offset_data = instr_init(OP_MOV);
+  set_op_ind(&load_gp_offset_data->src, GP_OFFSET_MEMBER_DISP, va_list_vreg);
+  set_op_reg(&load_gp_offset_data->dest, REG_DWORD, result_vreg);
+
+  InstructionData *cmp_gp_offset_data = instr_init(OP_CMP);
+  cmp_gp_offset_data->src = load_gp_offset_data->dest;
+  set_op_imm(&cmp_gp_offset_data->dest, GP_OFFSET_MAX, IMM_SIGNED);
+
+  InstructionData *jmp_ge_data = instr_init(OP_JGE);
+  set_op_dir(&jmp_ge_data->dest, mk_true_label(current_branch));
+
+  InstructionData *load_reg_save_area_data = instr_init(OP_MOV);
+  set_op_ind(&load_reg_save_area_data->src, REG_SAVE_AREA_MEMBER_DISP,
+             va_list_vreg);
+  set_op_reg(&load_reg_save_area_data->dest, REG_QWORD, next_vreg());
+
+  InstructionData *add_reg_save_area_data = instr_init(OP_ADD);
+  /* set operand explicitly to change width */
+  set_op_reg(&add_reg_save_area_data->dest, REG_QWORD, va_list_vreg);
+  add_reg_save_area_data->src = load_reg_save_area_data->dest;
+
+  InstructionData *load_disp_data = instr_init(OP_MOV);
+  set_op_imm(&load_disp_data->src, eightbytes * X64_SIZEOF_LONG, IMM_UNSIGNED);
+  set_op_reg(&load_disp_data->dest, REG_QWORD, next_vreg());
+
+  InstructionData *add_disp_data = instr_init(OP_MOV);
+  add_disp_data->src = load_disp_data->dest;
+  set_op_ind(&add_disp_data->dest, REG_SAVE_AREA_MEMBER_DISP, va_list_vreg);
+
+  InstructionData *jmp_false_data = instr_init(OP_JMP);
+  set_op_dir(&jmp_false_data->dest, mk_false_label(current_branch));
+
+  InstructionData *true_label_data = instr_init(OP_NONE);
+  true_label_data->label = mk_true_label(current_branch);
+
+  ListIter *temp = llist_iter_last(instructions);
+  int status = liter_push_back(
+      temp, NULL, 9, load_gp_offset_data, cmp_gp_offset_data, jmp_ge_data,
+      load_reg_save_area_data, add_reg_save_area_data, load_disp_data,
+      add_disp_data, jmp_false_data, true_label_data);
+  free(temp);
+  return status;
+}
+
+int helper_va_arg_stack_param(size_t eightbytes, size_t result_vreg,
+                              size_t va_list_vreg) {
+  InstructionData *load_overflow_arg_area_data = instr_init(OP_MOV);
+  set_op_ind(&load_overflow_arg_area_data->src, OVERFLOW_ARG_AREA_MEMBER_DISP,
+             va_list_vreg);
+  set_op_reg(&load_overflow_arg_area_data->dest, REG_QWORD, result_vreg);
+
+  InstructionData *load_disp_data = instr_init(OP_MOV);
+  set_op_imm(&load_disp_data->src, eightbytes * X64_SIZEOF_LONG, IMM_UNSIGNED);
+  set_op_reg(&load_disp_data->dest, REG_QWORD, next_vreg());
+
+  InstructionData *add_disp_data = instr_init(OP_ADD);
+  add_disp_data->src = load_disp_data->dest;
+  set_op_ind(&add_disp_data->dest, OVERFLOW_ARG_AREA_MEMBER_DISP, va_list_vreg);
+
+  ListIter *temp = llist_iter_last(instructions);
+  int status = liter_push_back(temp, NULL, 3, load_overflow_arg_area_data,
+                               load_disp_data, add_disp_data);
+  free(temp);
+  return status;
+}
+
+ASTree *translate_va_arg(ASTree *va_arg_, ASTree *expr, ASTree *type_name) {
+  va_arg_->first_instr = liter_copy(expr->last_instr);
+  if (va_arg_->first_instr == NULL) abort();
+  InstructionData *expr_data = liter_get(expr->last_instr);
+  if (expr_data == NULL) abort();
+  size_t eightbytes = typespec_get_eightbytes(astree_get(type_name, 1)->type);
+  size_t result_vreg = next_vreg();
+
+  if (eightbytes <= 2) {
+    size_t current_branch = next_branch();
+    int status = helper_va_arg_reg_param(
+        eightbytes, result_vreg, expr_data->dest.reg.num, current_branch);
+    if (status) abort();
+    status = helper_va_arg_stack_param(eightbytes, result_vreg,
+                                       expr_data->dest.reg.num);
+    if (status) abort();
+    InstructionData *reg_label_data = instr_init(OP_NONE);
+    reg_label_data->label = mk_false_label(current_branch);
+    status = llist_push_back(instructions, reg_label_data);
+    if (status) abort();
+  } else {
+    int status = helper_va_arg_stack_param(eightbytes, result_vreg,
+                                           expr_data->dest.reg.num);
+    if (status) abort();
+  }
+
+  /* dummy mov for parent expression */
+  InstructionData *dummy_data = instr_init(OP_MOV);
+  set_op_reg(&dummy_data->dest, REG_QWORD, result_vreg);
+  dummy_data->src = dummy_data->dest;
+  int status = llist_push_back(instructions, dummy_data);
+  if (status) abort();
+  va_arg_->last_instr = llist_iter_last(instructions);
+  if (va_arg_->last_instr == NULL) abort();
+
+  return astree_adopt(va_arg_, 2, expr, type_name);
+}
+
 int translate_params(ASTree *declarator) {
   ASTree *fn_dirdecl = astree_get(declarator, astree_count(declarator) - 1);
   const TypeSpec *fn_type = declarator->type;
@@ -1525,9 +1736,9 @@ int translate_params(ASTree *declarator) {
   int status = strip_aux_type(&ret_type, fn_type);
   if (status) return status;
   /* account for hidden out param */
-  param_reg_eightbytes = typespec_get_eightbytes(&ret_type) > 2 ? 1 : 0;
+  param_reg_index = typespec_get_eightbytes(&ret_type) > 2 ? 1 : 0;
   typespec_destroy(&ret_type);
-  if (param_reg_eightbytes == 1) {
+  if (param_reg_index == 1) {
     SymbolValue dummy = {0};
     /* TODO(Robert): (void?) pointer type constant */
     dummy.type = SPEC_LONG;
@@ -1539,31 +1750,47 @@ int translate_params(ASTree *declarator) {
     if (status) return status;
   }
   /* offset to account for preserved regs and return address */
-  param_stack_eightbytes = PROLOGUE_EIGHTBYTES;
-  size_t i;
-  for (i = 0; i < astree_count(fn_dirdecl); ++i) {
-    ASTree *param = astree_get(fn_dirdecl, i);
-    ASTree *param_decl = astree_get(param, 1);
-    SymbolValue *param_symval = NULL;
-    assert(state_get_symbol(state, param_decl->lexinfo,
-                            strlen(param_decl->lexinfo), &param_symval));
-    assert(param_symval);
-    size_t param_symval_eightbytes =
-        typespec_get_eightbytes(&param_symval->type);
-    if (param_symval_eightbytes <= 2 &&
-        param_reg_eightbytes + param_symval_eightbytes <= PARAM_REG_COUNT) {
-      assign_stack_space(param_symval);
-      ListIter *temp = llist_iter_last(instructions);
-      int status = bulk_rtom(RBP_VREG, param_symval->disp,
-                             PARAM_REGS + param_reg_eightbytes,
-                             &param_symval->type, temp);
-      param_reg_eightbytes += param_symval_eightbytes;
-      free(temp);
-      if (status) return status;
-    } else {
-      param_symval->disp = param_stack_eightbytes * 8;
-      param_stack_eightbytes += param_symval_eightbytes;
+  param_stack_disp = PROLOGUE_EIGHTBYTES * X64_SIZEOF_LONG;
+  size_t i, param_count = astree_count(fn_dirdecl);
+  if (param_count > 0 && typespec_is_varfn(fn_type)) --param_count;
+  if (param_count != 0 && astree_get(fn_dirdecl, 0)->symbol != TOK_VOID) {
+    for (i = 0; i < param_count; ++i) {
+      ASTree *param = astree_get(fn_dirdecl, i);
+      ASTree *param_decl = astree_get(param, 1);
+      SymbolValue *param_symval = NULL;
+      assert(state_get_symbol(state, param_decl->lexinfo,
+                              strlen(param_decl->lexinfo), &param_symval));
+      assert(param_symval);
+      size_t param_symval_eightbytes =
+          typespec_get_eightbytes(&param_symval->type);
+      if (param_symval_eightbytes <= 2 &&
+          param_reg_index + param_symval_eightbytes <= PARAM_REG_COUNT) {
+        assign_stack_space(param_symval);
+        ListIter *temp = llist_iter_last(instructions);
+        int status =
+            bulk_rtom(RBP_VREG, param_symval->disp,
+                      PARAM_REGS + param_reg_index, &param_symval->type, temp);
+        param_reg_index += param_symval_eightbytes;
+        free(temp);
+        if (status) return status;
+      } else {
+        param_symval->disp = param_stack_disp;
+        param_stack_disp += param_symval_eightbytes * X64_SIZEOF_LONG;
+      }
     }
+  }
+
+  if (typespec_is_varfn(fn_type) && param_reg_index < PARAM_REG_COUNT) {
+    SymbolValue dummy = {0};
+    dummy.type.width = X64_SIZEOF_LONG * (PARAM_REG_COUNT - param_reg_index);
+    dummy.type.alignment = X64_ALIGNOF_LONG;
+    assign_stack_space(&dummy);
+    reg_save_area_disp = dummy.disp;
+    ListIter *temp = llist_iter_last(instructions);
+    int status = bulk_rtom(RBP_VREG, dummy.disp, PARAM_REGS + param_reg_index,
+                           &dummy.type, temp);
+    free(temp);
+    if (status) return status;
   }
   return 0;
 }
