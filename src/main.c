@@ -244,13 +244,13 @@ cleanup:
 
   DEBUGS('m', "global state cleanup");
   state_destroy(state);
+  DEBUGS('m', "assembly generator cleanup");
+  asmgen_free_globals();
   DEBUGS('m', "syntax tree cleanup");
   astree_destroy(parser_root);
   DEBUGS('m', "string set cleanup");
   string_set_free_globals();
   DEBUGS('m', "lexing/parsing helper cleanup");
   lexer_free_globals();
-  DEBUGS('m', "assembly generator cleanup");
-  asmgen_free_globals();
   return EXIT_SUCCESS;
 }
