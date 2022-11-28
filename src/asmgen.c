@@ -530,26 +530,46 @@ Opcode opcode_from_operator(int symbol, const TypeSpec *type) {
       /* fallthrough */
     case TOK_DEC:
       return OP_DEC;
+    case TOK_ADDEQ:
+      /* fallthrough */
     case '+':
       return OP_ADD;
+    case TOK_SUBEQ:
+      /* fallthrough */
     case '-':
       return OP_SUB;
+    case TOK_MULEQ:
+      /* fallthrough */
     case '*':
       return typespec_is_signed(type) ? OP_IMUL : OP_MUL;
+    case TOK_REMEQ:
+      /* fallthrough */
     case '%':
+      /* fallthrough */
+    case TOK_DIVEQ:
       /* fallthrough */
     case '/':
       return typespec_is_signed(type) ? OP_IDIV : OP_DIV;
+    case TOK_OREQ:
+      /* fallthrough */
     case '|':
       return OP_OR;
+    case TOK_ANDEQ:
+      /* fallthrough */
     case '&':
       return OP_AND;
+    case TOK_XOREQ:
+      /* fallthrough */
     case '^':
       return OP_XOR;
     case '~':
       return OP_NOT;
+    case TOK_SHLEQ:
+      /* fallthrough */
     case TOK_SHL:
       return typespec_is_signed(type) ? OP_SAL : OP_SHL;
+    case TOK_SHREQ:
+      /* fallthrough */
     case TOK_SHR:
       return typespec_is_signed(type) ? OP_SAR : OP_SHR;
     case TOK_GE:
@@ -570,6 +590,8 @@ Opcode opcode_from_operator(int symbol, const TypeSpec *type) {
       /* fallthrough */
     case TOK_AND:
       return OP_JZ;
+    case '=':
+      return OP_MOV;
     default:
       return OP_INVALID;
   }
@@ -1333,6 +1355,103 @@ int assign_aggregate(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   return 0;
 }
 
+int assign_add(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
+  InstructionData *lvalue_data = liter_get(lvalue->last_instr);
+
+  int status = scalar_conversions(rvalue, lvalue->type);
+  if (status) return status;
+  InstructionData *rvalue_data = liter_get(rvalue->last_instr);
+
+  InstructionData *assignment_data =
+      instr_init(opcode_from_operator(assignment->symbol, assignment->type));
+  set_op_ind(&assignment_data->dest, NO_DISP, lvalue_data->dest.reg.num);
+  assignment_data->src = rvalue_data->dest;
+
+  InstructionData *dummy_data = instr_init(OP_MOV);
+  dummy_data->src = dummy_data->dest = rvalue_data->dest;
+
+  assignment->first_instr = liter_copy(lvalue->first_instr);
+  if (assignment->first_instr == NULL) return -1;
+
+  /* TODO(Robert): copied from translate_addition */
+  /* use two-operand IMUL, since it is more convenient in this case */
+  if (typespec_is_pointer(lvalue->type) && !typespec_is_pointer(rvalue->type)) {
+    TypeSpec element_type;
+    int status = strip_aux_type(&element_type, lvalue->type);
+    if (status) status;
+    InstructionData *mul_data = instr_init(OP_IMUL);
+    mul_data->dest = rvalue_data->dest;
+    set_op_imm(&mul_data->src, typespec_get_width(&element_type), IMM_UNSIGNED);
+    status = typespec_destroy(&element_type);
+    if (status) abort();
+    status = liter_push_back(rvalue->last_instr, &assignment->last_instr, 3,
+                             mul_data, assignment_data, dummy_data);
+    if (status) return status;
+  } else if (!typespec_is_pointer(lvalue->type) &&
+             typespec_is_pointer(rvalue->type)) {
+    TypeSpec element_type;
+    status = strip_aux_type(&element_type, rvalue->type);
+    if (status) return status;
+    InstructionData *mul_data = instr_init(OP_IMUL);
+    mul_data->dest = lvalue_data->dest;
+    set_op_imm(&mul_data->src, typespec_get_width(&element_type), IMM_UNSIGNED);
+    status = typespec_destroy(&element_type);
+    if (status) abort();
+    status = liter_push_back(rvalue->last_instr, &assignment->last_instr, 3,
+                             mul_data, assignment_data, dummy_data);
+    if (status) return status;
+  } else {
+    int status = liter_push_back(rvalue->last_instr, &assignment->last_instr, 2,
+                                 assignment_data, dummy_data);
+    if (status) return status;
+  }
+  return 0;
+}
+
+int assign_mul(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
+  const TypeSpec *common_type =
+      arithmetic_conversions(lvalue->type, rvalue->type);
+
+  InstructionData *lvalue_data = liter_get(lvalue->last_instr);
+  int status = scalar_conversions(lvalue, common_type);
+  if (status) return -1;
+  InstructionData *left_data = liter_get(lvalue->last_instr);
+
+  status = scalar_conversions(rvalue, common_type);
+  if (status) return status;
+  InstructionData *rvalue_data = liter_get(rvalue->last_instr);
+
+  InstructionData *zero_rdx_data = instr_init(OP_MOV);
+  set_op_reg(&zero_rdx_data->dest, typespec_get_width(common_type), RDX_VREG);
+  set_op_imm(&zero_rdx_data->src, 0, IMM_UNSIGNED);
+
+  InstructionData *mov_rax_data = instr_init(OP_MOV);
+  set_op_reg(&mov_rax_data->dest, typespec_get_width(common_type), RAX_VREG);
+  mov_rax_data->src = left_data->dest;
+
+  InstructionData *operator_data =
+      instr_init(opcode_from_operator(assignment->symbol, common_type));
+  operator_data->dest = rvalue_data->dest;
+
+  assignment->first_instr = liter_copy(lvalue->first_instr);
+  if (assignment->first_instr == NULL) return -1;
+
+  InstructionData *store_data = instr_init(OP_MOV);
+  set_op_ind(&store_data->dest, NO_DISP, lvalue_data->dest.reg.num);
+  set_op_reg(&store_data->src, typespec_get_width(lvalue->type),
+             assignment->symbol == TOK_REMEQ ? RDX_VREG : RAX_VREG);
+
+  InstructionData *dummy_data = instr_init(OP_MOV);
+  /* mov from vreg representing rax/rdx to new vreg and truncate */
+  set_op_reg(&dummy_data->src, typespec_get_width(lvalue->type),
+             assignment->symbol == TOK_REMEQ ? RDX_VREG : RAX_VREG);
+  set_op_reg(&dummy_data->dest, typespec_get_width(lvalue->type), next_vreg());
+
+  return liter_push_back(rvalue->last_instr, &assignment->last_instr, 5,
+                         zero_rdx_data, mov_rax_data, operator_data, store_data,
+                         dummy_data);
+}
+
 int assign_scalar(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   InstructionData *lvalue_data = liter_get(lvalue->last_instr);
 
@@ -1340,7 +1459,8 @@ int assign_scalar(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   if (status) return status;
   InstructionData *rvalue_data = liter_get(rvalue->last_instr);
 
-  InstructionData *assignment_data = instr_init(OP_MOV);
+  InstructionData *assignment_data =
+      instr_init(opcode_from_operator(assignment->symbol, assignment->type));
   set_op_ind(&assignment_data->dest, NO_DISP, lvalue_data->dest.reg.num);
   assignment_data->src = rvalue_data->dest;
 
@@ -1361,6 +1481,15 @@ ASTree *translate_assignment(ASTree *assignment, ASTree *lvalue,
   if (typespec_is_union(assignment->type) ||
       typespec_is_struct(assignment->type)) {
     int status = assign_aggregate(assignment, lvalue, rvalue);
+    if (status) abort();
+  } else if (assignment->symbol == TOK_ADDEQ ||
+             assignment->symbol == TOK_SUBEQ) {
+    int status = assign_add(assignment, lvalue, rvalue);
+    if (status) abort();
+  } else if (assignment->symbol == TOK_MULEQ ||
+             assignment->symbol == TOK_DIVEQ ||
+             assignment->symbol == TOK_REMEQ) {
+    int status = assign_mul(assignment, lvalue, rvalue);
     if (status) abort();
   } else {
     int status = assign_scalar(assignment, lvalue, rvalue);
