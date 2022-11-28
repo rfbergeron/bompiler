@@ -224,8 +224,20 @@ return              : TOK_RETURN expr ';'                               { $$ = b
 expr                : assign_expr                                       { $$ = bcc_yyval = $1; }
                     | expr ',' assign_expr                              { $$ = bcc_yyval = validate_comma($2, $1, $3); }
                     ;
-assign_expr         : assign_expr '=' cond_expr                         { $$ = bcc_yyval = validate_assignment($2, $1, $3); }
+assign_expr         : assign_expr assign_op cond_expr                   { $$ = bcc_yyval = validate_assignment($2, $1, $3); }
                     | cond_expr                                         { $$ = bcc_yyval = $1; }
+                    ;
+assign_op           : '='                                               { $$ = $1; }
+                    | TOK_ADDEQ                                         { $$ = $1; }
+                    | TOK_SUBEQ                                         { $$ = $1; }
+                    | TOK_MULEQ                                         { $$ = $1; }
+                    | TOK_DIVEQ                                         { $$ = $1; }
+                    | TOK_REMEQ                                         { $$ = $1; }
+                    | TOK_ANDEQ                                         { $$ = $1; }
+                    | TOK_OREQ                                          { $$ = $1; }
+                    | TOK_XOREQ                                         { $$ = $1; }
+                    | TOK_SHREQ                                         { $$ = $1; }
+                    | TOK_SHLEQ                                         { $$ = $1; }
                     ;
 cond_expr           : binary_expr '?' expr ':' cond_expr                { $$ = bcc_yyval = validate_conditional($2, $1, $3, $5); astree_destroy($4); }
                     | binary_expr                                       { $$ = bcc_yyval = $1; }
