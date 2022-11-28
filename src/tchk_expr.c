@@ -23,8 +23,10 @@ ASTree *validate_stringcon(ASTree *stringcon) {
   if (status)
     return astree_create_errnode(stringcon, BCC_TERR_LIBRARY_FAILURE, 0);
 
-  AuxSpec *array_aux = calloc(1, sizeof(*array_aux));
+  AuxSpec *array_aux = malloc(sizeof(*array_aux));
   array_aux->aux = AUX_ARRAY;
+  array_aux->data.memory_loc.qualifiers = TYPESPEC_FLAG_CONST;
+  array_aux->data.memory_loc.deduce_length = 0;
   /* Normally, we would subtract 2 to omit the starting and ending doublequote,
    * but since strlen does not include the terminating null byte, we only
    * subtract one.

@@ -175,6 +175,7 @@ typedef struct auxspec {
     struct {
       size_t length;
       unsigned int qualifiers;
+      int deduce_length;
     } memory_loc;
     struct {
       const char *name;

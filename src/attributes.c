@@ -88,12 +88,12 @@ const char VA_LIST_TYPEDEF_NAME[] = "__builtin_va_list";
 const char VA_LIST_STRUCT_NAME[] = "0_0_0_struct";
 const char VA_LIST_MEMBER_NAMES[][sizeof("overflow_arg_area")] = {
     "gp_offset", "fp_offset", "overflow_arg_area", "reg_save_area"};
-const AuxSpec AUXSPEC_PTR = {{{0, 0}}, AUX_POINTER};
-const AuxSpec AUXSPEC_CONST_PTR = {{{0, TYPESPEC_FLAG_CONST}}, AUX_POINTER};
-const AuxSpec AUXSPEC_VOLATILE_PTR = {{{0, TYPESPEC_FLAG_VOLATILE}},
+const AuxSpec AUXSPEC_PTR = {{{0, 0, 0}}, AUX_POINTER};
+const AuxSpec AUXSPEC_CONST_PTR = {{{0, TYPESPEC_FLAG_CONST, 0}}, AUX_POINTER};
+const AuxSpec AUXSPEC_VOLATILE_PTR = {{{0, TYPESPEC_FLAG_VOLATILE, 0}},
                                       AUX_POINTER};
 const AuxSpec AUXSPEC_CONST_VOLATILE_PTR = {
-    {{0, TYPESPEC_FLAG_CONST | TYPESPEC_FLAG_VOLATILE}}, AUX_POINTER};
+    {{0, TYPESPEC_FLAG_CONST | TYPESPEC_FLAG_VOLATILE, 0}}, AUX_POINTER};
 const TypeSpec SPEC_EMPTY = {0, 0, BLIB_LLIST_EMPTY, TYPESPEC_FLAG_NONE,
                              TYPE_NONE};
 const TypeSpec SPEC_VOID = {0, 0, BLIB_LLIST_EMPTY, TYPESPEC_FLAG_VOID,
@@ -194,11 +194,11 @@ int type_to_string(const TypeSpec *type, char *buf, size_t size) {
     size_t j;
     switch (auxspec->aux) {
       case AUX_ARRAY:
-        if (auxspec->data.memory_loc.length > 0) {
+        if (auxspec->data.memory_loc.deduce_length) {
+          ret += sprintf((buf + ret), "array of ");
+        } else {
           ret += sprintf((buf + ret), "array of size %lu of ",
                          auxspec->data.memory_loc.length);
-        } else {
-          ret += sprintf((buf + ret), "array of ");
         }
         break;
       case AUX_POINTER:
@@ -541,7 +541,7 @@ int typespec_is_incomplete(const TypeSpec *type) {
   int is_array =
       llist_size(&type->auxspecs) >= 1 &&
       ((AuxSpec *)llist_front(&type->auxspecs))->aux == AUX_ARRAY &&
-      ((AuxSpec *)llist_front(&type->auxspecs))->data.memory_loc.length == 0;
+      ((AuxSpec *)llist_front(&type->auxspecs))->data.memory_loc.deduce_length;
   return is_void || is_struct || is_array;
 }
 

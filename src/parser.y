@@ -377,6 +377,7 @@ void make_va_list_type(void) {
   AuxSpec *aux_array = malloc(sizeof(AuxSpec));
   aux_array->aux = AUX_ARRAY;
   aux_array->data.memory_loc.length = 1;
+  aux_array->data.memory_loc.deduce_length = 0;
   status = llist_push_back(&builtin_symval->type.auxspecs, aux_array);
   if (status) abort();
   AuxSpec *aux_struct = malloc(sizeof(AuxSpec));

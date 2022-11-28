@@ -649,7 +649,7 @@ ASTree *define_array(ASTree *declarator, ASTree *array) {
   AuxSpec *aux_array = calloc(1, sizeof(*aux_array));
   aux_array->aux = AUX_ARRAY;
   if (astree_count(array) == 0) {
-    aux_array->data.memory_loc.length = 0;
+    aux_array->data.memory_loc.deduce_length = 1;
   } else {
     ASTree *expr = astree_get(array, 0);
     aux_array->data.memory_loc.length = expr->constant.integral.value;
