@@ -1154,6 +1154,8 @@ ASTree *translate_addition(ASTree *operator, ASTree * left, ASTree *right) {
     InstructionData *mul_data = instr_init(OP_IMUL);
     mul_data->dest = right_data->dest;
     set_op_imm(&mul_data->src, typespec_get_width(&element_type), IMM_UNSIGNED);
+    status = typespec_destroy(&element_type);
+    if (status) abort();
     status = liter_push_back(right->last_instr, &operator->last_instr, 2,
                              mul_data, operator_data);
     if (status) abort();
@@ -1165,6 +1167,8 @@ ASTree *translate_addition(ASTree *operator, ASTree * left, ASTree *right) {
     InstructionData *mul_data = instr_init(OP_IMUL);
     mul_data->dest = left_data->dest;
     set_op_imm(&mul_data->src, typespec_get_width(&element_type), IMM_UNSIGNED);
+    status = typespec_destroy(&element_type);
+    if (status) abort();
     status = liter_push_back(right->last_instr, &operator->last_instr, 2,
                              mul_data, operator_data);
     if (status) abort();
@@ -1198,6 +1202,11 @@ ASTree *translate_multiplication(ASTree *operator, ASTree * left,
   if (status) abort();
   InstructionData *right_data = liter_get(right->last_instr);
 
+  InstructionData *zero_rdx_data = instr_init(OP_MOV);
+  set_op_reg(&zero_rdx_data->dest, typespec_get_width(operator->type),
+             RDX_VREG);
+  set_op_imm(&zero_rdx_data->src, 0, IMM_UNSIGNED);
+
   InstructionData *mov_rax_data = instr_init(OP_MOV);
   set_op_reg(&mov_rax_data->dest, typespec_get_width(operator->type), RAX_VREG);
   mov_rax_data->src = left_data->dest;
@@ -1214,8 +1223,9 @@ ASTree *translate_multiplication(ASTree *operator, ASTree * left,
   set_op_reg(&mov_data->src, typespec_get_width(operator->type),
                              operator->symbol == '%' ? RDX_VREG : RAX_VREG);
   set_op_reg(&mov_data->dest, typespec_get_width(operator->type), next_vreg());
-  status = liter_push_back(right->last_instr, &operator->last_instr, 3,
-                           mov_rax_data, operator_data, mov_data);
+  status =
+      liter_push_back(right->last_instr, &operator->last_instr, 4,
+                      zero_rdx_data, mov_rax_data, operator_data, mov_data);
   if (status) abort();
   return astree_adopt(operator, 2, left, right);
 }
