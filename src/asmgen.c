@@ -208,7 +208,7 @@ typedef struct instruction_data {
 const char OPCODES[][MAX_OPCODE_LENGTH] = {FOREACH_OPCODE(GENERATE_STRING)};
 
 static const char LOCAL_FMT[] = ".L%s";
-static const char STATIC_FMT[] = "%s.%s";
+static const char STATIC_FMT[] = "%s.%lu";
 static const char COND_FMT[] = ".LC%lu";
 static const char END_FMT[] = ".LE%lu";
 static const char STMT_FMT[] = ".LS%lu";
@@ -331,7 +331,7 @@ const char *mk_generic_label(const char *fmt, size_t unique_id) {
 const char *mk_static_label(const char *name, size_t unique_id) {
   char temp[64];
   sprintf(temp, "%lu", unique_id);
-  size_t label_len = strlen(name) + strlen(temp) + sizeof(STATIC_FMT) - 3;
+  size_t label_len = strlen(name) + strlen(temp) + sizeof(STATIC_FMT) - 5;
   return deduplicate_text(label_len, STATIC_FMT, name, unique_id);
 }
 
