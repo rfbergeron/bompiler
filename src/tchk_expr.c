@@ -358,51 +358,57 @@ ASTree *validate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
   }
 }
 
-/* logic:
- * casts to pointer disqualify expressions from being arithmetic constants
- */
+const TypeSpec *subtraction_type(const TypeSpec *left_type,
+                                 const TypeSpec *right_type) {
+  if (typespec_is_arithmetic(left_type) && typespec_is_arithmetic(right_type)) {
+    return arithmetic_conversions(left_type, right_type);
+  } else if (typespec_is_pointer(left_type) &&
+             typespec_is_integer(right_type)) {
+    return left_type;
+  } else if (typespec_is_pointer(left_type) &&
+             typespec_is_pointer(right_type) &&
+             types_equivalent(left_type, right_type,
+                              IGNORE_QUALIFIERS | IGNORE_STORAGE_CLASS)) {
+    /* TODO(Robert): dedicated pointer difference type constant */
+    return &SPEC_LONG;
+  } else {
+    return &SPEC_EMPTY;
+  }
+}
+
+const TypeSpec *addition_type(const TypeSpec *left_type,
+                              const TypeSpec *right_type) {
+  if (typespec_is_arithmetic(left_type) && typespec_is_arithmetic(right_type)) {
+    return arithmetic_conversions(left_type, right_type);
+  } else if (typespec_is_pointer(left_type) &&
+             typespec_is_integer(right_type)) {
+    return left_type;
+  } else if (typespec_is_integer(left_type) &&
+             typespec_is_pointer(right_type)) {
+    return right_type;
+  } else {
+    return &SPEC_EMPTY;
+  }
+}
+
 ASTree *validate_addition(ASTree *operator, ASTree * left, ASTree *right) {
   if (left->symbol == TOK_TYPE_ERROR || right->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(operator, 2, left, right);
   }
+
   pointer_conversions(left);
   pointer_conversions(right);
-  const TypeSpec *left_type = left->type;
-  const TypeSpec *right_type = right->type;
+  if (operator->symbol == '-')
+    operator->type = subtraction_type(left->type, right->type);
+  else
+    operator->type = addition_type(left->type, right->type);
 
-  if (typespec_is_arithmetic(left_type) && typespec_is_arithmetic(right_type)) {
-    operator->type = arithmetic_conversions(left->type, right->type);
-    return evaluate_binop(operator, left, right);
-  } else if (typespec_is_pointer(left_type) &&
-             typespec_is_integer(right_type)) {
-    operator->type = left_type;
-    return evaluate_binop(operator, left, right);
-  } else if (typespec_is_integer(left_type) &&
-             typespec_is_pointer(right_type)) {
-    if (operator->symbol == '-') {
-      return astree_create_errnode(astree_adopt(operator, 2, left, right),
-                                   BCC_TERR_INCOMPATIBLE_TYPES, 3, operator,
-                                   left_type, right_type);
-    } else {
-      operator->type = right_type;
-      return evaluate_binop(operator, left, right);
-    }
-  } else if (typespec_is_pointer(left_type) &&
-             typespec_is_pointer(right_type) && operator->symbol == '-') {
-    if (types_equivalent(left->type, right->type,
-                         IGNORE_QUALIFIERS | IGNORE_STORAGE_CLASS)) {
-      /* TODO(Robert): dedicated pointer difference type constant */
-      operator->type = & SPEC_LONG;
-      return evaluate_binop(operator, left, right);
-    } else {
-      return astree_create_errnode(astree_adopt(operator, 2, left, right),
-                                   BCC_TERR_INCOMPATIBLE_TYPES, 3, operator,
-                                   left_type, right_type);
-    }
-  } else {
+  if (operator->type == & SPEC_EMPTY) {
     return astree_create_errnode(astree_adopt(operator, 2, left, right),
                                  BCC_TERR_INCOMPATIBLE_TYPES, 3, operator,
-                                 left_type, right_type);
+                                 left->type, right->type);
+  } else {
+    return evaluate_binop(operator, left, right);
   }
 }
 
@@ -756,14 +762,58 @@ ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src) {
   } else if (!(dest->attributes & ATTR_EXPR_LVAL)) {
     return astree_create_errnode(astree_adopt(assignment, 2, dest, src),
                                  BCC_TERR_EXPECTED_LVAL, 2, assignment, dest);
-  } else if (types_assignable(dest->type, src)) {
+  } else {
+    switch (assignment->symbol) {
+    incompatible:
+      return astree_create_errnode(astree_adopt(assignment, 2, dest, src),
+                                   BCC_TERR_INCOMPATIBLE_TYPES, 3, assignment,
+                                   dest->type, src->type);
+      case TOK_ADDEQ: {
+        ASTree dummy;
+        dummy.attributes = 0;
+        dummy.type = addition_type(dest->type, src->type);
+        if (dummy.type != &SPEC_EMPTY && types_assignable(dest->type, &dummy))
+          break;
+        goto incompatible;
+      }
+      case TOK_SUBEQ: {
+        ASTree dummy;
+        dummy.attributes = 0;
+        dummy.type = subtraction_type(dest->type, src->type);
+        if (dummy.type != &SPEC_EMPTY && types_assignable(dest->type, &dummy))
+          break;
+        goto incompatible;
+      }
+      case TOK_MULEQ:
+        /* fallthrough */
+      case TOK_DIVEQ:
+        /* fallthrough */
+      case TOK_REMEQ:
+        if (typespec_is_arithmetic(dest->type) &&
+            typespec_is_arithmetic(src->type))
+          break;
+        goto incompatible;
+      case TOK_ANDEQ:
+        /* fallthrough */
+      case TOK_OREQ:
+        /* fallthrough */
+      case TOK_XOREQ:
+        /* fallthrough */
+      case TOK_SHREQ:
+        /* fallthrough */
+      case TOK_SHLEQ:
+        if (typespec_is_integer(dest->type) && typespec_is_integer(src->type))
+          break;
+        goto incompatible;
+      case '=':
+        if (types_assignable(dest->type, src)) break;
+        goto incompatible;
+      default:
+        abort();
+    }
     assignment->type = dest->type;
     maybe_load_cexpr(src, NULL);
     maybe_load_cexpr(dest, src->first_instr);
     return translate_assignment(assignment, dest, src);
-  } else {
-    return astree_create_errnode(astree_adopt(assignment, 2, dest, src),
-                                 BCC_TERR_INCOMPATIBLE_TYPES, 3, assignment,
-                                 dest->type, src->type);
   }
 }
