@@ -477,6 +477,14 @@ size_t typespec_get_eightbytes(const TypeSpec *spec) {
   return (width / 8) + ((width % 8 == 0) ? 0 : 1);
 }
 
+size_t typespec_get_padding(const TypeSpec *type, size_t to_pad) {
+  assert(!typespec_is_incomplete(type));
+  size_t width = typespec_is_array(type) ? typespec_elem_width(type)
+                                         : typespec_get_width(type);
+  size_t remainder = to_pad % width;
+  return remainder == 0 ? remainder : width - remainder;
+}
+
 int typespec_append_auxspecs(TypeSpec *dest, const TypeSpec *src) {
   size_t i;
   for (i = 0; i < llist_size(&src->auxspecs); ++i) {
@@ -579,6 +587,11 @@ int typespec_is_pointer(const TypeSpec *type) {
 
 int typespec_is_array(const TypeSpec *type) {
   return typespec_is_aux(type, AUX_ARRAY, 0);
+}
+
+int typespec_is_deduced_arr(const TypeSpec *type) {
+  return typespec_is_array(type) && ((AuxSpec *)llist_front(&type->auxspecs))
+                                        ->data.memory_loc.deduce_length;
 }
 
 int typespec_is_function(const TypeSpec *type) {
