@@ -6,10 +6,14 @@
 #include "badllist.h"
 #include "lyutils.h"
 
+extern const size_t RBP_VREG;
 const char *mk_static_label(const char *name, size_t unique_id);
 const char *mk_fnptr_text(const char *name);
 void maybe_load_cexpr(ASTree *expr, ListIter *where);
 const char *asmgen_literal_label(const char *literal);
+int bulk_mzero(size_t dest_memreg, ptrdiff_t dest_disp, size_t skip_bytes,
+               const TypeSpec *type, ListIter *where);
+int static_zero_pad(size_t count, ListIter *where);
 ASTree *translate_empty_expr(ASTree *empty_expr);
 ASTree *translate_ident(ASTree *ident);
 ASTree *translate_cast(ASTree *cast, ASTree *expr);
@@ -60,6 +64,14 @@ ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator);
 ASTree *begin_translate_fn(ASTree *declaration, ASTree *declarator,
                            ASTree *body);
 ASTree *end_translate_fn(ASTree *declaration);
+ASTree *translate_static_scalar_init(const TypeSpec *type, ASTree *initializer,
+                                     ListIter *where);
+ASTree *translate_auto_scalar_init(const TypeSpec *type, ptrdiff_t disp,
+                                   ASTree *initializer, ListIter *where);
+ASTree *translate_static_literal_init(const TypeSpec *type, ASTree *literal,
+                                      ListIter *where);
+ASTree *translate_auto_literal_init(const TypeSpec *type, ptrdiff_t disp,
+                                    ASTree *literal, ListIter *where);
 int generator_print_il(FILE *out);
 int generator_debug_il(FILE *out);
 void asmgen_init_globals(const char *filename);

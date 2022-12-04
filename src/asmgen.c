@@ -7,6 +7,7 @@
 #include "attributes.h"
 #include "badalist.h"
 #include "debug.h"
+#include "init.h"
 #include "lyutils.h"
 #include "state.h"
 #include "symtable.h"
@@ -236,7 +237,7 @@ static const size_t RCX_VREG = 1;
 static const size_t RDX_VREG = 2;
 static const size_t RBX_VREG = 3;
 static const size_t RSP_VREG = 4;
-static const size_t RBP_VREG = 5;
+const size_t RBP_VREG = 5;
 static const size_t RSI_VREG = 6;
 static const size_t RDI_VREG = 7;
 static const size_t PARAM_REGS[] = {RDI_VREG, RSI_VREG, RDX_VREG,
@@ -516,6 +517,46 @@ int bulk_mtom(size_t dest_reg, size_t src_reg, const TypeSpec *type,
     if (status) return status;
   }
   return 0;
+}
+
+int bulk_mzero(size_t dest_memreg, ptrdiff_t dest_disp, size_t skip_bytes,
+               const TypeSpec *type, ListIter *where) {
+  size_t alignment = typespec_get_alignment(type);
+  size_t width = typespec_get_width(type);
+  size_t i = skip_bytes;
+  InstructionData *zero_data = instr_init(OP_MOV);
+  set_op_imm(&zero_data->src, 0, IMM_UNSIGNED);
+  set_op_reg(&zero_data->dest, alignment, next_vreg());
+
+  while (i < width) {
+    ptrdiff_t chunk_disp = i + dest_disp;
+    if ((i + dest_disp) % alignment != 0) {
+      InstructionData *mov_data = instr_init(OP_MOV);
+      set_op_reg(&mov_data->src, REG_BYTE, zero_data->dest.reg.num);
+      set_op_ind(&mov_data->dest, chunk_disp, dest_memreg);
+      int status = liter_push_back(where, NULL, 1, mov_data);
+      if (status) return status;
+      ++i;
+    } else {
+      InstructionData *mov_data = instr_init(OP_MOV);
+      mov_data->src = zero_data->dest;
+      set_op_ind(&mov_data->dest, chunk_disp, dest_memreg);
+      int status = liter_push_back(where, NULL, 1, mov_data);
+      if (status) return status;
+      i += alignment;
+    }
+  }
+
+  /* push afterwards since `where` does not move */
+  return liter_push_back(where, NULL, 1, zero_data);
+}
+
+int static_zero_pad(size_t count, ListIter *where) {
+  InstructionData *zero_data = instr_init(OP_ZERO);
+  set_op_imm(&zero_data->dest, count, IMM_UNSIGNED);
+  int status = liter_push_back(where, &where, 1, zero_data);
+  if (status) free(zero_data);
+  return status;
 }
 
 Opcode opcode_from_operator(int symbol, const TypeSpec *type) {
@@ -2368,327 +2409,171 @@ ASTree *translate_default(ASTree *default_, ASTree *stmt) {
   return astree_adopt(default_, 1, stmt);
 }
 
-int init_scalar(const TypeSpec *type, ptrdiff_t displacement,
-                ASTree *initializer, ListIter *where) {
-  assert(!typespec_is_aggregate(type));
-  if (initializer->symbol == TOK_INIT_LIST) {
-    assert(astree_count(initializer) == 1);
-    int status =
-        init_scalar(type, displacement, astree_get(initializer, 0), where);
-    if (status) return status;
-    initializer->first_instr =
-        liter_copy(astree_get(initializer, 0)->first_instr);
-    if (initializer->first_instr == NULL) return -1;
-    initializer->last_instr =
-        liter_copy(astree_get(initializer, 0)->last_instr);
-    if (initializer->last_instr == NULL) return -1;
-    return 0;
-  } else if (displacement >= 0) {
-    Opcode directive;
-    switch (typespec_get_width(type)) {
-      case X64_SIZEOF_LONG:
-        directive = OP_QUAD;
-        break;
-      case X64_SIZEOF_INT:
-        directive = OP_LONG;
-        break;
-      case X64_SIZEOF_SHORT:
-        directive = OP_VALUE;
-        break;
-      case X64_SIZEOF_CHAR:
-        directive = OP_BYTE;
-        break;
-      default:
-        abort();
-    }
-    InstructionData *data = instr_init(directive);
-    if (initializer->attributes & ATTR_CONST_ADDR) {
-      set_op_pic(&data->dest, initializer->constant.address.disp,
-                 initializer->constant.address.label);
-    } else {
-      set_op_imm(&data->dest, initializer->constant.integral.value,
-                 typespec_is_signed(type));
-    }
-    int status = liter_push_back(where, &where, 1, data);
-    if (status) return status;
-    initializer->first_instr = liter_copy(where);
-    if (initializer->first_instr == NULL) return -1;
-    initializer->last_instr = liter_copy(where);
-    if (initializer->last_instr == NULL) return -1;
-    return 0;
-  } else {
-    assert(initializer->attributes & ATTR_EXPR_CONST);
-    InstructionData *load_data;
-    if (initializer->attributes & ATTR_CONST_ADDR) {
-      load_data = instr_init(OP_LEA);
-      set_op_pic(&load_data->src, initializer->constant.address.disp,
-                 initializer->constant.address.label);
-    } else {
-      load_data = instr_init(OP_MOV);
-      set_op_imm(&load_data->src, initializer->constant.integral.value,
-                 typespec_is_signed(type));
-    }
-    set_op_reg(&load_data->dest, typespec_get_width(type), next_vreg());
-    InstructionData *store_data = instr_init(OP_MOV);
-    store_data->src = load_data->dest;
-    set_op_ind(&store_data->dest, displacement, RBP_VREG);
-
-    int status = liter_push_back(where, &where, 2, load_data, store_data);
-    if (status) return status;
-    initializer->first_instr = liter_prev(where, 1);
-    if (initializer->first_instr == NULL) return -1;
-    initializer->last_instr = liter_copy(where);
-    if (initializer->last_instr == NULL) return -1;
-    return 0;
+ASTree *translate_static_scalar_init(const TypeSpec *type, ASTree *initializer,
+                                     ListIter *where) {
+  Opcode directive;
+  switch (typespec_get_width(type)) {
+    case X64_SIZEOF_LONG:
+      directive = OP_QUAD;
+      break;
+    case X64_SIZEOF_INT:
+      directive = OP_LONG;
+      break;
+    case X64_SIZEOF_SHORT:
+      directive = OP_VALUE;
+      break;
+    case X64_SIZEOF_CHAR:
+      directive = OP_BYTE;
+      break;
+    default:
+      abort();
   }
-}
-
-int init_aggregate(const TypeSpec *agg_type, ptrdiff_t agg_disp,
-                   ASTree *initializer, size_t start, ListIter *where);
-
-int init_literal(const TypeSpec *arr_type, ptrdiff_t arr_disp,
-                 ASTree *initializer, ListIter *where) {
-  if (arr_disp >= 0) {
-    size_t i;
-    for (i = 0; i < literals_size; ++i) {
-      if (literals[i].label == initializer->constant.address.label) {
-        InstructionData *ascii_data = instr_init(OP_ASCII);
-        set_op_dir(&ascii_data->dest, literals[i].literal);
-        int status = liter_push_back(where, &where, 1, ascii_data);
-        if (status) return status;
-        initializer->first_instr = liter_copy(where);
-        if (initializer->first_instr == NULL) return status;
-
-        /* TODO(Robert): check that the string literal fits in the array
-         * during type checking
-         */
-        /* TODO(Robert): emit .asciz when the array size is deduced */
-        assert(typespec_get_width(arr_type) > strlen(literals[i].literal) - 2);
-        size_t zero_count =
-            typespec_get_width(arr_type) - (strlen(literals[i].literal) - 2);
-        if (zero_count > 0) {
-          InstructionData *zero_data = instr_init(OP_ZERO);
-          set_op_imm(&zero_data->dest, zero_count, IMM_UNSIGNED);
-          int status = liter_push_back(where, &where, 1, zero_data);
-          if (status) return status;
-        }
-        initializer->last_instr = liter_copy(where);
-        if (initializer->last_instr == NULL) return status;
-        return 0;
-      }
-    }
-    /* literal not found */
-    return -1;
-  } else {
-    InstructionData *literal_lea_data = instr_init(OP_LEA);
-    set_op_pic(&literal_lea_data->src, initializer->constant.address.disp,
+  InstructionData *data = instr_init(directive);
+  if (initializer->attributes & ATTR_CONST_ADDR) {
+    set_op_pic(&data->dest, initializer->constant.address.disp,
                initializer->constant.address.label);
-    set_op_reg(&literal_lea_data->dest, REG_QWORD, next_vreg());
-    InstructionData *arr_lea_data = instr_init(OP_LEA);
-    set_op_ind(&arr_lea_data->src, arr_disp, RBP_VREG);
-    set_op_reg(&arr_lea_data->dest, REG_QWORD, next_vreg());
-    int status =
-        liter_push_back(where, &where, 2, literal_lea_data, arr_lea_data);
-    if (status) return status;
-    initializer->first_instr = liter_prev(where, 1);
-    if (initializer->first_instr == NULL) return -1;
-
-    liter_advance(where, 1);
-    ListIter *temp = liter_prev(where, 1);
-    /* we need to know where the last instruction was inserted */
-    status = bulk_mtom(arr_lea_data->dest.reg.num,
-                       literal_lea_data->dest.reg.num, arr_type, temp);
-    liter_advance(where, -1);
-    free(temp);
-    if (status) return status;
-    initializer->last_instr = liter_copy(where);
-    if (initializer->last_instr == NULL) return -1;
-    return 0;
-  }
-}
-
-int init_array(const TypeSpec *arr_type, ptrdiff_t arr_disp, ASTree *init_list,
-               size_t start, ListIter *where) {
-  TypeSpec elem_type;
-  int status = strip_aux_type(&elem_type, arr_type);
-  if (status) return -1;
-  size_t elem_width = typespec_get_width(&elem_type);
-  size_t elem_count = typespec_member_count(arr_type);
-  size_t init_count = astree_count(init_list);
-  size_t init_index, elem_index;
-  for (elem_index = 0, init_index = start;
-       elem_index < elem_count && init_index < init_count;
-       ++elem_index, ++init_index) {
-    ASTree *initializer = astree_get(init_list, init_index);
-    ptrdiff_t elem_disp = arr_disp + (elem_index * elem_width);
-    if (typespec_is_aggregate(&elem_type)) {
-      if (initializer->symbol == TOK_INIT_LIST) {
-        int consumed =
-            init_aggregate(&elem_type, elem_disp, initializer, 0, where);
-        if (consumed < 0) return consumed;
-      } else {
-        int consumed =
-            init_aggregate(&elem_type, elem_disp, init_list, init_index, where);
-        if (consumed < 0) return consumed;
-        init_index += consumed - 1;
-      }
-    } else {
-      int status = init_scalar(&elem_type, elem_disp, initializer, where);
-      if (status) return -1;
-    }
-  }
-  if (arr_disp >= 0) {
-    size_t zero_count =
-        (elem_count - elem_index) * typespec_get_width(&elem_type);
-    if (zero_count > 0) {
-      InstructionData *zero_data = instr_init(OP_ZERO);
-      set_op_imm(&zero_data->dest, zero_count, IMM_UNSIGNED);
-      int status = liter_push_back(where, &where, 1, zero_data);
-      if (status) return -1;
-    }
   } else {
-    for (; elem_index < elem_count; ++elem_index) {
-      ptrdiff_t elem_disp = arr_disp + (elem_index * elem_width);
-      InstructionData *mov_data = instr_init(OP_MOV);
-      set_op_reg(&mov_data->dest, typespec_get_width(&elem_type), next_vreg());
-      set_op_imm(&mov_data->src, 0, IMM_UNSIGNED);
-      InstructionData *mov_data_2 = instr_init(OP_MOV);
-      mov_data_2->src = mov_data->dest;
-      set_op_ind(&mov_data_2->dest, elem_disp, RBP_VREG);
-      int status = liter_push_back(where, &where, 2, mov_data, mov_data_2);
-      if (status) return -1;
-    }
+    set_op_imm(&data->dest, initializer->constant.integral.value,
+               typespec_is_signed(type));
   }
-  typespec_destroy(&elem_type);
-  return init_index - start;
-}
-
-int init_struct(const TypeSpec *struct_type, ptrdiff_t struct_disp,
-                ASTree *init_list, size_t start, ListIter *where) {
-  size_t member_count = typespec_member_count(struct_type);
-  size_t init_count = astree_count(init_list);
-  size_t bytes_initialized = 0;
-  size_t init_index, member_index;
-  for (member_index = 0, init_index = start;
-       member_index < member_count && init_index < init_count;
-       ++member_index, ++init_index) {
-    SymbolValue *member_symval =
-        typespec_member_index(struct_type, member_index);
-    TypeSpec *member_type = &member_symval->type;
-    ASTree *initializer = astree_get(init_list, init_index);
-    size_t member_alignment = typespec_get_alignment(member_type);
-    ptrdiff_t member_disp = struct_disp + member_symval->disp;
-    size_t padding = member_alignment - (bytes_initialized % member_alignment);
-    if (padding == member_alignment) padding = 0;
-    if (member_disp >= 0 && padding > 0) {
-      InstructionData *zero_data = instr_init(OP_ZERO);
-      set_op_imm(&zero_data->dest, padding, IMM_UNSIGNED);
-      int status = liter_push_back(where, &where, 1, zero_data);
-      if (status) return -1;
-    }
-    if (typespec_is_aggregate(member_type)) {
-      if (initializer->symbol == TOK_INIT_LIST) {
-        int consumed =
-            init_aggregate(member_type, member_disp, initializer, 0, where);
-        if (consumed < 0) return consumed;
-      } else {
-        int consumed = init_aggregate(member_type, member_disp, init_list,
-                                      init_index, where);
-        if (consumed < 0) return consumed;
-        init_index += consumed - 1;
-      }
-    } else {
-      int status = init_scalar(member_type, member_disp, initializer, where);
-      if (status) return -1;
-    }
-    bytes_initialized += padding + typespec_get_width(member_type);
-  }
-  if (struct_disp >= 0) {
-    size_t zero_count = typespec_get_width(struct_type) - bytes_initialized;
-    if (zero_count > 0) {
-      InstructionData *zero_data = instr_init(OP_ZERO);
-      set_op_imm(&zero_data->dest, zero_count, IMM_UNSIGNED);
-      int status = liter_push_back(where, &where, 1, zero_data);
-      if (status) return -1;
-    }
-  } else {
-    for (; member_index < member_count; ++member_index) {
-      SymbolValue *member_symval =
-          typespec_member_index(struct_type, member_index);
-      TypeSpec *member_type = &member_symval->type;
-      ptrdiff_t member_disp = struct_disp + member_symval->disp;
-      InstructionData *mov_data = instr_init(OP_MOV);
-      set_op_reg(&mov_data->dest, typespec_get_width(member_type), next_vreg());
-      set_op_imm(&mov_data->src, 0, IMM_UNSIGNED);
-      InstructionData *mov_data_2 = instr_init(OP_MOV);
-      mov_data_2->src = mov_data->dest;
-      set_op_ind(&mov_data_2->dest, member_disp, RBP_VREG);
-      int status = liter_push_back(where, &where, 2, mov_data, mov_data_2);
-      if (status) return -1;
-    }
-  }
-  return init_index - start;
-}
-
-int init_union(const TypeSpec *union_type, ptrdiff_t union_disp,
-               ASTree *init_list, size_t start, ListIter *where) {
-  SymbolValue *member_symval = typespec_member_index(union_type, 0);
-  TypeSpec *member_type = &member_symval->type;
-  ASTree *initializer = astree_get(init_list, start);
-  int consumed;
-  if (typespec_is_aggregate(member_type)) {
-    if (initializer->symbol == TOK_INIT_LIST) {
-      consumed = init_aggregate(member_type, union_disp, initializer, 0, where);
-      if (consumed < 0) return consumed;
-    } else {
-      consumed =
-          init_aggregate(member_type, union_disp, init_list, start, where);
-      if (consumed < 0) return consumed;
-    }
-  } else {
-    int status = init_scalar(member_type, union_disp, initializer, where);
-    if (status) return -1;
-    consumed = 1;
-  }
-  size_t zero_count =
-      typespec_get_width(union_type) - typespec_get_width(member_type);
-  if (union_disp >= 0 && zero_count > 0) {
-    InstructionData *zero_data = instr_init(OP_ZERO);
-    set_op_imm(&zero_data->dest, zero_count, IMM_UNSIGNED);
-    int status = liter_push_back(where, &where, 1, zero_data);
-    if (status) return -1;
-  }
-  return consumed;
-}
-
-int init_aggregate(const TypeSpec *agg_type, ptrdiff_t agg_disp,
-                   ASTree *initializer, size_t start, ListIter *where) {
-  assert(typespec_is_aggregate(agg_type) &&
-         (initializer->symbol == TOK_INIT_LIST ||
-          initializer->symbol == TOK_STRINGCON));
-  int consumed = -1;
-  if (typespec_is_array(agg_type)) {
-    if (initializer->symbol == TOK_INIT_LIST) {
-      consumed = init_array(agg_type, agg_disp, initializer, start, where);
-    } else if (initializer->symbol == TOK_STRINGCON) {
-      int status = init_literal(agg_type, agg_disp, initializer, where);
-      if (status)
-        return -1;
-      else
-        return 1;
-    }
-  } else if (typespec_is_struct(agg_type)) {
-    consumed = init_struct(agg_type, agg_disp, initializer, start, where);
-  } else if (typespec_is_union(agg_type)) {
-    consumed = init_union(agg_type, agg_disp, initializer, start, where);
-  }
-  if (consumed < 0) return consumed;
-  initializer->first_instr =
-      liter_copy(astree_get(initializer, 0)->first_instr);
-  if (initializer->first_instr == NULL) return -1;
+  int status = liter_push_back(where, &where, 1, data);
+  if (status) abort();
+  initializer->first_instr = liter_copy(where);
+  if (initializer->first_instr == NULL) abort();
   initializer->last_instr = liter_copy(where);
-  if (initializer->last_instr == NULL) return -1;
-  return consumed;
+  if (initializer->last_instr == NULL) abort();
+  return initializer;
+}
+
+ASTree *translate_auto_scalar_init(const TypeSpec *type, ptrdiff_t disp,
+                                   ASTree *initializer, ListIter *where) {
+  assert(initializer->attributes & ATTR_EXPR_CONST);
+  InstructionData *load_data;
+  if (initializer->attributes & ATTR_CONST_ADDR) {
+    load_data = instr_init(OP_LEA);
+    set_op_pic(&load_data->src, initializer->constant.address.disp,
+               initializer->constant.address.label);
+  } else {
+    load_data = instr_init(OP_MOV);
+    set_op_imm(&load_data->src, initializer->constant.integral.value,
+               typespec_is_signed(type));
+  }
+  set_op_reg(&load_data->dest, typespec_get_width(type), next_vreg());
+  InstructionData *store_data = instr_init(OP_MOV);
+  store_data->src = load_data->dest;
+  set_op_ind(&store_data->dest, disp, RBP_VREG);
+
+  int status = liter_push_back(where, &where, 2, load_data, store_data);
+  if (status) abort();
+  initializer->first_instr = liter_prev(where, 1);
+  if (initializer->first_instr == NULL) abort();
+  initializer->last_instr = liter_copy(where);
+  if (initializer->last_instr == NULL) abort();
+  return initializer;
+}
+
+ASTree *translate_static_literal_init(const TypeSpec *arr_type, ASTree *literal,
+                                      ListIter *where) {
+  size_t i;
+  for (i = 0; i < literals_size; ++i) {
+    if (literals[i].label == literal->constant.address.label) {
+      const char *str = literals[i].literal;
+      size_t arr_width = typespec_get_width(arr_type);
+      size_t literal_length = strlen(str) - 2;
+      if (typespec_is_deduced_arr(arr_type)) {
+        assert(arr_width == literal_length + 1);
+        InstructionData *asciz_data = instr_init(OP_ASCIZ);
+        set_op_dir(&asciz_data->dest, str);
+        int status = liter_push_back(where, &where, 1, asciz_data);
+        if (status) abort();
+        literal->first_instr = liter_copy(where);
+        if (literal->first_instr == NULL) abort();
+        literal->last_instr = liter_copy(where);
+        if (literal->last_instr == NULL) abort();
+        return literal;
+      } else if (literal_length <= arr_width) {
+        InstructionData *ascii_data = instr_init(OP_ASCII);
+        set_op_dir(&ascii_data->dest, str);
+        int status = liter_push_back(where, &where, 1, ascii_data);
+        if (status) abort();
+        literal->first_instr = liter_copy(where);
+        if (literal->first_instr == NULL) abort();
+
+        size_t zero_count = arr_width - literal_length;
+        if (zero_count > 0) {
+          int status = static_zero_pad(zero_count, where);
+          if (status) abort();
+        }
+        literal->last_instr = liter_copy(where);
+        if (literal->last_instr == NULL) abort();
+        return literal;
+      } else {
+        size_t partial_len = arr_width + 2;
+        char *partial_str = malloc(partial_len + 1);
+        partial_str[partial_len] = '\0';
+        partial_str[partial_len - 1] = '\"';
+        memcpy(partial_str, str, arr_width + 1);
+
+        char *existing = map_get(generated_text, partial_str, partial_len);
+        if (existing) {
+          free(partial_str);
+          partial_str = existing;
+        } else {
+          int status =
+              map_insert(generated_text, partial_str, partial_len, partial_str);
+          if (status) abort();
+        }
+
+        InstructionData *ascii_data = instr_init(OP_ASCII);
+        set_op_dir(&ascii_data->dest, partial_str);
+        int status = liter_push_back(where, &where, 1, ascii_data);
+        if (status) abort();
+        literal->first_instr = liter_copy(where);
+        if (literal->first_instr == NULL) abort();
+        literal->last_instr = liter_copy(where);
+        if (literal->last_instr == NULL) abort();
+        return literal;
+      }
+    }
+  }
+  /* literal not found */
+  abort();
+}
+
+ASTree *translate_auto_literal_init(const TypeSpec *arr_type,
+                                    ptrdiff_t arr_disp, ASTree *literal,
+                                    ListIter *where) {
+  InstructionData *literal_lea_data = instr_init(OP_LEA);
+  set_op_pic(&literal_lea_data->src, literal->constant.address.disp,
+             literal->constant.address.label);
+  set_op_reg(&literal_lea_data->dest, REG_QWORD, next_vreg());
+  InstructionData *arr_lea_data = instr_init(OP_LEA);
+  set_op_ind(&arr_lea_data->src, arr_disp, RBP_VREG);
+  set_op_reg(&arr_lea_data->dest, REG_QWORD, next_vreg());
+  int status =
+      liter_push_back(where, &where, 2, literal_lea_data, arr_lea_data);
+  if (status) abort();
+  literal->first_instr = liter_prev(where, 1);
+  if (literal->first_instr == NULL) abort();
+
+  size_t arr_width = typespec_get_width(arr_type);
+  size_t literal_width = typespec_get_width(literal->type);
+  liter_advance(where, 1);
+  ListIter *temp = liter_prev(where, 1);
+  /* we need to know where the last instruction was inserted */
+  status =
+      bulk_mtom(arr_lea_data->dest.reg.num, literal_lea_data->dest.reg.num,
+                (arr_width > literal_width) ? literal->type : arr_type, temp);
+  if (!status && arr_width > literal_width) {
+    status = bulk_mzero(arr_lea_data->dest.reg.num, NO_DISP, literal_width,
+                        arr_type, temp);
+  }
+  liter_advance(where, -1);
+  free(temp);
+  if (status) abort();
+  literal->last_instr = liter_copy(where);
+  if (literal->last_instr == NULL) abort();
+  return literal;
 }
 
 int translate_static_prelude(ASTree *declarator, SymbolValue *symval,
@@ -2736,17 +2621,21 @@ ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
     int status =
         liter_push_back(before_definition, &before_definition, 1, data_data);
     if (status) abort();
-    status = translate_static_prelude(declarator, symval, before_definition);
-    if (status) abort();
-    if (typespec_is_aggregate(declarator->type)) {
-      int consumed = init_aggregate(declarator->type, symval->disp, initializer,
-                                    0, before_definition);
-      if (consumed < 0) abort();
-    } else {
-      int status = init_scalar(declarator->type, symval->disp, initializer,
-                               before_definition);
-      if (status) abort();
+    ListIter *temp = liter_copy(before_definition);
+    initializer = traverse_initializer(declarator->type, symval->disp,
+                                       initializer, before_definition);
+    if (initializer->symbol == TOK_TYPE_ERROR) {
+      free(temp);
+      return astree_propogate_errnode_v(
+          declaration, 1,
+          astree_propogate_errnode_v(assignment, 2, declarator, initializer));
     }
+
+    /* wait to do this so that deduced array sizes are set */
+    status = translate_static_prelude(declarator, symval, temp);
+    free(temp);
+    if (status) abort();
+
     if (declaration->first_instr == NULL) {
       assert(declaration->last_instr == NULL);
       InstructionData *nop_data = instr_init(OP_NOP);
@@ -2782,23 +2671,19 @@ ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
     return astree_adopt(declaration, 1, assignment);
   } else {
     assign_stack_space(symval);
-    ListIter *last_instr = llist_iter_last(instructions);
-    if (last_instr == NULL) abort();
-    if (typespec_is_aggregate(declarator->type)) {
-      int consumed = init_aggregate(declarator->type, symval->disp, initializer,
-                                    0, last_instr);
-      if (consumed < 0) abort();
-    } else {
-      int status =
-          init_scalar(declarator->type, symval->disp, initializer, last_instr);
-      if (status) abort();
-    }
+    free(declaration->last_instr);
+    declaration->last_instr = llist_iter_last(instructions);
+    if (declaration->last_instr == NULL) abort();
+    initializer = traverse_initializer(declarator->type, symval->disp,
+                                       initializer, declaration->last_instr);
+    if (initializer->symbol == TOK_TYPE_ERROR)
+      return astree_propogate_errnode_v(
+          declaration, 1,
+          astree_propogate_errnode_v(assignment, 2, declarator, initializer));
     if (declaration->first_instr == NULL) {
       declaration->first_instr = liter_copy(initializer->first_instr);
       if (declaration->first_instr == NULL) abort();
     }
-    free(declaration->last_instr);
-    declaration->last_instr = last_instr;
     return astree_adopt(declaration, 1,
                         astree_adopt(assignment, 2, declarator, initializer));
   }
@@ -2850,22 +2735,24 @@ ASTree *translate_global_init(ASTree *declaration, ASTree *assignment,
   int status = llist_push_back(instructions, data_data);
   if (status) abort();
   ListIter *temp = llist_iter_last(instructions);
-  status = translate_static_prelude(declarator, symval, temp);
-  if (status) abort();
-  if (typespec_is_aggregate(declarator->type)) {
-    int consumed = init_aggregate(declarator->type, 0, initializer, 0, temp);
-    if (consumed < 0) abort();
-  } else {
-    int status = init_scalar(declarator->type, 0, initializer, temp);
-    if (status) abort();
-  }
-
+  ListIter *temp2 = llist_iter_last(instructions);
+  initializer =
+      traverse_initializer(declarator->type, NO_DISP, initializer, temp);
   free(temp);
+  /* wait to do this so that deduced array sizes are set */
+  status = translate_static_prelude(declarator, symval, temp2);
+  free(temp2);
+  if (status) abort();
   free(before_definition);
   before_definition = llist_iter_last(instructions);
   if (before_definition == NULL) abort();
-  return astree_adopt(declaration, 1,
-                      astree_adopt(assignment, 2, declarator, initializer));
+  if (initializer->symbol == TOK_TYPE_ERROR)
+    return astree_propogate_errnode_v(
+        declaration, 1,
+        astree_propogate_errnode_v(assignment, 2, declarator, initializer));
+  else
+    return astree_adopt(declaration, 1,
+                        astree_adopt(assignment, 2, declarator, initializer));
 }
 
 ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
