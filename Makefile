@@ -27,10 +27,11 @@ OBJFILES := ${OBJ:%=build/%} ${GENOBJ:%=build/%} ${LIBOBJ:%=build/%}
 all: CFLAGS += -O1
 all: ${EXE}
 
-debug: CFLAGS += -Og -pg -g -fstack-protector-all
+debug: CFLAGS += -Og -pg -g -fsanitize=undefined -fstack-protector-all
+debug: LDFLAGS += -Wl,-Map=./output.map
 debug: ${EXE}
 
-sanitize: CFLAGS += -Og -pg -g -fsanitize=address -fstack-protector-all
+sanitize: CFLAGS += -Og -pg -g -fsanitize=address -fsanitize=undefined -fstack-protector-all
 sanitize: ${EXE}
 
 test: CFLAGS += -Itest -Og -pg -g
@@ -39,7 +40,7 @@ test: export CPPFLAGS = -DUNIT_TESTING
 test: ${TESTS}
 
 ${EXE}: ${OBJFILES}
-	${CC} ${CFLAGS} ${CWARN} $^ -o $@
+	${CC} ${CFLAGS} ${LDFLAGS} ${CWARN} $^ -o $@
 
 build/test_astree: LDFLAGS += ${WRAP_ATTRS} ${WRAP_SYMTABLE} ${WRAP_STRSET} ${WRAP_LYUTILS}
 build/test_%: build/%.o build/test_%.o build/debug.o ${LIBOBJ:%=build/%}
