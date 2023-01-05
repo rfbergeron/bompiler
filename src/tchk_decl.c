@@ -499,8 +499,9 @@ ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
       declarator->type = &SPEC_EMPTY;
       return astree_create_errnode(declarator, BCC_TERR_LIBRARY_FAILURE, 0);
     }
-    /* typedefs are not lvalues */
-    if (!(symval->type.flags & TYPESPEC_FLAG_TYPEDEF))
+    /* typedefs and type names are not lvalues */
+    if (!(symval->type.flags & TYPESPEC_FLAG_TYPEDEF) &&
+        declarator->symbol != TOK_TYPE_NAME)
       declarator->attributes |= ATTR_EXPR_LVAL;
     declarator->type = &symval->type;
     return declarator;

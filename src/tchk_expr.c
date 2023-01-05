@@ -19,6 +19,7 @@ ASTree *validate_charcon(ASTree *charcon) {
 ASTree *validate_stringcon(ASTree *stringcon) {
   TypeSpec *stringcon_type = malloc(sizeof(*stringcon->type));
   *stringcon_type = SPEC_CHAR;
+  stringcon_type->flags |= TYPESPEC_FLAG_CONST;
   int status = typespec_init(stringcon_type);
   if (status)
     return astree_create_errnode(stringcon, BCC_TERR_LIBRARY_FAILURE, 0);
