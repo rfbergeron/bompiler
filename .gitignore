@@ -6,4 +6,7 @@ build/*
 **.il
 **.asm
 **.s
+**.o
 **.err
+**.out
+**output.map
