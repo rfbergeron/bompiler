@@ -6,8 +6,7 @@ return_value="0"
 while read -r test_dir; do
     env CC="$(readlink -f ../build/bompiler)" \
         make -f "$(readlink -f ./Makefile)" \
-        -C "$test_dir" --no-print-directory "$make_target" \
-        1>"$test_dir/build.out" 2>"$test_dir/error.out"
+        -C "$test_dir" --no-print-directory "$make_target"
     make_status="$?"
     if [ $make_status -ne 0 ]; then
         echo "Error making target \"$make_target\" for test \"$(basename "$test_dir")\""
