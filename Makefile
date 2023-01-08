@@ -47,7 +47,7 @@ ${EXE}: ${OBJFILES}
 
 build/astree_test: LDFLAGS += ${WRAP_ATTRS} ${WRAP_SYMTABLE} ${WRAP_STRSET} ${WRAP_LYUTILS}
 build/%_test: build/%.o build/%_test.o build/debug.o ${LIBOBJ:%=build/%}
-	${CC} ${CFLAGS} ${LDFLAGS} $^ -o $@
+	${CC} ${CFLAGS} ${CWARN} ${LDFLAGS} $^ -o $@
 
 build:
 	[ -d build ] || mkdir build

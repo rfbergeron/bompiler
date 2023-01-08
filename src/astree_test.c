@@ -16,6 +16,12 @@ int skip_type_check = 0;
 const TypeSpec SPEC_EMPTY = {0, 0, BLIB_LLIST_EMPTY, TYPESPEC_FLAG_NONE,
                              TYPE_NONE};
 const Location LOC_EMPTY = LOC_EMPTY_VALUE;
+const AuxSpec AUXSPEC_PTR = {{{0, 0, 0}}, AUX_POINTER};
+const AuxSpec AUXSPEC_CONST_PTR = {{{0, TYPESPEC_FLAG_CONST, 0}}, AUX_POINTER};
+const AuxSpec AUXSPEC_VOLATILE_PTR = {{{0, TYPESPEC_FLAG_VOLATILE, 0}},
+                                      AUX_POINTER};
+const AuxSpec AUXSPEC_CONST_VOLATILE_PTR = {
+    {{0, TYPESPEC_FLAG_CONST | TYPESPEC_FLAG_VOLATILE, 0}}, AUX_POINTER};
 
 const char *__wrap_string_set_intern(const char *string) {
   check_expected_ptr(string);
@@ -99,12 +105,10 @@ void destroy_addrof(void **state) {
   AuxSpec expected_ptr_aux = {0};
   addrof->type = addrof_spec;
 
-  expect_value(__wrap_typespec_get_aux, type, addrof_spec);
-  will_return(__wrap_typespec_get_aux, &expected_ptr_aux);
-  expect_value(__wrap_auxspec_destroy, aux, &expected_ptr_aux);
-  will_return(__wrap_auxspec_destroy, 0);
   expect_value(__wrap_typespec_destroy, type, addrof_spec);
   will_return(__wrap_typespec_destroy, 0);
+  expect_value(__wrap_symbol_table_destroy, table, NULL);
+  will_return(__wrap_symbol_table_destroy, 0);
 
   int status = astree_destroy(addrof);
   assert_false(status);
@@ -114,6 +118,8 @@ void adopt_too_many(void **state) {
   expect_any_count(__wrap_string_set_intern, string, 3);
   will_return(__wrap_string_set_intern, "_terr");
   will_return_count(__wrap_string_set_intern, ";", 2);
+  expect_value_count(__wrap_symbol_table_destroy, table, NULL, 3);
+  will_return_count(__wrap_symbol_table_destroy, 0, 3);
 
   ASTree *errnode = astree_init(TOK_TYPE_ERROR, LOC_EMPTY, NULL);
   ASTree *child1 = astree_init(';', LOC_EMPTY, NULL);
@@ -128,6 +134,8 @@ void adopt_too_many(void **state) {
 void adopt_again(void **state) {
   expect_any_count(__wrap_string_set_intern, string, 2);
   will_return_count(__wrap_string_set_intern, ";", 2);
+  expect_value_count(__wrap_symbol_table_destroy, table, NULL, 2);
+  will_return_count(__wrap_symbol_table_destroy, 0, 2);
   ASTree *parent = astree_init(';', LOC_EMPTY, NULL);
   ASTree *child = astree_init(';', LOC_EMPTY, NULL);
 
@@ -138,6 +146,8 @@ void adopt_again(void **state) {
 void adopt_empty_again(void **state) {
   expect_any(__wrap_string_set_intern, string);
   will_return(__wrap_string_set_intern, ";");
+  expect_value(__wrap_symbol_table_destroy, table, NULL);
+  will_return(__wrap_symbol_table_destroy, 0);
   ASTree *parent = astree_init(';', LOC_EMPTY, NULL);
   (void)astree_adopt(parent, 2, &EMPTY_EXPR, &EMPTY_EXPR);
   assert_false(astree_destroy(parent));
@@ -146,6 +156,8 @@ void adopt_empty_again(void **state) {
 void adopt_null_child(void **state) {
   expect_any(__wrap_string_set_intern, string);
   will_return(__wrap_string_set_intern, ";");
+  expect_value(__wrap_symbol_table_destroy, table, NULL);
+  will_return(__wrap_symbol_table_destroy, 0);
   ASTree *parent = astree_init(';', LOC_EMPTY, NULL);
 
   expect_assert_failure(astree_adopt(parent, 1, NULL));
@@ -155,6 +167,8 @@ void adopt_null_child(void **state) {
 void replace_out_of_bounds(void **state) {
   expect_any_count(__wrap_string_set_intern, string, 2);
   will_return_count(__wrap_string_set_intern, ";", 2);
+  expect_value_count(__wrap_symbol_table_destroy, table, NULL, 2);
+  will_return_count(__wrap_symbol_table_destroy, 0, 2);
 
   ASTree *parent = astree_init(';', LOC_EMPTY, NULL);
   assert_null(astree_replace(parent, 1, &EMPTY_EXPR));
