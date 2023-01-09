@@ -5,8 +5,20 @@
 #include "tchk_common.h"
 #include "tchk_decl.h"
 
-ASTree *init_agg_member(const TypeSpec *member_type, ptrdiff_t disp,
-                        ASTree *init_list, size_t *init_index, ListIter *where);
+static ASTree *init_agg_member(const TypeSpec *member_type, ptrdiff_t disp,
+                               ASTree *init_list, size_t *init_index,
+                               ListIter *where);
+
+static ASTree *set_init_list_iterators(ASTree *init_list, ListIter *where) {
+  if (init_list->symbol == TOK_TYPE_ERROR) return init_list;
+  if (init_list->symbol == TOK_INIT_LIST) {
+    init_list->first_instr = liter_copy(astree_get(init_list, 0)->first_instr);
+    if (init_list->first_instr == NULL) abort();
+    init_list->last_instr = liter_copy(where);
+    if (init_list->last_instr == NULL) abort();
+  }
+  return init_list;
+}
 
 ASTree *init_scalar(const TypeSpec *type, ptrdiff_t disp, ASTree *initializer,
                     ListIter *where) {
@@ -19,11 +31,7 @@ ASTree *init_scalar(const TypeSpec *type, ptrdiff_t disp, ASTree *initializer,
       (void)astree_remove(errnode, 0);
       return astree_adopt(errnode, 1, initializer);
     } else {
-      initializer->first_instr = liter_copy(real_initializer->first_instr);
-      if (initializer->first_instr == NULL) abort();
-      initializer->last_instr = liter_copy(real_initializer->last_instr);
-      if (initializer->last_instr == NULL) abort();
-      return initializer;
+      return set_init_list_iterators(initializer, where);
     }
   } else if (types_assignable(type, initializer)) {
     if (disp >= 0)
@@ -166,70 +174,68 @@ ASTree *init_struct(const TypeSpec *struct_type, ptrdiff_t struct_disp,
   return init_list;
 }
 
-ASTree *init_agg_member(const TypeSpec *member_type, ptrdiff_t disp,
-                        ASTree *init_list, size_t *init_index,
-                        ListIter *where) {
+static ASTree *init_agg_member(const TypeSpec *member_type, ptrdiff_t disp,
+                               ASTree *init_list, size_t *init_index,
+                               ListIter *where) {
   ASTree *initializer = astree_get(init_list, *init_index);
+  ASTree *errnode;
   if (typespec_is_scalar(member_type)) {
-    initializer = init_scalar(member_type, disp, initializer, where);
     ++*init_index;
+    errnode = init_scalar(member_type, disp, initializer, where);
   } else if (typespec_is_chararray(member_type) &&
              initializer->symbol == TOK_STRINGCON) {
-    initializer = init_literal(member_type, disp, initializer, where);
     ++*init_index;
+    errnode = init_literal(member_type, disp, initializer, where);
   } else if (initializer->symbol == TOK_INIT_LIST) {
-    initializer = traverse_initializer(member_type, disp, initializer, where);
     ++*init_index;
+    errnode = traverse_initializer(member_type, disp, initializer, where);
   } else if (typespec_is_array(member_type)) {
-    initializer = init_array(member_type, disp, init_list, init_index, where);
+    errnode = init_array(member_type, disp, init_list, init_index, where);
   } else if (typespec_is_struct(member_type)) {
-    initializer = init_struct(member_type, disp, init_list, init_index, where);
+    errnode = init_struct(member_type, disp, init_list, init_index, where);
   } else if (typespec_is_union(member_type)) {
-    initializer = init_union(member_type, disp, init_list, init_index, where);
+    errnode = init_union(member_type, disp, init_list, init_index, where);
   } else {
-    abort();
+    errnode =
+        astree_create_errnode(initializer, BCC_TERR_INCOMPATIBLE_TYPES, 3,
+                              initializer, member_type, initializer->type);
   }
 
-  if (initializer->symbol == TOK_TYPE_ERROR) return initializer;
-  if (initializer->symbol == TOK_INIT_LIST) {
-    initializer->first_instr =
-        liter_copy(astree_get(initializer, 0)->first_instr);
-    if (initializer->first_instr == NULL) abort();
-    initializer->last_instr = liter_copy(where);
-    if (initializer->last_instr == NULL) abort();
+  if (errnode->symbol == TOK_TYPE_ERROR &&
+      initializer->symbol != TOK_INIT_LIST &&
+      typespec_is_aggregate(member_type)) {
+    assert(astree_get(errnode, 0) == initializer);
+    (void)astree_remove(errnode, 0);
+    return astree_adopt(errnode, 1, init_list);
+  } else {
+    /* no need to move the error node (if present) when the braces for the
+     * initializer were elided; it should be the root of the tree already
+     */
+    return init_list;
   }
-  return initializer;
 }
 
 ASTree *traverse_initializer(const TypeSpec *type, ptrdiff_t disp,
                              ASTree *initializer, ListIter *where) {
   if (typespec_is_scalar(type)) {
-    initializer = init_scalar(type, disp, initializer, where);
+    return init_scalar(type, disp, initializer, where);
   } else if (typespec_is_chararray(type) &&
              initializer->symbol == TOK_STRINGCON) {
-    initializer = init_literal(type, disp, initializer, where);
+    return init_literal(type, disp, initializer, where);
   } else if (typespec_is_array(type) && initializer->symbol == TOK_INIT_LIST) {
     size_t dummy_index = 0;
-    initializer = init_array(type, disp, initializer, &dummy_index, where);
+    return set_init_list_iterators(
+        init_array(type, disp, initializer, &dummy_index, where), where);
   } else if (typespec_is_struct(type) && initializer->symbol == TOK_INIT_LIST) {
     size_t dummy_index = 0;
-    initializer = init_struct(type, disp, initializer, &dummy_index, where);
+    return set_init_list_iterators(
+        init_struct(type, disp, initializer, &dummy_index, where), where);
   } else if (typespec_is_union(type) && initializer->symbol == TOK_INIT_LIST) {
     size_t dummy_index = 0;
-    initializer = init_union(type, disp, initializer, &dummy_index, where);
+    return set_init_list_iterators(
+        init_union(type, disp, initializer, &dummy_index, where), where);
   } else {
-    initializer =
-        astree_create_errnode(initializer, BCC_TERR_INCOMPATIBLE_TYPES, 3,
-                              initializer, type, initializer->type);
+    return astree_create_errnode(initializer, BCC_TERR_INCOMPATIBLE_TYPES, 3,
+                                 initializer, type, initializer->type);
   }
-
-  if (initializer->symbol == TOK_TYPE_ERROR) return initializer;
-  if (initializer->symbol == TOK_INIT_LIST) {
-    initializer->first_instr =
-        liter_copy(astree_get(initializer, 0)->first_instr);
-    if (initializer->first_instr == NULL) abort();
-    initializer->last_instr = liter_copy(where);
-    if (initializer->last_instr == NULL) abort();
-  }
-  return initializer;
 }
