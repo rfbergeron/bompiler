@@ -261,6 +261,9 @@ ASTree *evaluate_stringcon(ASTree *stringcon) {
   stringcon->attributes |= ATTR_CONST_INIT | ATTR_CONST_ADDR | ATTR_EXPR_CONST;
   stringcon->constant.address.label = stringcon_label;
   stringcon->constant.address.disp = 0;
+  (void)state_get_symbol(state, stringcon_label, strlen(stringcon_label),
+                         &stringcon->constant.address.symval);
+  assert(stringcon->constant.address.symval != NULL);
   return stringcon;
 }
 
@@ -273,19 +276,15 @@ ASTree *evaluate_ident(ASTree *ident) {
     ident->attributes |= ATTR_EXPR_CONST;
     ident->attributes |= ATTR_CONST_INIT;
     ident->attributes |= ATTR_CONST_ADDR;
-    if (typespec_is_function(&symval->type)) {
-      const char *fnptr_text = mk_fnptr_text(ident->lexinfo);
-      ident->constant.address.label = fnptr_text;
-      ident->constant.address.disp = 0;
-    } else if (symval->flags & SYMFLAG_LINK_NONE) {
-      const char *static_name =
+    ident->constant.address.symval = symval;
+    ident->constant.address.disp = 0;
+    if (typespec_is_function(&symval->type))
+      ident->constant.address.label = mk_fnptr_text(ident->lexinfo);
+    else if (symval->flags & SYMFLAG_LINK_NONE)
+      ident->constant.address.label =
           mk_static_label(ident->lexinfo, symval->static_id);
-      ident->constant.address.label = static_name;
-      ident->constant.address.disp = 0;
-    } else {
+    else
       ident->constant.address.label = ident->lexinfo;
-      ident->constant.address.disp = 0;
-    }
     return ident;
   } else if (symval->flags & SYMFLAG_ENUM_CONST) {
     ident->attributes |= ATTR_EXPR_CONST;
@@ -314,18 +313,16 @@ ASTree *evaluate_addition(ASTree *addition, ASTree *left, ASTree *right) {
     size_t stride =
         typespec_is_pointer(left->type) ? typespec_elem_width(left->type) : 1;
     addition->attributes |= left->attributes & ATTR_MASK_CONST;
-    addition->constant.address.label = left->constant.address.label;
-    addition->constant.address.disp =
-        left->constant.address.disp +
+    addition->constant = left->constant;
+    addition->constant.address.disp +=
         (long)(right->constant.integral.value * stride);
   } else if ((right->attributes & ATTR_CONST_ADDR)) {
     size_t stride =
         typespec_is_pointer(right->type) ? typespec_elem_width(right->type) : 1;
     addition->attributes |= right->attributes & ATTR_MASK_CONST;
-    addition->constant.address.label = right->constant.address.label;
-    addition->constant.address.disp =
-        (long)(left->constant.integral.value * stride) +
-        right->constant.address.disp;
+    addition->constant = right->constant;
+    addition->constant.address.disp +=
+        (long)(left->constant.integral.value * stride);
   } else {
     size_t left_stride =
         typespec_is_pointer(right->type) ? typespec_elem_width(right->type) : 1;
@@ -342,8 +339,7 @@ ASTree *evaluate_addition(ASTree *addition, ASTree *left, ASTree *right) {
 
 ASTree *evaluate_subtraction(ASTree *subtraction, ASTree *left, ASTree *right) {
   if ((left->attributes & right->attributes & ATTR_CONST_ADDR) &&
-      strcmp(left->constant.address.label, right->constant.address.label) ==
-          0 &&
+      left->constant.address.symval == right->constant.address.symval &&
       (typespec_is_pointer(right->type) || !typespec_is_pointer(left->type))) {
     size_t stride =
         typespec_is_pointer(left->type) ? typespec_elem_width(left->type) : 1;
@@ -357,9 +353,8 @@ ASTree *evaluate_subtraction(ASTree *subtraction, ASTree *left, ASTree *right) {
     size_t stride =
         typespec_is_pointer(left->type) ? typespec_elem_width(left->type) : 1;
     subtraction->attributes |= left->attributes & ATTR_MASK_CONST;
-    subtraction->constant.address.label = left->constant.address.label;
-    subtraction->constant.address.disp =
-        left->constant.address.disp -
+    subtraction->constant = left->constant;
+    subtraction->constant.address.disp -=
         (long)(right->constant.integral.value * stride);
   } else if ((left->attributes & right->attributes & ATTR_EXPR_CONST) &&
              !((left->attributes | right->attributes) & ATTR_CONST_ADDR)) {
@@ -413,7 +408,7 @@ ASTree *evaluate_shiftr(ASTree *shiftr, ASTree *left, ASTree *right) {
 ASTree *evaluate_relational(ASTree *relational, ASTree *left, ASTree *right) {
   int pointer_relation =
       (left->attributes & right->attributes & ATTR_CONST_ADDR) &&
-      strcmp(left->constant.address.label, right->constant.address.label) == 0;
+      left->constant.address.symval == right->constant.address.symval;
   int arithmetic_relation =
       (left->attributes & right->attributes & ATTR_EXPR_CONST) &&
       !((left->attributes | right->attributes) & ATTR_CONST_ADDR);
@@ -457,9 +452,8 @@ ASTree *evaluate_equality(ASTree *equality, ASTree *left, ASTree *right) {
   if (left->attributes & right->attributes & ATTR_CONST_ADDR) {
     equality->attributes |= ATTR_EXPR_CONST | ATTR_CONST_INIT;
     equality->constant.integral.value =
-        strcmp(left->constant.address.label, right->constant.address.label) ==
-            0 &&
-        (left->constant.address.disp == right->constant.address.disp);
+        left->constant.address.symval == right->constant.address.symval &&
+        left->constant.address.disp == right->constant.address.disp;
   } else if ((left->attributes & ATTR_CONST_ADDR) &&
              (right->attributes & ATTR_EXPR_CONST) &&
              right->constant.integral.value == 0) {

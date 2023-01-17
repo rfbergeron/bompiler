@@ -51,6 +51,7 @@ ASTree *astree_init(int symbol, const Location location, const char *info) {
    * type of a pointer argument */
   llist_init(&tree->children, (void (*)(void *))(astree_destroy), NULL);
   tree->symbol_table = NULL;
+  tree->constant.address.symval = NULL;
   tree->constant.address.label = NULL;
   tree->constant.address.disp = 0L;
   return tree;

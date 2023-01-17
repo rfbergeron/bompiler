@@ -18,6 +18,7 @@ typedef struct astree {
     struct {
       long disp;
       const char *label;
+      SymbolValue *symval;
     } address;
     struct {
       unsigned long value;
@@ -31,10 +32,10 @@ typedef struct astree {
   unsigned int attributes; /* node-specific attributes */
 } ASTree;
 
-#define EMPTY_EXPR_VALUE                                                    \
-  {                                                                         \
-    &SPEC_EMPTY, ";", NULL, NULL, NULL, {{0L, NULL}}, LOC_EMPTY_VALUE, 0UL, \
-        0UL, BLIB_LLIST_EMPTY, ';', ATTR_NONE                               \
+#define EMPTY_EXPR_VALUE                                                     \
+  {                                                                          \
+    &SPEC_EMPTY, ";", NULL, NULL, NULL, {{0L, NULL, NULL}}, LOC_EMPTY_VALUE, \
+        0UL, 0UL, BLIB_LLIST_EMPTY, ';', ATTR_NONE                           \
   }
 #define UNWRAP(node) \
   (node->symbol == TOK_TYPE_ERROR ? astree_get(node, 0) : node)
