@@ -654,18 +654,15 @@ int opcode_needs_width(Opcode opcode) {
   }
 }
 
-const char *asmgen_literal_label(const char *literal) {
+size_t asmgen_literal_label(const char *literal, const char **out) {
+  /* TODO(Robert): bad time complexity */
   size_t i;
-  for (i = 0; i < literals_size; ++i) {
-    /* TODO(Robert): bad time complexity */
-    if (strcmp(literals[i].literal, literal) == 0) {
-      return literals[i].label;
-    }
-  }
+  for (i = 0; i < literals_size; ++i)
+    if (strcmp(literals[i].literal, literal) == 0)
+      return *out = literals[i].label, i;
 
-  if (literals_size >= literals_cap) {
+  if (literals_size >= literals_cap)
     literals = realloc(literals, sizeof(*literals) * (literals_cap *= 2));
-  }
 
   InstructionData *section_data = instr_init(OP_SECTION);
   set_op_dir(&section_data->dest, ".rodata");
@@ -679,8 +676,8 @@ const char *asmgen_literal_label(const char *literal) {
   if (status) abort();
 
   literals[literals_size].literal = literal;
-  literals[literals_size++].label = label_data->label;
-  return label_data->label;
+  literals[literals_size].label = label_data->label;
+  return *out = label_data->label, literals_size++;
 }
 
 void assign_stack_space(SymbolValue *symval) {

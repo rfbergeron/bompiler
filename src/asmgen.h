@@ -10,7 +10,7 @@ extern const size_t RBP_VREG;
 const char *mk_static_label(const char *name, size_t unique_id);
 const char *mk_fnptr_text(const char *name);
 void maybe_load_cexpr(ASTree *expr, ListIter *where);
-const char *asmgen_literal_label(const char *literal);
+size_t asmgen_literal_label(const char *literal, const char **out);
 int bulk_mzero(size_t dest_memreg, ptrdiff_t dest_disp, size_t skip_bytes,
                const TypeSpec *type, ListIter *where);
 int static_zero_pad(size_t count, ListIter *where);

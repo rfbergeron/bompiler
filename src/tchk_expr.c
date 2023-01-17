@@ -17,27 +17,38 @@ ASTree *validate_charcon(ASTree *charcon) {
 }
 
 ASTree *validate_stringcon(ASTree *stringcon) {
-  TypeSpec *stringcon_type = malloc(sizeof(*stringcon->type));
-  *stringcon_type = SPEC_CHAR;
-  stringcon_type->flags |= TYPESPEC_FLAG_CONST;
-  int status = typespec_init(stringcon_type);
-  if (status)
-    return astree_create_errnode(stringcon, BCC_TERR_LIBRARY_FAILURE, 0);
+  /* create symbol for string literal; it is more convenient that way */
+  const char *stringcon_label;
+  SymbolValue *symval =
+      symbol_value_init(&stringcon->loc, state_get_sequence(state));
+  symval->disp = 0;
+  symval->flags = SYMFLAG_LINK_INT | SYMFLAG_STORE_STAT | SYMFLAG_DEFINED;
+  /* this function will emit the necessary directives for the literal */
+  symval->static_id =
+      asmgen_literal_label(stringcon->lexinfo, &stringcon_label);
+
+  /* cannot just assign SPEC_CHAR since auxspecs has already been initialized */
+  symval->type.base = SPEC_CHAR.base;
+  symval->type.flags = SPEC_CHAR.flags | TYPESPEC_FLAG_CONST;
+  symval->type.width = SPEC_CHAR.width;
+  symval->type.alignment = SPEC_CHAR.alignment;
 
   AuxSpec *array_aux = malloc(sizeof(*array_aux));
   array_aux->aux = AUX_ARRAY;
   array_aux->data.memory_loc.qualifiers = TYPESPEC_FLAG_CONST;
   array_aux->data.memory_loc.deduce_length = 0;
-  /* Normally, we would subtract 2 to omit the starting and ending doublequote,
-   * but since strlen does not include the terminating null byte, we only
-   * subtract one.
-   */
-  array_aux->data.memory_loc.length = strlen(stringcon->lexinfo) - 1;
-  status = llist_push_back(&stringcon_type->auxspecs, array_aux);
+  /* subtract 2 for quotes, add one for terminating nul */
+  array_aux->data.memory_loc.length = strlen(stringcon->lexinfo) - 2 + 1;
+  int status = llist_push_back(&symval->type.auxspecs, array_aux);
   if (status)
     return astree_create_errnode(stringcon, BCC_TERR_LIBRARY_FAILURE, 0);
 
-  stringcon->type = stringcon_type;
+  status = state_insert_symbol(state, stringcon_label, strlen(stringcon_label),
+                               symval);
+  if (status)
+    return astree_create_errnode(stringcon, BCC_TERR_LIBRARY_FAILURE, 0);
+
+  stringcon->type = &symval->type;
   return evaluate_stringcon(stringcon);
 }
 
