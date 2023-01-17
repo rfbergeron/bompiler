@@ -166,11 +166,6 @@ void pointer_conversions(ASTree *expr) {
       free(pointer_type);
       abort();
     }
-    if (expr->symbol == TOK_STRINGCON) {
-      int status = typespec_destroy((TypeSpec *)expr->type);
-      if (status) abort();
-      free((TypeSpec *)expr->type);
-    }
     expr->type = pointer_type;
   }
 }

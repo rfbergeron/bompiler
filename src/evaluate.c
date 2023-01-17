@@ -255,9 +255,11 @@ ASTree *evaluate_charcon(ASTree *charcon) {
 }
 
 ASTree *evaluate_stringcon(ASTree *stringcon) {
+  const char *stringcon_label;
+  (void)asmgen_literal_label(stringcon->lexinfo, &stringcon_label);
+  assert(stringcon_label != NULL);
   stringcon->attributes |= ATTR_CONST_INIT | ATTR_CONST_ADDR | ATTR_EXPR_CONST;
-  /* this function will emit the necessary directives */
-  stringcon->constant.address.label = asmgen_literal_label(stringcon->lexinfo);
+  stringcon->constant.address.label = stringcon_label;
   stringcon->constant.address.disp = 0;
   return stringcon;
 }

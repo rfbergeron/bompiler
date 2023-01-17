@@ -86,8 +86,6 @@ int astree_destroy(ASTree *tree) {
         }
         if (!owns_type) break;
         /* fallthrough */
-      case TOK_STRINGCON:
-        /* fallthrough */
       case TOK_ADDROF:
         /* fallthrough */
       case TOK_SUBSCRIPT:
