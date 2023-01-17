@@ -49,6 +49,7 @@ typedef struct symbol_value {
   unsigned int flags; /* flags, as enumerated above */
   ptrdiff_t disp;     /* displacement on stack/in struct */
   size_t static_id;   /* unique id for static local variables */
+  struct instruction_data *next_use; /* liveness info for allocator */
 } SymbolValue;
 
 typedef enum tag_type { TAG_STRUCT = 0, TAG_UNION, TAG_ENUM } TagType;
