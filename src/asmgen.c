@@ -9,6 +9,7 @@
 #include "debug.h"
 #include "init.h"
 #include "lyutils.h"
+#include "regalloc.h"
 #include "state.h"
 #include "symtable.h"
 #include "tchk_common.h"
@@ -20,89 +21,6 @@
 #define IMM_SIGNED 1
 #define IMM_UNSIGNED 0
 
-/* macros used to generate string constants for OPCODES */
-#define FOREACH_OPCODE(GENERATOR)         \
-  GENERATOR(INVALID, OPTYPE_INVALID, 0)   \
-  GENERATOR(NONE, OPTYPE_NULLARY, 0)      \
-  /* arithmetic */                        \
-  GENERATOR(ADD, OPTYPE_BINARY, 1)        \
-  GENERATOR(SUB, OPTYPE_BINARY, 1)        \
-  GENERATOR(MUL, OPTYPE_UNARY, 1)         \
-  GENERATOR(DIV, OPTYPE_UNARY, 1)         \
-  GENERATOR(INC, OPTYPE_UNARY, 1)         \
-  GENERATOR(DEC, OPTYPE_UNARY, 1)         \
-  GENERATOR(NEG, OPTYPE_UNARY, 1)         \
-  GENERATOR(IMUL, OPTYPE_CONTEXTUAL, 1)   \
-  GENERATOR(IDIV, OPTYPE_UNARY, 1)        \
-  /* compare and test */                  \
-  GENERATOR(TEST, OPTYPE_BINARY, 1)       \
-  GENERATOR(CMP, OPTYPE_BINARY, 1)        \
-  GENERATOR(SETE, OPTYPE_UNARY, 0)        \
-  GENERATOR(SETNE, OPTYPE_UNARY, 0)       \
-  GENERATOR(SETG, OPTYPE_UNARY, 0)        \
-  GENERATOR(SETGE, OPTYPE_UNARY, 0)       \
-  GENERATOR(SETL, OPTYPE_UNARY, 0)        \
-  GENERATOR(SETLE, OPTYPE_UNARY, 0)       \
-  GENERATOR(SETA, OPTYPE_UNARY, 0)        \
-  GENERATOR(SETAE, OPTYPE_UNARY, 0)       \
-  GENERATOR(SETB, OPTYPE_UNARY, 0)        \
-  GENERATOR(SETBE, OPTYPE_UNARY, 0)       \
-  GENERATOR(SETZ, OPTYPE_UNARY, 0)        \
-  GENERATOR(SETNZ, OPTYPE_UNARY, 0)       \
-  /* jump */                              \
-  GENERATOR(JMP, OPTYPE_UNARY, 0)         \
-  GENERATOR(JE, OPTYPE_UNARY, 0)          \
-  GENERATOR(JNE, OPTYPE_UNARY, 0)         \
-  GENERATOR(JG, OPTYPE_UNARY, 0)          \
-  GENERATOR(JGE, OPTYPE_UNARY, 0)         \
-  GENERATOR(JL, OPTYPE_UNARY, 0)          \
-  GENERATOR(JLE, OPTYPE_UNARY, 0)         \
-  GENERATOR(JA, OPTYPE_UNARY, 0)          \
-  GENERATOR(JAE, OPTYPE_UNARY, 0)         \
-  GENERATOR(JB, OPTYPE_UNARY, 0)          \
-  GENERATOR(JBE, OPTYPE_UNARY, 0)         \
-  GENERATOR(JZ, OPTYPE_UNARY, 0)          \
-  GENERATOR(JNZ, OPTYPE_UNARY, 0)         \
-  /* logical and bitwise */               \
-  GENERATOR(NOT, OPTYPE_UNARY, 1)         \
-  GENERATOR(OR, OPTYPE_BINARY, 1)         \
-  GENERATOR(AND, OPTYPE_BINARY, 1)        \
-  GENERATOR(LEA, OPTYPE_BINARY, 1)        \
-  GENERATOR(XOR, OPTYPE_BINARY, 1)        \
-  /* shifts */                            \
-  GENERATOR(SHL, OPTYPE_BINARY, 1)        \
-  GENERATOR(SAL, OPTYPE_BINARY, 1)        \
-  GENERATOR(SHR, OPTYPE_BINARY, 1)        \
-  GENERATOR(SAR, OPTYPE_BINARY, 1)        \
-  /* code movement */                     \
-  GENERATOR(MOV, OPTYPE_BINARY, 1)        \
-  GENERATOR(MOVZ, OPTYPE_BINARY, 1)       \
-  GENERATOR(MOVS, OPTYPE_BINARY, 1)       \
-  GENERATOR(PUSH, OPTYPE_UNARY, 1)        \
-  GENERATOR(POP, OPTYPE_UNARY, 1)         \
-  GENERATOR(CALL, OPTYPE_UNARY, 0)        \
-  GENERATOR(LEAVE, OPTYPE_NULLARY, 0)     \
-  GENERATOR(RET, OPTYPE_NULLARY, 0)       \
-  GENERATOR(NOP, OPTYPE_NULLARY, 0)       \
-  /* directives */                        \
-  GENERATOR(GLOBL, OPTYPE_DIRECTIVE, 0)   \
-  GENERATOR(ZERO, OPTYPE_DIRECTIVE, 0)    \
-  GENERATOR(BYTE, OPTYPE_DIRECTIVE, 0)    \
-  GENERATOR(VALUE, OPTYPE_DIRECTIVE, 0)   \
-  GENERATOR(LONG, OPTYPE_DIRECTIVE, 0)    \
-  GENERATOR(QUAD, OPTYPE_DIRECTIVE, 0)    \
-  GENERATOR(ALIGN, OPTYPE_DIRECTIVE, 0)   \
-  GENERATOR(SIZE, OPTYPE_DIRECTIVE, 0)    \
-  GENERATOR(TYPE, OPTYPE_DIRECTIVE, 0)    \
-  GENERATOR(ASCII, OPTYPE_DIRECTIVE, 0)   \
-  GENERATOR(ASCIZ, OPTYPE_DIRECTIVE, 0)   \
-  GENERATOR(SECTION, OPTYPE_DIRECTIVE, 0) \
-  GENERATOR(BSS, OPTYPE_DIRECTIVE, 0)     \
-  GENERATOR(TEXT, OPTYPE_DIRECTIVE, 0)    \
-  GENERATOR(DATA, OPTYPE_DIRECTIVE, 0)    \
-  GENERATOR(FILE, OPTYPE_DIRECTIVE, 0)
-
-#define GENERATE_ENUM(CODE, TYPE, BOOL) OP_##CODE,
 #define GENERATE_STRING(CODE, TYPE, BOOL) #CODE,
 #define GENERATE_TYPE(CODE, TYPE, BOOL) \
   case OP_##CODE:                       \
@@ -124,90 +42,8 @@
                                : (WIDTH) == REG_QWORD ? 3 \
                                                       : (abort(), -1)))]
 
-typedef enum opcode { FOREACH_OPCODE(GENERATE_ENUM) OPCODE_COUNT } Opcode;
-typedef enum optype {
-  OPTYPE_INVALID = -1,
-  OPTYPE_NULLARY,
-  OPTYPE_UNARY,
-  OPTYPE_BINARY,
-  OPTYPE_CONTEXTUAL,
-  OPTYPE_DIRECTIVE
-} OpType;
-
-typedef enum address_mode {
-  MODE_NONE,
-  MODE_REGISTER,
-  MODE_IMMEDIATE,
-  MODE_DIRECT,
-  MODE_INDIRECT,
-  MODE_SCALE,
-  MODE_PIC
-} AddressMode;
-typedef enum reg_width {
-  REG_NONE = 0,
-  REG_BYTE = 1,
-  REG_WORD = 2,
-  REG_DWORD = 4,
-  REG_QWORD = 8
-} RegWidth;
-typedef enum index_scale {
-  SCALE_NONE = 0,
-  SCALE_BYTE = 1,
-  SCALE_WORD = 2,
-  SCALE_DWORD = 4,
-  SCALE_QWORD = 8
-} IndexScale;
 const char WIDTH_TO_CHAR[] = {'@', 'B', 'W', '@', 'L', '@', '@', '@', 'Q'};
-
-typedef union operand {
-  struct opall {
-    AddressMode mode;
-  } all;
-  struct opreg {
-    AddressMode mode;
-    RegWidth width;
-    size_t num;
-  } reg;
-  struct opimm {
-    AddressMode mode;
-    int is_signed;
-    uintmax_t val;
-  } imm;
-  struct opdir {
-    AddressMode mode;
-    const char *lab;
-    intmax_t disp;
-  } dir;
-  struct oppic {
-    AddressMode mode;
-    const char *lab;
-    intmax_t disp;
-  } pic;
-  struct opind {
-    AddressMode mode;
-    size_t num;
-    intmax_t disp;
-  } ind;
-  struct opsca {
-    AddressMode mode;
-    IndexScale scale;
-    size_t base;
-    intmax_t disp;
-    size_t index;
-  } sca;
-} Operand;
-typedef struct opall Opall;
-
-typedef struct instruction_data {
-  Opcode opcode;
-  const char *label;
-  const char *comment;
-  Operand dest;
-  Operand src;
-} InstructionData;
-
 const char OPCODES[][MAX_OPCODE_LENGTH] = {FOREACH_OPCODE(GENERATE_STRING)};
-
 static const char LOCAL_FMT[] = ".L%s";
 static const char STATIC_FMT[] = "%s.%lu";
 static const char COND_FMT[] = ".LC%lu";
@@ -232,11 +68,11 @@ static const char FN_PTR_FMT[] = "%s@GOTPCREL";
  * preserved registers: rbx, rsp, rbp, r12-r15
  * other registers: r10, r11
  */
-static const size_t RAX_VREG = 0;
+const size_t RAX_VREG = 0;
 static const size_t RCX_VREG = 1;
-static const size_t RDX_VREG = 2;
+const size_t RDX_VREG = 2;
 static const size_t RBX_VREG = 3;
-static const size_t RSP_VREG = 4;
+const size_t RSP_VREG = 4;
 const size_t RBP_VREG = 5;
 static const size_t RSI_VREG = 6;
 static const size_t RDI_VREG = 7;
@@ -389,6 +225,7 @@ void set_op_reg(Operand *operand, RegWidth width, size_t num) {
   operand->reg.mode = MODE_REGISTER;
   operand->reg.width = width;
   operand->reg.num = num;
+  operand->reg.next_use = NULL;
 }
 
 void set_op_imm(Operand *operand, uintmax_t val, int is_signed) {
@@ -402,16 +239,20 @@ void set_op_dir(Operand *operand, const char *label) {
   operand->dir.lab = label;
 }
 
-void set_op_pic(Operand *operand, intmax_t disp, const char *label) {
+void set_op_pic(Operand *operand, intmax_t disp, const char *label,
+                SymbolValue *symval) {
   operand->pic.mode = MODE_PIC;
   operand->pic.disp = disp;
   operand->pic.lab = label;
+  operand->pic.symval = symval;
+  operand->pic.next_use = NULL;
 }
 
 void set_op_ind(Operand *operand, intmax_t disp, size_t num) {
   operand->ind.mode = MODE_INDIRECT;
   operand->ind.disp = disp;
   operand->ind.num = num;
+  operand->ind.next_use = NULL;
 }
 
 void set_op_sca(Operand *operand, IndexScale scale, intmax_t disp, size_t base,
@@ -421,6 +262,8 @@ void set_op_sca(Operand *operand, IndexScale scale, intmax_t disp, size_t base,
   operand->sca.disp = disp;
   operand->sca.base = base;
   operand->sca.index = index;
+  operand->sca.base_next_use = NULL;
+  operand->sca.index_next_use = NULL;
 }
 
 int bulk_rtom(size_t dest_memreg, ptrdiff_t dest_disp, const size_t *src_regs,
@@ -829,7 +672,7 @@ void maybe_load_cexpr(ASTree *expr, ListIter *where) {
     if (expr->attributes & ATTR_CONST_ADDR) {
       load_data = instr_init(OP_LEA);
       set_op_pic(&load_data->src, expr->constant.address.disp,
-                 expr->constant.address.label);
+                 expr->constant.address.label, expr->constant.address.symval);
       set_op_reg(&load_data->dest, REG_QWORD, next_vreg());
     } else {
       load_data = instr_init(OP_MOV);
@@ -862,9 +705,9 @@ ASTree *translate_ident(ASTree *ident) {
   if (symval->flags & SYMFLAG_STORE_STAT) {
     if (symval->flags & SYMFLAG_LINK_NONE) {
       set_op_pic(&lea_data->src, NO_DISP,
-                 mk_static_label(ident->lexinfo, symval->static_id));
+                 mk_static_label(ident->lexinfo, symval->static_id), symval);
     } else {
-      set_op_pic(&lea_data->src, NO_DISP, ident->lexinfo);
+      set_op_pic(&lea_data->src, NO_DISP, ident->lexinfo, symval);
     }
   } else {
     set_op_ind(&lea_data->src, symval->disp, RBP_VREG);
@@ -2428,7 +2271,8 @@ ASTree *translate_static_scalar_init(const TypeSpec *type, ASTree *initializer,
   InstructionData *data = instr_init(directive);
   if (initializer->attributes & ATTR_CONST_ADDR) {
     set_op_pic(&data->dest, initializer->constant.address.disp,
-               initializer->constant.address.label);
+               initializer->constant.address.label,
+               initializer->constant.address.symval);
   } else {
     set_op_imm(&data->dest, initializer->constant.integral.value,
                typespec_is_signed(type));
@@ -2449,7 +2293,8 @@ ASTree *translate_auto_scalar_init(const TypeSpec *type, ptrdiff_t disp,
   if (initializer->attributes & ATTR_CONST_ADDR) {
     load_data = instr_init(OP_LEA);
     set_op_pic(&load_data->src, initializer->constant.address.disp,
-               initializer->constant.address.label);
+               initializer->constant.address.label,
+               initializer->constant.address.symval);
   } else {
     load_data = instr_init(OP_MOV);
     set_op_imm(&load_data->src, initializer->constant.integral.value,
@@ -2542,7 +2387,7 @@ ASTree *translate_auto_literal_init(const TypeSpec *arr_type,
                                     ListIter *where) {
   InstructionData *literal_lea_data = instr_init(OP_LEA);
   set_op_pic(&literal_lea_data->src, literal->constant.address.disp,
-             literal->constant.address.label);
+             literal->constant.address.label, literal->constant.address.symval);
   set_op_reg(&literal_lea_data->dest, REG_QWORD, next_vreg());
   InstructionData *arr_lea_data = instr_init(OP_LEA);
   set_op_ind(&arr_lea_data->src, arr_disp, RBP_VREG);
@@ -2790,6 +2635,8 @@ ASTree *begin_translate_fn(ASTree *declaration, ASTree *declarator,
   InstructionData *text_data = instr_init(OP_TEXT);
   int status = llist_push_back(instructions, text_data);
   if (status) abort();
+  declaration->first_instr = llist_iter_last(instructions);
+  if (declaration->first_instr == NULL) abort();
   SymbolValue *symval = NULL;
   state_get_symbol(state, declarator->lexinfo, strlen(declarator->lexinfo),
                    &symval);
@@ -2833,7 +2680,6 @@ ASTree *end_translate_fn(ASTree *declaration) {
   int status = liter_push_back(declaration->last_instr, NULL, 1, rsp_sub_data);
   if (status) abort();
   free(declaration->last_instr);
-  declaration->last_instr = NULL;
 
   status = restore_preserved_regs();
   if (status) abort();
@@ -2846,10 +2692,15 @@ ASTree *end_translate_fn(ASTree *declaration) {
   set_op_dir(&size_data->src, mk_fn_size(declarator->lexinfo));
   status = llist_push_back(instructions, size_data);
   if (status) abort();
+  declaration->last_instr = llist_iter_last(instructions);
+  if (declaration->last_instr == NULL) abort();
 
   free(before_definition);
   before_definition = llist_iter_last(instructions);
   if (before_definition == NULL) abort();
+
+  status = liveness_sr(declaration->first_instr, declaration->last_instr);
+  if (status) abort();
   return declaration;
 }
 
@@ -3029,9 +2880,11 @@ int operand_debug(Operand *operand, char *str) {
     case MODE_REGISTER:
       return sprintf(str,
                      " (REGISTER):\n"
+                     "\t\tRegister number: %lu\n"
                      "\t\tRegister width: %u\n"
-                     "\t\tRegister number: %lu\n",
-                     operand->reg.width, operand->reg.num);
+                     "\t\tNext use: %p\n",
+                     operand->reg.num, operand->reg.width,
+                     (void *)operand->reg.next_use);
     case MODE_IMMEDIATE:
       return sprintf(str,
                      " (IMMEDIATE):\n"
@@ -3046,26 +2899,32 @@ int operand_debug(Operand *operand, char *str) {
     case MODE_PIC:
       return sprintf(str,
                      " (PIC):\n"
-                     "\t\tExternal Variable: %p \"%s\"\n"
-                     "\t\tDisplacement: %li\n",
-                     (void *)operand->pic.lab,
+                     "\t\tSymbol: %p \"%s\"\n"
+                     "\t\tDisplacement: %li\n"
+                     "\t\tNext use: %p\n",
+                     (void *)operand->pic.symval,
                      operand->pic.lab == NULL ? "" : operand->pic.lab,
-                     operand->pic.disp);
+                     operand->pic.disp, (void *)operand->pic.next_use);
     case MODE_INDIRECT:
       return sprintf(str,
                      " (INDIRECT):\n"
                      "\t\tRegister number: %lu\n"
-                     "\t\tDisplacement: %li\n",
-                     operand->ind.num, operand->ind.disp);
+                     "\t\tDisplacement: %li\n"
+                     "\t\tNext use: %p\n",
+                     operand->ind.num, operand->ind.disp,
+                     (void *)operand->ind.next_use);
     case MODE_SCALE:
       return sprintf(str,
                      " (SCALED):\n"
                      "\t\tBase register number: %lu\n"
                      "\t\tIndex register number: %lu\n"
                      "\t\tDisplacement: %li\n"
-                     "\t\tScale: %u\n",
+                     "\t\tScale: %u\n"
+                     "\t\tBase next use: %p\n"
+                     "\t\tIndex next use: %p\n",
                      operand->sca.base, operand->sca.index, operand->sca.disp,
-                     operand->sca.scale);
+                     operand->sca.scale, (void *)operand->sca.base_next_use,
+                     (void *)operand->sca.index_next_use);
     case MODE_NONE:
       return sprintf(str, " (NONE):\n");
     default:

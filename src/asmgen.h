@@ -6,6 +6,179 @@
 #include "badllist.h"
 #include "lyutils.h"
 
+/* macros used to generate information about opcodes */
+#define FOREACH_OPCODE(GENERATOR)         \
+  GENERATOR(INVALID, OPTYPE_INVALID, 0)   \
+  GENERATOR(NONE, OPTYPE_NULLARY, 0)      \
+  /* arithmetic */                        \
+  GENERATOR(ADD, OPTYPE_BINARY, 1)        \
+  GENERATOR(SUB, OPTYPE_BINARY, 1)        \
+  GENERATOR(MUL, OPTYPE_UNARY, 1)         \
+  GENERATOR(DIV, OPTYPE_UNARY, 1)         \
+  GENERATOR(INC, OPTYPE_UNARY, 1)         \
+  GENERATOR(DEC, OPTYPE_UNARY, 1)         \
+  GENERATOR(NEG, OPTYPE_UNARY, 1)         \
+  GENERATOR(IMUL, OPTYPE_CONTEXTUAL, 1)   \
+  GENERATOR(IDIV, OPTYPE_UNARY, 1)        \
+  /* compare and test */                  \
+  GENERATOR(TEST, OPTYPE_BINARY, 1)       \
+  GENERATOR(CMP, OPTYPE_BINARY, 1)        \
+  GENERATOR(SETE, OPTYPE_UNARY, 0)        \
+  GENERATOR(SETNE, OPTYPE_UNARY, 0)       \
+  GENERATOR(SETG, OPTYPE_UNARY, 0)        \
+  GENERATOR(SETGE, OPTYPE_UNARY, 0)       \
+  GENERATOR(SETL, OPTYPE_UNARY, 0)        \
+  GENERATOR(SETLE, OPTYPE_UNARY, 0)       \
+  GENERATOR(SETA, OPTYPE_UNARY, 0)        \
+  GENERATOR(SETAE, OPTYPE_UNARY, 0)       \
+  GENERATOR(SETB, OPTYPE_UNARY, 0)        \
+  GENERATOR(SETBE, OPTYPE_UNARY, 0)       \
+  GENERATOR(SETZ, OPTYPE_UNARY, 0)        \
+  GENERATOR(SETNZ, OPTYPE_UNARY, 0)       \
+  /* jump */                              \
+  GENERATOR(JMP, OPTYPE_UNARY, 0)         \
+  GENERATOR(JE, OPTYPE_UNARY, 0)          \
+  GENERATOR(JNE, OPTYPE_UNARY, 0)         \
+  GENERATOR(JG, OPTYPE_UNARY, 0)          \
+  GENERATOR(JGE, OPTYPE_UNARY, 0)         \
+  GENERATOR(JL, OPTYPE_UNARY, 0)          \
+  GENERATOR(JLE, OPTYPE_UNARY, 0)         \
+  GENERATOR(JA, OPTYPE_UNARY, 0)          \
+  GENERATOR(JAE, OPTYPE_UNARY, 0)         \
+  GENERATOR(JB, OPTYPE_UNARY, 0)          \
+  GENERATOR(JBE, OPTYPE_UNARY, 0)         \
+  GENERATOR(JZ, OPTYPE_UNARY, 0)          \
+  GENERATOR(JNZ, OPTYPE_UNARY, 0)         \
+  /* logical and bitwise */               \
+  GENERATOR(NOT, OPTYPE_UNARY, 1)         \
+  GENERATOR(OR, OPTYPE_BINARY, 1)         \
+  GENERATOR(AND, OPTYPE_BINARY, 1)        \
+  GENERATOR(LEA, OPTYPE_BINARY, 1)        \
+  GENERATOR(XOR, OPTYPE_BINARY, 1)        \
+  /* shifts */                            \
+  GENERATOR(SHL, OPTYPE_BINARY, 1)        \
+  GENERATOR(SAL, OPTYPE_BINARY, 1)        \
+  GENERATOR(SHR, OPTYPE_BINARY, 1)        \
+  GENERATOR(SAR, OPTYPE_BINARY, 1)        \
+  /* code movement */                     \
+  GENERATOR(MOV, OPTYPE_BINARY, 1)        \
+  GENERATOR(MOVZ, OPTYPE_BINARY, 1)       \
+  GENERATOR(MOVS, OPTYPE_BINARY, 1)       \
+  GENERATOR(PUSH, OPTYPE_UNARY, 1)        \
+  GENERATOR(POP, OPTYPE_UNARY, 1)         \
+  GENERATOR(CALL, OPTYPE_UNARY, 0)        \
+  GENERATOR(LEAVE, OPTYPE_NULLARY, 0)     \
+  GENERATOR(RET, OPTYPE_NULLARY, 0)       \
+  GENERATOR(NOP, OPTYPE_NULLARY, 0)       \
+  /* directives */                        \
+  GENERATOR(GLOBL, OPTYPE_DIRECTIVE, 0)   \
+  GENERATOR(ZERO, OPTYPE_DIRECTIVE, 0)    \
+  GENERATOR(BYTE, OPTYPE_DIRECTIVE, 0)    \
+  GENERATOR(VALUE, OPTYPE_DIRECTIVE, 0)   \
+  GENERATOR(LONG, OPTYPE_DIRECTIVE, 0)    \
+  GENERATOR(QUAD, OPTYPE_DIRECTIVE, 0)    \
+  GENERATOR(ALIGN, OPTYPE_DIRECTIVE, 0)   \
+  GENERATOR(SIZE, OPTYPE_DIRECTIVE, 0)    \
+  GENERATOR(TYPE, OPTYPE_DIRECTIVE, 0)    \
+  GENERATOR(ASCII, OPTYPE_DIRECTIVE, 0)   \
+  GENERATOR(ASCIZ, OPTYPE_DIRECTIVE, 0)   \
+  GENERATOR(SECTION, OPTYPE_DIRECTIVE, 0) \
+  GENERATOR(BSS, OPTYPE_DIRECTIVE, 0)     \
+  GENERATOR(TEXT, OPTYPE_DIRECTIVE, 0)    \
+  GENERATOR(DATA, OPTYPE_DIRECTIVE, 0)    \
+  GENERATOR(FILE, OPTYPE_DIRECTIVE, 0)
+
+#define GENERATE_ENUM(CODE, TYPE, BOOL) OP_##CODE,
+typedef enum opcode { FOREACH_OPCODE(GENERATE_ENUM) OPCODE_COUNT } Opcode;
+#undef GENERATE_ENUM
+
+typedef enum optype {
+  OPTYPE_INVALID = -1,
+  OPTYPE_NULLARY,
+  OPTYPE_UNARY,
+  OPTYPE_BINARY,
+  OPTYPE_CONTEXTUAL,
+  OPTYPE_DIRECTIVE
+} OpType;
+typedef enum address_mode {
+  MODE_NONE,
+  MODE_REGISTER,
+  MODE_IMMEDIATE,
+  MODE_DIRECT,
+  MODE_INDIRECT,
+  MODE_SCALE,
+  MODE_PIC
+} AddressMode;
+typedef enum reg_width {
+  REG_NONE = 0,
+  REG_BYTE = 1,
+  REG_WORD = 2,
+  REG_DWORD = 4,
+  REG_QWORD = 8
+} RegWidth;
+typedef enum index_scale {
+  SCALE_NONE = 0,
+  SCALE_BYTE = 1,
+  SCALE_WORD = 2,
+  SCALE_DWORD = 4,
+  SCALE_QWORD = 8
+} IndexScale;
+
+typedef union operand {
+  struct opall {
+    AddressMode mode;
+  } all;
+  struct opreg {
+    AddressMode mode;
+    RegWidth width;
+    size_t num;
+    struct instruction_data *next_use;
+  } reg;
+  struct opimm {
+    AddressMode mode;
+    int is_signed;
+    uintmax_t val;
+  } imm;
+  struct opdir {
+    AddressMode mode;
+    const char *lab;
+    intmax_t disp;
+  } dir;
+  struct oppic {
+    AddressMode mode;
+    const char *lab;
+    SymbolValue *symval;
+    intmax_t disp;
+    struct instruction_data *next_use;
+  } pic;
+  struct opind {
+    AddressMode mode;
+    size_t num;
+    intmax_t disp;
+    struct instruction_data *next_use;
+  } ind;
+  struct opsca {
+    AddressMode mode;
+    IndexScale scale;
+    size_t base;
+    intmax_t disp;
+    size_t index;
+    struct instruction_data *base_next_use;
+    struct instruction_data *index_next_use;
+  } sca;
+} Operand;
+
+typedef struct instruction_data {
+  Opcode opcode;
+  const char *label;
+  const char *comment;
+  Operand dest;
+  Operand src;
+} InstructionData;
+
+extern const size_t RAX_VREG;
+extern const size_t RDX_VREG;
+extern const size_t RSP_VREG;
 extern const size_t RBP_VREG;
 const char *mk_static_label(const char *name, size_t unique_id);
 const char *mk_fnptr_text(const char *name);
@@ -14,6 +187,7 @@ size_t asmgen_literal_label(const char *literal, const char **out);
 int bulk_mzero(size_t dest_memreg, ptrdiff_t dest_disp, size_t skip_bytes,
                const TypeSpec *type, ListIter *where);
 int static_zero_pad(size_t count, ListIter *where);
+OpType optype_from_opcode(Opcode opcode);
 ASTree *translate_empty_expr(ASTree *empty_expr);
 ASTree *translate_ident(ASTree *ident);
 ASTree *translate_cast(ASTree *cast, ASTree *expr);
