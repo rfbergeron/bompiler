@@ -87,7 +87,7 @@ static const size_t PARAM_REG_COUNT = 6;
 static const size_t RETURN_REG_COUNT = 2;
 static const size_t PRESERVED_REG_COUNT = 7;
 static const size_t VOLATILE_REG_COUNT = 9;
-static const size_t REAL_REG_COUNT = PRESERVED_REG_COUNT + VOLATILE_REG_COUNT;
+const size_t REAL_REG_COUNT = PRESERVED_REG_COUNT + VOLATILE_REG_COUNT;
 /* number of eightbytes occupied by the function prologue on the stack */
 static const size_t PROLOGUE_EIGHTBYTES = 8;
 static const char VREG_REG_TABLE[][5] = {
@@ -1105,6 +1105,14 @@ ASTree *translate_multiplication(ASTree *operator, ASTree * left,
   if (status) abort();
   InstructionData *right_data = liter_get(right->last_instr);
 
+  /* unconditionally save rax and rdx so that we don't need to worry about
+   * their values changing implicitly when performing register allocation.
+   */
+  InstructionData *push_rdx_data = instr_init(OP_PUSH);
+  set_op_reg(&push_rdx_data->dest, REG_QWORD, RDX_VREG);
+  InstructionData *push_rax_data = instr_init(OP_PUSH);
+  set_op_reg(&push_rax_data->dest, REG_QWORD, RAX_VREG);
+
   InstructionData *zero_rdx_data = instr_init(OP_MOV);
   set_op_reg(&zero_rdx_data->dest, typespec_get_width(operator->type),
              RDX_VREG);
@@ -1126,9 +1134,21 @@ ASTree *translate_multiplication(ASTree *operator, ASTree * left,
   set_op_reg(&mov_data->src, typespec_get_width(operator->type),
                              operator->symbol == '%' ? RDX_VREG : RAX_VREG);
   set_op_reg(&mov_data->dest, typespec_get_width(operator->type), next_vreg());
-  status =
-      liter_push_back(right->last_instr, &operator->last_instr, 4,
-                      zero_rdx_data, mov_rax_data, operator_data, mov_data);
+
+  /* restore rax and rdx */
+  InstructionData *pop_rax_data = instr_init(OP_POP);
+  set_op_reg(&pop_rax_data->dest, REG_QWORD, RAX_VREG);
+  InstructionData *pop_rdx_data = instr_init(OP_POP);
+  set_op_reg(&pop_rdx_data->dest, REG_QWORD, RDX_VREG);
+
+  /* dummy mov */
+  InstructionData *dummy_data = instr_init(OP_MOV);
+  dummy_data->dest = dummy_data->src = mov_data->dest;
+
+  status = liter_push_back(right->last_instr, &operator->last_instr, 9,
+                           push_rdx_data, push_rax_data, zero_rdx_data,
+                           mov_rax_data, operator_data, mov_data, pop_rax_data,
+                           pop_rdx_data, dummy_data);
   if (status) abort();
   return astree_adopt(operator, 2, left, right);
 }
@@ -1302,6 +1322,14 @@ int assign_mul(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   if (status) return status;
   InstructionData *rvalue_data = liter_get(rvalue->last_instr);
 
+  /* unconditionally save rax and rdx so that we don't need to worry about
+   * their values changing implicitly when performing register allocation.
+   */
+  InstructionData *push_rdx_data = instr_init(OP_PUSH);
+  set_op_reg(&push_rdx_data->dest, REG_QWORD, RDX_VREG);
+  InstructionData *push_rax_data = instr_init(OP_PUSH);
+  set_op_reg(&push_rax_data->dest, REG_QWORD, RAX_VREG);
+
   InstructionData *zero_rdx_data = instr_init(OP_MOV);
   set_op_reg(&zero_rdx_data->dest, typespec_get_width(common_type), RDX_VREG);
   set_op_imm(&zero_rdx_data->src, 0, IMM_UNSIGNED);
@@ -1322,15 +1350,26 @@ int assign_mul(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   set_op_reg(&store_data->src, typespec_get_width(lvalue->type),
              assignment->symbol == TOK_REMEQ ? RDX_VREG : RAX_VREG);
 
-  InstructionData *dummy_data = instr_init(OP_MOV);
+  InstructionData *mov_data = instr_init(OP_MOV);
   /* mov from vreg representing rax/rdx to new vreg and truncate */
-  set_op_reg(&dummy_data->src, typespec_get_width(lvalue->type),
+  set_op_reg(&mov_data->src, typespec_get_width(lvalue->type),
              assignment->symbol == TOK_REMEQ ? RDX_VREG : RAX_VREG);
-  set_op_reg(&dummy_data->dest, typespec_get_width(lvalue->type), next_vreg());
+  set_op_reg(&mov_data->dest, typespec_get_width(lvalue->type), next_vreg());
 
-  return liter_push_back(rvalue->last_instr, &assignment->last_instr, 5,
-                         zero_rdx_data, mov_rax_data, operator_data, store_data,
-                         dummy_data);
+  /* restore rax and rdx */
+  InstructionData *pop_rax_data = instr_init(OP_POP);
+  set_op_reg(&pop_rax_data->dest, REG_QWORD, RAX_VREG);
+  InstructionData *pop_rdx_data = instr_init(OP_POP);
+  set_op_reg(&pop_rdx_data->dest, REG_QWORD, RDX_VREG);
+
+  /* dummy mov */
+  InstructionData *dummy_data = instr_init(OP_MOV);
+  dummy_data->dest = dummy_data->src = mov_data->dest;
+
+  return liter_push_back(rvalue->last_instr, &assignment->last_instr, 10,
+                         push_rdx_data, push_rax_data, zero_rdx_data,
+                         mov_rax_data, operator_data, store_data, mov_data,
+                         pop_rax_data, pop_rdx_data, dummy_data);
 }
 
 int assign_scalar(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {

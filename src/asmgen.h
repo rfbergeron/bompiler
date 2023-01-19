@@ -180,6 +180,7 @@ extern const size_t RAX_VREG;
 extern const size_t RDX_VREG;
 extern const size_t RSP_VREG;
 extern const size_t RBP_VREG;
+extern const size_t REAL_REG_COUNT;
 const char *mk_static_label(const char *name, size_t unique_id);
 const char *mk_fnptr_text(const char *name);
 void maybe_load_cexpr(ASTree *expr, ListIter *where);
