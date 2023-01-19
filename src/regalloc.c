@@ -162,7 +162,6 @@ int bblock_partition(ListIter *first, ListIter *last, ArrayList *out) {
 }
 
 void update_liveness(InstructionData *data, Operand *operand, Map *temp_lives) {
-  if (data->opcode == OP_PUSH || data->opcode == OP_POP) return;
   switch (operand->all.mode) {
     int status;
     case MODE_NONE:
@@ -170,7 +169,7 @@ void update_liveness(InstructionData *data, Operand *operand, Map *temp_lives) {
     case MODE_IMMEDIATE:
       break;
     case MODE_REGISTER:
-      if (operand->reg.num == RBP_VREG || operand->reg.num == RSP_VREG) break;
+      if (operand->reg.num < REAL_REG_COUNT) break;
       operand->reg.next_use =
           map_get(temp_lives, &operand->reg.num, sizeof(operand->reg.num));
       InstructionData *new_data =
@@ -183,7 +182,7 @@ void update_liveness(InstructionData *data, Operand *operand, Map *temp_lives) {
         abort();
       break;
     case MODE_INDIRECT:
-      if (operand->ind.num == RBP_VREG || operand->ind.num == RSP_VREG) break;
+      if (operand->ind.num < REAL_REG_COUNT) break;
       operand->ind.next_use =
           map_get(temp_lives, &operand->ind.num, sizeof(operand->ind.num));
       if (map_insert(temp_lives, &operand->ind.num, sizeof(operand->ind.num),
@@ -195,16 +194,14 @@ void update_liveness(InstructionData *data, Operand *operand, Map *temp_lives) {
       operand->pic.symval->next_use = data;
       break;
     case MODE_SCALE:
-      if (operand->sca.base == RBP_VREG || operand->sca.base == RSP_VREG)
-        goto skip_base;
+      if (operand->sca.base < REAL_REG_COUNT) goto skip_base;
       operand->sca.base_next_use =
           map_get(temp_lives, &operand->sca.base, sizeof(operand->sca.base));
       if (map_insert(temp_lives, &operand->sca.base, sizeof(operand->sca.base),
                      data))
         abort();
     skip_base:
-      if (operand->sca.index == RBP_VREG || operand->sca.index == RSP_VREG)
-        break;
+      if (operand->sca.index < REAL_REG_COUNT) break;
       operand->sca.index_next_use =
           map_get(temp_lives, &operand->sca.index, sizeof(operand->sca.index));
       if (map_insert(temp_lives, &operand->sca.index,
@@ -226,17 +223,6 @@ int liveness_bblock(BBlock *block, Map *temp_lives) {
     if (data == NULL) abort();
     update_liveness(data, &data->dest, temp_lives);
     update_liveness(data, &data->src, temp_lives);
-    /* update liveness for implicit operands */
-    if ((data->opcode == OP_IMUL && data->src.all.mode != MODE_NONE) ||
-        data->opcode == OP_MUL || data->opcode == OP_DIV ||
-        data->opcode == OP_IDIV) {
-      int status =
-          map_insert(temp_lives, (size_t *)&RDX_VREG, sizeof(size_t), NULL);
-      if (status) abort();
-      status =
-          map_insert(temp_lives, (size_t *)&RAX_VREG, sizeof(size_t), data);
-      if (status) abort();
-    }
     if (liter_advance(current, -1)) abort();
   }
   free(current);
