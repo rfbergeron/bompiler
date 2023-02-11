@@ -1,5 +1,7 @@
 #include "tchk_expr.h"
 
+#include <assert.h>
+
 #include "asmgen.h"
 #include "ctype.h"
 #include "evaluate.h"
@@ -84,6 +86,13 @@ ASTree *finalize_call(ASTree *call) {
   /* subtract one since function expression is also a child */
   if (astree_count(call) - 1 < llist_size(param_list)) {
     return astree_create_errnode(call, BCC_TERR_INSUFF_PARAMS, 1, call);
+  } else if (astree_count(call) > 1) {
+    /* make sure to emit constexpr load before all argument instructions */
+    ASTree *first_arg = astree_get(call, 1);
+    assert(first_arg != NULL && first_arg->first_instr != NULL);
+    maybe_load_cexpr(function, first_arg->first_instr);
+  } else { /* astree_count(call) == 0 */
+    maybe_load_cexpr(function, NULL);
   }
   return translate_call(call);
 }
@@ -155,7 +164,6 @@ ASTree *validate_call(ASTree *expr, ASTree *call) {
   /* free temporaries created by stripping */
   typespec_destroy(&temp_spec);
   call->type = return_spec;
-  maybe_load_cexpr(expr, NULL);
   return astree_adopt(call, 1, expr);
 }
 

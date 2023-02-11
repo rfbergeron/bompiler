@@ -1513,10 +1513,8 @@ ASTree *translate_call(ASTree *call) {
   ASTree *fn_pointer = astree_get(call, 0);
   call->first_instr = liter_copy(fn_pointer->first_instr);
   if (call->first_instr == NULL) abort();
-  int status = save_volatile_regs(call->first_instr);
-  if (status) abort();
   /* TODO(Robert): (void?) pointer type constant */
-  status = scalar_conversions(fn_pointer, &SPEC_LONG);
+  int status = scalar_conversions(fn_pointer, &SPEC_LONG);
   if (status) abort();
   InstructionData *sub_data = instr_init(OP_SUB);
   set_op_reg(&sub_data->dest, REG_QWORD, RSP_VREG);
@@ -1529,6 +1527,8 @@ ASTree *translate_call(ASTree *call) {
 
   /* do this after so that params are moved in reverse order */
   status = translate_args(call);
+  if (status) abort();
+  status = save_volatile_regs(call->last_instr);
   if (status) abort();
   free(call->last_instr);
   call->last_instr = NULL;
@@ -1566,7 +1566,13 @@ ASTree *translate_call(ASTree *call) {
   if (status) abort();
 
   if (!typespec_is_void(call->type)) {
-    InstructionData *load_data;
+    /* store return value on the stack temporarily so that volatile registers
+     * can be restored without worrying about the return value being clobbered
+     */
+    InstructionData *store_data = instr_init(OP_MOV);
+    set_op_ind(&store_data->dest, -8, RBP_VREG);
+    InstructionData *load_data = instr_init(OP_MOV);
+    load_data->src = store_data->dest;
     if (typespec_is_struct(call->type) || typespec_is_union(call->type)) {
       if (typespec_get_eightbytes(call->type) <= 2) {
         ListIter *temp = llist_iter_last(instructions);
@@ -1575,22 +1581,23 @@ ASTree *translate_call(ASTree *call) {
         free(temp);
         if (status) abort();
       }
-      load_data = instr_init(OP_LEA);
-      set_op_ind(&load_data->src, -window_size, RBP_VREG);
+      InstructionData *agg_addr_data = instr_init(OP_LEA);
+      set_op_ind(&agg_addr_data->src, -window_size, RBP_VREG);
+      /* any volatile register is fine since they will all be restored */
+      set_op_reg(&agg_addr_data->dest, REG_QWORD, RCX_VREG);
+      int status = llist_push_back(instructions, agg_addr_data);
+      if (status) abort();
+      store_data->src = agg_addr_data->dest;
       set_op_reg(&load_data->dest, REG_QWORD, next_vreg());
     } else {
-      load_data = instr_init(OP_MOV);
-      set_op_reg(&load_data->src, typespec_get_width(call->type), RAX_VREG);
+      set_op_reg(&store_data->src, typespec_get_width(call->type), RAX_VREG);
       set_op_reg(&load_data->dest, typespec_get_width(call->type), next_vreg());
     }
-    int status = llist_push_back(instructions, load_data);
+    int status = llist_push_back(instructions, store_data);
     if (status) abort();
     status = restore_volatile_regs();
     if (status) abort();
-    /* dummy mov since parent expects last instr to have result */
-    InstructionData *dummy_data = instr_init(OP_MOV);
-    dummy_data->src = dummy_data->dest = load_data->dest;
-    status = llist_push_back(instructions, dummy_data);
+    status = llist_push_back(instructions, load_data);
     if (status) abort();
   } else {
     int status = restore_volatile_regs();
@@ -2668,7 +2675,8 @@ ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
 ASTree *begin_translate_fn(ASTree *declaration, ASTree *declarator,
                            ASTree *body) {
   DEBUGS('g', "Translating function prologue");
-  window_size = 0;
+  /* reserve 8 bytes for shuffling around register return values */
+  window_size = 8;
   InstructionData *text_data = instr_init(OP_TEXT);
   int status = llist_push_back(instructions, text_data);
   if (status) abort();
