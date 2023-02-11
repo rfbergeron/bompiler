@@ -2762,8 +2762,15 @@ int operand_to_str(Operand *operand, char *str, size_t size) {
         return sprintf(str, "%%VR%lu%c", operand->reg.num,
                        WIDTH_TO_CHAR[operand->reg.width]);
     case MODE_SCALE:
-      return sprintf(str, "%li(%%VR%luQ, %%VR%luQ, %u)", operand->sca.disp,
-                     operand->sca.base, operand->sca.index, operand->sca.scale);
+      if (operand->reg.num < REAL_REG_COUNT)
+        return sprintf(str, "%li(%%%s, %%%s, %u)", operand->sca.disp,
+                       SELECT_REG(operand->sca.base, REG_QWORD),
+                       SELECT_REG(operand->sca.index, REG_QWORD),
+                       operand->sca.scale);
+      else
+        return sprintf(str, "%li(%%VR%luQ, %%VR%luQ, %u)", operand->sca.disp,
+                       operand->sca.base, operand->sca.index,
+                       operand->sca.scale);
     case MODE_IMMEDIATE:
       if (operand->imm.is_signed)
         return sprintf(str, "$%li", operand->imm.val);
