@@ -117,7 +117,7 @@ static ListIter *before_definition;
 static struct {
   const char *literal;
   const char *label;
-} * literals;
+} *literals;
 static size_t literals_cap = 10;
 static size_t literals_size;
 static Map *static_locals;
@@ -1206,10 +1206,8 @@ ASTree *translate_conditional(ASTree *qmark, ASTree *condition,
 
   status = scalar_conversions(false_expr, qmark->type);
   if (status) abort();
-  InstructionData *false_label = instr_init(OP_NONE);
+  InstructionData *false_label = liter_get(false_expr->first_instr);
   false_label->label = mk_false_label(current_branch);
-  status = liter_push_front(false_expr->first_instr, NULL, 1, false_label);
-  if (status) abort();
   InstructionData *false_expr_data = liter_get(false_expr->last_instr);
   InstructionData *mov_false_data = instr_init(OP_MOV);
   mov_false_data->src = false_expr_data->dest;
@@ -1716,14 +1714,11 @@ int helper_va_arg_reg_param(size_t eightbytes, size_t result_vreg,
   InstructionData *jmp_false_data = instr_init(OP_JMP);
   set_op_dir(&jmp_false_data->dest, mk_false_label(current_branch));
 
-  InstructionData *true_label_data = instr_init(OP_NONE);
-  true_label_data->label = mk_true_label(current_branch);
-
   ListIter *temp = llist_iter_last(instructions);
-  int status = liter_push_back(
-      temp, NULL, 9, load_gp_offset_data, cmp_gp_offset_data, jmp_ge_data,
-      load_reg_save_area_data, add_reg_save_area_data, load_disp_data,
-      add_disp_data, jmp_false_data, true_label_data);
+  int status = liter_push_back(temp, NULL, 8, load_gp_offset_data,
+                               cmp_gp_offset_data, jmp_ge_data,
+                               load_reg_save_area_data, add_reg_save_area_data,
+                               load_disp_data, add_disp_data, jmp_false_data);
   free(temp);
   return status;
 }
@@ -1758,28 +1753,31 @@ ASTree *translate_va_arg(ASTree *va_arg_, ASTree *expr, ASTree *type_name) {
   size_t eightbytes = typespec_get_eightbytes(astree_get(type_name, 1)->type);
   size_t result_vreg = next_vreg();
 
+  /* dummy mov for parent expression */
+  InstructionData *dummy_data = instr_init(OP_MOV);
+  set_op_reg(&dummy_data->dest, REG_QWORD, result_vreg);
+  dummy_data->src = dummy_data->dest;
+
   if (eightbytes <= 2) {
     size_t current_branch = next_branch();
     int status = helper_va_arg_reg_param(
         eightbytes, result_vreg, expr_data->dest.reg.num, current_branch);
     if (status) abort();
+    ListIter *temp = llist_iter_last(instructions);
     status = helper_va_arg_stack_param(eightbytes, result_vreg,
                                        expr_data->dest.reg.num);
     if (status) abort();
-    InstructionData *reg_label_data = instr_init(OP_NONE);
-    reg_label_data->label = mk_false_label(current_branch);
-    status = llist_push_back(instructions, reg_label_data);
+    status = liter_advance(temp, 1);
     if (status) abort();
+    ((InstructionData *)liter_get(temp))->label = mk_true_label(current_branch);
+    free(temp);
+    dummy_data->label = mk_false_label(current_branch);
   } else {
     int status = helper_va_arg_stack_param(eightbytes, result_vreg,
                                            expr_data->dest.reg.num);
     if (status) abort();
   }
 
-  /* dummy mov for parent expression */
-  InstructionData *dummy_data = instr_init(OP_MOV);
-  set_op_reg(&dummy_data->dest, REG_QWORD, result_vreg);
-  dummy_data->src = dummy_data->dest;
   int status = llist_push_back(instructions, dummy_data);
   if (status) abort();
   va_arg_->last_instr = llist_iter_last(instructions);
