@@ -176,13 +176,22 @@ typedef struct instruction_data {
   Operand src;
 } InstructionData;
 
-extern const size_t RAX_VREG;
-extern const size_t RDX_VREG;
 extern const size_t RSP_VREG;
 extern const size_t RBP_VREG;
 extern const size_t REAL_REG_COUNT;
+extern const size_t VOLATILE_REGS[];
+extern const size_t VOLATILE_REG_COUNT;
 const char *mk_static_label(const char *name, size_t unique_id);
 const char *mk_fnptr_text(const char *name);
+InstructionData *instr_init(Opcode opcode);
+void set_op_reg(Operand *operand, RegWidth width, size_t num);
+void set_op_imm(Operand *operand, uintmax_t val, int is_signed);
+void set_op_dir(Operand *operand, const char *label);
+void set_op_pic(Operand *operand, intmax_t disp, const char *label,
+                SymbolValue *symval);
+void set_op_ind(Operand *operand, intmax_t disp, size_t num);
+void set_op_sca(Operand *operand, IndexScale scale, intmax_t disp, size_t base,
+                size_t index);
 void maybe_load_cexpr(ASTree *expr, ListIter *where);
 size_t asmgen_literal_label(const char *literal, const char **out);
 int bulk_mzero(size_t dest_memreg, ptrdiff_t dest_disp, size_t skip_bytes,

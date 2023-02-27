@@ -68,9 +68,9 @@ static const char FN_PTR_FMT[] = "%s@GOTPCREL";
  * preserved registers: rbx, rsp, rbp, r12-r15
  * other registers: r10, r11
  */
-const size_t RAX_VREG = 0;
+static const size_t RAX_VREG = 0;
 static const size_t RCX_VREG = 1;
-const size_t RDX_VREG = 2;
+static const size_t RDX_VREG = 2;
 static const size_t RBX_VREG = 3;
 const size_t RSP_VREG = 4;
 const size_t RBP_VREG = 5;
@@ -81,12 +81,12 @@ static const size_t PARAM_REGS[] = {RDI_VREG, RSI_VREG, RDX_VREG,
 static const size_t RETURN_REGS[] = {RAX_VREG, RDX_VREG};
 static const size_t PRESERVED_REGS[] = {RBX_VREG, RSP_VREG, RBP_VREG, 12,
                                         13,       14,       15};
-static const size_t VOLATILE_REGS[] = {
+const size_t VOLATILE_REGS[] = {
     RAX_VREG, RDX_VREG, RCX_VREG, RSI_VREG, RDI_VREG, 8, 9, 10, 11};
 static const size_t PARAM_REG_COUNT = 6;
 static const size_t RETURN_REG_COUNT = 2;
 static const size_t PRESERVED_REG_COUNT = 7;
-static const size_t VOLATILE_REG_COUNT = 9;
+const size_t VOLATILE_REG_COUNT = 9;
 const size_t REAL_REG_COUNT = PRESERVED_REG_COUNT + VOLATILE_REG_COUNT;
 /* number of eightbytes occupied by the function prologue on the stack */
 static const size_t PROLOGUE_EIGHTBYTES = 8;
@@ -2745,6 +2745,8 @@ ASTree *end_translate_fn(ASTree *declaration) {
   if (before_definition == NULL) abort();
 
   status = liveness_sr(declaration->first_instr, declaration->last_instr);
+  if (status) abort();
+  status = allocate_regs(declaration->first_instr, declaration->last_instr);
   if (status) abort();
   return declaration;
 }
