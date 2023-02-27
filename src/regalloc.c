@@ -1,5 +1,7 @@
 #include "regalloc.h"
 
+#include <assert.h>
+
 #include "asmgen.h"
 #include "badalist.h"
 #include "badmap.h"
@@ -17,6 +19,12 @@ typedef struct basic_block {
  * values are `ListIter*`s corresponding to the next instruction they are used
  * at.
  */
+
+static const char *LEADER_COMMENT = "basic block leader";
+static const char *GROUP_COMMENT =
+    "basic block leader; group with previous block";
+
+static Map group_save_table;
 
 int instr_is_jump(InstructionData *data) {
   switch (data->opcode) {
@@ -78,9 +86,15 @@ int instr_has_label(InstructionData *data) { return data->label != NULL; }
 
 int bblock_in_group(BBlock *block) {
   InstructionData *data = liter_get(block->leader);
-  return data != NULL && data->label != NULL &&
-         ((strncmp(data->label, ".T", 2) == 0) ||
-          (strncmp(data->label, ".F", 2) == 0));
+  ListIter *leader_prev = liter_prev(block->leader, 1);
+  InstructionData *data_prev = liter_get(leader_prev);
+  free(leader_prev);
+  return (data != NULL && data->label != NULL &&
+          ((strncmp(data->label, ".LT", 3) == 0) ||
+           (strncmp(data->label, ".LF", 3) == 0))) ||
+         (data_prev != NULL && data_prev->dest.all.mode == MODE_DIRECT &&
+          (strncmp(data_prev->dest.dir.lab, ".LF", 3) == 0 ||
+           strncmp(data_prev->dest.dir.lab, ".LT", 3) == 0));
 }
 
 BBlock *bblock_init(ListIter *leader) {
@@ -129,31 +143,34 @@ int bblock_partition(ListIter *first, ListIter *last, ArrayList *out) {
   status = alist_push(out, enter_block);
   if (status) abort();
   /* TODO(Robert): iterator comparison functions */
-  while (first->node != exit_leader->node &&
-         instr_is_directive(liter_get(first)))
-    if (liter_advance(first, 1) != 0) abort();
+  ListIter *current = liter_copy(first);
+  if (current == NULL) abort();
+  while (current->node != exit_leader->node &&
+         instr_is_directive(liter_get(current)))
+    if (liter_advance(current, 1) != 0) abort();
 
-  while (first->node != exit_leader->node) {
-    BBlock *block = bblock_init(liter_copy(first));
+  while (current->node != exit_leader->node) {
+    BBlock *block = bblock_init(liter_copy(current));
     int status = bblock_add_follower(alist_peek(out), block);
     if (status) abort();
     status = alist_push(out, block);
     if (status) abort();
     for (;;) {
-      int status = liter_advance(first, 1);
+      int status = liter_advance(current, 1);
       if (status) {
         abort();
-      } else if (first->node == exit_leader->node ||
-                 instr_has_label(liter_get(first))) {
+      } else if (current->node == exit_leader->node ||
+                 instr_has_label(liter_get(current))) {
         break;
-      } else if (instr_is_jump(liter_get(first))) {
-        int status = liter_advance(first, 1);
+      } else if (instr_is_jump(liter_get(current))) {
+        int status = liter_advance(current, 1);
         if (status) abort();
         break;
       }
     }
   }
 
+  free(current);
   status = bblock_add_follower(alist_peek(out), exit_block);
   if (status) abort();
   status = alist_push(out, exit_block);
@@ -174,7 +191,11 @@ void update_liveness(InstructionData *data, Operand *operand, Map *temp_lives) {
           map_get(temp_lives, &operand->reg.num, sizeof(operand->reg.num));
       InstructionData *new_data =
           ((instr_is_mov(data) || instr_is_setcc(data)) &&
-           operand == &data->dest)
+           operand == &data->dest &&
+           (data->src.all.mode != MODE_REGISTER ||
+            data->src.reg.num != operand->reg.num) &&
+           map_get(&group_save_table, &operand->reg.num,
+                   sizeof(operand->reg.num)) == NULL)
               ? NULL
               : data;
       if (map_insert(temp_lives, &operand->reg.num, sizeof(operand->reg.num),
@@ -242,6 +263,9 @@ int liveness_sr(ListIter *first, ListIter *last) {
   int status = map_init(&liveness_table, DEFAULT_MAP_SIZE, NULL, NULL,
                         (BlibComparator)compare_regnums);
   if (status) abort();
+  status = map_init(&group_save_table, DEFAULT_MAP_SIZE, NULL, NULL,
+                    (BlibComparator)compare_regnums);
+  if (status) abort();
   ArrayList bblocks;
   status = alist_init(&bblocks, 0);
   if (status) abort();
@@ -254,11 +278,34 @@ int liveness_sr(ListIter *first, ListIter *last) {
     BBlock *block = alist_get(&bblocks, bblocks_size - i);
     int status = liveness_bblock(block, &liveness_table);
     if (status) abort();
-    if (!bblock_in_group(block) && map_clear(&liveness_table)) abort();
+    InstructionData *leader_data = liter_get(block->leader);
+    if (bblock_in_group(block)) {
+      leader_data->comment = GROUP_COMMENT;
+      /* mark dummy vreg so that it is not cleared */
+      if (leader_data->label != NULL &&
+          (strncmp(leader_data->label, ".LT", 3) == 0 ||
+           strncmp(leader_data->label, ".LF", 3) == 0) &&
+          leader_data->opcode == OP_MOV &&
+          leader_data->dest.all.mode == MODE_REGISTER &&
+          leader_data->src.all.mode == MODE_REGISTER &&
+          leader_data->dest.reg.num == leader_data->src.reg.num) {
+        assert(map_get(&group_save_table, &leader_data->src.reg.num,
+                       sizeof(leader_data->src.reg.num)) == NULL);
+        int status = map_insert(&group_save_table, &leader_data->src.reg.num,
+                                sizeof(leader_data->src.reg.num),
+                                &leader_data->src.reg.num);
+        if (status) abort();
+      }
+    } else {
+      leader_data->comment = LEADER_COMMENT;
+      if (map_clear(&liveness_table)) abort();
+      if (map_clear(&group_save_table)) abort();
+    }
   }
 
   status = map_destroy(&liveness_table);
   if (status) abort();
+  status = map_destroy(&group_save_table);
   status = alist_destroy(&bblocks, (BlibDestroyer)bblock_destroy);
   if (status) abort();
   return 0;
