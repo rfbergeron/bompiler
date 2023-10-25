@@ -21,6 +21,12 @@ ASTree *validate_return(ASTree *ret, ASTree *expr) {
   }
   if (expr != &EMPTY_EXPR) {
     pointer_conversions(expr);
+    /* TODO(Robert): Functions with void return type may have return statements
+     * with expressions, so long as the expression's result is void or cast to
+     * void. `types_assignable` returns 0 when asked if you can assign `void`
+     * to `void`. This is correct behavior, so a special case should be added
+     * here to catch that.
+     */
     if (types_assignable(&ret_spec, expr)) {
       typespec_destroy(&ret_spec);
       maybe_load_cexpr(expr, NULL);
