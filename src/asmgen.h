@@ -181,6 +181,8 @@ extern const size_t RBP_VREG;
 extern const size_t REAL_REG_COUNT;
 extern const size_t VOLATILE_REGS[];
 extern const size_t VOLATILE_REG_COUNT;
+extern ptrdiff_t window_size;
+
 const char *mk_static_label(const char *name, size_t unique_id);
 const char *mk_fnptr_text(const char *name);
 InstructionData *instr_init(Opcode opcode);

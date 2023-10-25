@@ -23,11 +23,7 @@ typedef struct reg_desc RegDesc;
 static size_t reg_descs_sizes[16];
 static size_t reg_descs_caps[16];
 /* location of 24-byte region for contents of unspilled registers */
-static ptrdiff_t unspill_region;
-/* total number of bytes spilled, including padding */
-static ptrdiff_t spill_bytes;
-/* function stack window size before spill bytes are accounted for */
-static ptrdiff_t window_size;
+static ptrdiff_t unspill_region = -32;
 
 static ptrdiff_t *vreg_descs;
 static size_t vreg_descs_size;
@@ -382,11 +378,11 @@ int assign_or_spill(size_t *vreg_num, size_t vreg_width,
       vreg_descs[vreg_index] = next_available;
     } else {
       /* spill */
-      ptrdiff_t padding = spill_bytes % vreg_width == 0
+      ptrdiff_t padding = window_size % vreg_width == 0
                               ? 0
-                              : vreg_width - spill_bytes % vreg_width;
-      spill_bytes += padding + vreg_width;
-      vreg_descs[vreg_index] = -spill_bytes;
+                              : vreg_width - window_size % vreg_width;
+      window_size += padding + vreg_width;
+      vreg_descs[vreg_index] = -window_size;
     }
   } else {
     ptrdiff_t location = vreg_descs[vreg_index];
@@ -645,6 +641,11 @@ int allocate_regs(ListIter *first, ListIter *last) {
   vreg_descs_cap = 8;
   vreg_descs = malloc(sizeof(ptrdiff_t) * vreg_descs_cap);
   ListIter *current = liter_copy(first);
+
+  /* save window_size before spilling registers so that we know how many bytes
+   * have been spilled for debugging purposes
+   */
+  ptrdiff_t old_window_size = window_size;
 
   /* we should be able to run through directives as though they were
    * instructions and nothing should happen to them, since their operands

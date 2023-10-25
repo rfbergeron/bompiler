@@ -30,11 +30,11 @@
     return BOOL;
 
 #define GENERATE_T1_REGS(REGBASE) \
-#REGBASE "L", #REGBASE "X", "E" #REGBASE "X", "R" #REGBASE "X"
+  #REGBASE "L", #REGBASE "X", "E" #REGBASE "X", "R" #REGBASE "X"
 #define GENERATE_T2_REGS(REGBASE) \
-#REGBASE "L", #REGBASE, "E" #REGBASE, "R" #REGBASE
+  #REGBASE "L", #REGBASE, "E" #REGBASE, "R" #REGBASE
 #define GENERATE_T3_REGS(REGBASE) \
-#REGBASE "B", #REGBASE "W", #REGBASE "D", #REGBASE
+  #REGBASE "B", #REGBASE "W", #REGBASE "D", #REGBASE
 #define SELECT_REG(NUM, WIDTH)                            \
   VREG_REG_TABLE[((NUM * 4) + ((WIDTH) == REG_BYTE    ? 0 \
                                : (WIDTH) == REG_WORD  ? 1 \
@@ -110,7 +110,7 @@ static size_t arg_reg_index;
 static ptrdiff_t arg_stack_disp;
 static size_t param_reg_index;
 static ptrdiff_t param_stack_disp;
-static ptrdiff_t window_size;
+ptrdiff_t window_size;
 
 static LinkedList *instructions;
 static ListIter *before_definition;
@@ -2675,8 +2675,9 @@ ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
 ASTree *begin_translate_fn(ASTree *declaration, ASTree *declarator,
                            ASTree *body) {
   DEBUGS('g', "Translating function prologue");
-  /* reserve 8 bytes for shuffling around register return values */
-  window_size = 8;
+  /* reserve 8 bytes for shuffling around register return values, and another
+   * 24 for the allocator to unspill registers to */
+  window_size = 32;
   InstructionData *text_data = instr_init(OP_TEXT);
   int status = llist_push_back(instructions, text_data);
   if (status) abort();
@@ -2714,14 +2715,11 @@ ASTree *begin_translate_fn(ASTree *declaration, ASTree *declarator,
 }
 
 ASTree *end_translate_fn(ASTree *declaration) {
-  /* align ensure stack alignment to 16x + 8 */
-  size_t window_padding = (window_size % 16 > 0) ? 16 - (window_size % 16) : 0;
-  assert(window_padding <= PTRDIFF_MAX);
-  window_size += window_padding;
-  /* emit rsp adjustment now that we know the amount of stack space */
+  /* emit rsp adjustment; set to bogus value initially since we don't know how
+   * many bytes the register allocator will spill yet */
   InstructionData *rsp_sub_data = instr_init(OP_SUB);
   set_op_reg(&rsp_sub_data->dest, REG_QWORD, RSP_VREG);
-  set_op_imm(&rsp_sub_data->src, window_size, IMM_UNSIGNED);
+  set_op_imm(&rsp_sub_data->src, PTRDIFF_MAX, IMM_UNSIGNED);
   int status = liter_push_back(declaration->last_instr, NULL, 1, rsp_sub_data);
   if (status) abort();
   free(declaration->last_instr);
@@ -2746,8 +2744,17 @@ ASTree *end_translate_fn(ASTree *declaration) {
 
   status = liveness_sr(declaration->first_instr, declaration->last_instr);
   if (status) abort();
+  /* this function will adjust window_size to account for spilled bytes */
   status = allocate_regs(declaration->first_instr, declaration->last_instr);
   if (status) abort();
+
+  /* align to ensure stack alignment to 16x + 8 */
+  size_t window_padding = (window_size % 16 > 0) ? 16 - (window_size % 16) : 0;
+  assert(window_padding <= PTRDIFF_MAX);
+  window_size += window_padding;
+
+  /* set rsp adjustment to its actual value */
+  rsp_sub_data->src.imm.val = window_size;
   return declaration;
 }
 
