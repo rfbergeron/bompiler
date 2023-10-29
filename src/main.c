@@ -219,7 +219,9 @@ int main(int argc, char **argv) {
   astree_print_symbols(UNWRAP(parser_root), symfile, 0);
   astree_print_tree(UNWRAP(parser_root), astfile, 0);
   generator_debug_il(ilfile);
+  if (skip_asm) goto skip_asm;
   generator_print_il(asmfile);
+skip_asm:
 
 cleanup:
   if (parser_root->symbol == TOK_TYPE_ERROR) {

@@ -554,7 +554,13 @@ void assign_static_space(const char *ident, SymbolValue *symval) {
  * any int -> any int of same width: nop
  */
 int scalar_conversions(ASTree *expr, const TypeSpec *to) {
+  if (!typespec_is_scalar(to) && !typespec_is_enum(to) &&
+      !typespec_is_array(to))
+    return -1;
   const TypeSpec *from = expr->type;
+  if (!typespec_is_scalar(from) && !typespec_is_enum(from) &&
+      !typespec_is_array(from))
+    return -1;
   size_t from_width = typespec_get_width(from);
   if (expr->attributes & ATTR_EXPR_LVAL) {
     InstructionData *lvalue_data = liter_get(expr->last_instr);
@@ -727,8 +733,11 @@ ASTree *translate_ident(ASTree *ident) {
 ASTree *translate_cast(ASTree *cast, ASTree *expr) {
   DEBUGS('g', "Translating cast");
 
-  int status = scalar_conversions(expr, cast->type);
-  if (status) abort();
+  if (typespec_is_scalar(cast->type) || typespec_is_enum(cast->type) ||
+      typespec_is_array(cast->type)) {
+    int status = scalar_conversions(expr, cast->type);
+    if (status) abort();
+  }
 
   cast->first_instr = liter_copy(expr->first_instr);
   if (cast->first_instr == NULL) abort();
@@ -2187,7 +2196,7 @@ int return_void(ASTree *ret) {
 
 ASTree *translate_return(ASTree *ret, ASTree *expr) {
   DEBUGS('g', "Translating return statement");
-  if (expr == &EMPTY_EXPR) {
+  if (expr == &EMPTY_EXPR || typespec_is_void(expr->type)) {
     int status = return_void(ret);
     if (status) abort();
   } else {
