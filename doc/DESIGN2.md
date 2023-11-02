@@ -85,6 +85,129 @@ x64), since they are both represented internally as addresses in memory. The
 alignment of the members themselves will be specified in the `struct typespec`
 itself.
 
+## New Type System
+The new type system is cumbersome, confusing, and requires a lot of extra work
+in order to manipulate types. So, I will be designing a new, simpler, and better
+way of representing types.
+
+Types will no longer use the doubly-linked list data structure from badlib.
+Instead, they will be represented as a custom singly-linked list. The nodes of
+this linked list will be a union of structs.
+
+```
+typedef enum type_code {
+    TYPE_CODE_NONE,
+    TYPE_CODE_STRUCT,
+    TYPE_CODE_UNION,
+    TYPE_CODE_ENUM,
+    TYPE_CODE_POINTER,
+    TYPE_CODE_FUNCTION,
+    TYPE_CODE_ARRAY,
+    TYPE_CODE_BASE
+} TypeCode;
+
+typedef enum base_type {
+    BASE_TYPE_VOID = 0 ,
+    BASE_TYPE_CHAR_ONLY = 1, /* used for `char` */
+    BASE_TYPE_UCHAR = 2,
+    BASE_TYPE_SCHAR = 3,
+ /* 
+  * BASE_TYPE_FLOAT = 4,
+  * BASE_TYPE_DOUBLE = 5,
+  * BASE_TYPE_LONG_DOUBLE = 6,
+  * BASE_TYPE_BOOL = 7,
+  */
+    BASE_TYPE_UINT, /* use 3rd bit as flag, bits 0-2 as a 3-bit integer */
+    BASE_TYPE_USHRT,
+    BASE_TYPE_ULONG,
+ /* BASE_TYPE_ULLONG, */
+    BASE_TYPE_SINT,
+    BASE_TYPE_SSHRT,
+    BASE_TYPE_SLONG,
+ /* BASE_TYPE_SLLONG, */
+} BaseType;
+
+/* Qualifier and storage class flags will be specified such that they do not
+   overlap with any of the base type enums, even if it is not valid for the
+   given base type to have a given flag.
+
+   Storage class flags are technically for symbols, not for types, but because
+   of the compiler's structure the storage class information must be propogated
+   through the types system in order for the symbol to receive the info.
+
+   Integral values have 4 possible sizes: none, short, long, and long long.
+   They also have a signedness flag.
+
+   This representation is not explicit; base type codes are enumerated in such
+   a way that they can be treated as a 3-bit integer: one bit for the signedness
+   and two more bits for the size.
+ */
+
+typedef enum type_qual_flag {
+    QUAL_FLAG_CONST = 1 << 4,
+    QUAL_FLAG_VOLATILE = 1 << 5,
+    QUAL_FLAG_TYPEDEF = 1 << 6,
+ /* 
+  * QUAL_FLAG_RESTRICT = 1 << 7,
+  * QUAL_FLAG_ATOMIC = 1 << 8,
+  */
+} QualFlag;
+
+typedef enum type_stor_flag {
+    STOR_FLAG_AUTO = 1 << 9,
+    STOR_FLAG_REGISTER = 1 << 10,
+    STOR_FLAG_STATIC = 1 << 11,
+    STOR_FLAG_EXTERN = 1 << 12,
+    STOR_FLAG_TYPEDEF = 1 << 13,
+} StorFlag;
+
+typedef union type Type;
+union type {
+    struct any_type {
+        TypeCode code;
+    } any;
+    struct pointer_type {
+        TypeCode code;
+        unsigned int qualifiers;
+        Type *next;
+    } pointer;
+    struct array_type {
+        TypeCode code;
+        int deduce_length;
+        Type *next;
+        size_t length;
+    } array;
+    /* functions whose number and types of parameters are not specified will
+       have a types_size of 1; this indicates that only the return type was
+       specified and that the parameters were specified as '()'. functions with
+       an explicit '(void)' will have a second entry in `types` with type void.
+
+       should the types of a function's parameters be stored in a function's
+       type node, or should the names of the parameters be stored instead?
+     */
+    struct function_type {
+        TypeCode code;
+        int variadic;
+        Type **types; /* first type is always the return/base type */
+        size_t types_size; /* minimum 1 */
+    } function;
+    struct tag_type {
+        TypeCode code;
+        unsigned int qualifiers;
+        const char *tag_name;
+        TagValue *tag_value;
+    } tag;
+    /* base types don't need their alignment and size recorded here; provide
+     * functions which return alignment and size based on hard-coded values in
+     * a switch statement.
+     */
+    struct base_type {
+        TypeCode code;
+        unsigned int type_flags;
+    } base;
+};
+```
+
 ## Checking types of return statements
 The statement checking function must be able to check the type of a return
 statement against the return type of the function being checked. This could be
