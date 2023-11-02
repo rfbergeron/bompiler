@@ -4,6 +4,7 @@
 #include "attributes.h"
 #include "badllist.h"
 #include "badmap.h"
+#include "bcc_types.h"
 
 #define DEFAULT_MAP_SIZE 100
 
@@ -45,7 +46,7 @@ typedef enum symbol_flag {
 typedef struct symbol_value {
   size_t sequence;    /* used to order declarations in a given block */
   Location loc;       /* declaration location */
-  TypeSpec type;      /* type of symbol */
+  Type* type;         /* type of symbol */
   unsigned int flags; /* flags, as enumerated above */
   ptrdiff_t disp;     /* displacement on stack/in struct */
   size_t static_id;   /* unique id for static local variables */

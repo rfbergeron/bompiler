@@ -187,6 +187,7 @@ int type_to_str(const Type *type, char *buf, size_t size) {
                 break;
         }
     }
+    return ret;
 }
 
 int type_is_void(const Type *type) {
