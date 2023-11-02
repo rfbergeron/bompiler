@@ -25,6 +25,7 @@ enum attribute {
   ATTR_MASK_CONST = ATTR_EXPR_CONST | ATTR_CONST_INIT | ATTR_CONST_ADDR
 };
 
+/*
 typedef enum base_type {
   TYPE_NONE,
   TYPE_SIGNED,
@@ -46,6 +47,7 @@ typedef enum aux_type {
   AUX_FUNCTION,
   AUX_ERROR
 } AuxType;
+*/
 
 /*
 enum conversion_type {
@@ -60,6 +62,7 @@ enum conversion_type {
 };
 */
 
+/*
 enum typespec_index {
   TYPESPEC_INDEX_INT = 0,
   TYPESPEC_INDEX_CHAR,
@@ -72,19 +75,18 @@ enum typespec_index {
   TYPESPEC_INDEX_STRUCT,
   TYPESPEC_INDEX_UNION,
   TYPESPEC_INDEX_ENUM,
-  /* storage class */
   TYPESPEC_INDEX_REGISTER,
   TYPESPEC_INDEX_STATIC,
   TYPESPEC_INDEX_EXTERN,
   TYPESPEC_INDEX_AUTO,
   TYPESPEC_INDEX_TYPEDEF,
-  /* qualifiers */
   TYPESPEC_INDEX_CONST,
   TYPESPEC_INDEX_VOLATILE,
-  /* number of type specifiers */
   TYPESPEC_INDEX_COUNT
 };
+*/
 
+/*
 enum typespec_flag {
   TYPESPEC_FLAG_NONE = 0,
   TYPESPEC_FLAG_INT = 1 << TYPESPEC_INDEX_INT,
@@ -98,18 +100,18 @@ enum typespec_flag {
   TYPESPEC_FLAG_STRUCT = 1 << TYPESPEC_INDEX_STRUCT,
   TYPESPEC_FLAG_UNION = 1 << TYPESPEC_INDEX_UNION,
   TYPESPEC_FLAG_ENUM = 1 << TYPESPEC_INDEX_ENUM,
-  /* storage class */
   TYPESPEC_FLAG_REGISTER = 1 << TYPESPEC_INDEX_REGISTER,
   TYPESPEC_FLAG_STATIC = 1 << TYPESPEC_INDEX_STATIC,
   TYPESPEC_FLAG_EXTERN = 1 << TYPESPEC_INDEX_EXTERN,
   TYPESPEC_FLAG_AUTO = 1 << TYPESPEC_INDEX_AUTO,
   TYPESPEC_FLAG_TYPEDEF = 1 << TYPESPEC_INDEX_TYPEDEF,
-  /* qualifiers */
   TYPESPEC_FLAG_CONST = 1 << TYPESPEC_INDEX_CONST,
   TYPESPEC_FLAG_VOLATILE = 1 << TYPESPEC_INDEX_VOLATILE
 };
+*/
 
 /* "char" is not included in any of these groups */
+/*
 #define TYPESPEC_FLAGS_INTEGER                                    \
   (TYPESPEC_FLAG_INT | TYPESPEC_FLAG_SHORT | TYPESPEC_FLAG_LONG | \
    TYPESPEC_FLAG_LONG_LONG)
@@ -121,8 +123,11 @@ enum typespec_flag {
 #define TYPESPEC_FLAGS_STORAGE_CLASS                                      \
   (TYPESPEC_FLAG_REGISTER | TYPESPEC_FLAG_STATIC | TYPESPEC_FLAG_EXTERN | \
    TYPESPEC_FLAG_AUTO | TYPESPEC_FLAG_TYPEDEF)
+*/
 
+/*
 extern const unsigned int INCOMPATIBLE_FLAGSETS[];
+*/
 
 typedef enum bcc_type_err {
   BCC_TERR_FAILURE = -1,
@@ -170,6 +175,7 @@ typedef enum bcc_type_err {
   BCC_TERR_CONST_TOO_LARGE
 } TypeErr;
 
+/*
 typedef struct auxspec {
   union {
     struct {
@@ -193,11 +199,13 @@ typedef struct auxspec {
   } data;
   AuxType aux;
 } AuxSpec;
+*/
 
 /*
  * auxinfo will contain information about structs/unions, pointers, functions,
  * typedefs, and arrays.
  */
+/*
 typedef struct typespec {
   size_t width;
   size_t alignment;
@@ -205,6 +213,7 @@ typedef struct typespec {
   unsigned int flags;
   BaseType base;
 } TypeSpec;
+*/
 
 typedef struct location {
   size_t filenr;
@@ -218,6 +227,7 @@ extern const size_t MAX_IDENT_LEN;
 extern const char VA_LIST_TYPEDEF_NAME[];
 extern const char VA_LIST_STRUCT_NAME[];
 extern const char VA_LIST_MEMBER_NAMES[][sizeof("overflow_arg_area")];
+/*
 extern const AuxSpec AUXSPEC_PTR;
 extern const AuxSpec AUXSPEC_CONST_PTR;
 extern const AuxSpec AUXSPEC_VOLATILE_PTR;
@@ -235,6 +245,7 @@ extern const TypeSpec SPEC_USHRT;
 extern const TypeSpec SPEC_SHRT;
 extern const TypeSpec SPEC_UCHAR;
 extern const TypeSpec SPEC_SCHAR;
+*/
 
 #define LOC_EMPTY_VALUE \
   { 0, 0, 0, 0 }
@@ -244,8 +255,10 @@ extern const Location LOC_EMPTY;
 int attributes_to_string(const unsigned int attributes, char *buf, size_t size);
 int location_to_string(const Location *loc, char *buf, size_t size);
 int flags_to_string(const unsigned int flags, char *buf, size_t size);
+/*
 int type_to_string(const TypeSpec *type, char *buf, size_t size);
-
+*/
+/*
 int auxspec_destroy(AuxSpec *auxspec);
 int auxspec_copy(AuxSpec *dest, const AuxSpec *src);
 
@@ -294,4 +307,5 @@ int typespec_is_aggregate(const TypeSpec *type);
 int typespec_is_enum(const TypeSpec *type);
 int typespec_is_chararray(const TypeSpec *type);
 int typespec_is_const(const TypeSpec *type);
+*/
 #endif
