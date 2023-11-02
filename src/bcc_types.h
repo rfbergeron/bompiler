@@ -96,38 +96,38 @@ typedef enum type_storage_flag {
 
 typedef union type Type;
 union type {
-    struct any_type {
+    struct {
         TypeCode code;
     } any;
-    struct pointer_type {
+    struct {
         TypeCode code;
         unsigned int qualifiers;
         Type *next;
     } pointer;
-    struct array_type {
+    struct {
         TypeCode code;
         int deduce_length;
         Type *next;
         size_t length;
     } array;
-    struct function_type {
+    struct {
         TypeCode code;
         short variadic;
         unsigned short parameters_size;
         Type *next;
         struct symbol_value **parameters;
     } function;
-    struct tag_type {
+    struct {
         TypeCode code;
         unsigned int qualifiers;
         const char *tag_name;
         struct tag_value *tag_value;
     } tag;
-    struct base_type {
+    struct {
         TypeCode code;
         unsigned int type_flags;
     } base;
-    struct error_type {
+    struct {
         TypeCode code;
         unsigned int flags;
         void **info;

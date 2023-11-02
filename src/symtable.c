@@ -61,21 +61,21 @@ void destroy_unique_name(const char *str) {
  */
 SymbolValue *symbol_value_init(const Location *loc, const size_t sequence) {
   SymbolValue *ret = malloc(sizeof(*ret));
-  ret->type = SPEC_EMPTY;
+  ret->type = NULL;
   ret->loc = *loc;
   ret->sequence = sequence;
   ret->flags = SYMFLAG_NONE;
   ret->disp = 0;
   ret->static_id = 0;
   ret->next_use = NULL;
-  typespec_init(&ret->type);
   return ret;
 }
 
 int symbol_value_destroy(SymbolValue *symbol_value) {
   DEBUGS('t', "freeing symbol value");
   if (symbol_value == NULL) return 0;
-  int status = typespec_destroy(&(symbol_value->type));
+
+  int status = type_destroy(symbol_value->type);
   free(symbol_value);
 
   DEBUGS('t', "done");
@@ -91,9 +91,9 @@ int symbol_value_print(const SymbolValue *symbol, char *buffer, size_t size) {
   char locstr[LINESIZE];
   location_to_string(&symbol->loc, locstr, LINESIZE);
   char typestr[LINESIZE];
-  type_to_string(&symbol->type, typestr, LINESIZE);
-  size_t sym_width = typespec_get_width((TypeSpec *)&symbol->type);
-  size_t sym_align = typespec_get_alignment((TypeSpec *)&symbol->type);
+  type_to_str(symbol->type, typestr, LINESIZE);
+  size_t sym_width = type_get_width(symbol->type);
+  size_t sym_align = type_get_alignment(symbol->type);
   const char *link_str;
   if (symbol->flags & SYMFLAG_TYPENAME)
     link_str = "TYPENAME";
