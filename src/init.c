@@ -51,10 +51,13 @@ static ASTree *init_scalar(const Type *type, ptrdiff_t disp,
 
 static ASTree *init_literal(Type *arr_type, ptrdiff_t arr_disp, ASTree *literal,
                             ListIter *where) {
-  if (type_is_deduced_array(arr_type) && type_get_width(arr_type) == 0) {
+  if (!type_is_deduced_array(arr_type) &&
+      type_get_width(arr_type) > strlen(literal->lexinfo))
+    return astree_create_errnode(literal, BCC_TERR_EXCESS_INITIALIZERS, 1,
+                                 literal);
+  else if (type_is_deduced_array(arr_type) && type_get_width(arr_type) == 0)
     /* subtract 2 for quotes, add 1 for nul terminator */
     arr_type->array.length = strlen(literal->lexinfo) - 2 + 1;
-  }
 
   if (arr_disp >= 0) {
     return translate_static_literal_init(arr_type, literal, where);
@@ -71,6 +74,11 @@ ASTree *init_array(Type *arr_type, ptrdiff_t arr_disp, ASTree *init_list,
   size_t elem_width = type_get_width(elem_type),
          elem_count = type_member_count(arr_type),
          init_count = astree_count(init_list), elem_index;
+
+  if (!type_is_deduced_array(arr_type) && elem_count < init_count)
+    return astree_create_errnode(init_list, BCC_TERR_EXCESS_INITIALIZERS, 1,
+                                 init_list);
+
   for (elem_index = 0;
        (elem_index < elem_count || type_is_deduced_array(arr_type)) &&
        *init_index < init_count;
