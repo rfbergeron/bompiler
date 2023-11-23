@@ -176,8 +176,8 @@ int state_get_selection_default(CompilerState *state) {
   return ((SwitchInfo *)llist_front(&state->switch_stack))->has_default;
 }
 
-const TypeSpec *state_get_control_type(CompilerState *state) {
-  if (llist_empty(&state->switch_stack)) return &SPEC_EMPTY;
+const Type *state_get_control_type(CompilerState *state) {
+  if (llist_empty(&state->switch_stack)) return NULL;
   return ((SwitchInfo *)llist_front(&state->switch_stack))->control_type;
 }
 
@@ -249,7 +249,7 @@ int state_set_selection_default(CompilerState *state) {
   return 0;
 }
 
-int state_set_control_type(CompilerState *state, const TypeSpec *type) {
+int state_set_control_type(CompilerState *state, const Type *type) {
   SwitchInfo *info = llist_front(&state->switch_stack);
   if (info == NULL) return -1;
   if (info->control_type != NULL) abort();

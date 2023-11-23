@@ -15,17 +15,17 @@
 int flags[UCHAR_MAX + 1] = {0};
 
 void debug_set_flags(const char *initflags) {
-  size_t i;
-  for (i = 0; i < strlen(initflags); ++i) {
-    const unsigned char flag = *(initflags + i);
+  size_t i, flags_len = strlen(initflags);
+  for (i = 0; i < flags_len; ++i) {
+    char flag = initflags[i];
 
     if (flag == '@') {
       size_t j;
-      for (j = 0; i < UCHAR_MAX + 1; ++i) {
-        flags[i] = 1;
+      for (j = 0; j < UCHAR_MAX + 1; ++j) {
+        flags[j] = 1;
       }
     } else {
-      flags[flag] = 1;
+      flags[(unsigned char)flag] = 1;
     }
   }
 }

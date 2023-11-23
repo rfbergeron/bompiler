@@ -1,4 +1,4 @@
-export CWARN ?= -Wall -Wextra -Wpedantic -Wno-shadow -Wno-declaration-after-statement -Wno-unused -Wno-variadic-macros -Wno-cast-function-type
+export CWARN ?= -Wall -Wextra -Wpedantic -Wno-shadow -Wno-declaration-after-statement -Wno-variadic-macros -Wno-cast-function-type
 export CFLAGS ?= -Isrc -Ibuild -Ibadlib -Ibadlib/murmur3 -ansi
 WRAP_ATTRS := -Wl,--wrap=auxspec_destroy,--wrap=typespec_destroy,--wrap=create_erraux_v,--wrap=typespec_append_auxspecs,--wrap=typespec_append_aux,--wrap=typespec_prepend_aux,--wrap=typespec_init,--wrap=typespec_get_aux
 WRAP_LYUTILS := -Wl,--wrap=parser_get_tname
@@ -7,8 +7,8 @@ WRAP_SYMTABLE := -Wl,--wrap=symbol_table_destroy
 WRAP_STATE := -WL,--wrap=state_get_label
 MKFILE := Makefile
 EXE := build/bompiler
-SRC := debug.c bcc_err.c attributes.c strset.c lyutils.c astree.c symtable.c tchk_common.c tchk_expr.c tchk_stmt.c tchk_decl.c asmgen.c state.c evaluate.c init.c regalloc.c main.c
-HDR := debug.h bcc_err.h attributes.h strset.h lyutils.h astree.h symtable.h tchk_common.h tchk_expr.h tchk_stmt.h tchk_decl.h asmgen.h state.h evaluate.h init.h regalloc.h simplestack.h
+SRC := debug.c bcc_err.c bcc_types.c strset.c lyutils.c astree.c symtable.c tchk_expr.c tchk_stmt.c tchk_decl.c asmgen.c state.c evaluate.c init.c regalloc.c main.c
+HDR := debug.h bcc_err.h bcc_types.h strset.h lyutils.h astree.h symtable.h tchk_expr.h tchk_stmt.h tchk_decl.h asmgen.h state.h evaluate.h init.h regalloc.h simplestack.h
 OBJ := ${SRC:.c=.o}
 # unit test files
 UNITS := build/astree_test
@@ -30,14 +30,14 @@ OBJFILES := ${OBJ:%=build/%} ${GENOBJ:%=build/%} ${LIBOBJ:%=build/%}
 all: CFLAGS += -O1
 all: ${EXE}
 
-debug: CFLAGS += -Og -pg -g -fsanitize=undefined -fstack-protector-all
+debug: CFLAGS += -O0 -pg -g -fsanitize=undefined -fstack-protector-all
 debug: LDFLAGS += -Wl,-Map=./output.map
 debug: ${EXE}
 
-sanitize: CFLAGS += -Og -pg -g -fsanitize=address -fsanitize=undefined -fstack-protector-all
+sanitize: CFLAGS += -O0 -pg -g -fsanitize=address -fsanitize=undefined -fstack-protector-all
 sanitize: ${EXE}
 
-units: CFLAGS += -Og -pg -g
+units: CFLAGS += -O0 -pg -g
 units: LDFLAGS += -lcmocka
 units: export CPPFLAGS = -DUNIT_TESTING
 units: ${UNITS}
@@ -77,12 +77,16 @@ build/yyparse.h build/yyparse.c&: src/parser.y build
 
 format:
 	clang-format --style=Google -i ${SRC:%=src/%} ${HDR:%=src/%} \
-	${UNITSRC:%=src/%} src/parser.y
+	${UNITSRC:%=src/%} src/parser.y src/parser.c
 
-ci: format
+check:
+	clang-format --style=Google --dry-run --Werror ${SRC:%=src/%} \
+        ${HDR:%=src/%} ${UNITSRC:%=src/%} src/parser.y src/parser.c
+
+ci: check
 	git add ${HDR:%=src/%} ${SRC:%=src/%} ${UNITSRC:%=src/%} ${MKFILE} \
 	README.md doc/*.md .gitignore .gitmodules \
-	src/parser.y src/scanner.l badlib
+	src/parser.y src/parser.c src/scanner.l badlib
 	make -C test ci
 
 test:

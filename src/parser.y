@@ -1,18 +1,35 @@
 /* clang-format off */
-/* *INDENT-OFF* */
 %{
+/* clang-format on */
 #include <assert.h>
 
-#include "lyutils.h"
 #include "astree.h"
+#include "bcc_err.h"
 #include "debug.h"
-#include "attributes.h"
+#include "lyutils.h"
+#include "state.h"
 #include "symtable.h"
+#include "tchk_decl.h"
 #include "tchk_expr.h"
 #include "tchk_stmt.h"
-#include "tchk_decl.h"
-#include "bcc_err.h"
-#include "state.h"
+
+  static ASTree *parser_make_root();
+  static ASTree *parser_new_sym(ASTree * tree, int new_symbol);
+  static ASTree *parser_make_spec_list(ASTree * first_specifier);
+  static ASTree *parser_make_declaration(ASTree * spec_list);
+  static ASTree *parser_make_param_list(ASTree * left_paren, ASTree * spec_list,
+                                        ASTree * declarator);
+  static ASTree *parser_make_type_name(void);
+  static ASTree *parser_make_cast(ASTree * left_paren, ASTree * spec_list,
+                                  ASTree * type_name, ASTree * expr);
+  static ASTree *parser_make_label(ASTree * ident);
+  static ASTree *parser_make_auto_conv(ASTree * tree, int convert_arrays);
+  static ASTree *parse_sizeof(ASTree * sizeof_, ASTree * spec_list,
+                              ASTree * declarator);
+  static ASTree *parse_va_arg(ASTree * va_arg_, ASTree * expr,
+                              ASTree * spec_list, ASTree * declarator);
+  static void parser_cleanup(size_t count, ...);
+  /* clang-format off */
 %}
 
 %debug
@@ -76,7 +93,7 @@
  * are meant to be read.
  */
 %%
-program             : %empty                                            { $$ = bcc_yyval = parser_root = parser_make_root(); }
+program             : %empty                                            { parser_init_globals(); $$ = bcc_yyval = parser_root; }
                     | program topdecl                                   { $$ = bcc_yyval = parser_root = validate_topdecl($1, finalize_declaration($2)); }
                     | program error '}'                                 { $$ = bcc_yyval = $1; astree_destroy($3); }
                     | program error ';'                                 { $$ = bcc_yyval = $1; astree_destroy($3); }
@@ -145,7 +162,7 @@ enum_def            : TOK_ENUM any_ident '{' any_ident                  { $$ = b
                     | enum_def ',' any_ident                            { $$ = bcc_yyval = define_enumerator($1, $3, NULL, NULL); parser_cleanup(1, $2); }
                     | enum_def ',' any_ident '=' cond_expr              { $$ = bcc_yyval = define_enumerator($1, $3, $4, $5); parser_cleanup(1, $2); }
                     ;
-initializer         : assign_expr                                       { $$ = bcc_yyval = $1; } /* do nothing */
+initializer         : assign_expr                                       { $$ = bcc_yyval = $1->symbol == TOK_STRINGCON ? $1 : parser_make_auto_conv($1, 1); } /* do nothing */
                     | init_list '}'                                     { $$ = bcc_yyval = $1; astree_destroy($2); } /* do nothing */
                     | init_list ',' '}'                                 { $$ = bcc_yyval = $1; astree_destroy($2); astree_destroy($3); } /* do nothing */
                     ;
@@ -203,28 +220,31 @@ stmt_expr           : expr ';'                                          { $$ = b
 labelled_stmt       : any_ident ':' stmt                                { $$ = bcc_yyval = validate_label(parser_make_label($1), $1, $3); parser_cleanup(1, $2); }
                     | TOK_DEFAULT ':' stmt                              { $$ = bcc_yyval = validate_default($1, $3); parser_cleanup(1, $2); }
                     | TOK_CASE cond_expr   ':' stmt                     { $$ = bcc_yyval = validate_case($1, $2, $4); parser_cleanup(1, $3); }
+                    /* TODO(Robert): can't we just use the empty node instead of changing the symbol for ')' ? */
+                    /* TODO(Robert): do we need to perform automatic conversions for statements? */
                     ;
-for                 : TOK_FOR '(' stmt_expr stmt_expr ')' stmt          { $$ = bcc_yyval = validate_for($1, $3, $4, parser_new_sym($5, ';'), $6); parser_cleanup(1, $2); }
-                    | TOK_FOR '(' stmt_expr stmt_expr expr ')' stmt     { $$ = bcc_yyval = validate_for($1, $3, $4, $5, $7); parser_cleanup(2, $2, $6); }
+for                 : TOK_FOR '(' stmt_expr stmt_expr ')' stmt          { $$ = bcc_yyval = validate_for($1, $3, parser_make_auto_conv($4, 1), parser_new_sym($5, ';'), $6); parser_cleanup(1, $2); }
+                    | TOK_FOR '(' stmt_expr stmt_expr expr ')' stmt     { $$ = bcc_yyval = validate_for($1, $3, parser_make_auto_conv($4, 1), $5, $7); parser_cleanup(2, $2, $6); }
                     ;
-dowhile             : TOK_DO stmt TOK_WHILE '(' expr ')' ';'            { $$ = bcc_yyval = validate_do($1, $2, $5); parser_cleanup (4, $3, $4, $6, $7); }
+dowhile             : TOK_DO stmt TOK_WHILE '(' expr ')' ';'            { $$ = bcc_yyval = validate_do($1, $2, parser_make_auto_conv($5, 1)); parser_cleanup (4, $3, $4, $6, $7); }
                     ;
-while               : TOK_WHILE '(' expr ')' stmt                       { $$ = bcc_yyval = validate_while($1, $3, $5); parser_cleanup (2, $2, $4); }
+while               : TOK_WHILE '(' expr ')' stmt                       { $$ = bcc_yyval = validate_while($1, parser_make_auto_conv($3, 1), $5); parser_cleanup (2, $2, $4); }
                     ;
-ifelse              : TOK_IF '(' expr ')' stmt TOK_ELSE stmt            { $$ = bcc_yyval = validate_ifelse($1, $3, $5, $7); parser_cleanup (3, $2, $4, $6); }
-                    | TOK_IF '(' expr ')' stmt %prec TOK_ELSE           { $$ = bcc_yyval = validate_ifelse($1, $3, $5, &EMPTY_EXPR); parser_cleanup (2, $2, $4); }
+ifelse              : TOK_IF '(' expr ')' stmt TOK_ELSE stmt            { $$ = bcc_yyval = validate_ifelse($1, parser_make_auto_conv($3, 1), $5, $7); parser_cleanup (3, $2, $4, $6); }
+                    | TOK_IF '(' expr ')' stmt %prec TOK_ELSE           { $$ = bcc_yyval = validate_ifelse($1, parser_make_auto_conv($3, 1), $5, &EMPTY_EXPR); parser_cleanup (2, $2, $4); }
                     ;
 switch              : TOK_SWITCH '(' switch_expr ')' stmt               { $$ = bcc_yyval = validate_switch($1, $3, $5); parser_cleanup(2, $2, $4); }
                     ;
 switch_expr         : expr                                              { $$ = bcc_yyval = validate_switch_expr($1); }
                     ;
-return              : TOK_RETURN expr ';'                               { $$ = bcc_yyval = validate_return($1, $2); parser_cleanup (1, $3); }
+return              : TOK_RETURN expr ';'                               { $$ = bcc_yyval = validate_return($1, parser_make_auto_conv($2, 1)); parser_cleanup (1, $3); }
                     | TOK_RETURN ';'                                    { $$ = bcc_yyval = validate_return($1, &EMPTY_EXPR); parser_cleanup (1, $2); }
                     ;
 expr                : assign_expr                                       { $$ = bcc_yyval = $1; }
-                    | expr ',' assign_expr                              { $$ = bcc_yyval = validate_comma($2, $1, $3); }
+                    /* TODO(Robert): should we ever bother converting the left operand? */
+                    | expr ',' assign_expr                              { $$ = bcc_yyval = validate_comma($2, $1, parser_make_auto_conv($3, 1)); }
                     ;
-assign_expr         : assign_expr assign_op cond_expr                   { $$ = bcc_yyval = validate_assignment($2, $1, $3); }
+assign_expr         : assign_expr assign_op cond_expr                   { $$ = bcc_yyval = validate_assignment($2, $1, parser_make_auto_conv($3, 1)); }
                     | cond_expr                                         { $$ = bcc_yyval = $1; }
                     ;
 assign_op           : '='                                               { $$ = $1; }
@@ -239,60 +259,60 @@ assign_op           : '='                                               { $$ = $
                     | TOK_SHREQ                                         { $$ = $1; }
                     | TOK_SHLEQ                                         { $$ = $1; }
                     ;
-cond_expr           : binary_expr '?' expr ':' cond_expr                { $$ = bcc_yyval = validate_conditional($2, $1, $3, $5); astree_destroy($4); }
+cond_expr           : binary_expr '?' expr ':' cond_expr                { $$ = bcc_yyval = validate_conditional($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1), parser_make_auto_conv($5, 1)); astree_destroy($4); }
                     | binary_expr                                       { $$ = bcc_yyval = $1; }
                     ;
-binary_expr         : binary_expr '+' binary_expr                       { $$ = bcc_yyval = validate_addition($2, $1, $3); }
-                    | binary_expr '-' binary_expr                       { $$ = bcc_yyval = validate_addition($2, $1, $3); }
-                    | binary_expr '/' binary_expr                       { $$ = bcc_yyval = validate_multiply($2, $1, $3); }
-                    | binary_expr '*' binary_expr                       { $$ = bcc_yyval = validate_multiply($2, $1, $3); }
-                    | binary_expr '%' binary_expr                       { $$ = bcc_yyval = validate_multiply($2, $1, $3); }
-                    | binary_expr '>' binary_expr                       { $$ = bcc_yyval = validate_relational($2, $1, $3); }
-                    | binary_expr '<' binary_expr                       { $$ = bcc_yyval = validate_relational($2, $1, $3); }
-                    | binary_expr TOK_LE binary_expr                    { $$ = bcc_yyval = validate_relational($2, $1, $3); }
-                    | binary_expr TOK_GE binary_expr                    { $$ = bcc_yyval = validate_relational($2, $1, $3); }
-                    | binary_expr TOK_EQ binary_expr                    { $$ = bcc_yyval = validate_equality($2, $1, $3); }
-                    | binary_expr TOK_NE binary_expr                    { $$ = bcc_yyval = validate_equality($2, $1, $3); }
-                    | binary_expr TOK_OR binary_expr                    { $$ = bcc_yyval = validate_logical($2, $1, $3); }
-                    | binary_expr TOK_AND binary_expr                   { $$ = bcc_yyval = validate_logical($2, $1, $3); }
-                    | binary_expr '|' binary_expr                       { $$ = bcc_yyval = validate_bitwise($2, $1, $3); }
-                    | binary_expr '&' binary_expr                       { $$ = bcc_yyval = validate_bitwise($2, $1, $3); }
-                    | binary_expr '^' binary_expr                       { $$ = bcc_yyval = validate_bitwise($2, $1, $3); }
-                    | binary_expr TOK_SHR binary_expr                   { $$ = bcc_yyval = validate_shift($2, $1, $3); }
-                    | binary_expr TOK_SHL binary_expr                   { $$ = bcc_yyval = validate_shift($2, $1, $3); }
+binary_expr         : binary_expr '+' binary_expr                       { $$ = bcc_yyval = validate_addition($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
+                    | binary_expr '-' binary_expr                       { $$ = bcc_yyval = validate_addition($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
+                    | binary_expr '/' binary_expr                       { $$ = bcc_yyval = validate_multiply($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
+                    | binary_expr '*' binary_expr                       { $$ = bcc_yyval = validate_multiply($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
+                    | binary_expr '%' binary_expr                       { $$ = bcc_yyval = validate_multiply($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
+                    | binary_expr '>' binary_expr                       { $$ = bcc_yyval = validate_relational($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
+                    | binary_expr '<' binary_expr                       { $$ = bcc_yyval = validate_relational($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
+                    | binary_expr TOK_LE binary_expr                    { $$ = bcc_yyval = validate_relational($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
+                    | binary_expr TOK_GE binary_expr                    { $$ = bcc_yyval = validate_relational($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
+                    | binary_expr TOK_EQ binary_expr                    { $$ = bcc_yyval = validate_equality($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
+                    | binary_expr TOK_NE binary_expr                    { $$ = bcc_yyval = validate_equality($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
+                    | binary_expr TOK_OR binary_expr                    { $$ = bcc_yyval = validate_logical($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
+                    | binary_expr TOK_AND binary_expr                   { $$ = bcc_yyval = validate_logical($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
+                    | binary_expr '|' binary_expr                       { $$ = bcc_yyval = validate_bitwise($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
+                    | binary_expr '&' binary_expr                       { $$ = bcc_yyval = validate_bitwise($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
+                    | binary_expr '^' binary_expr                       { $$ = bcc_yyval = validate_bitwise($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
+                    | binary_expr TOK_SHR binary_expr                   { $$ = bcc_yyval = validate_shift($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
+                    | binary_expr TOK_SHL binary_expr                   { $$ = bcc_yyval = validate_shift($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
                     | cast_expr                                         { $$ = bcc_yyval = $1; }
                     ;
-cast_expr           : '(' typespec_list abs_declarator')' unary_expr    { $$ = bcc_yyval = parser_make_cast($1, $2, $3, $5); parser_cleanup(1, $4); }
+cast_expr           : '(' typespec_list abs_declarator')' unary_expr    { $$ = bcc_yyval = parser_make_cast($1, $2, $3, parser_make_auto_conv($5, 1)); parser_cleanup(1, $4); }
                     | unary_expr                                        { $$ = bcc_yyval = $1; }
                     ;
 unary_expr          : postfix_expr                                      { $$ = bcc_yyval = $1; }
-                    | TOK_INC unary_expr                                { $$ = bcc_yyval = validate_increment($1, $2); }
-                    | TOK_DEC unary_expr                                { $$ = bcc_yyval = validate_increment($1, $2); }
-                    | '!' unary_expr                                    { $$ = bcc_yyval = validate_not($1, $2); }
-                    | '~' unary_expr                                    { $$ = bcc_yyval = validate_complement($1, $2); }
-                    | '+' unary_expr                                    { $$ = bcc_yyval = validate_negation(parser_new_sym($1, TOK_POS), $2); }
-                    | '-' unary_expr                                    { $$ = bcc_yyval = validate_negation(parser_new_sym($1, TOK_NEG), $2); }
-                    | '*' unary_expr                                    { $$ = bcc_yyval = validate_indirection(parser_new_sym($1, TOK_INDIRECTION), $2); }
+                    | TOK_INC unary_expr                                { $$ = bcc_yyval = validate_increment($1, parser_make_auto_conv($2, 0)); }
+                    | TOK_DEC unary_expr                                { $$ = bcc_yyval = validate_increment($1, parser_make_auto_conv($2, 0)); }
+                    | '!' unary_expr                                    { $$ = bcc_yyval = validate_not($1, parser_make_auto_conv($2, 1)); }
+                    | '~' unary_expr                                    { $$ = bcc_yyval = validate_complement($1, parser_make_auto_conv($2, 1)); }
+                    | '+' unary_expr                                    { $$ = bcc_yyval = validate_negation(parser_new_sym($1, TOK_POS), parser_make_auto_conv($2, 1)); }
+                    | '-' unary_expr                                    { $$ = bcc_yyval = validate_negation(parser_new_sym($1, TOK_NEG), parser_make_auto_conv($2, 1)); }
+                    | '*' unary_expr                                    { $$ = bcc_yyval = validate_indirection(parser_new_sym($1, TOK_INDIRECTION), parser_make_auto_conv($2, 1)); }
                     | '&' unary_expr                                    { $$ = bcc_yyval = validate_addrof(parser_new_sym($1, TOK_ADDROF), $2); }
-                    | TOK_SIZEOF unary_expr                             { $$ = bcc_yyval = validate_sizeof($1, $2); }
+                    | TOK_SIZEOF unary_expr                             { $$ = bcc_yyval = validate_sizeof($1, parser_make_auto_conv($2, 0)); }
                     | TOK_SIZEOF '(' typespec_list abs_declarator')'    { $$ = bcc_yyval = parse_sizeof($1, $3, $4); parser_cleanup(2, $2, $5); }
                     ;
 postfix_expr        : primary_expr                                      { $$ = bcc_yyval = $1; }
-                    | postfix_expr TOK_INC                              { $$ = bcc_yyval = validate_increment(parser_new_sym($2, TOK_POST_INC), $1); }
-                    | postfix_expr TOK_DEC                              { $$ = bcc_yyval = validate_increment(parser_new_sym($2, TOK_POST_DEC), $1); }
+                    | postfix_expr TOK_INC                              { $$ = bcc_yyval = validate_increment(parser_new_sym($2, TOK_POST_INC), parser_make_auto_conv($1, 0)); }
+                    | postfix_expr TOK_DEC                              { $$ = bcc_yyval = validate_increment(parser_new_sym($2, TOK_POST_DEC), parser_make_auto_conv($1, 0)); }
                     | call                                              { $$ = bcc_yyval = $1; }
-                    | TOK_VA_START '(' expr ',' TOK_IDENT ')'           { $$ = bcc_yyval = validate_va_start($1, $3, $5); parser_cleanup(3, $2, $4, $6); }
-                    | TOK_VA_END '(' expr ')'                           { $$ = bcc_yyval = validate_va_end($1, $3); parser_cleanup(2, $2, $4); }
-                    | TOK_VA_ARG '(' expr ',' typespec_list abs_declarator ')'   { $$ = bcc_yyval = parse_va_arg($1, $3, $5, $6); parser_cleanup(3, $2, $4, $7); }
-                    | postfix_expr '[' expr ']'                         { $$ = bcc_yyval = validate_subscript(parser_new_sym($2, TOK_SUBSCRIPT), $1, $3); parser_cleanup(1, $4); }
-                    | postfix_expr '.' any_ident                        { $$ = bcc_yyval = validate_reference($2, $1, $3); }
-                    | postfix_expr TOK_ARROW any_ident                  { $$ = bcc_yyval = validate_reference($2, $1, $3); }
+                    | TOK_VA_START '(' expr ',' TOK_IDENT ')'           { $$ = bcc_yyval = validate_va_start($1, parser_make_auto_conv($3, 1), $5); parser_cleanup(3, $2, $4, $6); }
+                    | TOK_VA_END '(' expr ')'                           { $$ = bcc_yyval = validate_va_end($1, parser_make_auto_conv($3, 1)); parser_cleanup(2, $2, $4); }
+                    | TOK_VA_ARG '(' expr ',' typespec_list abs_declarator ')'   { $$ = bcc_yyval = parse_va_arg($1, parser_make_auto_conv($3, 1), $5, $6); parser_cleanup(3, $2, $4, $7); }
+                    | postfix_expr '[' expr ']'                         { $$ = bcc_yyval = validate_subscript(parser_new_sym($2, TOK_SUBSCRIPT), parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); parser_cleanup(1, $4); }
+                    | postfix_expr '.' any_ident                        { $$ = bcc_yyval = validate_reference($2, parser_make_auto_conv($1, 0), $3); }
+                    | postfix_expr TOK_ARROW any_ident                  { $$ = bcc_yyval = validate_reference($2, parser_make_auto_conv($1, 1), $3); }
                     ;
-call                : postfix_expr '(' ')'                              { $$ = bcc_yyval = finalize_call(validate_call($1, parser_new_sym($2, TOK_CALL))); parser_cleanup(1, $3);}
+call                : postfix_expr '(' ')'                              { $$ = bcc_yyval = finalize_call(validate_call(parser_make_auto_conv($1, 1), parser_new_sym($2, TOK_CALL))); parser_cleanup(1, $3);}
                     | call_args ')'                                     { $$ = bcc_yyval = finalize_call($1); parser_cleanup(1, $2); }
                     ;
-call_args           : postfix_expr '(' assign_expr                      { $$ = bcc_yyval = validate_arg(validate_call($1, parser_new_sym($2, TOK_CALL)), $3); }
-                    | call_args ',' assign_expr                         { $$ = bcc_yyval = validate_arg($1, $3); parser_cleanup(1, $2); }
+call_args           : postfix_expr '(' assign_expr                      { $$ = bcc_yyval = validate_arg(validate_call(parser_make_auto_conv($1, 1), parser_new_sym($2, TOK_CALL)), parser_make_auto_conv($3, 1)); }
+                    | call_args ',' assign_expr                         { $$ = bcc_yyval = validate_arg($1, parser_make_auto_conv($3, 1)); parser_cleanup(1, $2); }
                     ;
 primary_expr        : TOK_IDENT                                         { $$ = bcc_yyval = validate_ident($1); }
                     | constant                                          { $$ = bcc_yyval = $1; }
@@ -307,185 +327,5 @@ any_ident           : TOK_IDENT                                         { $$ = b
                     ;
 %%
 
-/* functions, structures, typeids, allocs can have their type
- * assigned when they adopt their children
- */
-
-/* *INDENT-ON* */
-    /* clang-format on */
-
-    const char *parser_get_tname(int symbol) {
-  return yytname[YYTRANSLATE(symbol)];
-}
-
-void make_va_list_type(void) {
-  /* TODO(Robert): This was copied/based on code in `validate_tag_def` and
-   * `define_struct_member` in `tchk_decl`. Attempt to deduplicate later, if
-   * possible.
-   */
-  TagValue *builtin_tagval = tag_value_init(TAG_STRUCT);
-  int status = state_insert_tag(state, VA_LIST_STRUCT_NAME,
-                                strlen(VA_LIST_STRUCT_NAME), builtin_tagval);
-  if (status) abort();
-  status = state_push_table(state, builtin_tagval->data.members.by_name);
-  if (status) abort();
-  builtin_tagval->alignment = X64_ALIGNOF_LONG;
-  builtin_tagval->width = 2 * X64_SIZEOF_LONG + 2 * X64_SIZEOF_INT;
-  builtin_tagval->is_defined = 1;
-  LinkedList *member_list = &builtin_tagval->data.members.in_order;
-  size_t i;
-  ptrdiff_t displacement;
-  for (i = 0, displacement = 0; i < 4; ++i) {
-    SymbolValue *member_symval =
-        symbol_value_init(&LOC_EMPTY, state_get_sequence(state));
-    member_symval->disp = displacement;
-    if (i < 2) {
-      displacement += X64_SIZEOF_INT;
-      member_symval->type.base = TYPE_UNSIGNED;
-      member_symval->type.alignment = X64_ALIGNOF_INT;
-      member_symval->type.width = X64_SIZEOF_INT;
-      member_symval->type.flags = TYPESPEC_FLAG_INT | TYPESPEC_FLAG_UNSIGNED;
-    } else {
-      displacement += X64_SIZEOF_LONG;
-      member_symval->type.base = TYPE_VOID;
-      member_symval->type.alignment = 0;
-      member_symval->type.width = 0;
-      member_symval->type.flags = TYPESPEC_FLAG_VOID;
-      AuxSpec *ptr_aux = malloc(sizeof(AuxSpec));
-      ptr_aux->aux = AUX_POINTER;
-      ptr_aux->data.memory_loc.qualifiers = TYPESPEC_FLAG_NONE;
-      ptr_aux->data.memory_loc.length = 0;
-      int status = llist_push_front(&member_symval->type.auxspecs, ptr_aux);
-      if (status) abort();
-    }
-    int status = llist_push_back(member_list, member_symval);
-    if (status) abort();
-    const char *symname = VA_LIST_MEMBER_NAMES[i];
-    status =
-        state_insert_symbol(state, symname, strlen(symname), member_symval);
-    if (status) abort();
-  }
-  status = state_pop_table(state);
-  if (status) abort();
-  SymbolValue *builtin_symval =
-      symbol_value_init(&LOC_EMPTY, state_get_sequence(state));
-  builtin_symval->type.alignment = X64_ALIGNOF_LONG;
-  builtin_symval->type.width = 2 * X64_SIZEOF_LONG + 2 * X64_SIZEOF_INT;
-  builtin_symval->type.base = TYPE_STRUCT;
-  builtin_symval->type.flags = TYPESPEC_FLAG_STRUCT | TYPESPEC_FLAG_TYPEDEF;
-  builtin_symval->flags = SYMFLAG_DEFINED | SYMFLAG_TYPEDEF;
-  AuxSpec *aux_array = malloc(sizeof(AuxSpec));
-  aux_array->aux = AUX_ARRAY;
-  aux_array->data.memory_loc.length = 1;
-  aux_array->data.memory_loc.deduce_length = 0;
-  status = llist_push_back(&builtin_symval->type.auxspecs, aux_array);
-  if (status) abort();
-  AuxSpec *aux_struct = malloc(sizeof(AuxSpec));
-  aux_struct->aux = AUX_STRUCT;
-  aux_struct->data.tag.name = VA_LIST_STRUCT_NAME;
-  aux_struct->data.tag.val = builtin_tagval;
-  status = llist_push_back(&builtin_symval->type.auxspecs, aux_struct);
-  if (status) abort();
-  status = state_insert_symbol(state, VA_LIST_TYPEDEF_NAME,
-                               strlen(VA_LIST_TYPEDEF_NAME), builtin_symval);
-  if (status) abort();
-}
-
-ASTree *parser_make_root() {
-  DEBUGS('p', "Initializing AST, root token code: %d", TOK_ROOT);
-  DEBUGS('p', "Translation of token code: %s", parser_get_tname(TOK_ROOT));
-  Location root_loc = {lexer_get_filenr(), 0, 0};
-  ASTree *root = astree_init(TOK_ROOT, root_loc, "_root");
-  DEBUGS('t', "Making symbol table");
-  root->symbol_table = symbol_table_init(TRANS_UNIT_TABLE);
-  state_push_table(state, root->symbol_table);
-  make_va_list_type();
-  return root;
-}
-
-ASTree *parser_new_sym(ASTree *tree, int new_symbol) {
-  tree->symbol = new_symbol;
-  return tree;
-}
-
-ASTree *parser_make_spec_list(ASTree *first_specifier) {
-  ASTree *spec_list =
-      astree_init(TOK_SPEC_LIST, first_specifier->loc, "_spec_list");
-  TypeSpec *type = calloc(1, sizeof(*type));
-  typespec_init(type);
-  spec_list->type = type;
-  return validate_typespec(spec_list, first_specifier);
-}
-
-ASTree *parser_make_declaration(ASTree *spec_list) {
-  ASTree *declaration = astree_init(TOK_DECLARATION, LOC_EMPTY, "_declaration");
-  spec_list = validate_typespec_list(spec_list);
-  if (spec_list->symbol == TOK_TYPE_ERROR) {
-    return astree_propogate_errnode(declaration, spec_list);
-  }
-  return astree_adopt(declaration, 1, spec_list);
-}
-
-ASTree *parser_make_param_list(ASTree *left_paren, ASTree *spec_list,
-                               ASTree *declarator) {
-  /* all error handling done in validate_param */
-  ASTree *param_list =
-      validate_param_list(parser_new_sym(left_paren, TOK_PARAM_LIST));
-  /* create temporary type object on the heap to hold the parameter auxspec */
-  ASTree *declaration = parser_make_declaration(spec_list);
-  return validate_param(param_list, declaration, declarator);
-}
-
-/* For the sake of code reusability, the tree structure of a type name is the
- * same as that of a full declaration, with the exception being that in the
- * place of the node with the TOK_IDENT symbol, there is instead a node with the
- * TOK_TYPE_NAME symbol. This way, the code for processing declaration can also
- * be used to validate type names, with a little tweaking.
- */
-ASTree *parser_make_type_name(void) {
-  ASTree *type_name = astree_init(TOK_TYPE_NAME, lexer_get_loc(), "_type_name");
-  SymbolValue *symval =
-      symbol_value_init(&type_name->loc, state_get_sequence(state));
-  type_name->type = &symval->type;
-  return type_name;
-}
-
-ASTree *parser_make_cast(ASTree *left_paren, ASTree *spec_list,
-                         ASTree *type_name, ASTree *expr) {
-  ASTree *cast = parser_new_sym(left_paren, TOK_CAST);
-  ASTree *declaration = parser_make_declaration(spec_list);
-  return validate_cast(
-      cast, finalize_declaration(declare_symbol(declaration, type_name)), expr);
-}
-
-ASTree *parser_make_label(ASTree *ident) {
-  return astree_init(TOK_LABEL, ident->loc, "_label");
-}
-
-ASTree *parse_sizeof(ASTree *sizeof_, ASTree *spec_list, ASTree *declarator) {
-  ASTree *declaration = parser_make_declaration(spec_list);
-  return validate_sizeof(
-      sizeof_, finalize_declaration(declare_symbol(declaration, declarator)));
-}
-
-ASTree *parse_va_arg(ASTree *va_arg_, ASTree *expr, ASTree *spec_list,
-                     ASTree *declarator) {
-  ASTree *declaration = parser_make_declaration(spec_list);
-  return validate_va_arg(
-      va_arg_, expr,
-      finalize_declaration(declare_symbol(declaration, declarator)));
-}
-
-void parser_cleanup(size_t count, ...) {
-  DEBUGS('p', "Cleaning up %lu astree nodes", count);
-  va_list args;
-  va_start(args, count);
-  size_t i;
-  for (i = 0; i < count; ++i) {
-    ASTree *tree = va_arg(args, ASTree *);
-    astree_destroy(tree);
-  }
-  va_end(args);
-}
-
-int is_defined_token(int symbol) { return YYTRANSLATE(symbol) > YYUNDEF; }
+/* define parser-specific functions in a separate source file */
+#include "parser.c"

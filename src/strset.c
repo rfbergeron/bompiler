@@ -5,10 +5,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "attributes.h"
 #include "badalist.h"
 #include "badmap.h"
 #include "debug.h"
+
+#define MAX_IDENT_LEN 31
 
 static const size_t starting_size = 100;
 static Map string_set = {0};
