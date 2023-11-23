@@ -198,7 +198,6 @@ int bblock_partition(ListIter *first, ListIter *last, ArrayList *out) {
 
 void update_liveness(InstructionData *data, Operand *operand, Map *temp_lives) {
   switch (operand->all.mode) {
-    int status;
     case MODE_NONE:
     case MODE_DIRECT:
     case MODE_IMMEDIATE:
@@ -645,7 +644,7 @@ int allocate_regs(ListIter *first, ListIter *last) {
   /* save window_size before spilling registers so that we know how many bytes
    * have been spilled for debugging purposes
    */
-  ptrdiff_t old_window_size = window_size;
+  /* ptrdiff_t old_window_size = window_size; */
 
   /* we should be able to run through directives as though they were
    * instructions and nothing should happen to them, since their operands

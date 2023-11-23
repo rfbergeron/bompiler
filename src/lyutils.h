@@ -8,11 +8,21 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "astree.h"
-#include "attributes.h"
 #include "debug.h"
 
 /* #define YYEOF 0 */
+
+typedef struct location {
+  size_t filenr;
+  size_t linenr;
+  size_t offset;
+  size_t blocknr;
+} Location;
+
+#define LOC_EMPTY_VALUE \
+  { 0, 0, 0, 0 }
+
+extern const Location LOC_EMPTY;
 
 extern FILE *yyin;
 extern char *yytext;
@@ -21,8 +31,8 @@ extern int yydebug;
 extern int yyleng;
 extern FILE *tokfile;
 extern int lexer_interactive;
-extern ASTree *parser_root;
-extern ASTree *bcc_yyval;
+extern struct astree *parser_root;
+extern struct astree *bcc_yyval;
 
 int yylex();
 int yylex_destroy();
@@ -50,24 +60,13 @@ void lexer_dump_filenames(FILE *out);
 void lexer_init_globals();
 void lexer_free_globals();
 
+int location_to_string(const Location *loc, char *buf, size_t size);
 const char *parser_get_tname(int symbol);
-ASTree *parser_make_root();
-ASTree *parser_new_sym(ASTree *tree, int new_symbol);
-ASTree *parser_make_spec_list(ASTree *first_specifier);
-ASTree *parser_make_declaration(ASTree *spec_list);
-ASTree *parser_make_param_list(ASTree *left_paren, ASTree *spec_list,
-                               ASTree *declarator);
-ASTree *parser_make_type_name(void);
-ASTree *parser_make_cast(ASTree *left_paren, ASTree *spec_list,
-                         ASTree *type_name, ASTree *expr);
-ASTree *parser_make_label(ASTree *ident);
-ASTree *parse_sizeof(ASTree *sizeof_, ASTree *spec_list, ASTree *declarator);
-ASTree *parse_va_arg(ASTree *va_arg_, ASTree *expr, ASTree *spec_list,
-                     ASTree *declarator);
-void parser_cleanup(size_t count, ...);
+void parser_init_globals(void);
+void parser_destroy_globals(void);
 
 #define YYSTYPE_IS_DECLARED
-typedef ASTree *YYSTYPE;
+typedef struct astree *YYSTYPE;
 
 #include "yyparse.h"
 

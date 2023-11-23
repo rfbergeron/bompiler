@@ -1,15 +1,26 @@
 #ifndef __ASTREE_H__
 #define __ASTREE_H__
 
-#include "attributes.h"
 #include "badllist.h"
 #include "badmap.h"
+#include "bcc_types.h"
 #include "debug.h"
 #include "stdint.h"
 #include "symtable.h"
 
+enum attribute {
+  ATTR_NONE = 0,              /* no attributes set */
+  ATTR_EXPR_LVAL = 1 << 0,    /* refers to an assignable location */
+  ATTR_STMT_DEFAULT = 1 << 1, /* switch statement has a default label */
+  ATTR_EXPR_CONST = 1 << 2,   /* node refers to a valid constant expression */
+  ATTR_CONST_INIT = 1 << 3,   /* constant expression is only for initializers */
+  ATTR_CONST_ADDR = 1 << 4,   /* constant expression includes an address */
+  NUM_ATTRIBUTES = 5,         /* number of attribute flags */
+  ATTR_MASK_CONST = ATTR_EXPR_CONST | ATTR_CONST_INIT | ATTR_CONST_ADDR
+};
+
 typedef struct astree {
-  const TypeSpec *type;      /* type info */
+  Type *type;                /* type info */
   const char *lexinfo;       /* lexical information */
   SymbolTable *symbol_table; /* symbol table for scope, if applicable */
   ListIter *first_instr;
@@ -32,10 +43,10 @@ typedef struct astree {
   unsigned int attributes; /* node-specific attributes */
 } ASTree;
 
-#define EMPTY_EXPR_VALUE                                                     \
-  {                                                                          \
-    &SPEC_EMPTY, ";", NULL, NULL, NULL, {{0L, NULL, NULL}}, LOC_EMPTY_VALUE, \
-        0UL, 0UL, BLIB_LLIST_EMPTY, ';', ATTR_NONE                           \
+#define EMPTY_EXPR_VALUE                                                   \
+  {                                                                        \
+    NULL, ";", NULL, NULL, NULL, {{0L, NULL, NULL}}, LOC_EMPTY_VALUE, 0UL, \
+        0UL, BLIB_LLIST_EMPTY, ';', ATTR_NONE                              \
   }
 #define UNWRAP(node) \
   (node->symbol == TOK_TYPE_ERROR ? astree_get(node, 0) : node)
@@ -47,13 +58,14 @@ ASTree *astree_adopt(ASTree *parent, const size_t count, ...);
 ASTree *astree_replace(ASTree *parent, const size_t index, ASTree *child);
 ASTree *astree_get(ASTree *parent, const size_t index);
 ASTree *astree_remove(ASTree *parent, const size_t index);
-ASTree *astree_create_errnode(ASTree *child, int errcode, size_t info_count,
+ASTree *astree_create_errnode(ASTree *child, ErrorCode code, size_t info_count,
                               ...);
 ASTree *astree_propogate_errnode(ASTree *parent, ASTree *child);
 ASTree *astree_propogate_errnode_v(ASTree *parent, size_t count, ...);
 ASTree *astree_propogate_errnode_a(ASTree *parent, size_t count,
                                    ASTree **children);
 size_t astree_count(ASTree *parent);
+int astree_is_const_zero(const ASTree *tree);
 int astree_to_string(ASTree *astree, char *buffer, size_t size);
 int astree_print_tree(ASTree *tree, FILE *out, int depth);
 int astree_print_symbols(ASTree *tree, FILE *out, int depth);

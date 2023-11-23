@@ -1,10 +1,10 @@
 #ifndef __SYMTABLE_H__
 #define __SYMTABLE_H__
 
-#include "attributes.h"
 #include "badllist.h"
 #include "badmap.h"
 #include "bcc_types.h"
+#include "lyutils.h"
 
 #define DEFAULT_MAP_SIZE 100
 
@@ -43,10 +43,13 @@ typedef enum symbol_flag {
   SYMFLAGS_LINK = SYMFLAG_LINK_NONE | SYMFLAG_LINK_EXT | SYMFLAG_LINK_INT
 } SymbolFlag;
 
+/* TODO(Robert): replace loc with a pointer since it makes more sense for it to
+ * point to the location stored in an ASTree node
+ */
 typedef struct symbol_value {
   size_t sequence;    /* used to order declarations in a given block */
   Location loc;       /* declaration location */
-  Type* type;         /* type of symbol */
+  Type *type;         /* type of symbol */
   unsigned int flags; /* flags, as enumerated above */
   ptrdiff_t disp;     /* displacement on stack/in struct */
   size_t static_id;   /* unique id for static local variables */

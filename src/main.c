@@ -204,6 +204,7 @@ int main(int argc, char **argv) {
   }
 
   /* remember to initialize certain things, like the string table */
+  type_init_globals();
   string_set_init_globals();
   lexer_init_globals();
   state = state_init();
@@ -225,7 +226,7 @@ skip_asm:
 
 cleanup:
   if (parser_root->symbol == TOK_TYPE_ERROR) {
-    int status = print_errs((TypeSpec *)parser_root->type, errfile);
+    int status = print_errors(parser_root->type, errfile);
     if (status) {
       warnx("Failed to print program errors.");
     }
@@ -247,7 +248,7 @@ cleanup:
   DEBUGS('m', "global state cleanup");
   state_destroy(state);
   DEBUGS('m', "syntax tree cleanup");
-  astree_destroy(parser_root);
+  parser_destroy_globals();
   DEBUGS('m', "assembly generator cleanup");
   asmgen_free_globals();
   DEBUGS('m', "string set cleanup");

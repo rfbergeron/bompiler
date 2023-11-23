@@ -2,7 +2,6 @@
 
 #include "assert.h"
 #include "astree.h"
-#include "attributes.h"
 #include "badalist.h"
 #include "badllist.h"
 #include "badmap.h"
@@ -17,6 +16,7 @@
 #include "yyparse.h"
 #define LINESIZE 1024
 #define EMPTY_SYMTABLE = ((SymbolTable){BLIB_MAP_EMPTY, NULL, NULL, NULL});
+#define MAX_IDENT_LEN 31
 
 #ifdef UNIT_TESTING
 extern void *_test_malloc(const size_t size, const char *file, const int line);
@@ -53,7 +53,7 @@ static int strncmp_wrapper(void *s1, void *s2) {
 }
 
 void destroy_unique_name(const char *str) {
-  if (isdigit(str[0]) && str != VA_LIST_STRUCT_NAME) free((char *)str);
+  if (isdigit(str[0])) free((char *)str);
 }
 
 /*
@@ -122,9 +122,24 @@ int symbol_value_print(const SymbolValue *symbol, char *buffer, size_t size) {
     stor_str = "UNSPECIFIED";
 
   /* TODO(Robert): check size without snprintf */
-  return sprintf(buffer,
-                 "{%s} {%s} {WIDTH: %lu, ALIGN: %lu} {LINK: %s, STORE: %s}",
-                 locstr, typestr, sym_width, sym_align, link_str, stor_str);
+  if (symbol->disp < 0) {
+    return sprintf(buffer,
+                   "{%s} {%s} {WIDTH: %lu, ALIGN: %lu} {LINK: %s, STORE: %s} "
+                   "{DISPLACEMENT: %li}",
+                   locstr, typestr, sym_width, sym_align, link_str, stor_str,
+                   symbol->disp);
+  } else if ((symbol->flags & (SYMFLAGS_LINK | SYMFLAGS_STORE)) ==
+             (SYMFLAG_LINK_NONE | SYMFLAG_STORE_STAT)) {
+    return sprintf(buffer,
+                   "{%s} {%s} {WIDTH: %lu, ALIGN: %lu} {LINK: %s, STORE: %s} "
+                   "{STATIC ID: %lu}",
+                   locstr, typestr, sym_width, sym_align, link_str, stor_str,
+                   symbol->static_id);
+  } else {
+    return sprintf(buffer,
+                   "{%s} {%s} {WIDTH: %lu, ALIGN: %lu} {LINK: %s, STORE: %s}",
+                   locstr, typestr, sym_width, sym_align, link_str, stor_str);
+  }
 }
 #endif
 
