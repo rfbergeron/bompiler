@@ -7,11 +7,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "attributes.h"
 #include "badalist.h"
 #include "badllist.h"
 #include "bcc_err.h"
 #include "debug.h"
+#include "evaluate.h"
 #include "lyutils.h"
 #include "strset.h"
 #include "symtable.h"
@@ -28,6 +28,9 @@ extern void mock_assert(const int result, const char *const expression,
 #undef assert
 #define assert(expression) \
   mock_assert((int)(expression), #expression, __FILE__, __LINE__);
+#else
+static const char attr_map[][16] = {"LVAL", "DEFAULT", "CONST", "INITIALIZER",
+                                    "ADDRESS"};
 #endif
 
 extern int skip_type_check;
@@ -42,7 +45,7 @@ ASTree *astree_init(int symbol, const Location location, const char *info) {
   tree->symbol = symbol;
   tree->lexinfo = string_set_intern(info);
   tree->loc = location;
-  tree->type = &SPEC_EMPTY;
+  tree->type = NULL;
   tree->attributes = ATTR_NONE;
   tree->first_instr = NULL;
   tree->last_instr = NULL;
@@ -69,35 +72,48 @@ int astree_destroy(ASTree *tree) {
   }
 
   /* free one-off TypeSpec objects */
-  if (!skip_type_check && tree->type != &SPEC_EMPTY) {
+  /* TODO(Robert): Type: this is obviously not good enough any more because of
+   * how the representation of types has changed. make changes as necessary.
+   */
+  if (!skip_type_check && tree->type != NULL) {
     switch (tree->symbol) {
-      AuxSpec *front_aux;
+      default:
+        break;
+      /*
       size_t i;
       int owns_type;
       default:
-        front_aux = typespec_get_aux(tree->type, 0);
-        if (front_aux != &AUXSPEC_PTR && front_aux != &AUXSPEC_CONST_PTR &&
-            front_aux != &AUXSPEC_VOLATILE_PTR &&
-            front_aux != &AUXSPEC_CONST_VOLATILE_PTR)
-          break;
         for (i = 0, owns_type = 1; i < llist_size(&tree->children) && owns_type;
              ++i) {
           ASTree *child = llist_get(&tree->children, i);
           if (tree->type == child->type) owns_type = 0;
         }
-        if (!owns_type) break;
+        if (owns_type) type_destroy(tree->type);
+        break;
+      */
+      case TOK_INTCON:
         /* fallthrough */
-      case TOK_ADDROF:
+      case TOK_CHARCON:
         /* fallthrough */
       case TOK_SUBSCRIPT:
         /* fallthrough */
       case TOK_INDIRECTION:
         /* fallthrough */
       case TOK_CALL:
+        break;
+      case '?':
+        if (!type_is_pointer(tree->type)) break;
+        /* fallthrough */
+      case TOK_AUTO_CONV:
+        /* fallthrough */
+      case TOK_ADDROF:
+        assert(type_is_pointer(tree->type));
+        tree->type->pointer.next = NULL;
+        /* fallthrough */
+      case TOK_TYPE_NAME:
         /* fallthrough */
       case TOK_TYPE_ERROR:
-        typespec_destroy((TypeSpec *)tree->type);
-        free((TypeSpec *)tree->type);
+        type_destroy(tree->type);
         break;
     }
   }
@@ -156,8 +172,8 @@ ASTree *astree_replace(ASTree *parent, const size_t index, ASTree *child) {
   assert(child != NULL);
   if (index >= astree_count(parent)) return NULL;
   ASTree *old_child = llist_extract(&parent->children, index);
-  /* TODO(Robert): check status and indicate errors */
   int status = llist_insert(&parent->children, child, index);
+  if (status) abort();
   return old_child;
 }
 
@@ -169,24 +185,20 @@ ASTree *astree_remove(ASTree *parent, const size_t index) {
   return llist_extract(&parent->children, index);
 }
 
-ASTree *astree_create_errnode(ASTree *child, int errcode, size_t info_count,
+ASTree *astree_create_errnode(ASTree *child, ErrorCode code, size_t info_size,
                               ...) {
   va_list info_ptrs;
-  va_start(info_ptrs, info_count);
-  AuxSpec *erraux = create_erraux_v(errcode, info_count, info_ptrs);
+  va_start(info_ptrs, info_size);
+  CompileError *error = compile_error_init_v(code, info_size, info_ptrs);
   va_end(info_ptrs);
+
   if (child->symbol == TOK_TYPE_ERROR) {
-    int status = typespec_append_aux((TypeSpec *)child->type, erraux);
+    int status = type_append_error(child->type, error);
     if (status) abort();
     return child;
   } else {
     ASTree *errnode = astree_init(TOK_TYPE_ERROR, child->loc, "_terr");
-    TypeSpec *errtype = calloc(1, sizeof(TypeSpec));
-    errnode->type = errtype;
-    int status = typespec_init(errtype);
-    if (status) abort();
-    errtype->base = TYPE_ERROR;
-    status = llist_push_back(&errtype->auxspecs, erraux);
+    int status = type_init_error(&errnode->type, error);
     if (status) abort();
     return astree_adopt(errnode, 1, child);
   }
@@ -201,10 +213,7 @@ ASTree *astree_propogate_errnode(ASTree *parent, ASTree *child) {
     (void)astree_adopt(parent, 1, real_child);
     return child;
   } else {
-    TypeSpec *parent_errs = (TypeSpec *)parent->type;
-    TypeSpec *child_errs = (TypeSpec *)child->type;
-    int status = typespec_append_auxspecs(parent_errs, child_errs);
-    /* TODO(Robert): be a man */
+    int status = type_merge_errors(parent->type, child->type);
     if (status) abort();
     (void)astree_adopt(UNWRAP(parent), 1, astree_remove(child, 0));
     status = astree_destroy(child);
@@ -237,8 +246,38 @@ ASTree *astree_propogate_errnode_a(ASTree *parent, size_t count,
 
 size_t astree_count(ASTree *parent) { return llist_size(&parent->children); }
 
+int astree_is_const_zero(const ASTree *tree) {
+  return (tree->attributes & ATTR_EXPR_CONST) &&
+         !(tree->attributes & ATTR_CONST_ADDR) &&
+         (tree->constant.integral.value == 0);
+}
+
 #ifndef UNIT_TESTING
+static int attributes_to_string(const unsigned int attributes, char *buf,
+                                size_t size) {
+  if (attributes == ATTR_NONE) {
+    buf[0] = 0;
+    return 0;
+  }
+
+  size_t i, buf_index = 0;
+  for (i = 0; i < NUM_ATTRIBUTES; ++i) {
+    if (attributes & (1 << i)) {
+      if (buf_index + strlen(attr_map[i]) > size) {
+        fprintf(stderr, "WARN: buffer too small to print all attributes\n");
+        return 1;
+      } else {
+        buf_index += sprintf(buf + buf_index, "%s ", attr_map[i]);
+      }
+    }
+  }
+
+  if (buf_index > 0) buf[buf_index - 1] = 0;
+  return 0;
+}
+
 int astree_to_string(ASTree *tree, char *buffer, size_t size) {
+  (void)size;
   /* print token name, lexinfo in quotes, the location, block number,
    * attributes, and the typeid if this is a struct
    */
@@ -253,7 +292,7 @@ int astree_to_string(ASTree *tree, char *buffer, size_t size) {
       attributes_to_string(tree->attributes, attrstr, LINESIZE);
   if (characters_printed < 0) return characters_printed;
   char typestr[LINESIZE];
-  characters_printed = type_to_string(tree->type, typestr, LINESIZE);
+  characters_printed = type_to_str(tree->type, typestr, LINESIZE);
   if (characters_printed < 0) return characters_printed;
 
   if (strlen(tname) > 4) tname += 4;
@@ -263,7 +302,7 @@ int astree_to_string(ASTree *tree, char *buffer, size_t size) {
                      tree->lexinfo, locstr, typestr, attrstr,
                      tree->constant.address.label,
                      (long)tree->constant.address.disp);
-    } else if (tree->type->base == TYPE_SIGNED) {
+    } else if (type_is_signed(tree->type)) {
       return sprintf(buffer, "%s \"%s\" {%s} {%s} {%s} { %li }", tname,
                      tree->lexinfo, locstr, typestr, attrstr,
                      (long)tree->constant.integral.value);
@@ -334,6 +373,8 @@ const char *table_type_to_str(TableType type) {
     case TRANS_UNIT_TABLE:
       /* currently unused */
       return "TRANSLATION UNIT SCOPE";
+    default:
+      abort();
   }
 }
 

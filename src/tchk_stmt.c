@@ -5,41 +5,31 @@
 #include "bcc_err.h"
 #include "state.h"
 #include "stdlib.h"
-#include "tchk_common.h"
 #include "yyparse.h"
 
 ASTree *validate_return(ASTree *ret, ASTree *expr) {
   if (expr->symbol == TOK_TYPE_ERROR)
     return astree_propogate_errnode(ret, expr);
   SymbolValue *symval = state_get_function(state);
-  TypeSpec ret_spec = SPEC_EMPTY;
-  int status = strip_aux_type(&ret_spec, &symval->type);
-  if (status) {
-    typespec_destroy(&ret_spec);
-    return astree_create_errnode(astree_adopt(ret, 1, expr), BCC_TERR_FAILURE,
-                                 0);
-  }
+  Type *return_type;
+  int status = type_strip_declarator(&return_type, symval->type);
+  if (status) abort();
+
   if (expr != &EMPTY_EXPR) {
-    pointer_conversions(expr);
-    if (types_assignable(&ret_spec, expr)) {
-      typespec_destroy(&ret_spec);
+    if (types_assignable(return_type, expr->type, astree_is_const_zero(expr))) {
       maybe_load_cexpr(expr, NULL);
       return translate_return(ret, expr);
-    } else if (typespec_is_void(expr->type) && typespec_is_void(&ret_spec)) {
-      typespec_destroy(&ret_spec);
+    } else if (type_is_void(expr->type) && type_is_void(return_type)) {
       return translate_return(ret, expr);
     } else {
-      typespec_destroy(&ret_spec);
       return astree_create_errnode(astree_adopt(ret, 1, expr),
                                    BCC_TERR_INCOMPATIBLE_TYPES, 3, ret,
                                    &symval->type, expr->type);
     }
-  } else if (typespec_is_void(&ret_spec)) {
-    typespec_destroy(&ret_spec);
+  } else if (type_is_void(return_type)) {
     maybe_load_cexpr(expr, NULL);
     return translate_return(ret, expr);
   } else {
-    typespec_destroy(&ret_spec);
     return astree_create_errnode(astree_adopt(ret, 1, expr),
                                  BCC_TERR_EXPECTED_RETVAL, 0);
   }
@@ -47,7 +37,6 @@ ASTree *validate_return(ASTree *ret, ASTree *expr) {
 
 ASTree *validate_ifelse(ASTree *ifelse, ASTree *condition, ASTree *if_body,
                         ASTree *else_body) {
-  pointer_conversions(condition);
   if (condition->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(ifelse, 3, condition, if_body, else_body);
   } else if (if_body->symbol == TOK_TYPE_ERROR) {
@@ -56,7 +45,7 @@ ASTree *validate_ifelse(ASTree *ifelse, ASTree *condition, ASTree *if_body,
     return astree_propogate_errnode_v(ifelse, 3, condition, if_body, else_body);
   }
 
-  if (!typespec_is_scalar(condition->type)) {
+  if (!type_is_scalar(condition->type)) {
     return astree_create_errnode(
         astree_adopt(ifelse, 3, condition, if_body, else_body),
         BCC_TERR_EXPECTED_SCALAR, 2, ifelse, condition);
@@ -77,11 +66,14 @@ ASTree *validate_switch(ASTree *switch_, ASTree *expr, ASTree *stmt) {
 }
 
 ASTree *validate_switch_expr(ASTree *expr) {
-  if (!typespec_is_integer(expr->type)) {
+  if (!type_is_integer(expr->type)) {
     return astree_create_errnode(expr, BCC_TERR_EXPECTED_INTEGER, 1, expr);
   }
-  const TypeSpec *promoted_type = arithmetic_conversions(expr->type, &SPEC_INT);
-  int status = state_set_control_type(state, promoted_type);
+  Type *promoted_type;
+  int status =
+      type_arithmetic_conversions(&promoted_type, expr->type, (Type *)TYPE_INT);
+  if (status) abort();
+  status = state_set_control_type(state, promoted_type);
   if (status) abort();
   maybe_load_cexpr(expr, NULL);
   return expr;
@@ -91,14 +83,13 @@ ASTree *validate_while(ASTree *while_, ASTree *condition, ASTree *stmt) {
   /* TODO(Robert): safely process flow control statements before checking error
    * codes so that more things are cleaned up in the event of an error.
    */
-  pointer_conversions(condition);
   if (condition->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(while_, 2, condition, stmt);
   } else if (stmt->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(while_, 2, condition, stmt);
   }
 
-  if (!typespec_is_scalar(condition->type)) {
+  if (!type_is_scalar(condition->type)) {
     return astree_create_errnode(astree_adopt(while_, 2, condition, stmt),
                                  BCC_TERR_EXPECTED_INTEGER, 2, while_,
                                  condition);
@@ -109,14 +100,13 @@ ASTree *validate_while(ASTree *while_, ASTree *condition, ASTree *stmt) {
 }
 
 ASTree *validate_do(ASTree *do_, ASTree *stmt, ASTree *condition) {
-  pointer_conversions(condition);
   if (condition->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(do_, 2, stmt, condition);
   } else if (stmt->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(do_, 2, stmt, condition);
   }
 
-  if (!typespec_is_scalar(condition->type)) {
+  if (!type_is_scalar(condition->type)) {
     return astree_create_errnode(astree_adopt(do_, 2, condition, stmt),
                                  BCC_TERR_EXPECTED_INTEGER, 2, do_, condition);
   }
@@ -135,7 +125,8 @@ ASTree *validate_for(ASTree *for_, ASTree *init_expr, ASTree *pre_iter_expr,
   }
 
   if (pre_iter_expr->symbol != ';') {
-    if (!typespec_is_scalar(pre_iter_expr->type)) {
+    if (!type_is_scalar(pre_iter_expr->type)) {
+      /* TODO(Robert): i don't think this is the correct error code */
       return astree_create_errnode(
           astree_adopt(for_, 4, init_expr, pre_iter_expr, reinit_expr, body),
           BCC_TERR_EXPECTED_SCALCONST, 2, for_, pre_iter_expr);
@@ -192,8 +183,8 @@ ASTree *validate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
   assert(case_->jump_id != (size_t)-1L);
   state_inc_case_id(state);
 
-  const TypeSpec *case_const_spec = expr->type;
-  if (!typespec_is_integer(case_const_spec) ||
+  Type *case_const_spec = expr->type;
+  if (!type_is_integer(case_const_spec) ||
       !(expr->attributes & ATTR_EXPR_CONST) ||
       (expr->attributes & ATTR_CONST_INIT)) {
     return astree_create_errnode(astree_adopt(case_, 2, expr, stmt),

@@ -9,7 +9,6 @@
 #include <string.h>
 
 #include "astree.h"
-#include "attributes.h"
 #include "badllist.h"
 #include "debug.h"
 #include "state.h"
@@ -27,6 +26,7 @@ struct {
   size_t count;
   size_t size;
 } lexer_include_linenrs = {NULL, 0, 10};
+const Location LOC_EMPTY = LOC_EMPTY_VALUE;
 
 /* internal functions */
 void push_linenr(size_t linenr) {
@@ -117,16 +117,16 @@ int lexer_token(int symbol) {
   return symbol;
 }
 
+/* TODO(Robert): determine if types will always have been normalized by this
+ * point and we can just use `typespec_is_*` functions instead of examining
+ * flags directly
+ */
 int lexer_ident(void) {
   DEBUGS('l', "Determining appropriate token type for identifier %s", yytext);
   SymbolValue *symval = NULL;
   (void)state_get_symbol(state, yytext, yyleng, &symval);
-  if (symval == NULL || !(symval->type.flags & TYPESPEC_FLAG_TYPEDEF)) {
-    return lexer_token(TOK_IDENT);
-  } else if (bcc_yyval->symbol == TOK_SPEC_LIST &&
-             (bcc_yyval->type->flags &
-              (TYPESPEC_FLAGS_INTEGER | TYPESPEC_FLAGS_SIGNEDNESS |
-               TYPESPEC_FLAGS_NON_INTEGER | TYPESPEC_FLAG_CHAR))) {
+  if (symval == NULL || !type_is_typedef(symval->type) ||
+      (bcc_yyval->symbol == TOK_SPEC_LIST && !type_is_none(bcc_yyval->type))) {
     return lexer_token(TOK_IDENT);
   } else {
     return lexer_token(TOK_TYPEDEF_NAME);
@@ -196,3 +196,10 @@ void lexer_free_globals() {
 }
 
 void yyerror(const char *message) { lexer_error(message); }
+
+int location_to_string(const Location *loc, char *buf, size_t size) {
+  (void)size;
+  /* TODO(Robert): check size without using snprintf */
+  return sprintf(buf, "%lu, %lu, %lu, %lu", loc->filenr, loc->linenr,
+                 loc->offset, loc->blocknr);
+}
