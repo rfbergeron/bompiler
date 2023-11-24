@@ -733,7 +733,7 @@ ASTree *translate_ident(ASTree *ident) {
 }
 
 ASTree *translate_cast(ASTree *cast, ASTree *expr) {
-  DEBUGS('g', "Translating cast");
+  PFDBG0('g', "Translating cast");
 
   if (type_is_scalar(cast->type) || type_is_enum(cast->type) ||
       type_is_array(cast->type)) {
@@ -859,7 +859,7 @@ ASTree *translate_comparison(ASTree *operator, ASTree * left, ASTree *right) {
 }
 
 ASTree *translate_indirection(ASTree *indirection, ASTree *operand) {
-  DEBUGS('g', "Translating indirection operation.");
+  PFDBG0('g', "Translating indirection operation.");
   indirection->first_instr = liter_copy(operand->first_instr);
   if (indirection->first_instr == NULL) abort();
 
@@ -883,7 +883,7 @@ ASTree *translate_indirection(ASTree *indirection, ASTree *operand) {
 }
 
 ASTree *translate_addrof(ASTree *addrof, ASTree *operand) {
-  DEBUGS('g', "Translating address operation.");
+  PFDBG0('g', "Translating address operation.");
   /* TODO(Robert): shouldn't this also be done for the '[]' operator? */
   if (operand->symbol == TOK_INDIRECTION) {
     /* just remove the code if some idiot does &*&*&*&*&* */
@@ -905,7 +905,7 @@ ASTree *translate_addrof(ASTree *addrof, ASTree *operand) {
 }
 
 ASTree *translate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
-  DEBUGS('g', "Translating pointer subscript");
+  PFDBG0('g', "Translating pointer subscript");
   /* both the pointer and index must be in a register so that the displacement
    * and scale addressing mode can be used
    */
@@ -946,7 +946,7 @@ ASTree *translate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
 
 ASTree *translate_reference(ASTree *reference, ASTree *struct_,
                             ASTree *member) {
-  DEBUGS('g', "Translating reference operator");
+  PFDBG0('g', "Translating reference operator");
   Type *record_type;
   if (reference->symbol == TOK_ARROW) {
     int status = scalar_conversions(struct_, struct_->type);
@@ -973,7 +973,7 @@ ASTree *translate_reference(ASTree *reference, ASTree *struct_,
 }
 
 ASTree *translate_post_inc_dec(ASTree *post_inc_dec, ASTree *operand) {
-  DEBUGS('g', "Translating postfix increment/decrement");
+  PFDBG0('g', "Translating postfix increment/decrement");
   post_inc_dec->first_instr = liter_copy(operand->first_instr);
   if (post_inc_dec->first_instr == NULL) abort();
   InstructionData *lvalue_data = liter_get(operand->last_instr);
@@ -1004,7 +1004,7 @@ ASTree *translate_post_inc_dec(ASTree *post_inc_dec, ASTree *operand) {
 }
 
 ASTree *translate_inc_dec(ASTree *inc_dec, ASTree *operand) {
-  DEBUGS('g', "Translating prefix increment/decrement");
+  PFDBG0('g', "Translating prefix increment/decrement");
   inc_dec->first_instr = liter_copy(operand->first_instr);
   if (inc_dec->first_instr == NULL) abort();
   InstructionData *lvalue_data = liter_get(operand->last_instr);
@@ -1032,7 +1032,7 @@ ASTree *translate_inc_dec(ASTree *inc_dec, ASTree *operand) {
 }
 
 ASTree *translate_unop(ASTree *operator, ASTree * operand) {
-  DEBUGS('g', "Translating unary operation");
+  PFDBG0('g', "Translating unary operation");
   int status = scalar_conversions(operand, operator->type);
   if (status) abort();
   InstructionData *operand_data = liter_get(operand->last_instr);
@@ -1050,7 +1050,7 @@ ASTree *translate_unop(ASTree *operator, ASTree * operand) {
 }
 
 ASTree *translate_addition(ASTree *operator, ASTree * left, ASTree *right) {
-  DEBUGS('g', "Translating additive operation");
+  PFDBG0('g', "Translating additive operation");
   int status = scalar_conversions(left, operator->type);
   if (status) abort();
   InstructionData *left_data = liter_get(left->last_instr);
@@ -1111,7 +1111,7 @@ ASTree *translate_addition(ASTree *operator, ASTree * left, ASTree *right) {
  */
 ASTree *translate_multiplication(ASTree *operator, ASTree * left,
                                  ASTree *right) {
-  DEBUGS('g', "Translating binary operation");
+  PFDBG0('g', "Translating binary operation");
   int status = scalar_conversions(left, operator->type);
   if (status) abort();
   InstructionData *left_data = liter_get(left->last_instr);
@@ -1168,7 +1168,7 @@ ASTree *translate_multiplication(ASTree *operator, ASTree * left,
 }
 
 ASTree *translate_binop(ASTree *operator, ASTree * left, ASTree *right) {
-  DEBUGS('g', "Translating binary operation");
+  PFDBG0('g', "Translating binary operation");
   int status = scalar_conversions(left, operator->type);
   if (status) abort();
   InstructionData *left_data = liter_get(left->last_instr);
@@ -1406,7 +1406,7 @@ int assign_scalar(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
 
 ASTree *translate_assignment(ASTree *assignment, ASTree *lvalue,
                              ASTree *rvalue) {
-  DEBUGS('g', "Translating assignment");
+  PFDBG0('g', "Translating assignment");
   if (type_is_union(assignment->type) || type_is_struct(assignment->type)) {
     int status = assign_aggregate(assignment, lvalue, rvalue);
     if (status) abort();
@@ -1501,7 +1501,7 @@ int translate_args(ASTree *call) {
   if (status) abort();
   size_t i, param_count = type_param_count(function_type);
   for (i = 1; i < astree_count(call); ++i) {
-    DEBUGS('g', "Translating parameter %i", i);
+    PFDBG1('g', "Translating parameter %i", i);
     ASTree *arg = astree_get(call, i);
     assert(arg->type != NULL && !type_is_array(arg->type));
     const Type *param_type = ((i - 1) < param_count)
@@ -1519,7 +1519,7 @@ int translate_args(ASTree *call) {
 }
 
 ASTree *translate_call(ASTree *call) {
-  DEBUGS('g', "Translating function call");
+  PFDBG0('g', "Translating function call");
   ASTree *fn_pointer = astree_get(call, 0);
   call->first_instr = liter_copy(fn_pointer->first_instr);
   if (call->first_instr == NULL) abort();
@@ -2103,7 +2103,7 @@ ASTree *translate_do(ASTree *do_, ASTree *body, ASTree *condition) {
 }
 
 ASTree *translate_block(ASTree *block) {
-  DEBUGS('g', "Translating compound statement");
+  PFDBG0('g', "Translating compound statement");
   if (astree_count(block) == 0) {
     InstructionData *nop_data = instr_init(OP_NOP);
     int status = llist_push_back(instructions, nop_data);
@@ -2204,7 +2204,7 @@ int return_void(ASTree *ret) {
 }
 
 ASTree *translate_return(ASTree *ret, ASTree *expr) {
-  DEBUGS('g', "Translating return statement");
+  PFDBG0('g', "Translating return statement");
   if (expr == &EMPTY_EXPR || type_is_void(expr->type)) {
     int status = return_void(ret);
     if (status) abort();
@@ -2511,7 +2511,7 @@ int translate_static_prelude(ASTree *declarator, SymbolValue *symval,
 /* TODO(Robert): This is really three different functions. Separate them. */
 ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
                              ASTree *declarator, ASTree *initializer) {
-  DEBUGS('g', "Translating local initialization");
+  PFDBG0('g', "Translating local initialization");
   SymbolValue *symval = NULL;
   assert(state_get_symbol(state, (char *)declarator->lexinfo,
                           strlen(declarator->lexinfo), &symval));
@@ -2596,7 +2596,7 @@ ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
 }
 
 ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
-  DEBUGS('g', "Translating local declaration");
+  PFDBG0('g', "Translating local declaration");
   if (declarator->symbol != TOK_TYPE_NAME &&
       !type_is_function(declarator->type)) {
     SymbolValue *symval = NULL;
@@ -2631,7 +2631,7 @@ ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
 
 ASTree *translate_global_init(ASTree *declaration, ASTree *assignment,
                               ASTree *declarator, ASTree *initializer) {
-  DEBUGS('g', "Translating global initialization");
+  PFDBG0('g', "Translating global initialization");
   SymbolValue *symval = NULL;
   assert(state_get_symbol(state, (char *)declarator->lexinfo,
                           strlen(declarator->lexinfo), &symval));
@@ -2662,7 +2662,7 @@ ASTree *translate_global_init(ASTree *declaration, ASTree *assignment,
 }
 
 ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
-  DEBUGS('g', "Translating global declaration");
+  PFDBG0('g', "Translating global declaration");
   if (declarator->symbol == TOK_TYPE_NAME || type_is_function(declarator->type))
     return astree_adopt(declaration, 1, declarator);
   SymbolValue *symval = NULL;
@@ -2693,7 +2693,7 @@ ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
 
 ASTree *begin_translate_fn(ASTree *declaration, ASTree *declarator,
                            ASTree *body) {
-  DEBUGS('g', "Translating function prologue");
+  PFDBG0('g', "Translating function prologue");
   /* reserve 8 bytes for shuffling around register return values, and another
    * 24 for the allocator to unspill registers to */
   window_size = 32;

@@ -1,5 +1,7 @@
 #include "evaluate.h"
 
+#include <limits.h>
+
 #include "asmgen.h"
 #include "assert.h"
 #include "ctype.h"

@@ -72,13 +72,13 @@ SymbolValue *symbol_value_init(const Location *loc, const size_t sequence) {
 }
 
 int symbol_value_destroy(SymbolValue *symbol_value) {
-  DEBUGS('t', "freeing symbol value");
+  PFDBG0('t', "freeing symbol value");
   if (symbol_value == NULL) return 0;
 
   int status = type_destroy(symbol_value->type);
   free(symbol_value);
 
-  DEBUGS('t', "done");
+  PFDBG0('t', "done");
   return status;
 }
 
@@ -281,7 +281,7 @@ SymbolTable *symbol_table_init(TableType type) {
 }
 
 int symbol_table_destroy(SymbolTable *table) {
-  DEBUGS('t', "Freeing symbol table");
+  PFDBG0('t', "Freeing symbol table");
   if (table == NULL) return 0;
   switch (table->type) {
     case FUNCTION_TABLE:

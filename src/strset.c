@@ -48,7 +48,7 @@ const char *string_set_intern(const char *string) {
   if (!ret) {
     ret = malloc((len + 1) * sizeof(char));
     memcpy(ret, string, len + 1);
-    DEBUGS(
+    PFDBG3(
         's',
         "First apearance of string %s, length %lu; duplicated and stored in %p",
         ret, len, ret);
@@ -65,7 +65,7 @@ const char *string_set_intern(const char *string) {
 }
 
 int string_set_print(FILE *out) {
-  DEBUGS('s', "Printing string set");
+  PFDBG0('s', "Printing string set");
   ArrayList key_list;
   assert(!alist_init(&key_list, map_size(&string_set)));
   assert(!map_keys(&string_set, &key_list));

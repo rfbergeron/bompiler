@@ -111,15 +111,15 @@ BCC_YYSTATIC void make_va_list_type(void) {
 }
 
 BCC_YYSTATIC ASTree *parser_make_root(void) {
-  DEBUGS('p', "Initializing AST, root token code: %d", TOK_ROOT);
-  DEBUGS('p', "Translation of token code: %s", parser_get_tname(TOK_ROOT));
+  PFDBG1('p', "Initializing AST, root token code: %d", TOK_ROOT);
+  PFDBG1('p', "Translation of token code: %s", parser_get_tname(TOK_ROOT));
   Location root_loc = {lexer_get_filenr(), 0, 0, 0};
   return astree_init(TOK_ROOT, root_loc, "_root");
 }
 
 void parser_init_globals(void) {
   parser_root = parser_make_root();
-  DEBUGS('t', "Making symbol table");
+  PFDBG0('t', "Making symbol table");
   parser_root->symbol_table = symbol_table_init(TRANS_UNIT_TABLE);
   state_push_table(state, parser_root->symbol_table);
   make_va_list_type();
@@ -226,7 +226,7 @@ BCC_YYSTATIC ASTree *parse_va_arg(ASTree *va_arg_, ASTree *expr,
 }
 
 BCC_YYSTATIC void parser_cleanup(size_t count, ...) {
-  DEBUGS('p', "Cleaning up %lu astree nodes", count);
+  PFDBG1('p', "Cleaning up %lu astree nodes", count);
   va_list args;
   va_start(args, count);
   size_t i;

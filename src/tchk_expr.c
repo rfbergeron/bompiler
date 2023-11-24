@@ -55,13 +55,13 @@ ASTree *validate_stringcon(ASTree *stringcon) {
 }
 
 ASTree *validate_ident(ASTree *ident) {
-  DEBUGS('t', "Attempting to assign a type");
+  PFDBG0('t', "Attempting to assign a type");
   const char *id_str = ident->lexinfo;
   size_t id_str_len = strlen(id_str);
   SymbolValue *symval = NULL;
   (void)state_get_symbol(state, id_str, id_str_len, &symval);
   if (symval) {
-    DEBUGS('t', "Assigning %s a symbol", id_str);
+    PFDBG1('t', "Assigning %s a symbol", id_str);
     ident->type = symval->type;
     if (!type_is_array(ident->type) && !type_is_function(ident->type) &&
         !type_is_typedef(ident->type) &&
@@ -112,7 +112,7 @@ ASTree *validate_arg(ASTree *call, ASTree *arg) {
   size_t param_index = astree_count(call) - 1;
   if (param_index >= function_type->function.parameters_size) {
     if (type_is_variadic_function(function_type)) {
-      DEBUGS('t', "Found variadic function parameter number %lu", param_index);
+      PFDBG1('t', "Found variadic function parameter number %lu", param_index);
       maybe_load_cexpr(arg, NULL);
       return astree_adopt(call, 1, arg);
     } else {
@@ -120,9 +120,9 @@ ASTree *validate_arg(ASTree *call, ASTree *arg) {
                                    BCC_TERR_EXCESS_PARAMS, 1, call);
     }
   }
-  DEBUGS('t', "Validating argument %d", param_index);
+  PFDBG1('t', "Validating argument %d", param_index);
   Type *param_type = type_param_index(function_type, param_index);
-  DEBUGS('t', "Comparing types");
+  PFDBG0('t', "Comparing types");
   if (types_assignable(param_type, arg->type, astree_is_const_zero(arg))) {
     maybe_load_cexpr(arg, NULL);
     return astree_adopt(call, 1, arg);
