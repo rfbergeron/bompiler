@@ -106,7 +106,7 @@ void lexer_include() {
 }
 
 int lexer_token(int symbol) {
-  DEBUGS('l', "Found token with code: %p, length: %p", symbol, yyleng);
+  PFDBG2('l', "Found token with code: %p, length: %p", symbol, yyleng);
   yylval = astree_init(symbol, lexer_loc, yytext);
   fprintf(tokfile, "%2lu  %3lu.%3lu %3d %-13s %s\n", yylval->loc.filenr,
           yylval->loc.linenr, yylval->loc.offset, yylval->symbol,
@@ -122,7 +122,7 @@ int lexer_token(int symbol) {
  * flags directly
  */
 int lexer_ident(void) {
-  DEBUGS('l', "Determining appropriate token type for identifier %s", yytext);
+  PFDBG1('l', "Determining appropriate token type for identifier %s", yytext);
   SymbolValue *symval = NULL;
   (void)state_get_symbol(state, yytext, yyleng, &symval);
   if (symval == NULL || !type_is_typedef(symval->type) ||
@@ -135,7 +135,7 @@ int lexer_ident(void) {
 
 int lexer_iteration(int symbol) {
   (void)lexer_token(symbol);
-  DEBUGS('l', "Creating jump stack entries for token %s", yytext);
+  PFDBG1('l', "Creating jump stack entries for token %s", yytext);
   size_t id = state_next_jump_id(state);
   yylval->jump_id = id;
   state_push_break_id(state, id);
@@ -145,7 +145,7 @@ int lexer_iteration(int symbol) {
 
 int lexer_switch(void) {
   (void)lexer_token(TOK_SWITCH);
-  DEBUGS('l', "Creating jump stack entries for token %s", yytext);
+  PFDBG1('l', "Creating jump stack entries for token %s", yytext);
   size_t id = state_next_jump_id(state);
   yylval->jump_id = id;
   state_push_break_id(state, id);

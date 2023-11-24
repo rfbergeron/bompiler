@@ -38,7 +38,7 @@ extern int skip_type_check;
 ASTree EMPTY_EXPR = EMPTY_EXPR_VALUE;
 
 ASTree *astree_init(int symbol, const Location location, const char *info) {
-  DEBUGS('t', "Initializing new astree node with code: %s, lexinfo: '%s'",
+  PFDBG2('t', "Initializing new astree node with code: %s, lexinfo: '%s'",
          parser_get_tname(symbol), info);
 
   ASTree *tree = malloc(sizeof(ASTree));
@@ -65,7 +65,7 @@ int astree_destroy(ASTree *tree) {
     return 0;
   }
 
-  DEBUGS('t', "Freeing an astree with symbol: %s, lexinfo: %s",
+  PFDBG2('t', "Freeing an astree with symbol: %s, lexinfo: %s",
          parser_get_tname(tree->symbol), tree->lexinfo);
   if (yydebug) {
     /* print tree contents to stderr */
@@ -156,7 +156,7 @@ ASTree *astree_adopt(ASTree *parent, const size_t count, ...) {
     assert(child != NULL);
     assert((child == &EMPTY_EXPR) ||
            (llist_find(&parent->children, child) == (size_t)-1L));
-    DEBUGS('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
+    PFDBG2('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
            parser_get_tname(child->symbol));
     int status = llist_push_back(&parent->children, child);
     if (status) {
@@ -319,7 +319,7 @@ int astree_to_string(ASTree *tree, char *buffer, size_t size) {
 
 int astree_print_tree(ASTree *tree, FILE *out, int depth) {
   /* print out the whole tree */
-  DEBUGS('t', "Tree info: token: %s, lexinfo: %s, children: %u",
+  PFDBG3('t', "Tree info: token: %s, lexinfo: %s, children: %u",
          parser_get_tname(tree->symbol), tree->lexinfo,
          llist_size(&tree->children));
 
@@ -334,7 +334,7 @@ int astree_print_tree(ASTree *tree, FILE *out, int depth) {
 
   size_t i;
   for (i = 0; i < llist_size(&tree->children); ++i) {
-    DEBUGS('t', "    %p", llist_get(&tree->children, i));
+    PFDBG1('t', "    %p", llist_get(&tree->children, i));
   }
 
   for (i = 0; i < llist_size(&tree->children); ++i) {

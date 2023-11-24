@@ -275,7 +275,7 @@ static const char *create_unique_name(ASTree *tree) {
  * called with error nodes as arguments.
  */
 ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
-  DEBUGS('t', "Making object entry for value %s", declarator->lexinfo);
+  PFDBG1('t', "Making object entry for value %s", declarator->lexinfo);
   if (location_is_empty(&UNWRAP(declaration)->loc))
     UNWRAP(declaration)->loc = UNWRAP(declarator)->loc;
   if (declaration->symbol == TOK_TYPE_ERROR ||

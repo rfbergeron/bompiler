@@ -5,6 +5,7 @@
 #include "asmgen.h"
 #include "badalist.h"
 #include "badmap.h"
+#include "limits.h"
 #include "string.h"
 #include "symtable.h"
 

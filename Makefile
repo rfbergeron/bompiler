@@ -1,4 +1,4 @@
-export CWARN ?= -Wall -Wextra -Wpedantic -Wno-shadow -Wno-declaration-after-statement -Wno-variadic-macros -Wno-cast-function-type
+export CWARN ?= -Wall -Wextra -Wpedantic -Wno-shadow -Wno-declaration-after-statement -Wno-cast-function-type
 export CFLAGS ?= -Isrc -Ibuild -Ibadlib -Ibadlib/murmur3 -ansi
 WRAP_ATTRS := -Wl,--wrap=auxspec_destroy,--wrap=typespec_destroy,--wrap=create_erraux_v,--wrap=typespec_append_auxspecs,--wrap=typespec_append_aux,--wrap=typespec_prepend_aux,--wrap=typespec_init,--wrap=typespec_get_aux
 WRAP_LYUTILS := -Wl,--wrap=parser_get_tname

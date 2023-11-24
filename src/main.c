@@ -114,7 +114,7 @@ int main(int argc, char **argv) {
   strcpy(name, srcname);
   name[name_len] = 0;
 
-  DEBUGS('m', "Creating names of output files and cpp exec line");
+  PFDBG0('m', "Creating names of output files and cpp exec line");
   strcpy(strname, name);
   strcat(strname, STR_EXT);
   strcpy(tokname, name);
@@ -132,7 +132,7 @@ int main(int argc, char **argv) {
   strcpy(cppcmd, CPP);
   strcat(cppcmd, srcname);
 
-  DEBUGS('m', "Opening preprocessor pipe");
+  PFDBG0('m', "Opening preprocessor pipe");
   /* this is way more complicated than it would normally be since -ansi does
    * not allow the use of the popen() function, so we have to do all the
    * heavy lifting ourselves
@@ -156,7 +156,7 @@ int main(int argc, char **argv) {
     close(pipedes[1]);
     /* set yyin to standard input, which should be the read end of the pipe */
     yyin = stdin;
-    DEBUGS('m', "value of yyin: %p", yyin);
+    PFDBG1('m', "value of yyin: %p", yyin);
     if (yyin == NULL) {
       err(1, "%s", cppcmd);
     }
@@ -173,7 +173,7 @@ int main(int argc, char **argv) {
     err(EXIT_FAILURE, "Failed to lay pipe\n");
   }
 
-  DEBUGS('m', "Opening output files");
+  PFDBG0('m', "Opening output files");
   strfile = fopen(strname, "w");
   if (strfile == NULL) {
     err(1, "%s", strname);
@@ -231,7 +231,7 @@ cleanup:
       warnx("Failed to print program errors.");
     }
   }
-  DEBUGS('m', "Execution finished; wrapping up.");
+  PFDBG0('m', "Execution finished; wrapping up.");
 
   /* restore stdin */
   dup2(stdin_tmp_fileno, STDIN_FILENO);
@@ -245,15 +245,15 @@ cleanup:
   fclose(asmfile);
   fclose(errfile);
 
-  DEBUGS('m', "global state cleanup");
+  PFDBG0('m', "global state cleanup");
   state_destroy(state);
-  DEBUGS('m', "syntax tree cleanup");
+  PFDBG0('m', "syntax tree cleanup");
   parser_destroy_globals();
-  DEBUGS('m', "assembly generator cleanup");
+  PFDBG0('m', "assembly generator cleanup");
   asmgen_free_globals();
-  DEBUGS('m', "string set cleanup");
+  PFDBG0('m', "string set cleanup");
   string_set_free_globals();
-  DEBUGS('m', "lexing/parsing helper cleanup");
+  PFDBG0('m', "lexing/parsing helper cleanup");
   lexer_free_globals();
   return EXIT_SUCCESS;
 }
