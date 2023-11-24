@@ -66,7 +66,7 @@ ASTree *astree_propogate_errnode_a(ASTree *parent, size_t count,
                                    ASTree **children);
 size_t astree_count(ASTree *parent);
 int astree_is_const_zero(const ASTree *tree);
-int astree_to_string(ASTree *astree, char *buffer, size_t size);
+int astree_to_string(ASTree *astree, char *buffer);
 int astree_print_tree(ASTree *tree, FILE *out, int depth);
 int astree_print_symbols(ASTree *tree, FILE *out, int depth);
 #endif

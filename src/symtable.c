@@ -83,15 +83,14 @@ int symbol_value_destroy(SymbolValue *symbol_value) {
 }
 
 #ifndef UNIT_TESTING
-int symbol_value_print(const SymbolValue *symbol, char *buffer, size_t size) {
-  if (!symbol || !buffer || size < 1) {
+int symbol_value_print(const SymbolValue *symbol, char *buffer) {
+  static char locstr[LINESIZE], typestr[LINESIZE];
+  if (!symbol || !buffer) {
     fprintf(stderr, "ERROR: invalid arguments to symbol_value_print\n");
     return -1;
   }
-  char locstr[LINESIZE];
-  location_to_string(&symbol->loc, locstr, LINESIZE);
-  char typestr[LINESIZE];
-  type_to_str(symbol->type, typestr, LINESIZE);
+  location_to_string(&symbol->loc, locstr);
+  type_to_str(symbol->type, typestr);
   size_t sym_width = type_get_width(symbol->type);
   size_t sym_align = type_get_alignment(symbol->type);
   const char *link_str;
@@ -234,10 +233,10 @@ int tag_value_print(const TagValue *tagval, char *buffer, size_t size) {
     assert(!map_keys(symbols, &symnames));
     size_t i;
     for (i = 0; i < alist_size(&symnames); ++i) {
-      char symbuf[LINESIZE];
+      static char symbuf[LINESIZE];
       const char *symname = alist_get(&symnames, i);
       SymbolValue *symval = map_get(symbols, (char *)symname, strlen(symname));
-      int status = symbol_value_print(symval, symbuf, LINESIZE);
+      int status = symbol_value_print(symval, symbuf);
       if (status) return status;
       int characters_printed =
           sprintf(buffer + buffer_offset, "%s: %s, ", symname, symbuf);

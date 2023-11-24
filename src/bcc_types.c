@@ -231,7 +231,7 @@ static const char *base_get_str(unsigned int flags) {
   }
 }
 
-static int specifiers_to_str(const Type *type, char *buf, size_t size) {
+static int specifiers_to_str(const Type *type, char *buf) {
   assert(type->any.code == TYPE_CODE_BASE || type->any.code == TYPE_CODE_ENUM ||
          type->any.code == TYPE_CODE_UNION ||
          type->any.code == TYPE_CODE_STRUCT);
@@ -250,7 +250,6 @@ static int specifiers_to_str(const Type *type, char *buf, size_t size) {
       "%s enum %s"    /* qualified enum */
   };
   static const size_t QUALIFIED_OFFSET = 4;
-  (void)size; /* unused because no snprintf until C99 */
   const char *type_string = type->any.code == TYPE_CODE_BASE
                                 ? base_get_str(type->base.flags)
                                 : type->tag.name;
@@ -265,8 +264,7 @@ static int specifiers_to_str(const Type *type, char *buf, size_t size) {
     return sprintf(buf, FORMAT_STRINGS[format_index], type_string);
 }
 
-int type_to_str(const Type *type, char *buf, size_t size) {
-  (void)size; /* unused because no snprintf until C99 */
+int type_to_str(const Type *type, char *buf) {
   buf[0] = '\0';
   int ret = 0;
   const Type *current = type;
@@ -283,7 +281,7 @@ int type_to_str(const Type *type, char *buf, size_t size) {
       case TYPE_CODE_UNION:
         /* fallthrough */
       case TYPE_CODE_ENUM:
-        ret += specifiers_to_str(current, buf + ret, size - ret);
+        ret += specifiers_to_str(current, buf + ret);
         current = NULL;
         break;
       case TYPE_CODE_FUNCTION:
@@ -297,8 +295,7 @@ int type_to_str(const Type *type, char *buf, size_t size) {
         size_t i;
         for (i = 0; i < current->function.parameters_size; ++i) {
           if (i > 0) ret += sprintf(buf + ret, ", ");
-          ret += type_to_str(current->function.parameters[i], buf + ret,
-                             size - ret);
+          ret += type_to_str(current->function.parameters[i], buf + ret);
         }
         ret += sprintf(buf + ret, ") returning ");
         current = current->function.next;

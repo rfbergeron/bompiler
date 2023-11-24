@@ -15,10 +15,13 @@
 #define MAX_OPCODE_LENGTH 8
 #define MAX_OPERAND_LENGTH 64
 #define MAX_LABEL_LENGTH 64
+#define MAX_INSTR_LENGTH 1024
 #define NO_DISP 0
 #define IMM_SIGNED 1
 #define IMM_UNSIGNED 0
 #define MAX_IDENT_LEN 31
+#define MAX_INSTR_DEBUG_LENGTH 4096
+#define MAX_OPERAND_DEBUG_LENGTH 1024
 
 #define GENERATE_STRING(CODE, TYPE, BOOL) #CODE,
 #define GENERATE_TYPE(CODE, TYPE, BOOL) \
@@ -2779,8 +2782,7 @@ no_alloc:;
   return declaration;
 }
 
-int operand_to_str(Operand *operand, char *str, size_t size) {
-  (void)size;
+int operand_to_str(Operand *operand, char *str) {
   switch (operand->all.mode) {
     case MODE_NONE:
       str[0] = 0;
@@ -2827,8 +2829,7 @@ int operand_to_str(Operand *operand, char *str, size_t size) {
   }
 }
 
-int opcode_to_str(InstructionData *data, char *str, size_t size) {
-  (void)size;
+int opcode_to_str(InstructionData *data, char *str) {
   switch (optype_from_opcode(data->opcode)) {
     case OPTYPE_CONTEXTUAL:
       /* fallthrough */
@@ -2868,31 +2869,27 @@ int opcode_to_str(InstructionData *data, char *str, size_t size) {
   }
 }
 
-int bin_to_str(InstructionData *data, char *str, size_t size) {
-  (void)size;
-  char opcode_str[MAX_OPCODE_LENGTH];
-  int chars_written = opcode_to_str(data, opcode_str, MAX_OPCODE_LENGTH);
+int bin_to_str(InstructionData *data, char *str) {
+  static char opcode_str[MAX_OPCODE_LENGTH], dest_str[MAX_OPERAND_LENGTH],
+      src_str[MAX_OPERAND_LENGTH];
+  int chars_written = opcode_to_str(data, opcode_str);
   if (chars_written < 0) return chars_written;
 
-  char dest_str[MAX_OPERAND_LENGTH];
-  chars_written = operand_to_str(&data->dest, dest_str, MAX_OPERAND_LENGTH);
+  chars_written = operand_to_str(&data->dest, dest_str);
   if (chars_written < 0) return chars_written;
 
-  char src_str[MAX_OPERAND_LENGTH];
-  chars_written = operand_to_str(&data->src, src_str, MAX_OPERAND_LENGTH);
+  chars_written = operand_to_str(&data->src, src_str);
   if (chars_written < 0) return chars_written;
 
   return sprintf(str, "%s %s, %s", opcode_str, src_str, dest_str);
 }
 
-int un_to_str(InstructionData *data, char *str, size_t size) {
-  (void)size;
-  char opcode_str[MAX_OPCODE_LENGTH];
-  int chars_written = opcode_to_str(data, opcode_str, MAX_OPCODE_LENGTH);
+int un_to_str(InstructionData *data, char *str) {
+  static char opcode_str[MAX_OPCODE_LENGTH], dest_str[MAX_OPERAND_LENGTH];
+  int chars_written = opcode_to_str(data, opcode_str);
   if (chars_written < 0) return chars_written;
 
-  char dest_str[MAX_OPERAND_LENGTH];
-  chars_written = operand_to_str(&data->dest, dest_str, MAX_OPERAND_LENGTH);
+  chars_written = operand_to_str(&data->dest, dest_str);
   if (chars_written < 0) return chars_written;
 
   if (data->opcode == OP_CALL && data->dest.all.mode == MODE_REGISTER)
@@ -2901,8 +2898,7 @@ int un_to_str(InstructionData *data, char *str, size_t size) {
     return sprintf(str, "%s %s", opcode_str, dest_str);
 }
 
-int dir_to_str(InstructionData *data, char *str, size_t size) {
-  (void)size;
+int dir_to_str(InstructionData *data, char *str) {
   switch (data->opcode) {
     case OP_FILE:
       assert(data->dest.all.mode == MODE_DIRECT);
@@ -3020,7 +3016,8 @@ int operand_debug(Operand *operand, char *str) {
 }
 
 int instr_debug(InstructionData *data, char *str) {
-  char src_buf[1024], dest_buf[1024];
+  static char src_buf[MAX_OPERAND_DEBUG_LENGTH],
+      dest_buf[MAX_OPERAND_DEBUG_LENGTH];
   int status = operand_debug(&data->src, src_buf);
   if (status < 0) return status;
   status = operand_debug(&data->dest, dest_buf);
@@ -3035,7 +3032,7 @@ int instr_debug(InstructionData *data, char *str) {
                  OPCODES[data->opcode], src_buf, dest_buf);
 }
 
-int instr_to_str(InstructionData *data, char *str, size_t size) {
+int instr_to_str(InstructionData *data, char *str) {
   int ret = 0;
   if (data->label != NULL) {
     int pad_count;
@@ -3057,30 +3054,30 @@ int instr_to_str(InstructionData *data, char *str, size_t size) {
   switch (optype_from_opcode(data->opcode)) {
     int chars_written;
     case OPTYPE_DIRECTIVE:
-      chars_written = dir_to_str(data, str + ret, size - ret);
+      chars_written = dir_to_str(data, str + ret);
       if (chars_written < 0) return chars_written;
       ret += chars_written;
       break;
     case OPTYPE_CONTEXTUAL:
       chars_written =
-          (data->src.all.mode == MODE_NONE ? un_to_str : bin_to_str)(
-              data, str + ret, size - ret);
+          (data->src.all.mode == MODE_NONE ? un_to_str : bin_to_str)(data,
+                                                                     str + ret);
       if (chars_written < 0) return chars_written;
       ret += chars_written;
       break;
     case OPTYPE_BINARY:
-      chars_written = bin_to_str(data, str + ret, size - ret);
+      chars_written = bin_to_str(data, str + ret);
       if (chars_written < 0) return chars_written;
       ret += chars_written;
       break;
     case OPTYPE_UNARY:
-      chars_written = un_to_str(data, str + ret, size - ret);
+      chars_written = un_to_str(data, str + ret);
       if (chars_written < 0) return chars_written;
       ret += chars_written;
       break;
     case OPTYPE_NULLARY:
       if (data->opcode == OP_NONE) break;
-      chars_written = opcode_to_str(data, str + ret, size - ret);
+      chars_written = opcode_to_str(data, str + ret);
       if (chars_written < 0) return chars_written;
       ret += chars_written;
       break;
@@ -3101,11 +3098,11 @@ int instr_to_str(InstructionData *data, char *str, size_t size) {
 }
 
 int generator_print_il(FILE *out) {
-  char buffer[1024];
+  static char buffer[MAX_INSTR_LENGTH];
   size_t i;
   for (i = 0; i < llist_size(instructions); ++i) {
     InstructionData *data = llist_get(instructions, i);
-    int chars_written = instr_to_str(data, buffer, 1024);
+    int chars_written = instr_to_str(data, buffer);
     if (chars_written < 0) return chars_written;
     chars_written = fprintf(out, "%s\n", buffer);
     if (chars_written < 0) return chars_written;
@@ -3114,7 +3111,7 @@ int generator_print_il(FILE *out) {
 }
 
 int generator_debug_il(FILE *out) {
-  char buffer[8192];
+  static char buffer[MAX_INSTR_DEBUG_LENGTH];
   size_t i;
   for (i = 0; i < llist_size(instructions); ++i) {
     InstructionData *data = llist_get(instructions, i);

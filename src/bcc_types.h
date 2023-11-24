@@ -172,7 +172,7 @@ int type_init_tag(Type **out, unsigned int flags, const char *tag_name,
 int type_init_base(Type **out, unsigned int flags);
 int type_init_error(Type **out, CompileError *error);
 int type_destroy(Type *type);
-int type_to_str(const Type *type, char *buf, size_t size);
+int type_to_str(const Type *type, char *buf);
 int type_is_void(const Type *type);
 int type_is_integer(const Type *type);
 int type_is_signed(const Type *type);
