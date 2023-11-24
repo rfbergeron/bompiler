@@ -60,7 +60,7 @@ void lexer_dump_filenames(FILE *out);
 void lexer_init_globals();
 void lexer_free_globals();
 
-int location_to_string(const Location *loc, char *buf, size_t size);
+int location_to_string(const Location *loc, char *buf);
 const char *parser_get_tname(int symbol);
 void parser_init_globals(void);
 void parser_destroy_globals(void);

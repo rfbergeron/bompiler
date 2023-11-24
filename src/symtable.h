@@ -98,7 +98,7 @@ typedef struct label_value {
 /* SymbolValue functions */
 SymbolValue *symbol_value_init(const Location *loc, size_t sequence);
 int symbol_value_destroy(SymbolValue *symbol_value);
-int symbol_value_print(const SymbolValue *symbol, char *buffer, size_t size);
+int symbol_value_print(const SymbolValue *symbol, char *buffer);
 
 /* TagValue functions */
 TagValue *tag_value_init(TagType tag);

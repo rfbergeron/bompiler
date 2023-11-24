@@ -253,8 +253,7 @@ int astree_is_const_zero(const ASTree *tree) {
 }
 
 #ifndef UNIT_TESTING
-static int attributes_to_string(const unsigned int attributes, char *buf,
-                                size_t size) {
+static int attributes_to_string(const unsigned int attributes, char *buf) {
   if (attributes == ATTR_NONE) {
     buf[0] = 0;
     return 0;
@@ -262,37 +261,27 @@ static int attributes_to_string(const unsigned int attributes, char *buf,
 
   size_t i, buf_index = 0;
   for (i = 0; i < NUM_ATTRIBUTES; ++i) {
-    if (attributes & (1 << i)) {
-      if (buf_index + strlen(attr_map[i]) > size) {
-        fprintf(stderr, "WARN: buffer too small to print all attributes\n");
-        return 1;
-      } else {
-        buf_index += sprintf(buf + buf_index, "%s ", attr_map[i]);
-      }
-    }
+    if (attributes & (1 << i))
+      buf_index += sprintf(buf + buf_index, "%s ", attr_map[i]);
   }
 
   if (buf_index > 0) buf[buf_index - 1] = 0;
   return 0;
 }
 
-int astree_to_string(ASTree *tree, char *buffer, size_t size) {
-  (void)size;
+int astree_to_string(ASTree *tree, char *buffer) {
+  static char locstr[LINESIZE], attrstr[LINESIZE], typestr[LINESIZE];
   /* print token name, lexinfo in quotes, the location, block number,
    * attributes, and the typeid if this is a struct
    */
   if (tree == NULL) return -1;
 
   const char *tname = parser_get_tname(tree->symbol);
-  char locstr[LINESIZE];
-  int characters_printed = location_to_string(&tree->loc, locstr, LINESIZE);
+  int characters_printed = location_to_string(&tree->loc, locstr);
   if (characters_printed < 0) return characters_printed;
-  char attrstr[LINESIZE];
-  characters_printed =
-      attributes_to_string(tree->attributes, attrstr, LINESIZE);
+  characters_printed = attributes_to_string(tree->attributes, attrstr);
   if (characters_printed < 0) return characters_printed;
-  char typestr[LINESIZE];
-  characters_printed = type_to_str(tree->type, typestr, LINESIZE);
+  characters_printed = type_to_str(tree->type, typestr);
   if (characters_printed < 0) return characters_printed;
 
   if (strlen(tname) > 4) tname += 4;
@@ -318,17 +307,16 @@ int astree_to_string(ASTree *tree, char *buffer, size_t size) {
 }
 
 int astree_print_tree(ASTree *tree, FILE *out, int depth) {
+  static char indent[LINESIZE], nodestr[LINESIZE];
   /* print out the whole tree */
   PFDBG3('t', "Tree info: token: %s, lexinfo: %s, children: %u",
          parser_get_tname(tree->symbol), tree->lexinfo,
          llist_size(&tree->children));
 
   size_t numspaces = depth * 2;
-  char indent[LINESIZE];
   memset(indent, ' ', numspaces);
   indent[numspaces] = 0;
-  char nodestr[LINESIZE];
-  int characters_printed = astree_to_string(tree, nodestr, LINESIZE);
+  int characters_printed = astree_to_string(tree, nodestr);
   if (characters_printed < 0) return characters_printed;
   fprintf(out, "%s%s\n", indent, nodestr);
 
@@ -412,9 +400,9 @@ int print_sym_child_helper(ASTree *tree, FILE *out, int depth) {
       break;
   }
   if (block != NULL && block->symbol == TOK_BLOCK) {
+    static char locstr[LINESIZE];
     const char *tname = parser_get_tname(tree->symbol);
-    char locstr[LINESIZE];
-    int characters_printed = location_to_string(&tree->loc, locstr, LINESIZE);
+    int characters_printed = location_to_string(&tree->loc, locstr);
     if (characters_printed < 0) return characters_printed;
     if (strlen(tname) > 4) tname += 4;
     int padding_plus_tname = strlen(tname) + depth * 2;
@@ -430,11 +418,11 @@ int print_sym_child_helper(ASTree *tree, FILE *out, int depth) {
 }
 
 int print_sym_pair_helper(MapPair *pair, FILE *out, int depth) {
+  static char symval_str[LINESIZE];
   const char *symname = pair->key;
   int padding_plus_symname = strlen(symname) + depth * 2;
   SymbolValue *symval = pair->value;
-  char symval_str[LINESIZE];
-  int characters_printed = symbol_value_print(symval, symval_str, LINESIZE);
+  int characters_printed = symbol_value_print(symval, symval_str);
   if (characters_printed < 0) return characters_printed;
   return fprintf(out, "%*s: %s\n", padding_plus_symname, symname, symval_str);
 }

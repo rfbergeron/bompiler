@@ -41,8 +41,8 @@
 %destructor { astree_destroy($$); } <>
 %destructor { ; } program
 %printer {
-  char nodestr[1024];
-  astree_to_string($$, nodestr, 1024);
+  static char nodestr[1024];
+  astree_to_string($$, nodestr);
   fprintf(yyoutput, "%p->%s", $$, nodestr);
 } <>
 

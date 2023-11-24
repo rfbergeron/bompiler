@@ -197,9 +197,7 @@ void lexer_free_globals() {
 
 void yyerror(const char *message) { lexer_error(message); }
 
-int location_to_string(const Location *loc, char *buf, size_t size) {
-  (void)size;
-  /* TODO(Robert): check size without using snprintf */
+int location_to_string(const Location *loc, char *buf) {
   return sprintf(buf, "%lu, %lu, %lu, %lu", loc->filenr, loc->linenr,
                  loc->offset, loc->blocknr);
 }
