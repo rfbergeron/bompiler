@@ -202,12 +202,13 @@ static const char *qual_get_str(unsigned int qualifiers) {
   }
 }
 
+/* TODO(Robert): this function should be able to print out types that haven't
+ * been normalized yet, for diagnostic purposes
+ */
 static const char *base_get_str(unsigned int flags) {
   switch (flags & SPEC_FLAG_MASK) {
     case SPEC_FLAG_NONE:
-      /* fallthrough */
-    default:
-      abort();
+      return "(none)";
     case SPEC_FLAG_VOID:
       return "void";
     case SPEC_FLAG_CHAR:
@@ -228,35 +229,47 @@ static const char *base_get_str(unsigned int flags) {
       return "signed long";
     case SPEC_FLAGS_ULONG:
       return "unsigned long";
+    case SPEC_FLAG_FLOAT:
+      return "float";
+    case SPEC_FLAG_DOUBLE:
+      return "double";
+    case SPEC_FLAGS_LONG_DOUBLE:
+      return "long double";
+    default:
+      return "(incomplete)";
   }
 }
 
 static int specifiers_to_str(const Type *type, char *buf) {
-  assert(type->any.code == TYPE_CODE_BASE || type->any.code == TYPE_CODE_ENUM ||
+  assert(type->any.code == TYPE_CODE_NONE || type->any.code == TYPE_CODE_BASE ||
+         type->any.code == TYPE_CODE_ENUM ||
          type->any.code == TYPE_CODE_UNION ||
          type->any.code == TYPE_CODE_STRUCT);
-  /* this array assumes that the type codes for base, struct, union, and enum
-   * are 1, 2, 3 and 4, respectively. the type code is used as a key to map
-   * to the format strings, with an offset of 4 if the type has qualifiers
+  /* this array assumes that the type codes for none, base, struct, union, and
+   * enum are 0, 1, 2, 3 and 4, respectively. the type code is used as a key to
+   * map to the format strings, with an offset of 5 if the type has qualifiers
    */
   static const char *FORMAT_STRINGS[] = {
+      "%s",           /* unqualified incomplete type */
       "%s",           /* unqualified scalar/void */
       "struct %s",    /* unqualified struct */
       "union %s",     /* unqualified union */
       "enum %s",      /* unqualified enum */
+      "%s %s",        /* qualified incomplete type */
       "%s %s",        /* qualified scalar/void */
       "%s struct %s", /* qualified struct */
       "%s union %s",  /* qualified union */
       "%s enum %s"    /* qualified enum */
   };
-  static const size_t QUALIFIED_OFFSET = 4;
-  const char *type_string = type->any.code == TYPE_CODE_BASE
-                                ? base_get_str(type->base.flags)
-                                : type->tag.name;
+  static const size_t QUALIFIED_OFFSET = 5;
+  const char *type_string =
+      type->any.code == TYPE_CODE_BASE || type->any.code == TYPE_CODE_NONE
+          ? base_get_str(type->base.flags)
+          : type->tag.name;
   const char *qualifier_string = qual_get_str(
       type->any.code == TYPE_CODE_BASE ? type->base.flags : type->tag.flags);
 
-  size_t format_index = type->any.code - TYPE_CODE_BASE;
+  size_t format_index = type->any.code;
   if (type_is_qualified(type))
     return sprintf(buf, FORMAT_STRINGS[format_index + QUALIFIED_OFFSET],
                    qualifier_string, type_string);
@@ -272,8 +285,6 @@ int type_to_str(const Type *type, char *buf) {
     switch (current->any.code) {
       case TYPE_CODE_NONE:
         /* fallthrough */
-      default:
-        abort();
       case TYPE_CODE_BASE:
         /* fallthrough */
       case TYPE_CODE_STRUCT:
@@ -317,6 +328,12 @@ int type_to_str(const Type *type, char *buf) {
           ret += sprintf(buf + ret, "pointer to ");
         current = current->pointer.next;
         break;
+      case TYPE_CODE_ERROR:
+        ret += sprintf(buf + ret, "(error)");
+        current = NULL;
+        break;
+      default:
+        abort();
     }
   }
   return ret;
@@ -343,6 +360,10 @@ int type_is_unsigned(const Type *type) {
 }
 
 int type_is_enum(const Type *type) { return type->any.code == TYPE_CODE_ENUM; }
+
+int type_is_integral(const Type *type) {
+  return type_is_integer(type) || type_is_enum(type);
+}
 
 int type_is_arithmetic(const Type *type) {
   return type_is_integer(type) || type_is_enum(type);
@@ -374,6 +395,23 @@ int type_is_variadic_function(const Type *type) {
 
 int type_is_old_style_function(const Type *type) {
   return type->any.code == TYPE_CODE_FUNCTION && type->function.is_old_style;
+}
+
+/* determines (in a roundabout way) whether or not a function has a prototype
+ * yet. this exists so that the compiler can check to see if a function that
+ * was at first declared without a prototype has since been given one.
+ *
+ * the logic is as follows:
+ * - unprototyped functions initially have the `is_variadic` and `is_old_style`
+ *   flags set, with zero parameters. this is the only way for a function to be
+ *   variadic with no parameters
+ * - when the function is given a prototype, either the `is_variadic` flag will
+ *   be cleared, or the function will have parameters
+ */
+int type_is_prototyped_function(const Type *type) {
+  return type->any.code == TYPE_CODE_FUNCTION &&
+         (!type->function.is_old_style || !type->function.is_variadic ||
+          type_param_count(type) > 0);
 }
 
 int type_is_void_pointer(const Type *type) {
@@ -1058,33 +1096,51 @@ int type_append_error(Type *type, CompileError *error) {
   return 0;
 }
 
+/* TODO(Robert): validity check won't work if new_flags has a mixture of type
+ * specifiers, type qualifiers, and storage class specifiers. Currently, this
+ * is not an issue, but it could be in the future. If this function were able
+ * to handle any valid combinations of flags as its operands, it would reduce
+ * the number of checks that need to be performed before calling.
+ */
 static int flags_valid(unsigned int old_flags, unsigned int new_flags,
                        int allow_stor_flags, int allow_spec_flags) {
   if (new_flags & QUAL_FLAG_MASK) {
     return !(new_flags & old_flags);
   } else if (new_flags & STOR_FLAG_MASK) {
     return allow_stor_flags && !(old_flags & STOR_FLAG_MASK);
+  } else if (!allow_spec_flags && (new_flags & SPEC_FLAG_MASK)) {
+    return 0;
   } else {
+    /* mask out qualifiers and storage class since new flags aren't those */
+    old_flags &= SPEC_FLAG_MASK;
     switch (new_flags) {
       case SPEC_FLAG_NONE: /* also SPEC_FLAG_INT */
         return 1;
+      case SPEC_FLAG_FLOAT:
+        /* fallthrough */
       case SPEC_FLAG_VOID:
-        /* fallthrough */
+        return (old_flags & SPEC_FLAG_MASK) == SPEC_FLAG_NONE;
       case SPEC_FLAG_CHAR:
-        /* fallthrough */
+        return (old_flags & ~SPEC_FLAG_SIGN_MASK) == SPEC_FLAG_NONE;
       case SPEC_FLAG_INTEGRAL:
-        return allow_spec_flags &&
-               (old_flags & SPEC_FLAG_LOW_MASK) == SPEC_FLAG_NONE;
+        return (old_flags & SPEC_FLAG_LOW_MASK) == SPEC_FLAG_NONE;
       case SPEC_FLAG_SHORT:
-        /* fallthrough */
-      case SPEC_FLAG_LONG:
-        return allow_spec_flags && !(old_flags & SPEC_FLAG_SIZE_MASK) &&
-               ((old_flags & SPEC_FLAG_LOW_MASK) == SPEC_FLAG_INTEGRAL ||
-                (old_flags & SPEC_FLAG_LOW_MASK) == SPEC_FLAG_NONE);
+        return (old_flags & ~SPEC_FLAG_SIGN_MASK) == SPEC_FLAG_NONE ||
+               (old_flags & ~SPEC_FLAG_SIGN_MASK) == SPEC_FLAG_INTEGRAL;
+      case SPEC_FLAG_LONG: /* remember to support `long long` later on */
+        return (old_flags & ~SPEC_FLAG_SIGN_MASK) == SPEC_FLAG_NONE ||
+               (old_flags & ~SPEC_FLAG_SIGN_MASK) == SPEC_FLAG_INTEGRAL ||
+               (old_flags & ~SPEC_FLAG_SIGN_MASK) == SPEC_FLAG_DOUBLE;
       case SPEC_FLAG_SIGNED:
         /* fallthrough */
       case SPEC_FLAG_UNSIGNED:
-        return allow_spec_flags && !(old_flags & SPEC_FLAG_SIGN_MASK);
+        return !(old_flags & SPEC_FLAG_SIGN_MASK) &&
+               ((old_flags & SPEC_FLAG_LOW_MASK) == SPEC_FLAG_INTEGRAL ||
+                (old_flags & SPEC_FLAG_LOW_MASK) == SPEC_FLAG_CHAR ||
+                (old_flags & SPEC_FLAG_LOW_MASK) == SPEC_FLAG_NONE);
+      case SPEC_FLAG_DOUBLE:
+        return (old_flags & SPEC_FLAG_MASK) == SPEC_FLAG_NONE ||
+               (old_flags & SPEC_FLAG_MASK) == SPEC_FLAG_LONG;
       default:
         abort();
     }

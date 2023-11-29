@@ -121,8 +121,8 @@
     }
 #define UNOP_CASE(opchar, optext, optrans)                            \
   case opchar:                                                        \
-    if ((operator->attributes & ATTR_EXPR_CONST) &&                   \
-        !(operator->attributes & ATTR_CONST_ADDR)) {                  \
+    if ((operand->attributes & ATTR_EXPR_CONST) &&                    \
+        !(operand->attributes & ATTR_CONST_ADDR)) {                   \
       operator->attributes |= operand->attributes & ATTR_MASK_CONST;  \
       UNCA(optext, operator->type, operator->constant.integral.value, \
            operand->constant.integral.value);                         \
@@ -554,12 +554,20 @@ ASTree *evaluate_conditional(ASTree *qmark, ASTree *condition,
   }
 }
 
+/* TODO(Robert): determine if `constant.address.symval` should actually be
+ * propogated by this function. currently, we do it because the register
+ * allocator expects a symbol to be there for pic mode operands. this may
+ * not even be necessary at all since pic mode operands use no registers
+ * except for the instruction pointer, whose liveness we don't care about
+ */
 ASTree *evaluate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
   if ((pointer->attributes & ATTR_CONST_ADDR) &&
       !(index->attributes & ATTR_CONST_ADDR) &&
       (index->attributes & ATTR_EXPR_CONST)) {
+    assert(pointer->constant.address.symval != NULL);
     subscript->attributes |= pointer->attributes & ATTR_MASK_CONST;
     subscript->constant.address.label = pointer->constant.address.label;
+    subscript->constant.address.symval = pointer->constant.address.symval;
     subscript->constant.address.disp = pointer->constant.address.disp +
                                        (long)(index->constant.integral.value *
                                               type_get_width(subscript->type));
@@ -589,11 +597,22 @@ ASTree *evaluate_addrof(ASTree *addrof, ASTree *operand) {
   }
 }
 
+/* TODO(Robert): determine if `constant.address.symval` should be set to the
+ * symval of the member being referenced. also, in the case of a constant
+ * address being used between multiple functions, find a way to clear the
+ * liveness info for all symbols before determining liveness.
+ */
 ASTree *evaluate_reference(ASTree *reference, ASTree *struct_, ASTree *member) {
   if (struct_->attributes & ATTR_CONST_ADDR) {
+    Type *tag_type;
+    if (reference->symbol == TOK_ARROW)
+      assert(!type_strip_declarator(&tag_type, struct_->type));
+    else
+      tag_type = struct_->type;
     reference->attributes |= struct_->attributes & ATTR_MASK_CONST;
-    SymbolValue *symval = type_member_name(struct_->type, member->lexinfo);
+    SymbolValue *symval = type_member_name(tag_type, member->lexinfo);
     assert(symval);
+    reference->constant.address.symval = symval;
     reference->constant.address.label = struct_->constant.address.label;
     reference->constant.address.disp =
         struct_->constant.address.disp + (long)symval->disp;

@@ -41,12 +41,10 @@ typedef enum type_spec_flag {
   SPEC_FLAG_VOID = 1,
   SPEC_FLAG_CHAR = 2,
   SPEC_FLAG_INTEGRAL = 3,
-  /*
-   * SPEC_FLAG_FLOAT = 4,
-   * SPEC_FLAG_DOUBLE = 5,
-   * SPEC_FLAG_LONG_DOUBLE = 6,
-   * SPEC_FLAG_BOOL = 7,
-   */
+  SPEC_FLAG_FLOAT = 4,
+  SPEC_FLAG_DOUBLE = 5,
+  /* SPEC_FLAG_BOOL = 6, */
+  /* unused 8th value = 7 */
   SPEC_FLAG_SIGNED = 1 << 3,
   SPEC_FLAG_UNSIGNED = 1 << 4,
   SPEC_FLAG_SHORT = 1 << 5,
@@ -65,6 +63,7 @@ typedef enum type_spec_flag {
   SPEC_FLAGS_ULONG = SPEC_FLAG_INTEGRAL | SPEC_FLAG_UNSIGNED | SPEC_FLAG_LONG,
   /* SPEC_FLAGS_ULLONG = SPEC_FLAG_INTEGRAL | SPEC_FLAG_UNSIGNED |
      SPEC_FLAG_LONG_LONG, */
+  SPEC_FLAGS_LONG_DOUBLE = SPEC_FLAG_DOUBLE | SPEC_FLAG_LONG,
   SPEC_FLAG_MASK = 0x7fU,
   SPEC_FLAG_LOW_MASK = 0x7U,
   SPEC_FLAG_HIGH_MASK = 0x78U,
@@ -178,6 +177,7 @@ int type_is_integer(const Type *type);
 int type_is_signed(const Type *type);
 int type_is_unsigned(const Type *type);
 int type_is_enum(const Type *type);
+int type_is_integral(const Type *type);
 int type_is_arithmetic(const Type *type);
 int type_is_pointer(const Type *type);
 int type_is_scalar(const Type *type);
@@ -186,6 +186,7 @@ int type_is_deduced_array(const Type *type);
 int type_is_function(const Type *type);
 int type_is_variadic_function(const Type *type);
 int type_is_old_style_function(const Type *type);
+int type_is_prototyped_function(const Type *type);
 int type_is_void_pointer(const Type *type);
 int type_is_function_pointer(const Type *type);
 int type_is_struct(const Type *type);

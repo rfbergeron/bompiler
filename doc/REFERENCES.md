@@ -19,3 +19,4 @@ or the meaning of the C standard.
   when explaining that array and function declarators are read before pointer
   declarators. It does not mention why pointers are read "backwards" in
   comparison, but it is because pointers are right associative.
+- https://gcc.gnu.org/onlinedocs/gcc/Attribute-Syntax.html

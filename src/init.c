@@ -35,7 +35,7 @@ static ASTree *init_scalar(const Type *type, ptrdiff_t disp,
     } else {
       return set_init_list_iterators(initializer, where);
     }
-  } else if ((type_is_char_array(type) &&
+  } else if (((type_is_char_array(type) || type_is_pointer(type)) &&
               initializer->symbol == TOK_STRINGCON) ||
              types_assignable(type, initializer->type,
                               astree_is_const_zero(initializer))) {

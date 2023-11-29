@@ -10,6 +10,12 @@
 #include "stdlib.h"
 #include "yyparse.h"
 
+ASTree *validate_empty_expr(ASTree *empty_expr) {
+  assert(empty_expr != &EMPTY_EXPR && empty_expr->symbol == ';');
+  empty_expr->type = (Type *)TYPE_VOID;
+  return translate_empty_expr(empty_expr);
+}
+
 ASTree *validate_intcon(ASTree *intcon) { return evaluate_intcon(intcon); }
 
 ASTree *validate_charcon(ASTree *charcon) {
@@ -21,34 +27,34 @@ ASTree *validate_charcon(ASTree *charcon) {
 }
 
 ASTree *validate_stringcon(ASTree *stringcon) {
-  /* create symbol for string literal; it is more convenient that way */
   const char *stringcon_label;
-  SymbolValue *symval =
-      symbol_value_init(&stringcon->loc, state_get_sequence(state));
-  symval->disp = 0;
-  symval->flags = SYMFLAG_LINK_INT | SYMFLAG_STORE_STAT | SYMFLAG_DEFINED;
   /* this function will emit the necessary directives for the literal */
-  symval->static_id =
-      asmgen_literal_label(stringcon->lexinfo, &stringcon_label);
+  size_t static_id = asmgen_literal_label(stringcon->lexinfo, &stringcon_label);
 
-  /* subtract 2 for quotes, add one for terminating nul */
-  int status =
-      type_init_array(&symval->type, strlen(stringcon->lexinfo) - 2 + 1, 0);
-  if (status) abort();
+  /* create symbol for string literal; it is more convenient that way */
+  /* insert string literal into the symbol table if it's not already there */
+  SymbolValue *symval = NULL;
+  (void)state_get_symbol(state, stringcon_label, strlen(stringcon_label),
+                         &symval);
+  if (symval == NULL) {
+    symval = symbol_value_init(&stringcon->loc, state_get_sequence(state));
+    symval->disp = 0;
+    symval->flags = SYMFLAG_LINK_INT | SYMFLAG_STORE_STAT | SYMFLAG_DEFINED;
+    symval->static_id = static_id;
 
-  Type *char_type;
-  /* TODO(Robert): Type: not sure if storage class flag is really necessary */
-  status = type_init_base(&char_type,
-                          SPEC_FLAG_CHAR | QUAL_FLAG_CONST | STOR_FLAG_STATIC);
-  if (status) abort();
+    /* subtract 2 for quotes, add one for terminating nul */
+    assert(
+        !type_init_array(&symval->type, strlen(stringcon->lexinfo) - 2 + 1, 0));
 
-  status = type_append(symval->type, char_type, 0);
-  if (status) abort();
+    Type *char_type;
+    /* TODO(Robert): Type: not sure if storage class flag is really necessary */
+    assert(!type_init_base(
+        &char_type, SPEC_FLAG_CHAR | QUAL_FLAG_CONST | STOR_FLAG_STATIC));
 
-  status = state_insert_symbol(state, stringcon_label, strlen(stringcon_label),
-                               symval);
-  if (status)
-    return astree_create_errnode(stringcon, BCC_TERR_LIBRARY_FAILURE, 0);
+    assert(!type_append(symval->type, char_type, 0));
+    assert(!state_insert_symbol(state, stringcon_label, strlen(stringcon_label),
+                                symval));
+  }
 
   stringcon->type = symval->type;
   return evaluate_stringcon(stringcon);
@@ -232,6 +238,10 @@ ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
     }
   } else if (type_is_pointer(true_expr->type) &&
              astree_is_const_zero(false_expr)) {
+    /* TODO(Robert): this will cause a double free when `astree_destroy` is
+     * called because it assumes that a new pointer type is created, like it
+     * is when its second and third operands are both pointers.
+     */
     qmark->type = true_expr->type;
   } else if (astree_is_const_zero(true_expr) &&
              type_is_pointer(false_expr->type)) {
@@ -289,7 +299,7 @@ ASTree *validate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
 static int subtraction_type(Type **out, Type *left_type, Type *right_type) {
   if (type_is_arithmetic(left_type) && type_is_arithmetic(right_type)) {
     return type_arithmetic_conversions(out, left_type, right_type);
-  } else if (type_is_pointer(left_type) && type_is_integer(right_type)) {
+  } else if (type_is_pointer(left_type) && type_is_integral(right_type)) {
     return *out = left_type, 0;
   } else if (type_is_pointer(left_type) && type_is_pointer(right_type) &&
              types_equivalent(left_type, right_type, 1, 1)) {
@@ -304,9 +314,9 @@ static int subtraction_type(Type **out, Type *left_type, Type *right_type) {
 static int addition_type(Type **out, Type *left_type, Type *right_type) {
   if (type_is_arithmetic(left_type) && type_is_arithmetic(right_type)) {
     return type_arithmetic_conversions(out, left_type, right_type);
-  } else if (type_is_pointer(left_type) && type_is_integer(right_type)) {
+  } else if (type_is_pointer(left_type) && type_is_integral(right_type)) {
     return *out = left_type, 0;
-  } else if (type_is_integer(left_type) && type_is_pointer(right_type)) {
+  } else if (type_is_integral(left_type) && type_is_pointer(right_type)) {
     return *out = right_type, 0;
   } else {
     return *out = NULL, -1;
@@ -421,7 +431,7 @@ ASTree *validate_shift(ASTree *operator, ASTree * left, ASTree *right) {
   if (left->symbol == TOK_TYPE_ERROR || right->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(operator, 2, left, right);
   }
-  if (type_is_integer(left->type) && type_is_integer(right->type)) {
+  if (type_is_integral(left->type) && type_is_integral(right->type)) {
     int status = type_arithmetic_conversions(&operator->type, left->type,
                                              (Type *)TYPE_INT);
     if (status) abort();
@@ -437,7 +447,7 @@ ASTree *validate_bitwise(ASTree *operator, ASTree * left, ASTree *right) {
   if (left->symbol == TOK_TYPE_ERROR || right->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(operator, 2, left, right);
   }
-  if (type_is_integer(left->type) && type_is_integer(right->type)) {
+  if (type_is_integral(left->type) && type_is_integral(right->type)) {
     int status =
         type_arithmetic_conversions(&operator->type, left->type, right->type);
     if (status) abort();
@@ -499,7 +509,7 @@ ASTree *validate_complement(ASTree *operator, ASTree * operand) {
     return astree_propogate_errnode(operator, operand);
   }
 
-  if (type_is_integer(operand->type)) {
+  if (type_is_integral(operand->type)) {
     int status = type_arithmetic_conversions(&operator->type, operand->type,
                                              (Type *)TYPE_INT);
     if (status) abort();
@@ -592,7 +602,7 @@ ASTree *validate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
     return astree_create_errnode(astree_adopt(subscript, 2, pointer, index),
                                  BCC_TERR_EXPECTED_POINTER, 2, subscript,
                                  pointer);
-  } else if (!type_is_integer(index->type)) {
+  } else if (!type_is_integral(index->type)) {
     return astree_create_errnode(astree_adopt(subscript, 2, pointer, index),
                                  BCC_TERR_EXPECTED_INTEGER, 2, subscript,
                                  index);
@@ -698,7 +708,7 @@ ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src) {
       case TOK_SHREQ:
         /* fallthrough */
       case TOK_SHLEQ:
-        if (type_is_integer(dest->type) && type_is_integer(src->type)) break;
+        if (type_is_integral(dest->type) && type_is_integral(src->type)) break;
         goto incompatible;
       case '=':
         if (types_assignable(dest->type, src->type, astree_is_const_zero(src)))

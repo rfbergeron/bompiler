@@ -20,7 +20,6 @@
 #include "symtable.h"
 
 #define LINESIZE 1024
-const char *CPP = "/usr/bin/cpp -nostdinc ";
 const char *SRC_EXT = ".c";
 const char *STR_EXT = ".str";
 const char *TOK_EXT = ".tok";
@@ -29,7 +28,9 @@ const char *SYM_EXT = ".sym";
 const char *IL_EXT = ".il";
 const char *ASM_EXT = ".asm";
 const char *ERR_EXT = ".err";
-char cppcmd[LINESIZE];
+/* declare as arrays so that we can use sizeof later */
+const char CPP_FILENAME[] = "cpp";
+const char CPP_STD_ARG[] = "-std=c90";
 char name[LINESIZE];
 char strname[LINESIZE];
 char tokname[LINESIZE];
@@ -47,14 +48,26 @@ FILE *ilfile;
 FILE *asmfile;
 FILE *errfile;
 
+static char **cpp_args;
+static size_t cpp_args_cap = 4;
+static size_t cpp_args_size = 2;
+
 int skip_type_check = 0;
 int skip_asm = 0;
+int skip_allocator = 0;
+int skip_liveness = 0;
 int stdin_tmp_fileno;
+
+void destroy_cpp_args(void) {
+  size_t i;
+  for (i = 0; i < cpp_args_size; ++i) free(cpp_args[i]);
+  free(cpp_args);
+}
 
 void scan_options(int argc, char **argv) {
   opterr = 0;
   for (;;) {
-    int option = getopt(argc, argv, "@:D:lyca");
+    int option = getopt(argc, argv, "@:D:I:lycaAL");
 
     if (option == EOF) break;
     switch (option) {
@@ -62,16 +75,26 @@ void scan_options(int argc, char **argv) {
         debug_set_flags(optarg);
         break;
       case 'D':
-        /* cpp args
-           DEBUGH('c', "     cpp option: " << optarg);
-           cpp_opts.append(" -D ").append(optarg); */
+        /* fallthrough */
+      case 'I':
+        PFDBG2('c', "Preprocessor argument: -%c%s", option, optarg);
+        /* leave two slots empty for file name and NULL pointer */
+        if (cpp_args_size == cpp_args_cap - 2)
+          cpp_args = realloc(cpp_args, sizeof(*cpp_args) * (cpp_args_cap *= 2));
+        /* add one for nul terminator and two for dash and option */
+        cpp_args[cpp_args_size] =
+            malloc(sizeof(**cpp_args) * (strlen(optarg) + 3));
+        cpp_args[cpp_args_size][0] = '-';
+        cpp_args[cpp_args_size][1] = option;
+        cpp_args[cpp_args_size][2] = '\0';
+        strcat(cpp_args[cpp_args_size++], optarg);
         break;
       case 'l':
-        /* DEBUGH('c', "     yy_flex_debug set to 1"); */
+        PFDBG0('c', "flex debug output enabled");
         yy_flex_debug = 1;
         break;
       case 'y':
-        /* DEBUGH('c', "     yydebug set to 1"); */
+        PFDBG0('c', "bison debug output enabled");
         yydebug = 1;
         break;
       case 'c':
@@ -79,6 +102,12 @@ void scan_options(int argc, char **argv) {
         break;
       case 'a':
         skip_asm = 1;
+        break;
+      case 'A':
+        skip_allocator = 1;
+        break;
+      case 'L':
+        skip_liveness = 1;
         break;
       default:
         fprintf(stderr, "-%c: invalid option\n", (char)optopt);
@@ -90,12 +119,23 @@ void scan_options(int argc, char **argv) {
 int main(int argc, char **argv) {
   yydebug = 0;
   yy_flex_debug = 0;
+
+  cpp_args = malloc(sizeof(*cpp_args) * cpp_args_cap);
+  /* allocate space so that these can be freed in `destroy_cpp_args` */
+  cpp_args[0] = malloc(sizeof(CPP_FILENAME));
+  strcpy(cpp_args[0], CPP_FILENAME);
+  cpp_args[1] = malloc(sizeof(CPP_STD_ARG));
+  strcpy(cpp_args[1], CPP_STD_ARG);
+
   scan_options(argc, argv);
 
-  char *srcpath = argv[optind];
+  /* allocate space so that srcpath can be freed in `destroy_cpp_args` */
+  char *srcpath = malloc(strlen(argv[optind]) + 1);
+  strcpy(srcpath, argv[optind]);
   char *srcname = basename(srcpath);
   char *ext_ptr = strstr(srcname, SRC_EXT);
-  ptrdiff_t name_len = ext_ptr - srcname;
+  ptrdiff_t name_len =
+      ext_ptr == NULL ? (ptrdiff_t)strlen(srcname) : ext_ptr - srcname;
 
   assert(name_len < LINESIZE);
 
@@ -110,7 +150,7 @@ int main(int argc, char **argv) {
     err(1, "%s", srcname);
   }
 
-  /* chop off the source extension */
+  /* chop off the source extension, if there is one */
   strcpy(name, srcname);
   name[name_len] = 0;
 
@@ -129,8 +169,10 @@ int main(int argc, char **argv) {
   strcat(asmname, ASM_EXT);
   strcpy(errname, name);
   strcat(errname, ERR_EXT);
-  strcpy(cppcmd, CPP);
-  strcat(cppcmd, srcname);
+
+  /* add path argument and NULL element to exec line */
+  cpp_args[cpp_args_size++] = srcpath;
+  cpp_args[cpp_args_size++] = NULL;
 
   PFDBG0('m', "Opening preprocessor pipe");
   /* this is way more complicated than it would normally be since -ansi does
@@ -158,7 +200,7 @@ int main(int argc, char **argv) {
     yyin = stdin;
     PFDBG1('m', "value of yyin: %p", yyin);
     if (yyin == NULL) {
-      err(1, "%s", cppcmd);
+      err(EXIT_FAILURE, "Parent failed to lay pipe");
     }
   } else {
     /* child process procedures*/
@@ -168,9 +210,9 @@ int main(int argc, char **argv) {
     close(pipedes[0]);
     close(pipedes[1]);
     /* execute the preprocessor; if successful execution should stop here */
-    execlp("/usr/bin/cpp", "cpp", srcpath, NULL);
+    execvp("cpp", cpp_args);
     /* error if the preprocessor was unable to run */
-    err(EXIT_FAILURE, "Failed to lay pipe\n");
+    err(EXIT_FAILURE, "Child failed to lay pipe");
   }
 
   PFDBG0('m', "Opening output files");
@@ -245,6 +287,7 @@ cleanup:
   fclose(asmfile);
   fclose(errfile);
 
+  destroy_cpp_args();
   PFDBG0('m', "global state cleanup");
   state_destroy(state);
   PFDBG0('m', "syntax tree cleanup");

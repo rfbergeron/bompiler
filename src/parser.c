@@ -5,6 +5,7 @@
 #include "evaluate.h"
 #include "lyutils.h"
 #include "state.h"
+#include "strset.h"
 #include "symtable.h"
 #include "tchk_decl.h"
 #include "tchk_expr.h"
@@ -137,6 +138,30 @@ BCC_YYSTATIC ASTree *parser_new_sym(ASTree *tree, int new_symbol) {
   return tree;
 }
 
+/* TODO(Robert): rather than appending the strings one at a time, it would be
+ * more efficient to put the strings together in a list and join them all at
+ * once. This would also result in less noise in the diagnostic output; there
+ * would be no intermediate strings, just the individual components and the
+ * final concatenated output
+ */
+BCC_YYSTATIC ASTree *parser_join_strings(ASTree *dest, ASTree *src) {
+  char *joined_string =
+      malloc(sizeof(char) * (strlen(dest->lexinfo) + strlen(src->lexinfo) + 1));
+  (void)strcpy(joined_string, dest->lexinfo);
+  /* omit closing double quote */
+  joined_string[strlen(joined_string) - 1] = '\0';
+  /* omit opening double quote */
+  (void)strcat(joined_string, src->lexinfo + 1);
+  dest->lexinfo = string_set_intern(joined_string);
+  /* `string_set_intern` will copy the string if it isn't present, since the
+   * parser is responsible for handling the memory occupied by normal tokens.
+   * the joined string must be freed.
+   */
+  free(joined_string);
+  assert(!astree_destroy(src));
+  return dest;
+}
+
 BCC_YYSTATIC ASTree *parser_make_spec_list(ASTree *first_specifier) {
   ASTree *spec_list =
       astree_init(TOK_SPEC_LIST, first_specifier->loc, "_spec_list");
@@ -208,6 +233,32 @@ BCC_YYSTATIC ASTree *parser_make_auto_conv(ASTree *tree, int convert_arrays) {
   int status = type_pointer_conversions(&auto_conv->type, tree->type);
   if (status) abort();
   return evaluate_cast(auto_conv, tree);
+}
+
+BCC_YYSTATIC ASTree *parser_make_attributes_list(void) {
+  return astree_init(TOK_ATTR_LIST, lexer_get_loc(), "_attr_list");
+}
+
+BCC_YYSTATIC ASTree *parse_pretty_function(ASTree *pretty_function) {
+  assert(pretty_function->symbol == TOK_PRTY_FN);
+  const char *fn_name = state_get_function_name(state);
+  assert(fn_name != NULL);
+  /* add 1 for terminating nul and 2 for double quotes */
+  size_t fn_str_size = strlen(fn_name) + 3;
+  char *fn_str = malloc(sizeof(char) * fn_str_size);
+  fn_str[0] = '\"';
+  fn_str[1] = '\0';
+  strcat(fn_str, fn_name);
+  assert(strlen(fn_str) == fn_str_size - 2);
+  fn_str[fn_str_size - 2] = '\"';
+  fn_str[fn_str_size - 1] = '\0';
+  /* put quoted function name into the string set */
+  ASTree *fn_str_node = astree_init(TOK_STRINGCON, pretty_function->loc,
+                                    string_set_intern(fn_str));
+  /* free quoted function name since strset duplicates it */
+  free(fn_str);
+  assert(!astree_destroy(pretty_function));
+  return fn_str_node;
 }
 
 BCC_YYSTATIC ASTree *parse_sizeof(ASTree *sizeof_, ASTree *spec_list,
