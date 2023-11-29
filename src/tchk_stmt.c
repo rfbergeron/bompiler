@@ -66,7 +66,7 @@ ASTree *validate_switch(ASTree *switch_, ASTree *expr, ASTree *stmt) {
 }
 
 ASTree *validate_switch_expr(ASTree *expr) {
-  if (!type_is_integer(expr->type)) {
+  if (!type_is_integral(expr->type)) {
     return astree_create_errnode(expr, BCC_TERR_EXPECTED_INTEGER, 1, expr);
   }
   Type *promoted_type;
@@ -184,7 +184,7 @@ ASTree *validate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
   state_inc_case_id(state);
 
   Type *case_const_spec = expr->type;
-  if (!type_is_integer(case_const_spec) ||
+  if (!type_is_integral(case_const_spec) ||
       !(expr->attributes & ATTR_EXPR_CONST) ||
       (expr->attributes & ATTR_CONST_INIT)) {
     return astree_create_errnode(astree_adopt(case_, 2, expr, stmt),

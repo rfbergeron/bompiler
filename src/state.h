@@ -21,6 +21,7 @@ typedef struct compiler_state {
   SizetStack continue_stack;
   LinkedList switch_stack;
   SymbolValue *enclosing_function;
+  const char *enclosing_function_name;
   size_t jump_id_count;
 } CompilerState;
 
@@ -62,8 +63,10 @@ int state_set_control_type(CompilerState *state, const Type *type);
 void state_push_break_id(CompilerState *state, size_t id);
 void state_push_continue_id(CompilerState *state, size_t id);
 void state_dec_jump_id_count(CompilerState *state);
-int state_set_function(CompilerState *state, SymbolValue *function_symval);
+int state_set_function(CompilerState *state, const char *function_name,
+                       SymbolValue *function_symval);
 SymbolValue *state_get_function(CompilerState *state);
+const char *state_get_function_name(CompilerState *state);
 int state_unset_function(CompilerState *state);
 
 #endif

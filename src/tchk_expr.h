@@ -3,6 +3,7 @@
 
 #include "astree.h"
 
+ASTree *validate_empty_expr(ASTree *empty_expr);
 ASTree *validate_intcon(ASTree *intcon);
 ASTree *validate_charcon(ASTree *charcon);
 ASTree *validate_stringcon(ASTree *stringcon);

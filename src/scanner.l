@@ -27,10 +27,11 @@ EXPONENT        ([Ee][+-]?{DIGIT}+)
 NUMBER          ({MANTISSA}{EXPONENT}?)
 NOTNUMBER       ({MANTISSA}[Ee][+-]?)
 IDENT           ({LETTER}({LETTER}|{DIGIT})*)
+INTWIDTH        ([uU]|[lL]|[uU][lL]|[lL][uU])
 DECCON          ([1-9]{DIGIT}*)
 OCTCON          (0{OCTDIGIT}*)
 HEXCON          (0[xX]{HEXDIGIT}+)
-INTCON          ({DECCON}|{OCTCON}|{HEXCON})
+INTCON          ({DECCON}|{OCTCON}|{HEXCON})({INTWIDTH})?
 OCTCHAR         (\\{OCTDIGIT}{OCTDIGIT}?{OCTDIGIT}?)
 HEXCHAR         (\\x{HEXDIGIT}+)
 ESCSEQUENCE     (\\[ntvbrfa\\?'"])
@@ -51,6 +52,8 @@ NOTSTRING       (\"[^"]*)
 "char"          { return lexer_token (TOK_CHAR); }
 "signed"        { return lexer_token (TOK_SIGNED); }
 "unsigned"      { return lexer_token (TOK_UNSIGNED); }
+"float"         { return lexer_token (TOK_FLOAT); }
+"double"        { return lexer_token (TOK_DOUBLE); }
 "static"        { return lexer_token (TOK_STATIC); }
 "extern"        { return lexer_token (TOK_EXTERN); }
 "auto"          { return lexer_token (TOK_AUTO); }
@@ -77,6 +80,11 @@ NOTSTRING       (\"[^"]*)
 "__builtin_va_arg" { return lexer_token(TOK_VA_ARG); }
 "__builtin_va_start" { return lexer_token(TOK_VA_START); }
 "__builtin_va_end" { return lexer_token(TOK_VA_END); }
+"__attribute__" { return lexer_token(TOK_ATTR); }
+"__extension__" { return lexer_token(TOK_EXTNSN); }
+"__asm__"       { return lexer_token(TOK_ASM); }
+"__PRETTY_FUNCTION__" { return lexer_token(TOK_PRTY_FN); }
+"__restrict"    { return lexer_token(TOK_RESTRICT); }
 "\.\.\."        { return lexer_token(TOK_ELLIPSIS); }
 {IDENT}         { return lexer_ident (); }
 {STRINGCON}     { return lexer_token (TOK_STRINGCON); }

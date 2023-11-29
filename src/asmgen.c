@@ -125,7 +125,8 @@ static size_t literals_size;
 static Map *static_locals;
 static Map *generated_text;
 
-extern int skip_asm;
+extern int skip_allocator;
+extern int skip_liveness;
 
 static const char *deduplicate_text(size_t size, const char *fmt, ...) {
   char *label = malloc(size);
@@ -245,6 +246,7 @@ void set_op_dir(Operand *operand, const char *label) {
 
 void set_op_pic(Operand *operand, intmax_t disp, const char *label,
                 SymbolValue *symval) {
+  assert(symval != NULL);
   operand->pic.mode = MODE_PIC;
   operand->pic.disp = disp;
   operand->pic.lab = label;
@@ -559,6 +561,7 @@ void assign_static_space(const char *ident, SymbolValue *symval) {
  * any int -> any int of same width: nop
  */
 int scalar_conversions(ASTree *expr, const Type *to) {
+  if (type_is_void(to)) return 0;
   if (!type_is_scalar(to) && !type_is_enum(to) && !type_is_array(to)) return -1;
   const Type *from = expr->type;
   if (!type_is_scalar(from) && !type_is_enum(from) && !type_is_array(from))
@@ -740,14 +743,16 @@ ASTree *translate_cast(ASTree *cast, ASTree *expr) {
 
   if (type_is_scalar(cast->type) || type_is_enum(cast->type) ||
       type_is_array(cast->type)) {
-    int status = scalar_conversions(expr, cast->type);
-    if (status) abort();
+    assert(!scalar_conversions(expr, cast->type));
+    assert((cast->last_instr = liter_copy(expr->last_instr)) != NULL);
+  } else if (type_is_void(cast->type)) {
+    InstructionData *nop_data = instr_init(OP_NOP);
+    assert(!liter_push_back(expr->last_instr, &cast->last_instr, 1, nop_data));
+  } else {
+    assert((cast->last_instr = liter_copy(expr->last_instr)) != NULL);
   }
 
-  cast->first_instr = liter_copy(expr->first_instr);
-  if (cast->first_instr == NULL) abort();
-  cast->last_instr = liter_copy(expr->last_instr);
-  if (cast->last_instr == NULL) abort();
+  assert((cast->first_instr = liter_copy(expr->first_instr)) != NULL);
   return astree_adopt(cast, 1, expr);
 }
 
@@ -814,7 +819,7 @@ ASTree *translate_logical(ASTree *operator, ASTree * left, ASTree *right) {
   set_op_reg(&setnz_data->dest, REG_BYTE, next_vreg());
   setnz_data->label = skip_label;
   InstructionData *movz_data = instr_init(OP_MOVZ);
-  movz_data->src = setnz_data->src;
+  movz_data->src = setnz_data->dest;
   set_op_reg(&movz_data->dest, REG_DWORD, next_vreg());
 
   operator->first_instr = liter_copy(left->first_instr);
@@ -1209,32 +1214,45 @@ ASTree *translate_conditional(ASTree *qmark, ASTree *condition,
                            jmp_false_data);
   if (status) abort();
 
-  status = scalar_conversions(true_expr, qmark->type);
-  if (status) abort();
-  InstructionData *true_expr_data = liter_get(true_expr->last_instr);
-  InstructionData *mov_true_data = instr_init(OP_MOV);
-  mov_true_data->src = true_expr_data->dest;
-  set_op_reg(&mov_true_data->dest, type_get_width(qmark->type), next_vreg());
-  InstructionData *jmp_end_data = instr_init(OP_JMP);
-  set_op_dir(&jmp_end_data->dest, mk_true_label(current_branch));
-  status = liter_push_back(true_expr->last_instr, NULL, 2, mov_true_data,
-                           jmp_end_data);
+  if (type_is_void(qmark->type)) {
+    InstructionData *jmp_end_data = instr_init(OP_JMP);
+    set_op_dir(&jmp_end_data->dest, mk_true_label(current_branch));
+    status = liter_push_back(true_expr->last_instr, NULL, 1, jmp_end_data);
 
-  status = scalar_conversions(false_expr, qmark->type);
-  if (status) abort();
-  InstructionData *false_label = liter_get(false_expr->first_instr);
-  false_label->label = mk_false_label(current_branch);
-  InstructionData *false_expr_data = liter_get(false_expr->last_instr);
-  InstructionData *mov_false_data = instr_init(OP_MOV);
-  mov_false_data->src = false_expr_data->dest;
-  mov_false_data->dest = mov_true_data->dest;
-  /* dummy mov so that last instruction has destination reg */
-  InstructionData *end_label = instr_init(OP_MOV);
-  end_label->label = mk_true_label(current_branch);
-  end_label->src = end_label->dest = mov_false_data->dest;
-  status = liter_push_back(false_expr->last_instr, &qmark->last_instr, 2,
-                           mov_false_data, end_label);
-  if (status) abort();
+    InstructionData *false_label = liter_get(false_expr->first_instr);
+    false_label->label = mk_false_label(current_branch);
+    InstructionData *end_label = instr_init(OP_NOP);
+    end_label->label = mk_true_label(current_branch);
+    status = liter_push_back(false_expr->last_instr, &qmark->last_instr, 1,
+                             end_label);
+  } else {
+    status = scalar_conversions(true_expr, qmark->type);
+    if (status) abort();
+    InstructionData *true_expr_data = liter_get(true_expr->last_instr);
+    InstructionData *mov_true_data = instr_init(OP_MOV);
+    mov_true_data->src = true_expr_data->dest;
+    set_op_reg(&mov_true_data->dest, type_get_width(qmark->type), next_vreg());
+    InstructionData *jmp_end_data = instr_init(OP_JMP);
+    set_op_dir(&jmp_end_data->dest, mk_true_label(current_branch));
+    status = liter_push_back(true_expr->last_instr, NULL, 2, mov_true_data,
+                             jmp_end_data);
+
+    status = scalar_conversions(false_expr, qmark->type);
+    if (status) abort();
+    InstructionData *false_label = liter_get(false_expr->first_instr);
+    false_label->label = mk_false_label(current_branch);
+    InstructionData *false_expr_data = liter_get(false_expr->last_instr);
+    InstructionData *mov_false_data = instr_init(OP_MOV);
+    mov_false_data->src = false_expr_data->dest;
+    mov_false_data->dest = mov_true_data->dest;
+    /* dummy mov so that last instruction has destination reg */
+    InstructionData *end_label = instr_init(OP_MOV);
+    end_label->label = mk_true_label(current_branch);
+    end_label->src = end_label->dest = mov_false_data->dest;
+    status = liter_push_back(false_expr->last_instr, &qmark->last_instr, 2,
+                             mov_false_data, end_label);
+    if (status) abort();
+  }
 
   qmark->first_instr = liter_copy(condition->first_instr);
   if (qmark->first_instr == NULL) abort();
@@ -2022,13 +2040,29 @@ ASTree *translate_for(ASTree *for_, ASTree *initializer, ASTree *condition,
 
   InstructionData *condition_start_data = liter_get(condition->first_instr);
   condition_start_data->label = mk_cond_label(for_->jump_id);
+
+  /* because of the way `liter_push_back` works, new instructions should be
+   * added after the condition in reverse order
+   */
+  /* add dummy reinitializer if necessary */
+  if (reinitializer->symbol == ';') {
+    assert(reinitializer->first_instr == NULL &&
+           reinitializer->last_instr == NULL && reinitializer != &EMPTY_EXPR);
+    InstructionData *nop_data = instr_init(OP_NOP);
+    int status = liter_push_back(condition->last_instr,
+                                 &reinitializer->first_instr, 1, nop_data);
+    if (status) abort();
+    reinitializer->last_instr = liter_copy(reinitializer->first_instr);
+    if (reinitializer->last_instr == NULL) abort();
+  }
+
+  /* add unconditional jump to function body, skipping reinitializer */
   InstructionData *body_jmp_data = instr_init(OP_JMP);
   set_op_dir(&body_jmp_data->dest, mk_stmt_label(for_->jump_id));
   int status = liter_push_back(condition->last_instr, NULL, 1, body_jmp_data);
   if (status) abort();
 
-  /* do this after, since it will be pushed in front of the unconditional jump
-   */
+  /* emit loop exit jump if condition is not empty */
   if (condition->symbol != ';') {
     int status = scalar_conversions(condition, condition->type);
     if (status) abort();
@@ -2041,6 +2075,7 @@ ASTree *translate_for(ASTree *for_, ASTree *initializer, ASTree *condition,
                              test_jmp_data);
     if (status) abort();
   }
+
   InstructionData *reinit_start_data = liter_get(reinitializer->first_instr);
   reinit_start_data->label = mk_reinit_label(for_->jump_id);
   InstructionData *cond_jmp_data = instr_init(OP_JMP);
@@ -2105,6 +2140,10 @@ ASTree *translate_do(ASTree *do_, ASTree *body, ASTree *condition) {
   return astree_adopt(do_, 2, body, condition);
 }
 
+/* TODO(Robert): iterate over block's children to find the first and last
+ * instructions emitted (if there were any), and emit a nop instruction if
+ * they weren't
+ */
 ASTree *translate_block(ASTree *block) {
   PFDBG0('g', "Translating compound statement");
   if (astree_count(block) == 0) {
@@ -2764,12 +2803,14 @@ ASTree *end_translate_fn(ASTree *declaration) {
   before_definition = llist_iter_last(instructions);
   if (before_definition == NULL) abort();
 
+  if (skip_liveness) goto no_live;
   status = liveness_sr(declaration->first_instr, declaration->last_instr);
   if (status) abort();
-  if (skip_asm) goto no_alloc;
+  if (skip_allocator) goto no_alloc;
   /* this function will adjust window_size to account for spilled bytes */
   status = allocate_regs(declaration->first_instr, declaration->last_instr);
   if (status) abort();
+no_live:;
 no_alloc:;
 
   /* align to ensure stack alignment to 16x + 8 */

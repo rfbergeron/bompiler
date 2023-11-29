@@ -13,6 +13,7 @@ CompilerState *state_init(void) {
   size_t_stack_init(&state->break_stack, 4);
   size_t_stack_init(&state->continue_stack, 4);
   state->enclosing_function = NULL;
+  state->enclosing_function_name = NULL;
   state->jump_id_count = 0;
   return state;
 }
@@ -267,7 +268,8 @@ void state_push_continue_id(CompilerState *state, size_t id) {
 
 void state_dec_jump_id_count(CompilerState *state) { --state->jump_id_count; }
 
-int state_set_function(CompilerState *state, SymbolValue *function_symval) {
+int state_set_function(CompilerState *state, const char *function_name,
+                       SymbolValue *function_symval) {
   if (state->enclosing_function != NULL) {
     fprintf(stderr,
             "ERROR: attempt to set enclosing function while inside "
@@ -275,7 +277,12 @@ int state_set_function(CompilerState *state, SymbolValue *function_symval) {
     return -1;
   }
   state->enclosing_function = function_symval;
+  state->enclosing_function_name = function_name;
   return 0;
+}
+
+const char *state_get_function_name(CompilerState *state) {
+  return state->enclosing_function_name;
 }
 
 SymbolValue *state_get_function(CompilerState *state) {
@@ -290,6 +297,7 @@ int state_unset_function(CompilerState *state) {
     return -1;
   } else {
     state->enclosing_function = NULL;
+    state->enclosing_function_name = NULL;
     return 0;
   }
 }

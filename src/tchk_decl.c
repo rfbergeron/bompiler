@@ -101,10 +101,16 @@ static unsigned int type_flag_from_symbol(int symbol) {
       return SPEC_FLAG_SIGNED;
     case TOK_UNSIGNED:
       return SPEC_FLAG_UNSIGNED;
+    case TOK_FLOAT:
+      return SPEC_FLAG_FLOAT;
+    case TOK_DOUBLE:
+      return SPEC_FLAG_DOUBLE;
     case TOK_CONST:
       return QUAL_FLAG_CONST;
     case TOK_VOLATILE:
       return QUAL_FLAG_VOLATILE;
+    case TOK_RESTRICT:
+      return QUAL_FLAG_NONE; /* C90: no restrict */
     case TOK_TYPEDEF:
       return STOR_FLAG_TYPEDEF;
     case TOK_AUTO:
@@ -323,17 +329,42 @@ ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
       exists->type = declarator->type;
       declarator->type = exists->type;
       return declarator;
-    } else if (type_is_function(declarator->type) &&
-               type_is_function(exists->type)) {
-      if (type_is_old_style_function(declarator->type)) {
-        int status = type_destroy(declarator->type);
-        if (status) abort();
+    } else if (type_is_function(exists->type) &&
+               type_is_function(declarator->type)) {
+      Type *exists_ret_type, *declarator_ret_type;
+      assert(!type_strip_declarator(&exists_ret_type, exists->type));
+      assert(!type_strip_declarator(&declarator_ret_type, declarator->type));
+      if (type_is_prototyped_function(exists->type) &&
+          type_is_prototyped_function(declarator->type)) {
+        if (types_equivalent(exists->type, declarator->type, 0, 1)) {
+          assert(!type_destroy(declarator->type));
+          declarator->type = exists->type;
+          return declarator;
+        } else {
+          return astree_create_errnode(declarator, BCC_TERR_REDEFINITION, 1,
+                                       declarator);
+        }
+      } else if (types_equivalent(exists_ret_type, declarator_ret_type, 0, 1)) {
+        if (!type_is_prototyped_function(exists->type)) {
+          /* give existing symbol a prototype; the existing type info may have
+           * already been used elsewhere so we need to replace the contents
+           * of the type info in place
+           */
+          /* TODO(Robert): because the type checker should consider any
+           * arguments to a function without a prototype to be valid, the
+           * assembly generator should use the argument list and not the
+           * parameter list to marshal arguments for calls to old-style
+           * functions
+           */
+          assert(exists->type->function.parameters == NULL);
+          *(exists->type) = *(declarator->type);
+          exists->type->function.next = exists_ret_type;
+          exists->type->function.is_old_style = 1;
+          declarator->type->function.parameters = NULL;
+        }
+
+        assert(!type_destroy(declarator->type));
         declarator->type = exists->type;
-        return declarator;
-      } else if (type_is_old_style_function(exists->type)) {
-        int status = type_destroy(exists->type);
-        if (status) abort();
-        exists->type = declarator->type;
         return declarator;
       } else {
         return astree_create_errnode(declarator, BCC_TERR_REDEFINITION, 1,
@@ -386,7 +417,7 @@ ASTree *validate_array_size(ASTree *array, ASTree *expr) {
   if (expr->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(array, expr);
   }
-  if (!type_is_integer(expr->type) || !(expr->attributes & ATTR_EXPR_CONST) ||
+  if (!type_is_integral(expr->type) || !(expr->attributes & ATTR_EXPR_CONST) ||
       (expr->attributes & ATTR_CONST_INIT)) {
     return astree_create_errnode(astree_adopt(array, 1, expr),
                                  BCC_TERR_EXPECTED_INTCONST, 2, array, expr);
@@ -619,8 +650,15 @@ ASTree *define_symbol(ASTree *declaration, ASTree *declarator,
   /* TODO(Robert): do not allow string literals or initializer lists to exceed
    * capacity for fixed size arrays, either here or in init.c
    */
+  /* TODO(Robert): according to the standard, attempting to modify a string
+   * literal is undefined behavior, and the type of a string literal is
+   * `char []`. It is not const-qualified. However, the compiler marks string
+   * literals as `const` and stores them in read-only memory. I am not sure if
+   * this behavior is standards-compliant.
+   */
   if (initializer->symbol != TOK_INIT_LIST &&
-      !(type_is_char_array(declarator->type) &&
+      !((type_is_char_array(declarator->type) ||
+         type_is_pointer(declarator->type)) &&
         initializer->symbol == TOK_STRINGCON) &&
       !types_assignable(declarator->type, initializer->type,
                         astree_is_const_zero(initializer))) {
@@ -693,7 +731,8 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
   /* TODO(Robert): set function to a dummy value even in the event of failure so
    * that return statements in the body may be processed in some way
    */
-  status = state_set_function(state, symval);
+  assert(declarator->symbol == TOK_IDENT);
+  status = state_set_function(state, declarator->lexinfo, symval);
   if (status)
     return astree_create_errnode(astree_adopt(declaration, 2, declarator, body),
                                  BCC_TERR_FAILURE, 0);
