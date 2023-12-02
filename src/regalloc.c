@@ -9,6 +9,10 @@
 #include "string.h"
 #include "symtable.h"
 
+/* TODO(Robert): consider putting `InstructionData` and perhaps basic block
+ * structures and operations in a separate translation unit, since they are
+ * shared by the allocator and generator
+ */
 typedef struct basic_block {
   ListIter *leader;
   struct basic_block **followers;
@@ -24,21 +28,20 @@ typedef struct reg_desc RegDesc;
 static size_t reg_descs_sizes[16];
 static size_t reg_descs_caps[16];
 /* location of 24-byte region for contents of unspilled registers */
-static ptrdiff_t unspill_region = -32;
+static const ptrdiff_t unspill_region = -32;
 
 static ptrdiff_t *vreg_descs;
 static size_t vreg_descs_size;
 static size_t vreg_descs_cap;
 static const char *LEADER_COMMENT = "basic block leader";
-static const char *GROUP_COMMENT =
-    "basic block leader; group with previous block";
 
-static Map group_save_table;
+static Map bblock_table;
+static Map persist_table;
 static int in_function;
 static unsigned short regs_clobbered;
 static unsigned short used_volatile;
 
-int instr_is_jump(InstructionData *data) {
+static int instr_is_jump(InstructionData *data) {
   switch (data->opcode) {
     case OP_JMP:
     case OP_JE:
@@ -59,64 +62,15 @@ int instr_is_jump(InstructionData *data) {
   }
 }
 
-int instr_is_mov(InstructionData *data) {
-  switch (data->opcode) {
-    case OP_MOV:
-    case OP_MOVS:
-    case OP_MOVZ:
-      return 1;
-    default:
-      return 0;
-  }
-}
-
-int instr_is_setcc(InstructionData *data) {
-  switch (data->opcode) {
-    case OP_SETA:
-    case OP_SETAE:
-    case OP_SETB:
-    case OP_SETBE:
-    case OP_SETL:
-    case OP_SETLE:
-    case OP_SETG:
-    case OP_SETGE:
-    case OP_SETZ:
-    case OP_SETNZ:
-    case OP_SETE:
-    case OP_SETNE:
-      return 1;
-    default:
-      return 0;
-  }
-}
-
-int instr_is_directive(InstructionData *data) {
+static int instr_is_directive(InstructionData *data) {
   return optype_from_opcode(data->opcode) == OPTYPE_DIRECTIVE;
 }
 
-int instr_has_label(InstructionData *data) { return data->label != NULL; }
-
-int reg_is_volatile(size_t reg_num) {
-  size_t i;
-  for (i = 0; i < VOLATILE_REG_COUNT; ++i)
-    if (reg_num == VOLATILE_REGS[i]) return 1;
-  return 0;
+static int instr_has_label(InstructionData *data) {
+  return data->label != NULL;
 }
 
-int bblock_in_group(BBlock *block) {
-  InstructionData *data = liter_get(block->leader);
-  ListIter *leader_prev = liter_prev(block->leader, 1);
-  InstructionData *data_prev = liter_get(leader_prev);
-  free(leader_prev);
-  return (data != NULL && data->label != NULL &&
-          ((strncmp(data->label, ".LT", 3) == 0) ||
-           (strncmp(data->label, ".LF", 3) == 0))) ||
-         (data_prev != NULL && data_prev->dest.all.mode == MODE_DIRECT &&
-          (strncmp(data_prev->dest.dir.lab, ".LF", 3) == 0 ||
-           strncmp(data_prev->dest.dir.lab, ".LT", 3) == 0));
-}
-
-BBlock *bblock_init(ListIter *leader) {
+static BBlock *bblock_init(ListIter *leader) {
   if (leader == NULL) return NULL;
   BBlock *block = malloc(sizeof(BBlock));
   if (block == NULL) return NULL;
@@ -128,14 +82,14 @@ BBlock *bblock_init(ListIter *leader) {
   return block;
 }
 
-void bblock_destroy(BBlock *block) {
+static void bblock_destroy(BBlock *block) {
   if (block == NULL) return;
   free(block->leader);
   free(block->followers);
   free(block);
 }
 
-int bblock_add_follower(BBlock *bblock, BBlock *follower) {
+static int bblock_add_follower(BBlock *bblock, BBlock *follower) {
   if (bblock == NULL || follower == NULL) return -1;
   if (bblock->followers_size == bblock->followers_cap) {
     BBlock **new_followers = realloc(
@@ -147,7 +101,7 @@ int bblock_add_follower(BBlock *bblock, BBlock *follower) {
   return 0;
 }
 
-int bblock_partition(ListIter *first, ListIter *last, ArrayList *out) {
+static int bblock_partition(ListIter *first, ListIter *last, ArrayList *out) {
   ListIter *exit_leader = liter_prev(last, 1);
   if (exit_leader == NULL) abort();
   while (instr_is_directive(liter_get(exit_leader)))
@@ -197,7 +151,30 @@ int bblock_partition(ListIter *first, ListIter *last, ArrayList *out) {
   return 0;
 }
 
-void update_liveness(InstructionData *data, Operand *operand, Map *temp_lives) {
+/* TODO(Robert): this function is more complicated than it needs to be. while it
+ * might make more since on a RISC architecture with 3-operand instructions, on
+ * x86 most instructions which overwrite dest also use the contents of dest in
+ * performing their operation; eg ADD does overwrite dest, but it also uses the
+ * value in dest to perform the addition, so the register would still be live
+ * at the beginning of the instruction. very few instructions write to dest in
+ * a purely destructive manner; namely the SETcc, MOV, and LEA instructions.
+ */
+static int instr_writes_dest(InstructionData *data) {
+#define GENERATE_WRITES(CODE, TYPE, BOOL, WRITES) WRITES,
+  static const int OPCODE_WRITE_TABLE[] = {FOREACH_OPCODE(GENERATE_WRITES)};
+#undef GENERATE_WRITES
+  if (data->opcode == OP_MOV && data->src.all.mode == MODE_REGISTER &&
+      data->dest.all.mode == MODE_REGISTER &&
+      data->dest.reg.num == data->src.reg.num) {
+    /* dummy mov from a register to itself; vreg is still live */
+    assert(data->dest.reg.width == data->src.reg.width);
+    return 0;
+  } else {
+    return OPCODE_WRITE_TABLE[data->opcode];
+  }
+}
+
+static void update_liveness(InstructionData *data, Operand *operand) {
   switch (operand->all.mode) {
     case MODE_NONE:
     case MODE_DIRECT:
@@ -205,26 +182,38 @@ void update_liveness(InstructionData *data, Operand *operand, Map *temp_lives) {
       break;
     case MODE_REGISTER:
       if (operand->reg.num < REAL_REG_COUNT) break;
-      operand->reg.next_use =
-          map_get(temp_lives, &operand->reg.num, sizeof(operand->reg.num));
-      InstructionData *new_data =
-          ((instr_is_mov(data) || instr_is_setcc(data)) &&
-           operand == &data->dest &&
-           (data->src.all.mode != MODE_REGISTER ||
-            data->src.reg.num != operand->reg.num) &&
-           map_get(&group_save_table, &operand->reg.num,
-                   sizeof(operand->reg.num)) == NULL)
-              ? NULL
-              : data;
-      if (map_insert(temp_lives, &operand->reg.num, sizeof(operand->reg.num),
-                     new_data))
-        abort();
+      size_t unused[2];
+      if (map_find(&bblock_table, &operand->reg.num, sizeof(operand->reg.num),
+                   unused)) {
+        /* use temporary liveness table if the vreg has an entry in there */
+        operand->reg.next_use =
+            map_get(&bblock_table, &operand->reg.num, sizeof(operand->reg.num));
+      } else {
+        operand->reg.next_use = map_get(&persist_table, &operand->reg.num,
+                                        sizeof(operand->reg.num));
+      }
+
+      if (operand == &data->dest) {
+        InstructionData *new_next_use = instr_writes_dest(data) ? NULL : data;
+        if (data->dest_persistence == PERSIST_SET) {
+          assert(!map_insert(&persist_table, &operand->reg.num,
+                             sizeof(operand->reg.num), new_next_use));
+        } else if (data->dest_persistence == PERSIST_CLEAR) {
+          assert(!map_delete(&persist_table, &operand->reg.num,
+                             sizeof(operand->reg.num)));
+        }
+        assert(!map_insert(&bblock_table, &operand->reg.num,
+                           sizeof(operand->reg.num), new_next_use));
+      } else {
+        assert(!map_insert(&bblock_table, &operand->reg.num,
+                           sizeof(operand->reg.num), data));
+      }
       break;
     case MODE_INDIRECT:
       if (operand->ind.num < REAL_REG_COUNT) break;
       operand->ind.next_use =
-          map_get(temp_lives, &operand->ind.num, sizeof(operand->ind.num));
-      if (map_insert(temp_lives, &operand->ind.num, sizeof(operand->ind.num),
+          map_get(&bblock_table, &operand->ind.num, sizeof(operand->ind.num));
+      if (map_insert(&bblock_table, &operand->ind.num, sizeof(operand->ind.num),
                      data))
         abort();
       break;
@@ -235,15 +224,15 @@ void update_liveness(InstructionData *data, Operand *operand, Map *temp_lives) {
     case MODE_SCALE:
       if (operand->sca.base < REAL_REG_COUNT) goto skip_base;
       operand->sca.base_next_use =
-          map_get(temp_lives, &operand->sca.base, sizeof(operand->sca.base));
-      if (map_insert(temp_lives, &operand->sca.base, sizeof(operand->sca.base),
-                     data))
+          map_get(&bblock_table, &operand->sca.base, sizeof(operand->sca.base));
+      if (map_insert(&bblock_table, &operand->sca.base,
+                     sizeof(operand->sca.base), data))
         abort();
     skip_base:
       if (operand->sca.index < REAL_REG_COUNT) break;
-      operand->sca.index_next_use =
-          map_get(temp_lives, &operand->sca.index, sizeof(operand->sca.index));
-      if (map_insert(temp_lives, &operand->sca.index,
+      operand->sca.index_next_use = map_get(&bblock_table, &operand->sca.index,
+                                            sizeof(operand->sca.index));
+      if (map_insert(&bblock_table, &operand->sca.index,
                      sizeof(operand->sca.index), data))
         abort();
       break;
@@ -252,7 +241,7 @@ void update_liveness(InstructionData *data, Operand *operand, Map *temp_lives) {
   }
 }
 
-int liveness_bblock(BBlock *block, Map *temp_lives) {
+static int liveness_bblock(BBlock *block) {
   ListIter *first = block->leader;
   ListIter *last = block->followers[0]->leader;
   ListIter *current = liter_prev(last, 1);
@@ -260,8 +249,8 @@ int liveness_bblock(BBlock *block, Map *temp_lives) {
   while (current->node != first->node->prev) {
     InstructionData *data = liter_get(current);
     if (data == NULL) abort();
-    update_liveness(data, &data->dest, temp_lives);
-    update_liveness(data, &data->src, temp_lives);
+    update_liveness(data, &data->dest);
+    update_liveness(data, &data->src);
     if (liter_advance(current, -1)) abort();
   }
   free(current);
@@ -277,11 +266,10 @@ static int compare_regnums(size_t *r1, size_t *r2) {
 }
 
 int liveness_sr(ListIter *first, ListIter *last) {
-  Map liveness_table;
-  int status = map_init(&liveness_table, DEFAULT_MAP_SIZE, NULL, NULL,
+  int status = map_init(&bblock_table, DEFAULT_MAP_SIZE, NULL, NULL,
                         (BlibComparator)compare_regnums);
   if (status) abort();
-  status = map_init(&group_save_table, DEFAULT_MAP_SIZE, NULL, NULL,
+  status = map_init(&persist_table, DEFAULT_MAP_SIZE, NULL, NULL,
                     (BlibComparator)compare_regnums);
   if (status) abort();
   ArrayList bblocks;
@@ -294,43 +282,21 @@ int liveness_sr(ListIter *first, ListIter *last) {
   /* skip first and last bblock, which contain only directives */
   for (i = 2; i < bblocks_size; ++i) {
     BBlock *block = alist_get(&bblocks, bblocks_size - i);
-    int status = liveness_bblock(block, &liveness_table);
+    int status = liveness_bblock(block);
     if (status) abort();
     InstructionData *leader_data = liter_get(block->leader);
-    if (bblock_in_group(block)) {
-      leader_data->comment = GROUP_COMMENT;
-      /* mark dummy vreg so that it is not cleared */
-      if (leader_data->label != NULL &&
-          (strncmp(leader_data->label, ".LT", 3) == 0 ||
-           strncmp(leader_data->label, ".LF", 3) == 0) &&
-          leader_data->opcode == OP_MOV &&
-          leader_data->dest.all.mode == MODE_REGISTER &&
-          leader_data->src.all.mode == MODE_REGISTER &&
-          leader_data->dest.reg.num == leader_data->src.reg.num) {
-        assert(map_get(&group_save_table, &leader_data->src.reg.num,
-                       sizeof(leader_data->src.reg.num)) == NULL);
-        int status = map_insert(&group_save_table, &leader_data->src.reg.num,
-                                sizeof(leader_data->src.reg.num),
-                                &leader_data->src.reg.num);
-        if (status) abort();
-      }
-    } else {
-      leader_data->comment = LEADER_COMMENT;
-      if (map_clear(&liveness_table)) abort();
-      if (map_clear(&group_save_table)) abort();
-    }
+    leader_data->comment = LEADER_COMMENT;
+    if (map_clear(&bblock_table)) abort();
   }
 
-  status = map_destroy(&liveness_table);
-  if (status) abort();
-  status = map_destroy(&group_save_table);
-  status = alist_destroy(&bblocks, (BlibDestroyer)bblock_destroy);
-  if (status) abort();
+  assert(!map_destroy(&bblock_table));
+  assert(!map_destroy(&persist_table));
+  assert(!alist_destroy(&bblocks, (BlibDestroyer)bblock_destroy));
   return 0;
 }
 
-int assign_or_spill(size_t *vreg_num, size_t vreg_width,
-                    unsigned short *used_volatile) {
+static int assign_or_spill(size_t *vreg_num, size_t vreg_width,
+                           unsigned short *used_volatile) {
   if (*vreg_num < REAL_REG_COUNT) {
     *used_volatile |= 1 << *vreg_num;
     return 0;
@@ -397,8 +363,9 @@ int assign_or_spill(size_t *vreg_num, size_t vreg_width,
   return 0;
 }
 
-int select_reg(ListIter *where, size_t *vreg_num, size_t vreg_width,
-               InstructionData *next_use, unsigned short *used_volatile) {
+static int select_reg(ListIter *where, size_t *vreg_num, size_t vreg_width,
+                      InstructionData *next_use,
+                      unsigned short *used_volatile) {
   if (*vreg_num < REAL_REG_COUNT) return 0;
   ptrdiff_t location = vreg_descs[*vreg_num - REAL_REG_COUNT];
   if (location >= 0) {
@@ -454,8 +421,8 @@ int select_reg(ListIter *where, size_t *vreg_num, size_t vreg_width,
   return 0;
 }
 
-int reg_thunk(ListIter *where, Operand *operand,
-              unsigned short *used_volatile) {
+static int reg_thunk(ListIter *where, Operand *operand,
+                     unsigned short *used_volatile) {
   switch (operand->all.mode) {
     default:
       abort();
@@ -478,7 +445,7 @@ int reg_thunk(ListIter *where, Operand *operand,
   }
 }
 
-int assign_thunk(Operand *operand, unsigned short *used_volatile) {
+static int assign_thunk(Operand *operand, unsigned short *used_volatile) {
   switch (operand->all.mode) {
     default:
       abort();
@@ -498,8 +465,8 @@ int assign_thunk(Operand *operand, unsigned short *used_volatile) {
   }
 }
 
-int src_thunk_in_fn(ListIter *where, InstructionData *data,
-                    unsigned short *used_volatile) {
+static int src_thunk_in_fn(ListIter *where, InstructionData *data,
+                           unsigned short *used_volatile) {
   /* normal register assignment */
   if (data->src.all.mode != MODE_REGISTER || data->src.reg.num < REAL_REG_COUNT)
     return reg_thunk(where, &data->src, used_volatile);
@@ -558,8 +525,8 @@ int src_thunk_in_fn(ListIter *where, InstructionData *data,
   return 0;
 }
 
-int dest_thunk_in_fn(ListIter *where, InstructionData *data,
-                     unsigned short *used_volatile) {
+static int dest_thunk_in_fn(ListIter *where, InstructionData *data,
+                            unsigned short *used_volatile) {
   if (data->dest.all.mode != MODE_REGISTER) {
     return reg_thunk(where, &data->dest, used_volatile);
   } else if (data->dest.reg.num < REAL_REG_COUNT) {
@@ -603,7 +570,7 @@ int dest_thunk_in_fn(ListIter *where, InstructionData *data,
   }
 }
 
-int select_regs(ListIter *where) {
+static int select_regs(ListIter *where) {
   InstructionData *data = liter_get(where);
   used_volatile = 0;
   int status = in_function ? src_thunk_in_fn(where, data, &used_volatile) ||

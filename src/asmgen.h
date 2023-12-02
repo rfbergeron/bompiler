@@ -6,88 +6,88 @@
 #include "lyutils.h"
 
 /* macros used to generate information about opcodes */
-#define FOREACH_OPCODE(GENERATOR)         \
-  GENERATOR(INVALID, OPTYPE_INVALID, 0)   \
-  GENERATOR(NONE, OPTYPE_NULLARY, 0)      \
-  /* arithmetic */                        \
-  GENERATOR(ADD, OPTYPE_BINARY, 1)        \
-  GENERATOR(SUB, OPTYPE_BINARY, 1)        \
-  GENERATOR(MUL, OPTYPE_UNARY, 1)         \
-  GENERATOR(DIV, OPTYPE_UNARY, 1)         \
-  GENERATOR(INC, OPTYPE_UNARY, 1)         \
-  GENERATOR(DEC, OPTYPE_UNARY, 1)         \
-  GENERATOR(NEG, OPTYPE_UNARY, 1)         \
-  GENERATOR(IMUL, OPTYPE_CONTEXTUAL, 1)   \
-  GENERATOR(IDIV, OPTYPE_UNARY, 1)        \
-  /* compare and test */                  \
-  GENERATOR(TEST, OPTYPE_BINARY, 1)       \
-  GENERATOR(CMP, OPTYPE_BINARY, 1)        \
-  GENERATOR(SETE, OPTYPE_UNARY, 0)        \
-  GENERATOR(SETNE, OPTYPE_UNARY, 0)       \
-  GENERATOR(SETG, OPTYPE_UNARY, 0)        \
-  GENERATOR(SETGE, OPTYPE_UNARY, 0)       \
-  GENERATOR(SETL, OPTYPE_UNARY, 0)        \
-  GENERATOR(SETLE, OPTYPE_UNARY, 0)       \
-  GENERATOR(SETA, OPTYPE_UNARY, 0)        \
-  GENERATOR(SETAE, OPTYPE_UNARY, 0)       \
-  GENERATOR(SETB, OPTYPE_UNARY, 0)        \
-  GENERATOR(SETBE, OPTYPE_UNARY, 0)       \
-  GENERATOR(SETZ, OPTYPE_UNARY, 0)        \
-  GENERATOR(SETNZ, OPTYPE_UNARY, 0)       \
-  /* jump */                              \
-  GENERATOR(JMP, OPTYPE_UNARY, 0)         \
-  GENERATOR(JE, OPTYPE_UNARY, 0)          \
-  GENERATOR(JNE, OPTYPE_UNARY, 0)         \
-  GENERATOR(JG, OPTYPE_UNARY, 0)          \
-  GENERATOR(JGE, OPTYPE_UNARY, 0)         \
-  GENERATOR(JL, OPTYPE_UNARY, 0)          \
-  GENERATOR(JLE, OPTYPE_UNARY, 0)         \
-  GENERATOR(JA, OPTYPE_UNARY, 0)          \
-  GENERATOR(JAE, OPTYPE_UNARY, 0)         \
-  GENERATOR(JB, OPTYPE_UNARY, 0)          \
-  GENERATOR(JBE, OPTYPE_UNARY, 0)         \
-  GENERATOR(JZ, OPTYPE_UNARY, 0)          \
-  GENERATOR(JNZ, OPTYPE_UNARY, 0)         \
-  /* logical and bitwise */               \
-  GENERATOR(NOT, OPTYPE_UNARY, 1)         \
-  GENERATOR(OR, OPTYPE_BINARY, 1)         \
-  GENERATOR(AND, OPTYPE_BINARY, 1)        \
-  GENERATOR(LEA, OPTYPE_BINARY, 1)        \
-  GENERATOR(XOR, OPTYPE_BINARY, 1)        \
-  /* shifts */                            \
-  GENERATOR(SHL, OPTYPE_BINARY, 1)        \
-  GENERATOR(SAL, OPTYPE_BINARY, 1)        \
-  GENERATOR(SHR, OPTYPE_BINARY, 1)        \
-  GENERATOR(SAR, OPTYPE_BINARY, 1)        \
-  /* code movement */                     \
-  GENERATOR(MOV, OPTYPE_BINARY, 1)        \
-  GENERATOR(MOVZ, OPTYPE_BINARY, 1)       \
-  GENERATOR(MOVS, OPTYPE_BINARY, 1)       \
-  GENERATOR(PUSH, OPTYPE_UNARY, 1)        \
-  GENERATOR(POP, OPTYPE_UNARY, 1)         \
-  GENERATOR(CALL, OPTYPE_UNARY, 0)        \
-  GENERATOR(LEAVE, OPTYPE_NULLARY, 0)     \
-  GENERATOR(RET, OPTYPE_NULLARY, 0)       \
-  GENERATOR(NOP, OPTYPE_NULLARY, 0)       \
-  /* directives */                        \
-  GENERATOR(GLOBL, OPTYPE_DIRECTIVE, 0)   \
-  GENERATOR(ZERO, OPTYPE_DIRECTIVE, 0)    \
-  GENERATOR(BYTE, OPTYPE_DIRECTIVE, 0)    \
-  GENERATOR(VALUE, OPTYPE_DIRECTIVE, 0)   \
-  GENERATOR(LONG, OPTYPE_DIRECTIVE, 0)    \
-  GENERATOR(QUAD, OPTYPE_DIRECTIVE, 0)    \
-  GENERATOR(ALIGN, OPTYPE_DIRECTIVE, 0)   \
-  GENERATOR(SIZE, OPTYPE_DIRECTIVE, 0)    \
-  GENERATOR(TYPE, OPTYPE_DIRECTIVE, 0)    \
-  GENERATOR(ASCII, OPTYPE_DIRECTIVE, 0)   \
-  GENERATOR(ASCIZ, OPTYPE_DIRECTIVE, 0)   \
-  GENERATOR(SECTION, OPTYPE_DIRECTIVE, 0) \
-  GENERATOR(BSS, OPTYPE_DIRECTIVE, 0)     \
-  GENERATOR(TEXT, OPTYPE_DIRECTIVE, 0)    \
-  GENERATOR(DATA, OPTYPE_DIRECTIVE, 0)    \
-  GENERATOR(FILE, OPTYPE_DIRECTIVE, 0)
+#define FOREACH_OPCODE(GENERATOR)            \
+  GENERATOR(INVALID, OPTYPE_INVALID, 0, 0)   \
+  GENERATOR(NONE, OPTYPE_NULLARY, 0, 0)      \
+  /* arithmetic */                           \
+  GENERATOR(ADD, OPTYPE_BINARY, 1, 0)        \
+  GENERATOR(SUB, OPTYPE_BINARY, 1, 0)        \
+  GENERATOR(MUL, OPTYPE_UNARY, 1, 0)         \
+  GENERATOR(DIV, OPTYPE_UNARY, 1, 0)         \
+  GENERATOR(INC, OPTYPE_UNARY, 1, 0)         \
+  GENERATOR(DEC, OPTYPE_UNARY, 1, 0)         \
+  GENERATOR(NEG, OPTYPE_UNARY, 1, 0)         \
+  GENERATOR(IMUL, OPTYPE_CONTEXTUAL, 1, 0)   \
+  GENERATOR(IDIV, OPTYPE_UNARY, 1, 0)        \
+  /* compare and test */                     \
+  GENERATOR(TEST, OPTYPE_BINARY, 1, 0)       \
+  GENERATOR(CMP, OPTYPE_BINARY, 1, 0)        \
+  GENERATOR(SETE, OPTYPE_UNARY, 0, 1)        \
+  GENERATOR(SETNE, OPTYPE_UNARY, 0, 1)       \
+  GENERATOR(SETG, OPTYPE_UNARY, 0, 1)        \
+  GENERATOR(SETGE, OPTYPE_UNARY, 0, 1)       \
+  GENERATOR(SETL, OPTYPE_UNARY, 0, 1)        \
+  GENERATOR(SETLE, OPTYPE_UNARY, 0, 1)       \
+  GENERATOR(SETA, OPTYPE_UNARY, 0, 1)        \
+  GENERATOR(SETAE, OPTYPE_UNARY, 0, 1)       \
+  GENERATOR(SETB, OPTYPE_UNARY, 0, 1)        \
+  GENERATOR(SETBE, OPTYPE_UNARY, 0, 1)       \
+  GENERATOR(SETZ, OPTYPE_UNARY, 0, 1)        \
+  GENERATOR(SETNZ, OPTYPE_UNARY, 0, 1)       \
+  /* jump */                                 \
+  GENERATOR(JMP, OPTYPE_UNARY, 0, 0)         \
+  GENERATOR(JE, OPTYPE_UNARY, 0, 0)          \
+  GENERATOR(JNE, OPTYPE_UNARY, 0, 0)         \
+  GENERATOR(JG, OPTYPE_UNARY, 0, 0)          \
+  GENERATOR(JGE, OPTYPE_UNARY, 0, 0)         \
+  GENERATOR(JL, OPTYPE_UNARY, 0, 0)          \
+  GENERATOR(JLE, OPTYPE_UNARY, 0, 0)         \
+  GENERATOR(JA, OPTYPE_UNARY, 0, 0)          \
+  GENERATOR(JAE, OPTYPE_UNARY, 0, 0)         \
+  GENERATOR(JB, OPTYPE_UNARY, 0, 0)          \
+  GENERATOR(JBE, OPTYPE_UNARY, 0, 0)         \
+  GENERATOR(JZ, OPTYPE_UNARY, 0, 0)          \
+  GENERATOR(JNZ, OPTYPE_UNARY, 0, 0)         \
+  /* logical and bitwise */                  \
+  GENERATOR(NOT, OPTYPE_UNARY, 1, 0)         \
+  GENERATOR(OR, OPTYPE_BINARY, 1, 0)         \
+  GENERATOR(AND, OPTYPE_BINARY, 1, 0)        \
+  GENERATOR(LEA, OPTYPE_BINARY, 1, 1)        \
+  GENERATOR(XOR, OPTYPE_BINARY, 1, 0)        \
+  /* shifts */                               \
+  GENERATOR(SHL, OPTYPE_BINARY, 1, 0)        \
+  GENERATOR(SAL, OPTYPE_BINARY, 1, 0)        \
+  GENERATOR(SHR, OPTYPE_BINARY, 1, 0)        \
+  GENERATOR(SAR, OPTYPE_BINARY, 1, 0)        \
+  /* code movement */                        \
+  GENERATOR(MOV, OPTYPE_BINARY, 1, 1)        \
+  GENERATOR(MOVZ, OPTYPE_BINARY, 1, 1)       \
+  GENERATOR(MOVS, OPTYPE_BINARY, 1, 1)       \
+  GENERATOR(PUSH, OPTYPE_UNARY, 1, 0)        \
+  GENERATOR(POP, OPTYPE_UNARY, 1, 1)         \
+  GENERATOR(CALL, OPTYPE_UNARY, 0, 0)        \
+  GENERATOR(LEAVE, OPTYPE_NULLARY, 0, 0)     \
+  GENERATOR(RET, OPTYPE_NULLARY, 0, 0)       \
+  GENERATOR(NOP, OPTYPE_NULLARY, 0, 0)       \
+  /* directives */                           \
+  GENERATOR(GLOBL, OPTYPE_DIRECTIVE, 0, 0)   \
+  GENERATOR(ZERO, OPTYPE_DIRECTIVE, 0, 0)    \
+  GENERATOR(BYTE, OPTYPE_DIRECTIVE, 0, 0)    \
+  GENERATOR(VALUE, OPTYPE_DIRECTIVE, 0, 0)   \
+  GENERATOR(LONG, OPTYPE_DIRECTIVE, 0, 0)    \
+  GENERATOR(QUAD, OPTYPE_DIRECTIVE, 0, 0)    \
+  GENERATOR(ALIGN, OPTYPE_DIRECTIVE, 0, 0)   \
+  GENERATOR(SIZE, OPTYPE_DIRECTIVE, 0, 0)    \
+  GENERATOR(TYPE, OPTYPE_DIRECTIVE, 0, 0)    \
+  GENERATOR(ASCII, OPTYPE_DIRECTIVE, 0, 0)   \
+  GENERATOR(ASCIZ, OPTYPE_DIRECTIVE, 0, 0)   \
+  GENERATOR(SECTION, OPTYPE_DIRECTIVE, 0, 0) \
+  GENERATOR(BSS, OPTYPE_DIRECTIVE, 0, 0)     \
+  GENERATOR(TEXT, OPTYPE_DIRECTIVE, 0, 0)    \
+  GENERATOR(DATA, OPTYPE_DIRECTIVE, 0, 0)    \
+  GENERATOR(FILE, OPTYPE_DIRECTIVE, 0, 0)
 
-#define GENERATE_ENUM(CODE, TYPE, BOOL) OP_##CODE,
+#define GENERATE_ENUM(CODE, TYPE, BOOL, WRITES) OP_##CODE,
 typedef enum opcode { FOREACH_OPCODE(GENERATE_ENUM) OPCODE_COUNT } Opcode;
 #undef GENERATE_ENUM
 
@@ -122,6 +122,11 @@ typedef enum index_scale {
   SCALE_DWORD = 4,
   SCALE_QWORD = 8
 } IndexScale;
+typedef enum persist_flag {
+  PERSIST_NONE = 0,
+  PERSIST_SET = 1,
+  PERSIST_CLEAR = 2
+} PersistFlag;
 
 typedef union operand {
   struct opall {
@@ -169,6 +174,7 @@ typedef union operand {
 
 typedef struct instruction_data {
   Opcode opcode;
+  PersistFlag dest_persistence;
   const char *label;
   const char *comment;
   Operand dest;
