@@ -23,12 +23,12 @@
 #define MAX_INSTR_DEBUG_LENGTH 4096
 #define MAX_OPERAND_DEBUG_LENGTH 1024
 
-#define GENERATE_STRING(CODE, TYPE, BOOL) #CODE,
-#define GENERATE_TYPE(CODE, TYPE, BOOL) \
-  case OP_##CODE:                       \
+#define GENERATE_STRING(CODE, TYPE, BOOL, WRITES) #CODE,
+#define GENERATE_TYPE(CODE, TYPE, BOOL, WRITES) \
+  case OP_##CODE:                               \
     return TYPE;
-#define GENERATE_NEEDS_WIDTH(CODE, TYPE, BOOL) \
-  case OP_##CODE:                              \
+#define GENERATE_NEEDS_WIDTH(CODE, TYPE, BOOL, WRITES) \
+  case OP_##CODE:                                      \
     return BOOL;
 
 #define GENERATE_T1_REGS(REGBASE) \
@@ -1215,9 +1215,11 @@ ASTree *translate_conditional(ASTree *qmark, ASTree *condition,
   if (status) abort();
 
   if (type_is_void(qmark->type)) {
+    InstructionData *nop_data = instr_init(OP_NOP);
     InstructionData *jmp_end_data = instr_init(OP_JMP);
     set_op_dir(&jmp_end_data->dest, mk_true_label(current_branch));
-    status = liter_push_back(true_expr->last_instr, NULL, 1, jmp_end_data);
+    status =
+        liter_push_back(true_expr->last_instr, NULL, 2, nop_data, jmp_end_data);
 
     InstructionData *false_label = liter_get(false_expr->first_instr);
     false_label->label = mk_false_label(current_branch);
@@ -1232,6 +1234,8 @@ ASTree *translate_conditional(ASTree *qmark, ASTree *condition,
     InstructionData *mov_true_data = instr_init(OP_MOV);
     mov_true_data->src = true_expr_data->dest;
     set_op_reg(&mov_true_data->dest, type_get_width(qmark->type), next_vreg());
+    /* clear persistence data for result vreg */
+    mov_true_data->dest_persistence = PERSIST_CLEAR;
     InstructionData *jmp_end_data = instr_init(OP_JMP);
     set_op_dir(&jmp_end_data->dest, mk_true_label(current_branch));
     status = liter_push_back(true_expr->last_instr, NULL, 2, mov_true_data,
@@ -1249,6 +1253,8 @@ ASTree *translate_conditional(ASTree *qmark, ASTree *condition,
     InstructionData *end_label = instr_init(OP_MOV);
     end_label->label = mk_true_label(current_branch);
     end_label->src = end_label->dest = mov_false_data->dest;
+    /* persist result vreg across bblocks */
+    end_label->dest_persistence = PERSIST_SET;
     status = liter_push_back(false_expr->last_instr, &qmark->last_instr, 2,
                              mov_false_data, end_label);
     if (status) abort();
@@ -1960,6 +1966,8 @@ ASTree *translate_switch(ASTree *switch_, ASTree *condition, ASTree *body) {
   mov_data->src = cond_data->dest;
   set_op_reg(&mov_data->dest, type_get_width(control_type),
              state_get_control_reg(state));
+  /* clear control vreg from persistence data */
+  mov_data->dest_persistence = PERSIST_CLEAR;
   InstructionData *jmp_case1_data = instr_init(OP_JMP);
   set_op_dir(&jmp_case1_data->dest, mk_case_label(switch_->jump_id, 0));
   status =
@@ -2325,6 +2333,8 @@ ASTree *translate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
   set_op_reg(&test_data->dest, type_get_width(control_type),
              state_get_control_reg(state));
   test_data->src = mov_data->dest;
+  /* persist test register between basic blocks */
+  test_data->dest_persistence = PERSIST_SET;
   InstructionData *jmp_data = instr_init(OP_JNE);
   set_op_dir(&jmp_data->dest,
              mk_case_label(case_->jump_id, state_get_case_id(state)));
