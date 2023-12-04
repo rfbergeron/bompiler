@@ -191,6 +191,9 @@ ASTree *validate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
                                  BCC_TERR_EXPECTED_INTCONST, 2, case_, expr);
   }
 
+  /* TODO(Robert): remove this call since `translate_case` doesn't need it, or
+   * otherwise use the instructions emitted by it
+   */
   maybe_load_cexpr(expr, stmt->first_instr);
   return translate_case(case_, expr, stmt);
 }

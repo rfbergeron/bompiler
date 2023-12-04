@@ -49,6 +49,7 @@ ASTree *astree_init(int symbol, const Location location, const char *info) {
   tree->attributes = ATTR_NONE;
   tree->first_instr = NULL;
   tree->last_instr = NULL;
+  tree->spill_eightbytes = 0;
   /* casting function pointers is undefined behavior but it seems like most
    * compiler implementations make it work, and here we're just changing the
    * type of a pointer argument */
@@ -163,6 +164,9 @@ ASTree *astree_adopt(ASTree *parent, const size_t count, ...) {
       fprintf(stderr, "ERROR: your data structures library sucks.\n");
       abort();
     }
+    /* propogate size of spill area for nested calls */
+    if (parent->spill_eightbytes < child->spill_eightbytes)
+      parent->spill_eightbytes = child->spill_eightbytes;
   }
   va_end(args);
   return parent;

@@ -125,6 +125,9 @@ static size_t literals_size;
 static Map *static_locals;
 static Map *generated_text;
 
+static ptrdiff_t *spill_regions = NULL;
+static size_t spill_regions_count = 0;
+
 extern int skip_allocator;
 extern int skip_liveness;
 
@@ -529,6 +532,10 @@ size_t asmgen_literal_label(const char *literal, const char **out) {
   return *out = label_data->label, literals_size++;
 }
 
+/* TODO(Robert): have this function take only a the type as an argument and
+ * return the displacement. currently half of the calls to this function make
+ * use of dummy symbols because the signature is bad.
+ */
 void assign_stack_space(SymbolValue *symval) {
   size_t width = type_get_width(symval->type);
   size_t alignment = type_get_alignment(symval->type);
@@ -559,6 +566,9 @@ void assign_static_space(const char *ident, SymbolValue *symval) {
  * any unsigned int -> any wider int: movz
  * any int -> any narrower int: simple mov
  * any int -> any int of same width: nop
+ */
+/* TODO(Robert): this function still does not handle enums correctly. in
+ * particular, make sure that it can handle conversions to and from enums
  */
 int scalar_conversions(ASTree *expr, const Type *to) {
   if (type_is_void(to)) return 0;
@@ -680,7 +690,10 @@ ASTree *translate_empty_expr(ASTree *empty_expr) {
 void maybe_load_cexpr(ASTree *expr, ListIter *where) {
   if (expr->attributes & ATTR_EXPR_CONST) {
     InstructionData *load_data;
-    if (expr->attributes & ATTR_CONST_ADDR) {
+    if (type_is_void(expr->type)) {
+      /* emit NOP when casting a constant to void */
+      load_data = instr_init(OP_NOP);
+    } else if (expr->attributes & ATTR_CONST_ADDR) {
       load_data = instr_init(OP_LEA);
       set_op_pic(&load_data->src, expr->constant.address.disp,
                  expr->constant.address.label, expr->constant.address.symval);
@@ -1453,19 +1466,26 @@ ASTree *translate_assignment(ASTree *assignment, ASTree *lvalue,
   return astree_adopt(assignment, 2, lvalue, rvalue);
 }
 
+/* TODO(Robert): ensure correct instruction order */
 int translate_agg_arg(ASTree *call, ASTree *arg) {
   size_t arg_eightbytes = type_get_eightbytes(arg->type);
   InstructionData *arg_data = liter_get(arg->last_instr);
+  assert(arg_data->dest.all.mode == MODE_INDIRECT);
+  InstructionData *mov_data = instr_init(OP_MOV);
+  /* use arbitrary volatile reg to store arg */
+  set_op_reg(&mov_data->dest, REG_QWORD, RAX_VREG);
+  mov_data->src = arg_data->dest;
+
   int status = liter_advance(call->last_instr, -1);
   if (status) return status;
   if (arg_eightbytes <= 2 &&
       arg_eightbytes + arg_reg_index <= PARAM_REG_COUNT) {
-    int status = bulk_mtor(PARAM_REGS + arg_reg_index, arg_data->dest.reg.num,
+    int status = bulk_mtor(PARAM_REGS + arg_reg_index, mov_data->dest.reg.num,
                            NO_DISP, arg->type, call->last_instr);
     arg_reg_index += arg_eightbytes;
     if (status) return status;
   } else {
-    int status = bulk_mtom(RSP_VREG, arg_data->dest.reg.num, arg->type,
+    int status = bulk_mtom(RSP_VREG, mov_data->dest.reg.num, arg->type,
                            call->last_instr);
     if (status) return status;
     arg_stack_disp += arg_eightbytes * X64_SIZEOF_LONG;
@@ -1476,35 +1496,46 @@ int translate_agg_arg(ASTree *call, ASTree *arg) {
     status = liter_push_back(call->last_instr, NULL, 1, sub_data);
     if (status) return status;
   }
-  return liter_advance(call->last_instr, 1);
+
+  /* push after since instructions will be reversed */
+  return liter_push_back(call->last_instr, NULL, 1, mov_data) ||
+         liter_advance(call->last_instr, 1);
 }
 
 int translate_scalar_arg(ASTree *call, const Type *param_type, ASTree *arg) {
   assert(type_get_eightbytes(param_type) == 1);
-
-  int status = scalar_conversions(arg, param_type);
-  if (status) return status;
   InstructionData *arg_data = liter_get(arg->last_instr);
+  assert(arg_data->dest.all.mode == MODE_INDIRECT);
+
+  InstructionData *mov_data = instr_init(OP_MOV);
+  mov_data->src = arg_data->dest;
 
   if (arg_reg_index < PARAM_REG_COUNT) {
-    InstructionData *mov_data = instr_init(OP_MOV);
-    mov_data->src = arg_data->dest;
     set_op_reg(&mov_data->dest, type_get_width(param_type),
                PARAM_REGS[arg_reg_index++]);
     int status =
         liter_push_front(call->last_instr, &call->last_instr, 1, mov_data);
     if (status) return status;
   } else {
+    /* we can use any volatile, non-parameter register to perform the mov,
+     * since they should be saved by this point. i'm picking rax arbitrarily. i
+     * might be able to make use of the register allocator here; i'm not sure
+     */
+    set_op_reg(&mov_data->dest, type_get_width(param_type), RAX_VREG);
     InstructionData *push_data = instr_init(OP_PUSH);
-    set_op_reg(&push_data->dest, REG_QWORD, arg_data->dest.reg.num);
-    int status =
-        liter_push_front(call->last_instr, &call->last_instr, 1, push_data);
+    set_op_reg(&push_data->dest, REG_QWORD, RAX_VREG);
+    int status = liter_push_front(call->last_instr, &call->last_instr, 2,
+                                  mov_data, push_data);
     if (status) return status;
     arg_stack_disp += X64_SIZEOF_LONG;
   }
   return 0;
 }
 
+/* TODO(Robert): arguments without an associated parameter type (variable
+ * arguments to variadic functions and all arguments to functions without
+ * prototypes) should probably not have their type widened to be 64 bits.
+ */
 int translate_args(ASTree *call) {
   /* account for hidden out param */
   int out_param = type_get_eightbytes(call->type) > 2;
@@ -1545,13 +1576,68 @@ int translate_args(ASTree *call) {
   return 0;
 }
 
+int save_call_subexprs(ASTree *call) {
+  size_t i;
+  for (i = 0; i < astree_count(call); ++i) {
+    ASTree *subexpr = astree_get(call, i);
+    if (call->spill_eightbytes < subexpr->spill_eightbytes + i + 1)
+      call->spill_eightbytes = subexpr->spill_eightbytes + i + 1;
+  }
+
+  if (spill_regions_count < call->spill_eightbytes) {
+    size_t old_count = spill_regions_count;
+    spill_regions = realloc(spill_regions,
+                            sizeof(*spill_regions) *
+                                (spill_regions_count = call->spill_eightbytes));
+    if (spill_regions == NULL) return -1;
+    SymbolValue dummy = {0};
+    dummy.type = (Type *)TYPE_LONG;
+    for (i = old_count; i < spill_regions_count; ++i) {
+      assign_stack_space(&dummy);
+      spill_regions[i] = dummy.disp;
+    }
+  }
+
+  Type *function_type;
+  int status = type_strip_declarator(&function_type, astree_get(call, 0)->type);
+  if (status) return status;
+  size_t param_count = type_param_count(function_type);
+  for (i = 0; i < astree_count(call); ++i) {
+    ASTree *subexpr = astree_get(call, i);
+    if (type_is_scalar(subexpr->type)) {
+      /* TODO(Robert): converting to LONG isn't quite right for arguments
+       * without a corresponding parameter type
+       *
+       * convert arguments to the appropriate parameter type, and the function
+       * pointer and extra arguments to LONG
+       */
+      const Type *conv_type = i <= param_count && i > 0
+                                  ? type_param_index(function_type, i - 1)
+                                  : (Type *)TYPE_LONG;
+      assert(type_is_scalar(conv_type));
+      status = scalar_conversions(subexpr, conv_type);
+      if (status) return status;
+    }
+    InstructionData *subexpr_data = liter_get(subexpr->last_instr);
+    assert(subexpr_data->dest.all.mode == MODE_REGISTER);
+    InstructionData *spill_data = instr_init(OP_MOV);
+    spill_data->src = subexpr_data->dest;
+    set_op_ind(&spill_data->dest,
+               spill_regions[call->spill_eightbytes - (i + 1)], RBP_VREG);
+    status = liter_push_back(subexpr->last_instr, &subexpr->last_instr, 1,
+                             spill_data);
+    if (status) return status;
+  }
+
+  return 0;
+}
+
 ASTree *translate_call(ASTree *call) {
   PFDBG0('g', "Translating function call");
   ASTree *fn_pointer = astree_get(call, 0);
   call->first_instr = liter_copy(fn_pointer->first_instr);
   if (call->first_instr == NULL) abort();
-  /* TODO(Robert): (void?) pointer type constant */
-  int status = scalar_conversions(fn_pointer, (Type *)TYPE_LONG);
+  int status = save_call_subexprs(call);
   if (status) abort();
   InstructionData *sub_data = instr_init(OP_SUB);
   set_op_reg(&sub_data->dest, REG_QWORD, RSP_VREG);
@@ -1591,8 +1677,15 @@ ASTree *translate_call(ASTree *call) {
   }
 
   InstructionData *fn_pointer_data = liter_get(fn_pointer->last_instr);
+  assert(fn_pointer_data->dest.all.mode == MODE_INDIRECT);
+  InstructionData *load_fn_data = instr_init(OP_MOV);
+  load_fn_data->src = fn_pointer_data->dest;
+  /* use r10 or r11 since those are never used for args */
+  set_op_reg(&load_fn_data->dest, type_get_width(fn_pointer->type), 11);
   InstructionData *call_data = instr_init(OP_CALL);
-  call_data->dest = fn_pointer_data->dest;
+  call_data->dest = load_fn_data->dest;
+  status = llist_push_back(instructions, load_fn_data);
+  if (status) abort();
   status = llist_push_back(instructions, call_data);
   if (status) abort();
 

@@ -38,6 +38,7 @@ typedef struct astree {
   Location loc; /* source location */
   size_t jump_id;
   size_t case_id;
+  size_t spill_eightbytes;
   LinkedList children;     /* children of this n-way node */
   int symbol;              /* token code */
   unsigned int attributes; /* node-specific attributes */
@@ -46,7 +47,7 @@ typedef struct astree {
 #define EMPTY_EXPR_VALUE                                                   \
   {                                                                        \
     NULL, ";", NULL, NULL, NULL, {{0L, NULL, NULL}}, LOC_EMPTY_VALUE, 0UL, \
-        0UL, BLIB_LLIST_EMPTY, ';', ATTR_NONE                              \
+        0UL, 0UL, BLIB_LLIST_EMPTY, ';', ATTR_NONE                         \
   }
 #define UNWRAP(node) \
   (node->symbol == TOK_TYPE_ERROR ? astree_get(node, 0) : node)
