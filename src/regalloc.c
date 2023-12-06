@@ -174,6 +174,31 @@ static int instr_writes_dest(InstructionData *data) {
   }
 }
 
+static void liveness_helper(size_t *vreg_num, InstructionData **next_use_out,
+                            int clear_persist, int set_persist) {
+  /* new use info must be in `next_use_out` */
+  InstructionData *new_next_use = *next_use_out;
+  /* dummy variable for `map_find` */
+  size_t unused[2];
+  if (map_find(&bblock_table, vreg_num, sizeof(*vreg_num), unused)) {
+    /* use temporary liveness table if the vreg has an entry in there */
+    *next_use_out = map_get(&bblock_table, vreg_num, sizeof(*vreg_num));
+  } else {
+    *next_use_out = map_get(&persist_table, vreg_num, sizeof(*vreg_num));
+  }
+
+  /* PERSIST_*_SET takes precedence over PERSIST_*_CLEAR */
+  if (set_persist) {
+    assert(
+        !map_insert(&persist_table, vreg_num, sizeof(*vreg_num), new_next_use));
+  } else if (clear_persist) {
+    /* don't check return value; persist table may not have an entry */
+    (void)map_delete(&persist_table, vreg_num, sizeof(*vreg_num));
+  }
+
+  assert(!map_insert(&bblock_table, vreg_num, sizeof(*vreg_num), new_next_use));
+}
+
 static void update_liveness(InstructionData *data, Operand *operand) {
   switch (operand->all.mode) {
     case MODE_NONE:
@@ -182,40 +207,33 @@ static void update_liveness(InstructionData *data, Operand *operand) {
       break;
     case MODE_REGISTER:
       if (operand->reg.num < REAL_REG_COUNT) break;
-      size_t unused[2];
-      if (map_find(&bblock_table, &operand->reg.num, sizeof(operand->reg.num),
-                   unused)) {
-        /* use temporary liveness table if the vreg has an entry in there */
-        operand->reg.next_use =
-            map_get(&bblock_table, &operand->reg.num, sizeof(operand->reg.num));
-      } else {
-        operand->reg.next_use = map_get(&persist_table, &operand->reg.num,
-                                        sizeof(operand->reg.num));
-      }
-
-      if (operand == &data->dest) {
-        InstructionData *new_next_use = instr_writes_dest(data) ? NULL : data;
-        if (data->dest_persistence == PERSIST_SET) {
-          assert(!map_insert(&persist_table, &operand->reg.num,
-                             sizeof(operand->reg.num), new_next_use));
-        } else if (data->dest_persistence == PERSIST_CLEAR) {
-          assert(!map_delete(&persist_table, &operand->reg.num,
-                             sizeof(operand->reg.num)));
-        }
-        assert(!map_insert(&bblock_table, &operand->reg.num,
-                           sizeof(operand->reg.num), new_next_use));
-      } else {
-        assert(!map_insert(&bblock_table, &operand->reg.num,
-                           sizeof(operand->reg.num), data));
-      }
+      /* set next use to NULL if operand is dest and instruction overwrites
+       * dest without making use of the existing value
+       */
+      operand->reg.next_use =
+          operand == &data->dest && instr_writes_dest(data) ? NULL : data;
+      liveness_helper(&operand->reg.num, &operand->reg.next_use,
+                      (operand == &data->dest &&
+                       (data->persist_flags & PERSIST_DEST_CLEAR)) ||
+                          (operand == &data->src &&
+                           (data->persist_flags & PERSIST_SRC_CLEAR)),
+                      (operand == &data->dest &&
+                       (data->persist_flags & PERSIST_DEST_SET)) ||
+                          (operand == &data->src &&
+                           (data->persist_flags & PERSIST_SRC_SET)));
       break;
     case MODE_INDIRECT:
       if (operand->ind.num < REAL_REG_COUNT) break;
-      operand->ind.next_use =
-          map_get(&bblock_table, &operand->ind.num, sizeof(operand->ind.num));
-      if (map_insert(&bblock_table, &operand->ind.num, sizeof(operand->ind.num),
-                     data))
-        abort();
+      operand->ind.next_use = data;
+      liveness_helper(&operand->ind.num, &operand->ind.next_use,
+                      (operand == &data->dest &&
+                       (data->persist_flags & PERSIST_DEST_CLEAR)) ||
+                          (operand == &data->src &&
+                           (data->persist_flags & PERSIST_SRC_CLEAR)),
+                      (operand == &data->dest &&
+                       (data->persist_flags & PERSIST_DEST_SET)) ||
+                          (operand == &data->src &&
+                           (data->persist_flags & PERSIST_SRC_SET)));
       break;
     case MODE_PIC:
       operand->pic.next_use = operand->pic.symval->next_use;
@@ -223,18 +241,28 @@ static void update_liveness(InstructionData *data, Operand *operand) {
       break;
     case MODE_SCALE:
       if (operand->sca.base < REAL_REG_COUNT) goto skip_base;
-      operand->sca.base_next_use =
-          map_get(&bblock_table, &operand->sca.base, sizeof(operand->sca.base));
-      if (map_insert(&bblock_table, &operand->sca.base,
-                     sizeof(operand->sca.base), data))
-        abort();
+      operand->sca.base_next_use = data;
+      liveness_helper(&operand->sca.base, &operand->sca.base_next_use,
+                      (operand == &data->dest &&
+                       (data->persist_flags & PERSIST_DEST_CLEAR)) ||
+                          (operand == &data->src &&
+                           (data->persist_flags & PERSIST_SRC_CLEAR)),
+                      (operand == &data->dest &&
+                       (data->persist_flags & PERSIST_DEST_SET)) ||
+                          (operand == &data->src &&
+                           (data->persist_flags & PERSIST_SRC_SET)));
     skip_base:
       if (operand->sca.index < REAL_REG_COUNT) break;
-      operand->sca.index_next_use = map_get(&bblock_table, &operand->sca.index,
-                                            sizeof(operand->sca.index));
-      if (map_insert(&bblock_table, &operand->sca.index,
-                     sizeof(operand->sca.index), data))
-        abort();
+      operand->sca.index_next_use = data;
+      liveness_helper(&operand->sca.index, &operand->sca.index_next_use,
+                      (operand == &data->dest &&
+                       (data->persist_flags & PERSIST_DEST_CLEAR)) ||
+                          (operand == &data->src &&
+                           (data->persist_flags & PERSIST_SRC_CLEAR)),
+                      (operand == &data->dest &&
+                       (data->persist_flags & PERSIST_DEST_SET)) ||
+                          (operand == &data->src &&
+                           (data->persist_flags & PERSIST_SRC_SET)));
       break;
     default:
       abort();

@@ -289,6 +289,8 @@ int bulk_rtom(size_t dest_memreg, ptrdiff_t dest_disp, const size_t *src_regs,
         InstructionData *mov_data = instr_init(OP_MOV);
         set_op_reg(&mov_data->src, alignment, src_regs[i]);
         set_op_ind(&mov_data->dest, chunk_disp, dest_memreg);
+        if (i == 0 && dest_memreg >= REAL_REG_COUNT)
+          mov_data->persist_flags |= PERSIST_DEST_SET;
         InstructionData *shr_data = instr_init(OP_SHR);
         set_op_reg(&shr_data->dest, REG_QWORD, src_regs[i]);
         set_op_imm(&shr_data->src, alignment, IMM_UNSIGNED);
@@ -303,6 +305,8 @@ int bulk_rtom(size_t dest_memreg, ptrdiff_t dest_disp, const size_t *src_regs,
       InstructionData *mov_data = instr_init(OP_MOV);
       set_op_reg(&mov_data->src, alignment, src_regs[i]);
       set_op_ind(&mov_data->dest, dest_disp + i * alignment, dest_memreg);
+      if (i == 0 && dest_memreg >= REAL_REG_COUNT)
+        mov_data->persist_flags |= PERSIST_DEST_SET;
       int status = liter_push_back(where, NULL, 1, mov_data);
       if (status) return status;
     }
@@ -324,6 +328,9 @@ int bulk_mtor(const size_t *dest_regs, size_t src_memreg, ptrdiff_t src_disp,
         InstructionData *mov_data = instr_init(OP_MOV);
         set_op_ind(&mov_data->src, chunk_disp, src_memreg);
         set_op_reg(&mov_data->dest, alignment, next_vreg());
+        /* persist vregs across basic blocks */
+        if (i == 0 && src_memreg >= REAL_REG_COUNT)
+          mov_data->persist_flags |= PERSIST_SRC_SET;
         InstructionData *movz_data = instr_init(OP_MOVZ);
         movz_data->src = mov_data->dest;
         set_op_reg(&movz_data->dest, REG_QWORD, next_vreg());
@@ -345,6 +352,9 @@ int bulk_mtor(const size_t *dest_regs, size_t src_memreg, ptrdiff_t src_disp,
       InstructionData *mov_data = instr_init(OP_MOV);
       set_op_reg(&mov_data->dest, alignment, dest_regs[i]);
       set_op_ind(&mov_data->src, src_disp + i * alignment, src_memreg);
+      /* persist vregs across basic blocks */
+      if (i == 0 && src_memreg >= REAL_REG_COUNT)
+        mov_data->persist_flags |= PERSIST_SRC_SET;
       int status = liter_push_back(where, NULL, 1, mov_data);
       if (status) return status;
     }
@@ -365,6 +375,11 @@ int bulk_mtom(size_t dest_reg, size_t src_reg, const Type *type,
     InstructionData *mov_data_2 = instr_init(OP_MOV);
     mov_data_2->src = mov_data->dest;
     set_op_ind(&mov_data_2->dest, i * alignment, dest_reg);
+    if (i == 0) {
+      if (src_reg >= REAL_REG_COUNT) mov_data->persist_flags |= PERSIST_SRC_SET;
+      if (dest_reg >= REAL_REG_COUNT)
+        mov_data_2->persist_flags |= PERSIST_DEST_SET;
+    }
     int status = liter_push_back(where, NULL, 2, mov_data, mov_data_2);
     if (status) return status;
   }
@@ -386,6 +401,8 @@ int bulk_mzero(size_t dest_memreg, ptrdiff_t dest_disp, size_t skip_bytes,
       InstructionData *mov_data = instr_init(OP_MOV);
       set_op_reg(&mov_data->src, REG_BYTE, zero_data->dest.reg.num);
       set_op_ind(&mov_data->dest, chunk_disp, dest_memreg);
+      if (i == skip_bytes && dest_memreg >= REAL_REG_COUNT)
+        mov_data->persist_flags |= PERSIST_DEST_SET;
       int status = liter_push_back(where, NULL, 1, mov_data);
       if (status) return status;
       ++i;
@@ -393,6 +410,8 @@ int bulk_mzero(size_t dest_memreg, ptrdiff_t dest_disp, size_t skip_bytes,
       InstructionData *mov_data = instr_init(OP_MOV);
       mov_data->src = zero_data->dest;
       set_op_ind(&mov_data->dest, chunk_disp, dest_memreg);
+      if (i == skip_bytes && dest_memreg >= REAL_REG_COUNT)
+        mov_data->persist_flags |= PERSIST_DEST_SET;
       int status = liter_push_back(where, NULL, 1, mov_data);
       if (status) return status;
       i += alignment;
@@ -698,11 +717,13 @@ void maybe_load_cexpr(ASTree *expr, ListIter *where) {
       set_op_pic(&load_data->src, expr->constant.address.disp,
                  expr->constant.address.label, expr->constant.address.symval);
       set_op_reg(&load_data->dest, REG_QWORD, next_vreg());
+      load_data->persist_flags |= PERSIST_DEST_CLEAR;
     } else {
       load_data = instr_init(OP_MOV);
       set_op_imm(&load_data->src, expr->constant.integral.value,
                  type_is_signed(expr->type));
       set_op_reg(&load_data->dest, type_get_width(expr->type), next_vreg());
+      load_data->persist_flags |= PERSIST_DEST_CLEAR;
     }
     if (where) {
       int status = liter_push_front(where, &expr->first_instr, 1, load_data);
@@ -742,6 +763,7 @@ ASTree *translate_ident(ASTree *ident) {
   AuxSpec *ident_aux = llist_back(&ident_type->auxspecs);
   */
   set_op_reg(&lea_data->dest, REG_QWORD, next_vreg());
+  lea_data->persist_flags |= PERSIST_DEST_CLEAR;
   int status = llist_push_back(instructions, lea_data);
   if (status) abort();
   ident->first_instr = llist_iter_last(instructions);
@@ -751,6 +773,7 @@ ASTree *translate_ident(ASTree *ident) {
   return ident;
 }
 
+/* TODO(Robert): determine how persistence should work for casts */
 ASTree *translate_cast(ASTree *cast, ASTree *expr) {
   PFDBG0('g', "Translating cast");
 
@@ -785,6 +808,7 @@ ASTree *translate_logical_not(ASTree * not, ASTree *operand) {
   /* TEST operand with itself */
   InstructionData *test_data = instr_init(OP_TEST);
   test_data->dest = test_data->src = operand_data->dest;
+  test_data->persist_flags |= PERSIST_DEST_SET;
 
   InstructionData *setz_data = instr_init(OP_SETZ);
   set_op_reg(&setz_data->dest, REG_BYTE, next_vreg());
@@ -792,6 +816,7 @@ ASTree *translate_logical_not(ASTree * not, ASTree *operand) {
   InstructionData *movz_data = instr_init(OP_MOVZ);
   movz_data->src = setz_data->dest;
   set_op_reg(&movz_data->dest, REG_DWORD, next_vreg());
+  movz_data->persist_flags |= PERSIST_DEST_CLEAR;
 
   not ->first_instr = liter_copy(operand->first_instr);
   if (not ->first_instr == NULL) abort();
@@ -812,6 +837,8 @@ ASTree *translate_logical(ASTree *operator, ASTree * left, ASTree *right) {
                                : mk_true_label(next_branch());
   InstructionData *test_left_data = instr_init(OP_TEST);
   test_left_data->dest = test_left_data->src = left_data->dest;
+  test_left_data->persist_flags |= PERSIST_DEST_SET;
+
   InstructionData *jmp_left_data =
       instr_init(opcode_from_operator(operator->symbol, operator->type));
   set_op_dir(&jmp_left_data->dest, skip_label);
@@ -826,6 +853,7 @@ ASTree *translate_logical(ASTree *operator, ASTree * left, ASTree *right) {
 
   InstructionData *test_right_data = instr_init(OP_TEST);
   test_right_data->dest = test_right_data->src = right_data->dest;
+  test_right_data->persist_flags |= PERSIST_DEST_SET;
 
   /* result will always be the truth value of the last evaluated expression */
   InstructionData *setnz_data = instr_init(OP_SETNZ);
@@ -834,6 +862,7 @@ ASTree *translate_logical(ASTree *operator, ASTree * left, ASTree *right) {
   InstructionData *movz_data = instr_init(OP_MOVZ);
   movz_data->src = setnz_data->dest;
   set_op_reg(&movz_data->dest, REG_DWORD, next_vreg());
+  movz_data->persist_flags |= PERSIST_DEST_CLEAR;
 
   operator->first_instr = liter_copy(left->first_instr);
   if (operator->first_instr == NULL) abort();
@@ -867,12 +896,17 @@ ASTree *translate_comparison(ASTree *operator, ASTree * left, ASTree *right) {
   InstructionData *cmp_data = instr_init(OP_CMP);
   cmp_data->dest = right_data->dest;
   cmp_data->src = left_data->dest;
+  cmp_data->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_SET;
+
   InstructionData *setcc_data =
       instr_init(opcode_from_operator(operator->symbol, common_type));
   set_op_reg(&setcc_data->dest, REG_BYTE, next_vreg());
+
   InstructionData *movz_data = instr_init(OP_MOVZ);
   movz_data->src = setcc_data->dest;
   set_op_reg(&movz_data->dest, REG_DWORD, next_vreg());
+  movz_data->persist_flags = PERSIST_DEST_CLEAR;
+
   status = liter_push_back(right->last_instr, &operator->last_instr, 3,
                            cmp_data, setcc_data, movz_data);
   if (status) abort();
@@ -892,17 +926,20 @@ ASTree *translate_indirection(ASTree *indirection, ASTree *operand) {
   Type *element_type;
   status = type_strip_declarator(&element_type, operand->type);
   if (status) abort();
+
   InstructionData *load_data =
       instr_init(type_is_array(element_type) ? OP_LEA : OP_MOV);
-  if (status) abort();
   set_op_ind(&load_data->src, NO_DISP, operand_data->dest.reg.num);
   set_op_reg(&load_data->dest, type_get_width(indirection->type), next_vreg());
+  load_data->persist_flags = PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
+
   status = liter_push_back(operand->last_instr, &indirection->last_instr, 1,
                            load_data);
   if (status) abort();
   return astree_adopt(indirection, 1, operand);
 }
 
+/* TODO(Robert): determine how persistence works in this case */
 ASTree *translate_addrof(ASTree *addrof, ASTree *operand) {
   PFDBG0('g', "Translating address operation.");
   /* TODO(Robert): shouldn't this also be done for the '[]' operator? */
@@ -945,6 +982,8 @@ ASTree *translate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
 
   InstructionData *lea_data = instr_init(OP_LEA);
   set_op_reg(&lea_data->dest, REG_QWORD, next_vreg());
+  lea_data->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
+
   size_t scale = type_get_width((Type *)subscript->type);
   if (scale == 1 || scale == 2 || scale == 4 || scale == 8) {
     set_op_sca(&lea_data->src, scale, NO_DISP, pointer_data->dest.reg.num,
@@ -981,9 +1020,11 @@ ASTree *translate_reference(ASTree *reference, ASTree *struct_,
   InstructionData *struct_data = liter_get(struct_->last_instr);
   SymbolValue *member_symbol = type_member_name(record_type, member->lexinfo);
   assert(member_symbol);
+
   InstructionData *lea_data = instr_init(OP_LEA);
   set_op_ind(&lea_data->src, member_symbol->disp, struct_data->dest.reg.num);
   set_op_reg(&lea_data->dest, REG_QWORD, next_vreg());
+  lea_data->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
 
   reference->first_instr = liter_copy(struct_->first_instr);
   if (reference->first_instr == NULL) abort();
@@ -1015,9 +1056,13 @@ ASTree *translate_post_inc_dec(ASTree *post_inc_dec, ASTree *operand) {
   set_op_ind(&mov_data_2->dest, NO_DISP, lvalue_data->dest.reg.num);
   set_op_reg(&mov_data_2->src, type_get_width(operand->type),
              operand_data->dest.reg.num);
+  /* both the location and value of the object must persist until this point */
+  mov_data_2->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_SET;
 
   InstructionData *dummy_data = instr_init(OP_MOV);
   dummy_data->src = dummy_data->dest = mov_data->dest;
+  dummy_data->persist_flags |= PERSIST_DEST_CLEAR;
+
   status = liter_push_back(operand->last_instr, &post_inc_dec->last_instr, 4,
                            mov_data, inc_dec_data, mov_data_2, dummy_data);
   if (status) abort();
@@ -1042,9 +1087,12 @@ ASTree *translate_inc_dec(ASTree *inc_dec, ASTree *operand) {
   set_op_ind(&mov_data->dest, NO_DISP, lvalue_data->dest.reg.num);
   set_op_reg(&mov_data->src, type_get_width(operand->type),
              operand_data->dest.reg.num);
+  /* both the location and value of the object must persist until this point */
+  mov_data->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_SET;
 
   InstructionData *dummy_data = instr_init(OP_MOV);
   dummy_data->src = dummy_data->dest = operand_data->dest;
+  dummy_data->persist_flags |= PERSIST_DEST_CLEAR;
 
   status = liter_push_back(operand->last_instr, &inc_dec->last_instr, 3,
                            inc_dec_data, mov_data, dummy_data);
@@ -1061,6 +1109,11 @@ ASTree *translate_unop(ASTree *operator, ASTree * operand) {
   InstructionData *operator_data =
       instr_init(opcode_from_operator(operator->symbol, operator->type));
   operator_data->dest = operand_data->dest;
+  /* TODO(Robert): not sure if this is right, but I believe all unary ops
+   * make use of the value in the register, so the value should persist aross
+   * basic blocks
+   */
+  operator_data->persist_flags |= PERSIST_DEST_SET | PERSIST_DEST_CLEAR;
 
   operator->first_instr = liter_copy(operand->first_instr);
   if (operator->first_instr == NULL) abort();
@@ -1084,6 +1137,8 @@ ASTree *translate_addition(ASTree *operator, ASTree * left, ASTree *right) {
       instr_init(opcode_from_operator(operator->symbol, operator->type));
   operator_data->dest = right_data->dest;
   operator_data->src = left_data->dest;
+  operator_data->persist_flags |=
+      PERSIST_SRC_SET | PERSIST_DEST_SET | PERSIST_DEST_CLEAR;
 
   operator->first_instr = liter_copy(left->first_instr);
   if (operator->first_instr == NULL) abort();
@@ -1156,10 +1211,12 @@ ASTree *translate_multiplication(ASTree *operator, ASTree * left,
   InstructionData *mov_rax_data = instr_init(OP_MOV);
   set_op_reg(&mov_rax_data->dest, type_get_width(operator->type), RAX_VREG);
   mov_rax_data->src = left_data->dest;
+  mov_rax_data->persist_flags |= PERSIST_SRC_SET;
 
   InstructionData *operator_data =
       instr_init(opcode_from_operator(operator->symbol, operator->type));
   operator_data->dest = right_data->dest;
+  operator_data->persist_flags |= PERSIST_DEST_SET;
 
   operator->first_instr = liter_copy(left->first_instr);
   if (operator->first_instr == NULL) abort();
@@ -1179,6 +1236,7 @@ ASTree *translate_multiplication(ASTree *operator, ASTree * left,
   /* dummy mov */
   InstructionData *dummy_data = instr_init(OP_MOV);
   dummy_data->dest = dummy_data->src = mov_data->dest;
+  dummy_data->persist_flags |= PERSIST_DEST_CLEAR;
 
   status = liter_push_back(right->last_instr, &operator->last_instr, 9,
                            push_rdx_data, push_rax_data, zero_rdx_data,
@@ -1202,6 +1260,8 @@ ASTree *translate_binop(ASTree *operator, ASTree * left, ASTree *right) {
       instr_init(opcode_from_operator(operator->symbol, operator->type));
   operator_data->dest = right_data->dest;
   operator_data->src = left_data->dest;
+  operator_data->persist_flags |=
+      PERSIST_SRC_SET | PERSIST_DEST_SET | PERSIST_DEST_CLEAR;
 
   operator->first_instr = liter_copy(left->first_instr);
   if (operator->first_instr == NULL) abort();
@@ -1220,6 +1280,7 @@ ASTree *translate_conditional(ASTree *qmark, ASTree *condition,
   InstructionData *condition_data = liter_get(condition->last_instr);
   InstructionData *test_data = instr_init(OP_TEST);
   test_data->dest = test_data->src = condition_data->dest;
+  test_data->persist_flags |= PERSIST_DEST_SET;
   InstructionData *jmp_false_data =
       instr_init(opcode_from_operator(qmark->symbol, qmark->type));
   set_op_dir(&jmp_false_data->dest, mk_false_label(current_branch));
@@ -1247,8 +1308,8 @@ ASTree *translate_conditional(ASTree *qmark, ASTree *condition,
     InstructionData *mov_true_data = instr_init(OP_MOV);
     mov_true_data->src = true_expr_data->dest;
     set_op_reg(&mov_true_data->dest, type_get_width(qmark->type), next_vreg());
-    /* clear persistence data for result vreg */
-    mov_true_data->dest_persistence = PERSIST_CLEAR;
+    /* clear persistence data for result vreg; set it for true expr result */
+    mov_true_data->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
     InstructionData *jmp_end_data = instr_init(OP_JMP);
     set_op_dir(&jmp_end_data->dest, mk_true_label(current_branch));
     status = liter_push_back(true_expr->last_instr, NULL, 2, mov_true_data,
@@ -1262,12 +1323,13 @@ ASTree *translate_conditional(ASTree *qmark, ASTree *condition,
     InstructionData *mov_false_data = instr_init(OP_MOV);
     mov_false_data->src = false_expr_data->dest;
     mov_false_data->dest = mov_true_data->dest;
+    mov_false_data->persist_flags |= PERSIST_SRC_SET;
     /* dummy mov so that last instruction has destination reg */
     InstructionData *end_label = instr_init(OP_MOV);
     end_label->label = mk_true_label(current_branch);
     end_label->src = end_label->dest = mov_false_data->dest;
     /* persist result vreg across bblocks */
-    end_label->dest_persistence = PERSIST_SET;
+    end_label->persist_flags |= PERSIST_DEST_SET;
     status = liter_push_back(false_expr->last_instr, &qmark->last_instr, 2,
                              mov_false_data, end_label);
     if (status) abort();
@@ -1295,11 +1357,13 @@ int assign_aggregate(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   InstructionData *rvalue_data = liter_get(rvalue->last_instr);
   assignment->last_instr = liter_next(rvalue->last_instr, 1);
   if (assignment->last_instr == NULL) return -1;
+  /* `bulk_mtom` should make registers persist */
   int status = bulk_mtom(lvalue_data->dest.reg.num, rvalue_data->dest.reg.num,
                          assignment->type, rvalue->last_instr);
   if (status) return status;
   InstructionData *dummy_data = instr_init(OP_MOV);
   dummy_data->src = dummy_data->dest = lvalue_data->dest;
+  dummy_data->persist_flags |= PERSIST_DEST_CLEAR;
   /* push_front since iter is current past the last instruction */
   status = liter_push_front(assignment->last_instr, &assignment->last_instr, 1,
                             dummy_data);
@@ -1318,14 +1382,20 @@ int assign_add(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
       instr_init(opcode_from_operator(assignment->symbol, assignment->type));
   set_op_ind(&assignment_data->dest, NO_DISP, lvalue_data->dest.reg.num);
   assignment_data->src = rvalue_data->dest;
+  assignment_data->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_SET;
 
+  /* TODO(Robert): this shouldn't be a dummy instruction; the new value needs
+   * to be loaded from memory, preferably to a fresh vreg
+   */
   InstructionData *dummy_data = instr_init(OP_MOV);
   dummy_data->src = dummy_data->dest = rvalue_data->dest;
+  dummy_data->persist_flags |= PERSIST_DEST_CLEAR;
 
   assignment->first_instr = liter_copy(lvalue->first_instr);
   if (assignment->first_instr == NULL) return -1;
 
   /* TODO(Robert): copied from translate_addition */
+  /* TODO(Robert): is a += b valid if a has integral type and b is a pointer? */
   /* use two-operand IMUL, since it is more convenient in this case */
   if (type_is_pointer(lvalue->type) && !type_is_pointer(rvalue->type)) {
     Type *element_type;
@@ -1386,10 +1456,12 @@ int assign_mul(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   InstructionData *mov_rax_data = instr_init(OP_MOV);
   set_op_reg(&mov_rax_data->dest, type_get_width(common_type), RAX_VREG);
   mov_rax_data->src = left_data->dest;
+  mov_rax_data->persist_flags |= PERSIST_SRC_SET;
 
   InstructionData *operator_data =
       instr_init(opcode_from_operator(assignment->symbol, common_type));
   operator_data->dest = rvalue_data->dest;
+  operator_data->persist_flags |= PERSIST_DEST_SET;
 
   assignment->first_instr = liter_copy(lvalue->first_instr);
   if (assignment->first_instr == NULL) return -1;
@@ -1398,6 +1470,7 @@ int assign_mul(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   set_op_ind(&store_data->dest, NO_DISP, lvalue_data->dest.reg.num);
   set_op_reg(&store_data->src, type_get_width(lvalue->type),
              assignment->symbol == TOK_REMEQ ? RDX_VREG : RAX_VREG);
+  store_data->persist_flags |= PERSIST_DEST_SET;
 
   InstructionData *mov_data = instr_init(OP_MOV);
   /* mov from vreg representing rax/rdx to new vreg and truncate */
@@ -1414,6 +1487,7 @@ int assign_mul(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   /* dummy mov */
   InstructionData *dummy_data = instr_init(OP_MOV);
   dummy_data->dest = dummy_data->src = mov_data->dest;
+  dummy_data->persist_flags |= PERSIST_DEST_CLEAR;
 
   return liter_push_back(rvalue->last_instr, &assignment->last_instr, 10,
                          push_rdx_data, push_rax_data, zero_rdx_data,
@@ -1432,9 +1506,11 @@ int assign_scalar(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
       instr_init(opcode_from_operator(assignment->symbol, assignment->type));
   set_op_ind(&assignment_data->dest, NO_DISP, lvalue_data->dest.reg.num);
   assignment_data->src = rvalue_data->dest;
+  assignment_data->persist_flags |= PERSIST_DEST_SET | PERSIST_SRC_SET;
 
   InstructionData *dummy_data = instr_init(OP_MOV);
   dummy_data->src = dummy_data->dest = rvalue_data->dest;
+  dummy_data->persist_flags |= PERSIST_DEST_CLEAR;
 
   assignment->first_instr = liter_copy(lvalue->first_instr);
   if (assignment->first_instr == NULL) return -1;
@@ -1520,6 +1596,16 @@ int translate_scalar_arg(ASTree *call, const Type *param_type, ASTree *arg) {
     /* we can use any volatile, non-parameter register to perform the mov,
      * since they should be saved by this point. i'm picking rax arbitrarily. i
      * might be able to make use of the register allocator here; i'm not sure
+     */
+    /* TODO(Robert): consider using r10 or r11 since neither of those are param
+     * or registers and rax is used for variadic functions; if i change the
+     * code in `translate_call` i don't want it to break mysteriously because
+     * rax is dirtied when moving around arguments
+     */
+    /* TODO(Robert): is the combination of PUSH, SUB, ADD and MOV instructions
+     * used when moving parameters to the stack correct? If I'm correct, the
+     * pre-call adjustment doesn't take into account the fact that PUSH already
+     * adjusts RSP
      */
     set_op_reg(&mov_data->dest, type_get_width(param_type), RAX_VREG);
     InstructionData *push_data = instr_init(OP_PUSH);
@@ -1624,6 +1710,7 @@ int save_call_subexprs(ASTree *call) {
     spill_data->src = subexpr_data->dest;
     set_op_ind(&spill_data->dest,
                spill_regions[call->spill_eightbytes - (i + 1)], RBP_VREG);
+    spill_data->persist_flags |= PERSIST_SRC_SET;
     status = liter_push_back(subexpr->last_instr, &subexpr->last_instr, 1,
                              spill_data);
     if (status) return status;
@@ -1699,6 +1786,9 @@ ASTree *translate_call(ASTree *call) {
     /* store return value on the stack temporarily so that volatile registers
      * can be restored without worrying about the return value being clobbered
      */
+    /* TODO(Robert): the memory location of the hidden out parameter is also
+     * stored at -8(%rbp). this is a problem.
+     */
     InstructionData *store_data = instr_init(OP_MOV);
     set_op_ind(&store_data->dest, -8, RBP_VREG);
     InstructionData *load_data = instr_init(OP_MOV);
@@ -1719,9 +1809,11 @@ ASTree *translate_call(ASTree *call) {
       if (status) abort();
       store_data->src = agg_addr_data->dest;
       set_op_reg(&load_data->dest, REG_QWORD, next_vreg());
+      load_data->persist_flags |= PERSIST_DEST_CLEAR;
     } else {
       set_op_reg(&store_data->src, type_get_width(call->type), RAX_VREG);
       set_op_reg(&load_data->dest, type_get_width(call->type), next_vreg());
+      load_data->persist_flags |= PERSIST_DEST_CLEAR;
     }
     int status = llist_push_back(instructions, store_data);
     if (status) abort();
@@ -1793,7 +1885,9 @@ ASTree *translate_va_start(ASTree *va_start_, ASTree *expr, ASTree *ident) {
   store_reg_save_area_data->src = add_rbp_data->dest;
   set_op_ind(&store_reg_save_area_data->dest, REG_SAVE_AREA_MEMBER_DISP,
              va_list_vreg);
+  store_reg_save_area_data->persist_flags |= PERSIST_DEST_SET;
 
+  /* TODO(Robert): are these pushed out of order intentionally? */
   ListIter *temp = llist_iter_last(instructions);
   status = liter_push_back(
       temp, &va_start_->last_instr, 10, load_gp_offset_data,
@@ -1820,8 +1914,6 @@ ASTree *translate_va_end(ASTree *va_end_, ASTree *expr) {
 int helper_va_arg_reg_param(ASTree *va_arg_, ASTree *expr, ASTree *type_name) {
   InstructionData *expr_data = liter_get(expr->last_instr);
   assert(expr_data != NULL && expr_data->dest.all.mode == MODE_REGISTER);
-  /* va list reg needs to persist across basic blocks; we clear it here */
-  expr_data->dest_persistence = PERSIST_CLEAR;
   size_t va_list_vreg = expr_data->dest.reg.num;
   size_t eightbytes = type_get_eightbytes(astree_get(type_name, 1)->type);
   size_t result_vreg = next_vreg(), current_branch = next_branch();
@@ -1830,7 +1922,8 @@ int helper_va_arg_reg_param(ASTree *va_arg_, ASTree *expr, ASTree *type_name) {
   InstructionData *load_gp_offset_data = instr_init(OP_MOV);
   set_op_ind(&load_gp_offset_data->src, GP_OFFSET_MEMBER_DISP, va_list_vreg);
   set_op_reg(&load_gp_offset_data->dest, REG_DWORD, result_vreg);
-  load_gp_offset_data->dest_persistence = PERSIST_CLEAR;
+  /* first use of result_vreg; it no longer needs to persist */
+  load_gp_offset_data->persist_flags = PERSIST_DEST_CLEAR;
 
   /* jump if arg cannot fit into the save area */
   InstructionData *cmp_gp_offset_data = instr_init(OP_CMP);
@@ -1885,26 +1978,21 @@ int helper_va_arg_reg_param(ASTree *va_arg_, ASTree *expr, ASTree *type_name) {
   InstructionData *add_disp_data = instr_init(OP_ADD);
   add_disp_data->src = load_disp_data->dest;
   set_op_ind(&add_disp_data->dest, OVERFLOW_ARG_AREA_MEMBER_DISP, va_list_vreg);
-
-  /* another dummy instruction because peristence can only be set/cleared on
-   * register operands and then only for the destination operand
-   */
-  InstructionData *persist_dummy_data = instr_init(OP_MOV);
-  persist_dummy_data->src = persist_dummy_data->dest = expr_data->dest;
-  persist_dummy_data->dest_persistence = PERSIST_SET;
+  /* va_list result vreg must perist until at least this point */
+  add_disp_data->persist_flags |= PERSIST_DEST_SET;
 
   /* dummy mov so last instruction holds result */
   InstructionData *dummy_data = instr_init(OP_MOV);
   set_op_reg(&dummy_data->src, REG_QWORD, result_vreg);
   dummy_data->dest = dummy_data->src;
   dummy_data->label = mk_false_label(current_branch);
-  dummy_data->dest_persistence = PERSIST_SET;
+  dummy_data->persist_flags = PERSIST_DEST_SET;
 
   return liter_push_back(
-      expr->last_instr, &va_arg_->last_instr, 12, load_gp_offset_data,
+      expr->last_instr, &va_arg_->last_instr, 11, load_gp_offset_data,
       cmp_gp_offset_data, jmp_ge_data, add_save_area_data, load_eightbyte_data,
       update_offset_data, jmp_false_data, load_overflow_arg_area_data,
-      load_disp_data, add_disp_data, persist_dummy_data, dummy_data);
+      load_disp_data, add_disp_data, dummy_data);
 }
 
 int helper_va_arg_stack_param(ASTree *va_arg_, ASTree *expr,
@@ -1919,6 +2007,8 @@ int helper_va_arg_stack_param(ASTree *va_arg_, ASTree *expr,
   set_op_ind(&load_overflow_arg_area_data->src, OVERFLOW_ARG_AREA_MEMBER_DISP,
              va_list_vreg);
   set_op_reg(&load_overflow_arg_area_data->dest, REG_QWORD, next_vreg());
+  /* first use of result vreg; no need to persist it above this point */
+  load_overflow_arg_area_data->persist_flags |= PERSIST_DEST_CLEAR;
 
   /* load displacement to add to overflow pointer */
   InstructionData *load_disp_data = instr_init(OP_MOV);
@@ -1929,6 +2019,8 @@ int helper_va_arg_stack_param(ASTree *va_arg_, ASTree *expr,
   InstructionData *add_disp_data = instr_init(OP_ADD);
   add_disp_data->src = load_disp_data->dest;
   set_op_ind(&add_disp_data->dest, OVERFLOW_ARG_AREA_MEMBER_DISP, va_list_vreg);
+  /* va_list_vreg must persist until at least this point */
+  add_disp_data->persist_flags |= PERSIST_DEST_SET;
 
   /* dummy mov so that last instruction contains result */
   InstructionData *dummy_data = instr_init(OP_MOV);
@@ -2003,6 +2095,9 @@ int translate_params(ASTree *declarator) {
   }
 
   /* TODO(Robert): this is clunky and it sucks */
+  /* TODO(Robert): because of the way `va_list` is implemented, the varargs
+   * register spill region must always be 48 bytes.
+   */
   if (type_is_variadic_function(fn_type) && param_reg_index < PARAM_REG_COUNT) {
     TagValue dummy_tag = {0};
     dummy_tag.width = X64_SIZEOF_LONG * (PARAM_REG_COUNT - param_reg_index);
@@ -2039,6 +2134,7 @@ ASTree *translate_ifelse(ASTree *ifelse, ASTree *condition, ASTree *if_body,
 
   InstructionData *test_data = instr_init(OP_TEST);
   test_data->dest = test_data->src = condition_data->dest;
+  test_data->persist_flags |= PERSIST_DEST_SET;
 
   InstructionData *end_label = instr_init(OP_NONE);
   end_label->label = mk_end_label(ifelse->jump_id);
@@ -2088,8 +2184,8 @@ ASTree *translate_switch(ASTree *switch_, ASTree *condition, ASTree *body) {
   mov_data->src = cond_data->dest;
   set_op_reg(&mov_data->dest, type_get_width(control_type),
              state_get_control_reg(state));
-  /* clear control vreg from persistence data */
-  mov_data->dest_persistence = PERSIST_CLEAR;
+  /* clear control vreg from persistence data; persist condition expression */
+  mov_data->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
   InstructionData *jmp_case1_data = instr_init(OP_JMP);
   set_op_dir(&jmp_case1_data->dest, mk_case_label(switch_->jump_id, 0));
   status =
@@ -2139,6 +2235,7 @@ ASTree *translate_while(ASTree *while_, ASTree *condition, ASTree *body) {
   InstructionData *condition_data = liter_get(condition->last_instr);
   InstructionData *test_data = instr_init(OP_TEST);
   test_data->src = test_data->dest = condition_data->dest;
+  test_data->persist_flags |= PERSIST_DEST_SET;
 
   InstructionData *end_label = instr_init(OP_NONE);
   end_label->label = mk_end_label(while_->jump_id);
@@ -2199,6 +2296,8 @@ ASTree *translate_for(ASTree *for_, ASTree *initializer, ASTree *condition,
     InstructionData *condition_data = liter_get(condition->last_instr);
     InstructionData *test_data = instr_init(OP_TEST);
     test_data->dest = test_data->src = condition_data->dest;
+    test_data->persist_flags |= PERSIST_DEST_SET;
+
     InstructionData *test_jmp_data = instr_init(OP_JZ);
     set_op_dir(&test_jmp_data->dest, mk_end_label(for_->jump_id));
     status = liter_push_back(condition->last_instr, NULL, 2, test_data,
@@ -2247,8 +2346,10 @@ ASTree *translate_do(ASTree *do_, ASTree *body, ASTree *condition) {
   if (status) abort();
   InstructionData *condition_data = liter_get(condition->last_instr);
   if (condition_data == NULL) abort();
+
   InstructionData *test_data = instr_init(OP_TEST);
   test_data->dest = test_data->src = condition_data->dest;
+  test_data->persist_flags |= PERSIST_DEST_SET;
 
   InstructionData *test_jmp_data = instr_init(OP_JNZ);
   set_op_dir(&test_jmp_data->dest, body_label->label);
@@ -2311,6 +2412,7 @@ int return_scalar(ASTree *ret, ASTree *expr) {
   InstructionData *mov_data = instr_init(OP_MOV);
   mov_data->src = expr_data->dest;
   set_op_reg(&mov_data->dest, type_get_width(return_type), RAX_VREG);
+  mov_data->persist_flags |= PERSIST_SRC_SET;
   status = llist_push_back(instructions, mov_data);
   if (status) return status;
 
@@ -2332,6 +2434,7 @@ int return_aggregate(ASTree *ret, ASTree *expr) {
 
   if (expr_eightbytes <= 2) {
     ListIter *temp = llist_iter_last(instructions);
+    /* `bulk_mtor` should handle persistence flags */
     int status = bulk_mtor(RETURN_REGS, expr_data->dest.reg.num, NO_DISP,
                            expr->type, temp);
     free(temp);
@@ -2447,6 +2550,7 @@ ASTree *translate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
   const Type *control_type = state_get_control_type(state);
   if (control_type == NULL) abort();
 
+  /* TODO(Robert): is the MOV necessary? the other operand is a register */
   InstructionData *mov_data = instr_init(OP_MOV);
   set_op_reg(&mov_data->dest, type_get_width(control_type), next_vreg());
   set_op_imm(&mov_data->src, expr->constant.integral.value,
@@ -2456,7 +2560,7 @@ ASTree *translate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
              state_get_control_reg(state));
   test_data->src = mov_data->dest;
   /* persist test register between basic blocks */
-  test_data->dest_persistence = PERSIST_SET;
+  test_data->persist_flags = PERSIST_DEST_SET;
   InstructionData *jmp_data = instr_init(OP_JNE);
   set_op_dir(&jmp_data->dest,
              mk_case_label(case_->jump_id, state_get_case_id(state)));
@@ -2624,9 +2728,15 @@ ASTree *translate_auto_literal_init(const Type *arr_type, ptrdiff_t arr_disp,
   set_op_pic(&literal_lea_data->src, literal->constant.address.disp,
              literal->constant.address.label, literal->constant.address.symval);
   set_op_reg(&literal_lea_data->dest, REG_QWORD, next_vreg());
+  /* need to clear persistence because `bulk_mtom` always sets it */
+  literal_lea_data->persist_flags |= PERSIST_DEST_CLEAR;
+
   InstructionData *arr_lea_data = instr_init(OP_LEA);
   set_op_ind(&arr_lea_data->src, arr_disp, RBP_VREG);
   set_op_reg(&arr_lea_data->dest, REG_QWORD, next_vreg());
+  /* need to clear persistence because `bulk_mtom` always sets it */
+  arr_lea_data->persist_flags |= PERSIST_DEST_CLEAR;
+
   int status =
       liter_push_back(where, &where, 2, literal_lea_data, arr_lea_data);
   if (status) abort();
@@ -2732,9 +2842,12 @@ ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
      * the actual assignment happens
      */
     assign_stack_space(symval);
+
     InstructionData *lea_data = instr_init(OP_LEA);
     set_op_ind(&lea_data->src, symval->disp, RBP_VREG);
     set_op_reg(&lea_data->dest, REG_QWORD, next_vreg());
+    lea_data->persist_flags |= PERSIST_DEST_CLEAR;
+
     int status = liter_push_front(initializer->first_instr,
                                   &declarator->first_instr, 1, lea_data);
     if (status) abort();
