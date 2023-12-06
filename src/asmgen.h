@@ -124,8 +124,10 @@ typedef enum index_scale {
 } IndexScale;
 typedef enum persist_flag {
   PERSIST_NONE = 0,
-  PERSIST_SET = 1,
-  PERSIST_CLEAR = 2
+  PERSIST_SRC_SET = 1 << 0,
+  PERSIST_DEST_SET = 1 << 1,
+  PERSIST_SRC_CLEAR = 1 << 2,
+  PERSIST_DEST_CLEAR = 1 << 3
 } PersistFlag;
 
 typedef union operand {
@@ -174,7 +176,7 @@ typedef union operand {
 
 typedef struct instruction_data {
   Opcode opcode;
-  PersistFlag dest_persistence;
+  unsigned int persist_flags;
   const char *label;
   const char *comment;
   Operand dest;
