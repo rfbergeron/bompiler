@@ -175,13 +175,9 @@ ASTree *validate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
     return astree_propogate_errnode_v(case_, 2, expr, stmt);
   }
 
-  case_->jump_id = state_get_selection_id(state);
-  if (case_->jump_id == (size_t)-1L) {
+  if (case_->jump_id == (size_t)-1L)
     return astree_create_errnode(case_, BCC_TERR_UNEXPECTED_TOKEN, 1, case_);
-  }
-  case_->case_id = state_get_case_id(state);
-  assert(case_->jump_id != (size_t)-1L);
-  state_inc_case_id(state);
+  assert(case_->case_id != (size_t)-1L);
 
   Type *case_const_spec = expr->type;
   if (!type_is_integral(case_const_spec) ||
@@ -203,15 +199,13 @@ ASTree *validate_default(ASTree *default_, ASTree *stmt) {
     return astree_propogate_errnode(default_, stmt);
   }
 
-  default_->jump_id = state_get_selection_id(state);
-  if (default_->jump_id == (size_t)-1L) {
+  /* TODO(Robert): consider changing instances of (size_t)-1L to SIZE_MAX */
+  if (default_->jump_id == (size_t)-1L)
     return astree_create_errnode(astree_adopt(default_, 1, stmt),
                                  BCC_TERR_UNEXPECTED_TOKEN, 1, default_);
-  }
-  if (state_set_selection_default(state)) {
+  else if (state_set_selection_default(state))
     return astree_create_errnode(astree_adopt(default_, 1, stmt),
                                  BCC_TERR_UNEXPECTED_TOKEN, 1, default_);
-  }
 
   return translate_default(default_, stmt);
 }
@@ -233,7 +227,6 @@ ASTree *validate_goto(ASTree *goto_, ASTree *ident) {
 }
 
 ASTree *validate_continue(ASTree *continue_) {
-  continue_->jump_id = state_get_continue_id(state);
   if (continue_->jump_id == (size_t)-1L) {
     return astree_create_errnode(continue_, BCC_TERR_UNEXPECTED_TOKEN, 1,
                                  continue_);
@@ -243,7 +236,6 @@ ASTree *validate_continue(ASTree *continue_) {
 }
 
 ASTree *validate_break(ASTree *break_) {
-  break_->jump_id = state_get_break_id(state);
   if (break_->jump_id == (size_t)-1L) {
     return astree_create_errnode(break_, BCC_TERR_UNEXPECTED_TOKEN, 1, break_);
   }

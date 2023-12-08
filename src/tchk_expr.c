@@ -217,6 +217,12 @@ ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
         BCC_TERR_EXPECTED_SCALAR, 2, qmark, condition);
   }
 
+  /* NOTE: whenever the result type is a pointer, the pointer type information,
+   * not the element type information, must be copied and not assigned, because
+   * the result may be a common qualified pointer type and determining whether
+   * or not this is the case at destruction time is harder than making
+   * unnecessary copies
+   */
   if (type_is_arithmetic(true_expr->type) &&
       type_is_arithmetic(false_expr->type)) {
     int status = type_arithmetic_conversions(&qmark->type, true_expr->type,
@@ -238,24 +244,32 @@ ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
     }
   } else if (type_is_pointer(true_expr->type) &&
              astree_is_const_zero(false_expr)) {
-    /* TODO(Robert): this will cause a double free when `astree_destroy` is
-     * called because it assumes that a new pointer type is created, like it
-     * is when its second and third operands are both pointers.
+    /* TODO(Robert): this is awkward and only necessary because `type_copy`
+     * fails for types which terminate in a null pointer
      */
-    qmark->type = true_expr->type;
+    assert(!type_copy(&qmark->type, true_expr->type, 0));
+    Type *elem_type;
+    assert(!type_strip_declarator(&elem_type, qmark->type));
+    assert(!type_destroy(elem_type));
+    qmark->type->pointer.next = NULL;
+    assert(!type_strip_declarator(&elem_type, true_expr->type));
+    assert(!type_append(qmark->type, elem_type, 0));
   } else if (astree_is_const_zero(true_expr) &&
              type_is_pointer(false_expr->type)) {
-    qmark->type = false_expr->type;
+    assert(!type_copy(&qmark->type, false_expr->type, 0));
+    Type *elem_type;
+    assert(!type_strip_declarator(&elem_type, qmark->type));
+    assert(!type_destroy(elem_type));
+    qmark->type->pointer.next = NULL;
+    assert(!type_strip_declarator(&elem_type, false_expr->type));
+    assert(!type_append(qmark->type, elem_type, 0));
   } else if ((type_is_pointer(true_expr->type) &&
               type_is_pointer(false_expr->type)) &&
              (type_is_void_pointer(true_expr->type) ||
               type_is_void_pointer(false_expr->type) ||
               types_equivalent(true_expr->type, false_expr->type, 1, 1))) {
-    Type *common_type;
-    int status = type_common_qualified_pointer(&common_type, true_expr->type,
-                                               false_expr->type);
-    if (status) abort();
-    qmark->type = common_type;
+    assert(!type_common_qualified_pointer(&qmark->type, true_expr->type,
+                                          false_expr->type));
   } else {
     return astree_create_errnode(
         astree_adopt(qmark, 3, condition, true_expr, false_expr),
@@ -546,7 +560,8 @@ ASTree *validate_indirection(ASTree *indirection, ASTree *operand) {
   if (type_is_pointer(operand->type)) {
     int status = type_strip_declarator(&indirection->type, operand->type);
     if (status) abort();
-    indirection->attributes |= ATTR_EXPR_LVAL;
+    if (!type_is_array(indirection->type))
+      indirection->attributes |= ATTR_EXPR_LVAL;
     maybe_load_cexpr(operand, NULL);
     return translate_indirection(indirection, operand);
   } else {

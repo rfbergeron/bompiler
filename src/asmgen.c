@@ -586,17 +586,30 @@ void assign_static_space(const char *ident, SymbolValue *symval) {
  * any int -> any narrower int: simple mov
  * any int -> any int of same width: nop
  */
+/* NOTE: all casts are semantically valid unless one of the following is true:
+ * - the source type is a struct, union, or function
+ * - the destination type is a struct, union, function or array
+ * - the source type is void and the destination type is not void
+ */
 /* TODO(Robert): this function still does not handle enums correctly. in
  * particular, make sure that it can handle conversions to and from enums
  */
 int scalar_conversions(ASTree *expr, const Type *to) {
-  if (type_is_void(to)) return 0;
-  if (!type_is_scalar(to) && !type_is_enum(to) && !type_is_array(to)) return -1;
-  const Type *from = expr->type;
-  if (!type_is_scalar(from) && !type_is_enum(from) && !type_is_array(from))
+  if (type_is_record(expr->type) || type_is_function(expr->type)) {
     return -1;
-  size_t from_width = type_get_width(from);
-  if (expr->attributes & ATTR_EXPR_LVAL) {
+  } else if (type_is_aggregate(to) || type_is_function(to)) {
+    return -1;
+  } else if (type_is_void(expr->type) && !type_is_void(to)) {
+    return -1;
+  } else if (type_is_void(to)) {
+    InstructionData *nop_data = instr_init(OP_NOP);
+    return liter_push_back(expr->last_instr, &expr->last_instr, 1, nop_data);
+  }
+
+  const Type *from = expr->type;
+  size_t from_width =
+      type_is_array(from) ? X64_SIZEOF_LONG : type_get_width(from);
+  if (expr->attributes & ATTR_EXPR_LVAL && !type_is_array(from)) {
     InstructionData *lvalue_data = liter_get(expr->last_instr);
     InstructionData *mov_data = instr_init(OP_MOV);
     set_op_ind(&mov_data->src, NO_DISP, lvalue_data->dest.reg.num);
@@ -605,6 +618,7 @@ int scalar_conversions(ASTree *expr, const Type *to) {
         liter_push_back(expr->last_instr, &expr->last_instr, 1, mov_data);
     if (status) return status;
   }
+
   InstructionData *expr_data = liter_get(expr->last_instr);
   if (expr_data->dest.all.mode != MODE_REGISTER) {
     InstructionData *mov_data = instr_init(OP_MOV);
@@ -628,7 +642,7 @@ int scalar_conversions(ASTree *expr, const Type *to) {
     set_op_reg(&mov_data->src, to_width, expr_data->dest.reg.num);
     set_op_reg(&mov_data->dest, to_width, next_vreg());
     return liter_push_back(expr->last_instr, &expr->last_instr, 1, mov_data);
-  } else if (type_is_signed(from)) {
+  } else if (type_is_signed(from) || type_is_enum(from)) {
     InstructionData *movs_data = instr_init(OP_MOVS);
     movs_data->src = expr_data->dest;
     set_op_reg(&movs_data->dest, to_width, next_vreg());
@@ -820,8 +834,8 @@ ASTree *translate_logical_not(ASTree * not, ASTree *operand) {
 
   not ->first_instr = liter_copy(operand->first_instr);
   if (not ->first_instr == NULL) abort();
-  status = liter_push_back(operand->last_instr, &not ->first_instr, 3,
-                           test_data, setz_data, movz_data);
+  status = liter_push_back(operand->last_instr, &not ->last_instr, 3, test_data,
+                           setz_data, movz_data);
   if (status) abort();
   return astree_adopt(not, 1, operand);
 }
@@ -913,6 +927,9 @@ ASTree *translate_comparison(ASTree *operator, ASTree * left, ASTree *right) {
   return astree_adopt(operator, 2, left, right);
 }
 
+/* TODO(Robert): i find myself questioning whether or not this is correct again
+ * on account of the way `scalar_conversions` works
+ */
 ASTree *translate_indirection(ASTree *indirection, ASTree *operand) {
   PFDBG0('g', "Translating indirection operation.");
   indirection->first_instr = liter_copy(operand->first_instr);
@@ -923,14 +940,21 @@ ASTree *translate_indirection(ASTree *indirection, ASTree *operand) {
   if (status) abort();
   InstructionData *operand_data = liter_get(operand->last_instr);
 
-  Type *element_type;
-  status = type_strip_declarator(&element_type, operand->type);
-  if (status) abort();
-
-  InstructionData *load_data =
-      instr_init(type_is_array(element_type) ? OP_LEA : OP_MOV);
+  /* NOTE: if the operand is an aggregate, technically no operation is necessary
+   * but because the address-of operator removes instructions when applied to
+   * the result of the indirection operator, it makes sense to always emit an
+   * instruction which can always be removed by the address-of
+   */
+  InstructionData *load_data;
+  if (type_is_aggregate(indirection->type)) {
+    load_data = instr_init(OP_LEA);
+    set_op_reg(&load_data->dest, type_get_width(TYPE_LONG), next_vreg());
+  } else {
+    load_data = instr_init(OP_MOV);
+    set_op_reg(&load_data->dest, type_get_width(indirection->type),
+               next_vreg());
+  }
   set_op_ind(&load_data->src, NO_DISP, operand_data->dest.reg.num);
-  set_op_reg(&load_data->dest, type_get_width(indirection->type), next_vreg());
   load_data->persist_flags = PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
 
   status = liter_push_back(operand->last_instr, &indirection->last_instr, 1,
@@ -2171,7 +2195,23 @@ ASTree *translate_ifelse(ASTree *ifelse, ASTree *condition, ASTree *if_body,
 }
 
 ASTree *translate_switch(ASTree *switch_, ASTree *condition, ASTree *body) {
+  size_t saved_break = SIZE_MAX, saved_selection = SIZE_MAX;
+  if (state_get_break_id(state) != switch_->jump_id)
+    saved_break = state_get_break_id(state), state_pop_break_id(state);
+  assert(state_get_break_id(state) == switch_->jump_id);
+  state_pop_break_id(state);
+
+  if (state_get_selection_id(state) != switch_->jump_id)
+    saved_selection = state_get_selection_id(state),
+    state_pop_selection_id(state);
+  assert(state_get_selection_id(state) == switch_->jump_id);
+  /* save switch statement info before popping from stack */
+  int has_default_stmt = state_get_selection_default(state);
   const Type *control_type = state_get_control_type(state);
+  size_t fake_case_id = state_get_case_id(state);
+  size_t control_vreg = state_get_control_reg(state);
+  state_pop_selection_id(state);
+
   int status = scalar_conversions(condition, control_type);
   if (status) abort();
   InstructionData *cond_data = liter_get(condition->last_instr);
@@ -2182,8 +2222,7 @@ ASTree *translate_switch(ASTree *switch_, ASTree *condition, ASTree *body) {
   /* switch prologue */
   InstructionData *mov_data = instr_init(OP_MOV);
   mov_data->src = cond_data->dest;
-  set_op_reg(&mov_data->dest, type_get_width(control_type),
-             state_get_control_reg(state));
+  set_op_reg(&mov_data->dest, type_get_width(control_type), control_vreg);
   /* clear control vreg from persistence data; persist condition expression */
   mov_data->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
   InstructionData *jmp_case1_data = instr_init(OP_JMP);
@@ -2198,9 +2237,8 @@ ASTree *translate_switch(ASTree *switch_, ASTree *condition, ASTree *body) {
   InstructionData *jmp_end_data = instr_init(OP_JMP);
   set_op_dir(&jmp_end_data->dest, end_label->label);
   InstructionData *dummy_case_label = instr_init(OP_NONE);
-  dummy_case_label->label =
-      mk_case_label(switch_->jump_id, state_get_case_id(state));
-  if (state_get_selection_default(state)) {
+  dummy_case_label->label = mk_case_label(switch_->jump_id, fake_case_id);
+  if (has_default_stmt) {
     InstructionData *jmp_def_data = instr_init(OP_JMP);
     set_op_dir(&jmp_def_data->dest, mk_def_label(switch_->jump_id));
     int status =
@@ -2213,16 +2251,25 @@ ASTree *translate_switch(ASTree *switch_, ASTree *condition, ASTree *body) {
     if (status) abort();
   }
 
-  /* cleanup state */
-  assert(state_get_break_id(state) == switch_->jump_id);
-  assert(state_get_selection_id(state) == switch_->jump_id);
-  state_pop_break_id(state);
-  state_pop_selection(state);
+  if (saved_break != SIZE_MAX) state_push_break_id(state, saved_break);
+  if (saved_selection != SIZE_MAX)
+    state_push_selection_id(state, saved_selection);
 
   return astree_adopt(switch_, 2, condition, body);
 }
 
 ASTree *translate_while(ASTree *while_, ASTree *condition, ASTree *body) {
+  size_t saved_break = SIZE_MAX, saved_continue = SIZE_MAX;
+  if (state_get_break_id(state) != while_->jump_id)
+    saved_break = state_get_break_id(state), state_pop_break_id(state);
+  assert(state_get_break_id(state) == while_->jump_id);
+  state_pop_break_id(state);
+
+  if (state_get_continue_id(state) != while_->jump_id)
+    saved_continue = state_get_continue_id(state), state_pop_continue_id(state);
+  assert(state_get_continue_id(state) == while_->jump_id);
+  state_pop_continue_id(state);
+
   InstructionData *condition_label = instr_init(OP_NONE);
   condition_label->label = mk_cond_label(while_->jump_id);
   /* set first instr to label */
@@ -2253,15 +2300,25 @@ ASTree *translate_while(ASTree *while_, ASTree *condition, ASTree *body) {
                            cond_jmp_data, end_label);
   if (status) abort();
 
-  assert(state_get_break_id(state) == while_->jump_id);
-  assert(state_get_continue_id(state) == while_->jump_id);
-  state_pop_break_id(state);
-  state_pop_continue_id(state);
+  if (saved_break != SIZE_MAX) state_push_break_id(state, saved_break);
+  if (saved_continue != SIZE_MAX) state_push_continue_id(state, saved_continue);
+
   return astree_adopt(while_, 2, condition, body);
 }
 
 ASTree *translate_for(ASTree *for_, ASTree *initializer, ASTree *condition,
                       ASTree *reinitializer, ASTree *body) {
+  size_t saved_break = SIZE_MAX, saved_continue = SIZE_MAX;
+  if (state_get_break_id(state) != for_->jump_id)
+    saved_break = state_get_break_id(state), state_pop_break_id(state);
+  assert(state_get_break_id(state) == for_->jump_id);
+  state_pop_break_id(state);
+
+  if (state_get_continue_id(state) != for_->jump_id)
+    saved_continue = state_get_continue_id(state), state_pop_continue_id(state);
+  assert(state_get_continue_id(state) == for_->jump_id);
+  state_pop_continue_id(state);
+
   for_->first_instr = liter_copy(initializer->first_instr);
   if (for_->first_instr == NULL) abort();
 
@@ -2324,14 +2381,32 @@ ASTree *translate_for(ASTree *for_, ASTree *initializer, ASTree *condition,
                            reinit_jmp_data, end_label);
   if (status) abort();
 
-  assert(state_get_break_id(state) == for_->jump_id);
-  assert(state_get_continue_id(state) == for_->jump_id);
-  state_pop_break_id(state);
-  state_pop_continue_id(state);
+  if (saved_break != SIZE_MAX) state_push_break_id(state, saved_break);
+  if (saved_continue != SIZE_MAX) state_push_continue_id(state, saved_continue);
+
   return astree_adopt(for_, 4, initializer, condition, reinitializer, body);
 }
 
 ASTree *translate_do(ASTree *do_, ASTree *body, ASTree *condition) {
+  /* fix bogus jump id information created by TOK_WHILE */
+  size_t saved_break = state_get_break_id(state);
+  state_pop_break_id(state);
+  if (state_get_break_id(state) == do_->jump_id)
+    saved_break = SIZE_MAX;
+  else
+    state_pop_break_id(state);
+  assert(state_get_break_id(state) == do_->jump_id);
+  state_pop_break_id(state);
+
+  size_t saved_continue = state_get_continue_id(state);
+  state_pop_continue_id(state);
+  if (state_get_continue_id(state) == do_->jump_id)
+    saved_continue = SIZE_MAX;
+  else
+    state_pop_continue_id(state);
+  assert(state_get_continue_id(state) == do_->jump_id);
+  state_pop_continue_id(state);
+
   InstructionData *body_label = instr_init(OP_NONE);
   body_label->label = mk_stmt_label(do_->jump_id);
   int status =
@@ -2359,15 +2434,9 @@ ASTree *translate_do(ASTree *do_, ASTree *body, ASTree *condition) {
   status = liter_push_back(condition->last_instr, &do_->last_instr, 3,
                            test_data, test_jmp_data, end_label);
 
-  /* fix bogus jump id information */
-  state_pop_break_id(state);
-  state_pop_continue_id(state);
-  state_dec_jump_id_count(state);
+  if (saved_break != SIZE_MAX) state_push_break_id(state, saved_break);
+  if (saved_continue != SIZE_MAX) state_push_continue_id(state, saved_continue);
 
-  assert(state_get_break_id(state) == do_->jump_id);
-  assert(state_get_continue_id(state) == do_->jump_id);
-  state_pop_break_id(state);
-  state_pop_continue_id(state);
   return astree_adopt(do_, 2, body, condition);
 }
 
@@ -2562,8 +2631,12 @@ ASTree *translate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
   /* persist test register between basic blocks */
   test_data->persist_flags = PERSIST_DEST_SET;
   InstructionData *jmp_data = instr_init(OP_JNE);
+  /* NOTE: because of the way case ids are used, they do not require special
+   * handling like jump, continue, and selection ids do
+   */
+  /* jump to next case statement if condition is false */
   set_op_dir(&jmp_data->dest,
-             mk_case_label(case_->jump_id, state_get_case_id(state)));
+             mk_case_label(case_->jump_id, case_->case_id + 1));
   InstructionData *fall_label = instr_init(OP_NONE);
   fall_label->label = mk_fallthru_label(case_->jump_id, case_->case_id);
   InstructionData *case_label = instr_init(OP_NONE);

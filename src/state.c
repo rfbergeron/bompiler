@@ -202,7 +202,7 @@ size_t state_next_jump_id(CompilerState *state) {
   return state->jump_id_count++;
 }
 
-void state_pop_selection(CompilerState *state) {
+void state_pop_selection_id(CompilerState *state) {
   if (llist_size(&state->switch_stack) == 0) {
     abort();
   }
@@ -226,7 +226,7 @@ void state_pop_continue_id(CompilerState *state) {
   (void)size_t_stack_pop(&state->continue_stack);
 }
 
-void state_push_selection(CompilerState *state, size_t id) {
+void state_push_selection_id(CompilerState *state, size_t id) {
   SwitchInfo *info = malloc(sizeof(SwitchInfo));
   info->id = id;
   info->case_id = 0;

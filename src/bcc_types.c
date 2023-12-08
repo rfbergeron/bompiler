@@ -438,6 +438,10 @@ int type_is_union_pointer(const Type *type) {
   return type_is_pointer(type) && type_is_union(type->pointer.next);
 }
 
+int type_is_record(const Type *type) {
+  return type_is_struct(type) || type_is_union(type);
+}
+
 int type_is_aggregate(const Type *type) {
   return type_is_struct(type) || type_is_union(type) || type_is_array(type);
 }
