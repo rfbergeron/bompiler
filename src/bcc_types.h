@@ -193,6 +193,7 @@ int type_is_struct(const Type *type);
 int type_is_struct_pointer(const Type *type);
 int type_is_union(const Type *type);
 int type_is_union_pointer(const Type *type);
+int type_is_record(const Type *type);
 int type_is_aggregate(const Type *type);
 int type_is_char_array(const Type *type);
 int type_is_const(const Type *type);

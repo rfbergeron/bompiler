@@ -67,11 +67,11 @@ NOTSTRING       (\"[^"]*)
 "while"         { return lexer_iteration (TOK_WHILE); }
 "for"           { return lexer_iteration (TOK_FOR); }
 "return"        { return lexer_token (TOK_RETURN); }
-"break"         { return lexer_token (TOK_BREAK); }
-"continue"      { return lexer_token (TOK_CONTINUE); }
+"break"         { return lexer_break(); }
+"continue"      { return lexer_continue(); }
 "goto"          { return lexer_token (TOK_GOTO); }
-"case"          { return lexer_token (TOK_CASE); }
-"default"       { return lexer_token (TOK_DEFAULT); }
+"case"          { return lexer_case(); }
+"default"       { return lexer_default(); }
 "struct"        { return lexer_token (TOK_STRUCT); }
 "union"         { return lexer_token (TOK_UNION); }
 "enum"          { return lexer_token (TOK_ENUM); }
