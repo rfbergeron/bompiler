@@ -257,8 +257,11 @@ ASTree *validate_block_content(ASTree *block, ASTree *block_content) {
     return astree_propogate_errnode(block, block_content);
   } else if (block_content->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(block, block_content);
+  } else if (block_content->symbol == TOK_DECLARATION) {
+    return translate_local_declarations(block, block_content);
+  } else {
+    return astree_adopt(block, 1, block_content);
   }
-  return astree_adopt(block, 1, block_content);
 }
 
 ASTree *finalize_block(ASTree *block) {
