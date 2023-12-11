@@ -615,16 +615,35 @@ ASTree *define_dirdecl(ASTree *declarator, ASTree *dirdecl) {
   }
 }
 
-ASTree *define_symbol(ASTree *declaration, ASTree *declarator,
-                      ASTree *equal_sign, ASTree *initializer) {
-  declarator = validate_declaration(declaration, declarator);
-  if (declaration->symbol == TOK_TYPE_ERROR ||
-      declarator->symbol == TOK_TYPE_ERROR ||
-      initializer->symbol == TOK_TYPE_ERROR) {
-    return astree_propogate_errnode_v(
-        declaration, 1,
-        astree_propogate_errnode_v(equal_sign, 2, declarator, initializer));
+ASTree *define_symbol(ASTree *decl_list, ASTree *equal_sign,
+                      ASTree *initializer) {
+  ASTree *declarator =
+      astree_remove(UNWRAP(decl_list), astree_count(decl_list) - 1);
+  if (decl_list->symbol == TOK_TYPE_ERROR) {
+    ASTree *errnode = decl_list;
+    decl_list = astree_get(errnode, 0);
+    if (initializer->symbol == TOK_TYPE_ERROR) {
+      int status = type_merge_errors(errnode->type, initializer->type);
+      if (status) abort();
+      (void)astree_adopt(decl_list, 1,
+                         astree_adopt(equal_sign, 2, declarator,
+                                      astree_remove(initializer, 0)));
+      status = astree_destroy(initializer);
+      if (status) abort();
+      return errnode;
+    } else {
+      (void)astree_adopt(decl_list, 1,
+                         astree_adopt(equal_sign, 2, declarator, initializer));
+      return errnode;
+    }
+  } else if (initializer->symbol == TOK_TYPE_ERROR) {
+    ASTree *errnode = initializer;
+    return astree_adopt(errnode, 1,
+                        astree_adopt(decl_list, 1,
+                                     astree_adopt(equal_sign, 2, declarator,
+                                                  astree_remove(errnode, 0))));
   }
+  assert(declarator->symbol == TOK_IDENT);
 
   SymbolValue *symval;
   (void)state_get_symbol(state, declarator->lexinfo,
@@ -632,7 +651,7 @@ ASTree *define_symbol(ASTree *declaration, ASTree *declarator,
   assert(symval != NULL);
   if (symval->flags & SYMFLAG_DEFINED)
     return astree_create_errnode(
-        astree_adopt(declaration, 1,
+        astree_adopt(decl_list, 1,
                      astree_adopt(equal_sign, 2, declarator, initializer)),
         BCC_TERR_REDEFINITION, 1, declarator);
   symval->flags |= SYMFLAG_DEFINED;
@@ -663,16 +682,14 @@ ASTree *define_symbol(ASTree *declaration, ASTree *declarator,
       !types_assignable(declarator->type, initializer->type,
                         astree_is_const_zero(initializer))) {
     return astree_create_errnode(
-        astree_adopt(declaration, 1,
+        astree_adopt(decl_list, 1,
                      astree_adopt(equal_sign, 2, declarator, initializer)),
         BCC_TERR_INCOMPATIBLE_TYPES, 3, equal_sign, declarator->type,
         initializer->type);
-  } else if (symval->flags & SYMFLAG_LINK_NONE) {
-    return translate_local_init(declaration, equal_sign, declarator,
-                                initializer);
   } else {
-    return translate_global_init(declaration, equal_sign, declarator,
-                                 initializer);
+    /* wait to emit code until `finalize_declaration` */
+    return astree_adopt(decl_list, 1,
+                        astree_adopt(equal_sign, 2, declarator, initializer));
   }
 }
 
@@ -745,20 +762,31 @@ ASTree *validate_fnbody_content(ASTree *function, ASTree *fnbody_content) {
    * because of the tree structure of function definitions
    */
   ASTree *fnbody = astree_get(UNWRAP(function), 2);
-  (void)astree_adopt(fnbody, 1, UNWRAP(fnbody_content));
-  if (fnbody_content->symbol == TOK_TYPE_ERROR) {
-    (void)astree_remove(fnbody_content, 0);
-    if (function->symbol == TOK_TYPE_ERROR) {
-      int status = type_merge_errors(function->type, fnbody_content->type);
-      if (status) abort();
-      status = astree_destroy(fnbody_content);
-      if (status) abort();
+  if (function->symbol == TOK_TYPE_ERROR) {
+    if (fnbody_content->symbol == TOK_TYPE_ERROR) {
+      (void)astree_adopt(fnbody, 1, astree_remove(fnbody_content, 0));
+      assert(!type_merge_errors(function->type, fnbody_content->type));
+      assert(!astree_destroy(fnbody_content));
       return function;
     } else {
-      return astree_adopt(fnbody_content, 1, function);
+      (void)astree_adopt(fnbody, 1, fnbody_content);
+      return function;
     }
+  } else if (fnbody_content->symbol == TOK_TYPE_ERROR) {
+    (void)astree_adopt(fnbody, 1, astree_remove(fnbody_content, 0));
+    return astree_adopt(fnbody_content, 1, function);
+  } else if (fnbody_content->symbol == TOK_DECLARATION) {
+    ASTree *errnode = translate_local_declarations(fnbody, fnbody_content);
+    if (errnode->symbol == TOK_TYPE_ERROR) {
+      (void)astree_remove(errnode, 0);
+      return astree_adopt(errnode, 1, function);
+    } else {
+      return function;
+    }
+  } else {
+    (void)astree_adopt(fnbody, 1, fnbody_content);
+    return function;
   }
-  return function;
 }
 
 ASTree *finalize_function(ASTree *function) {
@@ -1120,45 +1148,13 @@ ASTree *define_struct_member(ASTree *struct_, ASTree *member) {
   return struct_;
 }
 
-ASTree *validate_declarator(ASTree *declarator) {
-  /* TODO(Robert): Type: this code created symbol values and assigned a pointer
-   * to them to the syntax tree node, presumably so that the symbol could be
-   * retieved later, since it isn't in the symbol table already because we don't
-   * know what its name should be yet. figure out a way to create symbols and
-   * retrieve them later, or just wait to create the symbol until the
-   * declaration is finished
-   */
-  /*
-  SymbolValue *symval =
-      symbol_value_init(&declarator->loc, state_get_sequence(state));
-  declarator->type = symval->type;
-  */
-  return declarator;
-}
-
 ASTree *declare_symbol(ASTree *declaration, ASTree *declarator) {
   ASTree *err_or_decl = validate_declaration(declaration, declarator);
   if (err_or_decl->symbol == TOK_TYPE_ERROR ||
       declaration->symbol == TOK_TYPE_ERROR)
     return astree_propogate_errnode(declaration, err_or_decl);
-  /* TODO(Robert): determine if type names need to be translated; no code should
-   * be emitted so all the function call would do is set the iterators on the
-   * syntax tree node
-   */
-  else if (declarator->symbol == TOK_TYPE_NAME)
+  else
     return astree_adopt(declaration, 1, declarator);
-
-  SymbolValue *symval;
-  (void)state_get_symbol(state, declarator->lexinfo,
-                         strlen(declarator->lexinfo), &symval);
-  if (state_peek_table(state)->type == MEMBER_TABLE ||
-      (symval->flags & SYMFLAG_TYPEDEF)) {
-    return astree_adopt(declaration, 1, declarator);
-  } else if (symval->flags & SYMFLAG_LINK_NONE) {
-    return translate_local_decl(declaration, declarator);
-  } else {
-    return translate_global_decl(declaration, declarator);
-  }
 }
 
 ASTree *validate_topdecl(ASTree *root, ASTree *topdecl) {
@@ -1167,6 +1163,6 @@ ASTree *validate_topdecl(ASTree *root, ASTree *topdecl) {
   } else if (topdecl->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(root, topdecl);
   } else {
-    return astree_adopt(root, 1, topdecl);
+    return translate_global_declarations(root, topdecl);
   }
 }

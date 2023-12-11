@@ -248,12 +248,8 @@ ASTree *translate_goto(ASTree *goto_, ASTree *ident);
 ASTree *translate_label(ASTree *label, ASTree *ident, ASTree *stmt);
 ASTree *translate_case(ASTree *case_, ASTree *expr, ASTree *stmt);
 ASTree *translate_default(ASTree *default_, ASTree *stmt);
-ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
-                             ASTree *declarator, ASTree *initializer);
-ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator);
-ASTree *translate_global_init(ASTree *declaration, ASTree *assignment,
-                              ASTree *declarator, ASTree *initializer);
-ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator);
+ASTree *translate_local_declarations(ASTree *block, ASTree *declarations);
+ASTree *translate_global_declarations(ASTree *root, ASTree *declarations);
 ASTree *begin_translate_fn(ASTree *declaration, ASTree *declarator,
                            ASTree *body);
 ASTree *end_translate_fn(ASTree *declaration);

@@ -1544,6 +1544,7 @@ int assign_scalar(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   return 0;
 }
 
+/* NOTE: callers assume this function does not return errors */
 ASTree *translate_assignment(ASTree *assignment, ASTree *lvalue,
                              ASTree *rvalue) {
   PFDBG0('g', "Translating assignment");
@@ -1563,7 +1564,8 @@ ASTree *translate_assignment(ASTree *assignment, ASTree *lvalue,
     int status = assign_scalar(assignment, lvalue, rvalue);
     if (status) abort();
   }
-  return astree_adopt(assignment, 2, lvalue, rvalue);
+  /* don't adopt; this function gets used for initialization */
+  return assignment;
 }
 
 /* TODO(Robert): ensure correct instruction order */
@@ -2861,18 +2863,26 @@ int translate_static_prelude(ASTree *declarator, SymbolValue *symval,
   set_op_imm(&size_data->src, type_get_width(declarator->type), IMM_UNSIGNED);
   InstructionData *label_data = instr_init(OP_NONE);
   label_data->label = identifier;
+  /* TODO(Robert): i think the behavior here is not what i expected, or at worst
+   * incorrecty. while the instructions will be pushed in the correct order,
+   * storing the iterator to the final instruction in `&where` will not work:
+   * `where` is a temporary and the given iterator will not be changed. this is
+   * at least an issure in `translate_local_decl`, which inserts instructions
+   * before the function definition and does not change the value of
+   * `before_definition` to match the new last instruction before the definition
+   */
   return liter_push_back(where, &where, 4, align_data, type_data, size_data,
                          label_data);
 }
 
 /* TODO(Robert): This is really three different functions. Separate them. */
-ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
-                             ASTree *declarator, ASTree *initializer) {
+static ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
+                                    ASTree *declarator, ASTree *initializer) {
   PFDBG0('g', "Translating local initialization");
   SymbolValue *symval = NULL;
-  assert(state_get_symbol(state, (char *)declarator->lexinfo,
-                          strlen(declarator->lexinfo), &symval));
-  assert(symval);
+  int in_current_scope = state_get_symbol(state, (char *)declarator->lexinfo,
+                                          strlen(declarator->lexinfo), &symval);
+  assert(in_current_scope && symval);
 
   if (symval->flags & SYMFLAG_STORE_STAT) {
     assign_static_space(declarator->lexinfo, symval);
@@ -2881,19 +2891,18 @@ ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
         liter_push_back(before_definition, &before_definition, 1, data_data);
     if (status) abort();
     ListIter *temp = liter_copy(before_definition);
-    initializer = traverse_initializer(declarator->type, symval->disp,
-                                       initializer, before_definition);
-    if (initializer->symbol == TOK_TYPE_ERROR) {
+    ASTree *errnode = traverse_initializer(declarator->type, symval->disp,
+                                           initializer, before_definition);
+    if (errnode->symbol == TOK_TYPE_ERROR) {
       free(temp);
-      return astree_propogate_errnode_v(
-          declaration, 1,
-          astree_propogate_errnode_v(assignment, 2, declarator, initializer));
+      (void)astree_remove(errnode, 0);
+      return astree_adopt(errnode, 1, declaration);
     }
 
     /* wait to do this so that deduced array sizes are set */
     status = translate_static_prelude(declarator, symval, temp);
-    free(temp);
     if (status) abort();
+    free(temp);
 
     if (declaration->first_instr == NULL) {
       assert(declaration->last_instr == NULL);
@@ -2905,8 +2914,6 @@ ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
       declaration->last_instr = llist_iter_last(instructions);
       if (declaration->last_instr == NULL) abort();
     }
-    return astree_adopt(declaration, 1,
-                        astree_adopt(assignment, 2, declarator, initializer));
   } else if (initializer->symbol != TOK_INIT_LIST &&
              initializer->symbol != TOK_STRINGCON &&
              !(initializer->attributes & ATTR_EXPR_CONST)) {
@@ -2926,7 +2933,6 @@ ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
     if (status) abort();
     declarator->last_instr = liter_copy(declarator->first_instr);
     if (declarator->last_instr == NULL) abort();
-    /* translate_assignment performs adoption for this subtree */
     (void)translate_assignment(assignment, declarator, initializer);
     if (declaration->first_instr == NULL)
       declaration->first_instr = liter_copy(declarator->first_instr);
@@ -2934,49 +2940,28 @@ ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
     free(declaration->last_instr);
     declaration->last_instr = liter_copy(assignment->last_instr);
     if (declaration->last_instr == NULL) abort();
-    return astree_adopt(declaration, 1, assignment);
   } else {
     assign_stack_space(symval);
     free(declaration->last_instr);
     declaration->last_instr = llist_iter_last(instructions);
     if (declaration->last_instr == NULL) abort();
-    initializer = traverse_initializer(declarator->type, symval->disp,
-                                       initializer, declaration->last_instr);
-    if (initializer->symbol == TOK_TYPE_ERROR)
-      return astree_propogate_errnode_v(
-          declaration, 1,
-          astree_propogate_errnode_v(assignment, 2, declarator, initializer));
+    ASTree *errnode = traverse_initializer(
+        declarator->type, symval->disp, initializer, declaration->last_instr);
+    if (errnode->symbol == TOK_TYPE_ERROR) {
+      (void)astree_remove(errnode, 0);
+      return astree_adopt(errnode, 1, declaration);
+    }
+
     if (declaration->first_instr == NULL) {
       declaration->first_instr = liter_copy(initializer->first_instr);
       if (declaration->first_instr == NULL) abort();
     }
-    return astree_adopt(declaration, 1,
-                        astree_adopt(assignment, 2, declarator, initializer));
   }
+  return declaration;
 }
 
-ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
+static ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
   PFDBG0('g', "Translating local declaration");
-  if (declarator->symbol != TOK_TYPE_NAME &&
-      !type_is_function(declarator->type)) {
-    SymbolValue *symval = NULL;
-    assert(state_get_symbol(state, (char *)declarator->lexinfo,
-                            strlen(declarator->lexinfo), &symval));
-    assert(symval);
-    if (!(symval->flags & SYMFLAG_INHERIT)) {
-      if (symval->flags & SYMFLAG_STORE_STAT) {
-        assign_static_space(declarator->lexinfo, symval);
-        InstructionData *bss_data = instr_init(OP_BSS);
-        int status =
-            liter_push_back(before_definition, &before_definition, 1, bss_data);
-        status =
-            translate_static_prelude(declarator, symval, before_definition);
-        if (status) abort();
-      } else if (symval->flags & SYMFLAG_STORE_AUTO) {
-        assign_stack_space(symval);
-      }
-    }
-  }
   if (declaration->first_instr == NULL) {
     InstructionData *nop_data = instr_init(OP_NOP);
     int status = llist_push_back(instructions, nop_data);
@@ -2986,23 +2971,73 @@ ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
     declaration->last_instr = llist_iter_last(instructions);
     if (declaration->last_instr == NULL) abort();
   }
-  return astree_adopt(declaration, 1, declarator);
+
+  SymbolValue *symval = NULL;
+  int in_current_scope = state_get_symbol(state, (char *)declarator->lexinfo,
+                                          strlen(declarator->lexinfo), &symval);
+  assert(symval && in_current_scope);
+
+  if (declarator->symbol == TOK_TYPE_NAME ||
+      (symval->flags & SYMFLAG_INHERIT) || (symval->flags & SYMFLAG_TYPEDEF)) {
+    return declaration;
+  } else if (symval->flags & SYMFLAG_STORE_STAT) {
+    assign_static_space(declarator->lexinfo, symval);
+    InstructionData *bss_data = instr_init(OP_BSS);
+    int status =
+        liter_push_back(before_definition, &before_definition, 1, bss_data);
+    if (status) abort();
+    status = translate_static_prelude(declarator, symval, before_definition);
+    if (status) abort();
+  } else if (symval->flags & SYMFLAG_STORE_AUTO) {
+    assign_stack_space(symval);
+  } else if (symval->flags & SYMFLAG_STORE_EXT) {
+    InstructionData *globl_data = instr_init(OP_GLOBL);
+    set_op_dir(&globl_data->dest, declarator->lexinfo);
+    int status =
+        liter_push_back(before_definition, &before_definition, 1, globl_data);
+    if (status) abort();
+  }
+
+  return declaration;
 }
 
-ASTree *translate_global_init(ASTree *declaration, ASTree *assignment,
-                              ASTree *declarator, ASTree *initializer) {
+ASTree *translate_local_declarations(ASTree *block, ASTree *declarations) {
+  /* skip typespec list */
+  size_t i, decl_count = astree_count(declarations);
+  for (i = 1; i < decl_count; ++i) {
+    ASTree *declaration = astree_get(declarations, i);
+    if (declaration->symbol == TOK_IDENT) {
+      (void)translate_local_decl(declarations, declaration);
+    } else if (declaration->symbol == '=') {
+      ASTree *declarator = astree_get(declaration, 0),
+             *initializer = astree_get(declaration, 1),
+             *errnode = translate_local_init(declarations, declaration,
+                                             declarator, initializer);
+      if (errnode->symbol == TOK_TYPE_ERROR) {
+        (void)astree_remove(errnode, 0);
+        return astree_adopt(errnode, 1, astree_adopt(block, 1, declarations));
+      }
+    } else {
+      abort();
+    }
+  }
+  return astree_adopt(block, 1, declarations);
+}
+
+static ASTree *translate_global_init(ASTree *declaration, ASTree *declarator,
+                                     ASTree *initializer) {
   PFDBG0('g', "Translating global initialization");
   SymbolValue *symval = NULL;
-  assert(state_get_symbol(state, (char *)declarator->lexinfo,
-                          strlen(declarator->lexinfo), &symval));
-  assert(symval);
+  int in_current_scope = state_get_symbol(state, (char *)declarator->lexinfo,
+                                          strlen(declarator->lexinfo), &symval);
+  assert(in_current_scope && symval);
 
   InstructionData *data_data = instr_init(OP_DATA);
   int status = llist_push_back(instructions, data_data);
   if (status) abort();
   ListIter *temp = llist_iter_last(instructions);
   ListIter *temp2 = llist_iter_last(instructions);
-  initializer =
+  ASTree *errnode =
       traverse_initializer(declarator->type, NO_DISP, initializer, temp);
   free(temp);
   /* wait to do this so that deduced array sizes are set */
@@ -3012,25 +3047,29 @@ ASTree *translate_global_init(ASTree *declaration, ASTree *assignment,
   free(before_definition);
   before_definition = llist_iter_last(instructions);
   if (before_definition == NULL) abort();
-  if (initializer->symbol == TOK_TYPE_ERROR)
-    return astree_propogate_errnode_v(
-        declaration, 1,
-        astree_propogate_errnode_v(assignment, 2, declarator, initializer));
-  else
-    return astree_adopt(declaration, 1,
-                        astree_adopt(assignment, 2, declarator, initializer));
+  if (errnode->symbol == TOK_TYPE_ERROR) {
+    (void)astree_remove(errnode, 0);
+    return astree_adopt(errnode, 1, declaration);
+  } else {
+    return declaration;
+  }
 }
 
-ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
+static ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
   PFDBG0('g', "Translating global declaration");
-  if (declarator->symbol == TOK_TYPE_NAME || type_is_function(declarator->type))
-    return astree_adopt(declaration, 1, declarator);
+  assert(declarator->symbol == TOK_IDENT);
   SymbolValue *symval = NULL;
-  assert(state_get_symbol(state, (char *)declarator->lexinfo,
-                          strlen(declarator->lexinfo), &symval));
-  assert(symval);
+  int in_current_scope = state_get_symbol(state, (char *)declarator->lexinfo,
+                                          strlen(declarator->lexinfo), &symval);
+  assert(in_current_scope && symval);
 
-  if (symval->flags & SYMFLAG_STORE_STAT) {
+  if (symval->flags & SYMFLAG_STORE_EXT) {
+    assert(symval->flags & SYMFLAG_LINK_EXT);
+    InstructionData *globl_data = instr_init(OP_GLOBL);
+    set_op_dir(&globl_data->dest, declarator->lexinfo);
+    int status = llist_push_back(instructions, globl_data);
+    if (status) abort();
+  } else if (symval->flags & SYMFLAG_STORE_STAT) {
     InstructionData *bss_data = instr_init(OP_BSS);
     int status = llist_push_back(instructions, bss_data);
     if (status) abort();
@@ -3043,12 +3082,46 @@ ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
                IMM_UNSIGNED);
     status = llist_push_back(instructions, zero_data);
     if (status) abort();
+  } else if (!(symval->flags & SYMFLAG_TYPEDEF)) {
+    abort();
   }
 
   free(before_definition);
   before_definition = llist_iter_last(instructions);
   if (before_definition == NULL) abort();
-  return astree_adopt(declaration, 1, declarator);
+  return declaration;
+}
+
+ASTree *translate_global_declarations(ASTree *root, ASTree *declarations) {
+  if (astree_count(declarations) == 3 &&
+      astree_get(declarations, 2)->symbol == TOK_BLOCK)
+    /* function defnition; no further instructions to emit */
+    return astree_adopt(root, 1, declarations);
+  else if (astree_count(declarations) == 2 &&
+           astree_get(declarations, 1)->symbol == TOK_TYPE_NAME)
+    /* declares nothing; emit no instructions */
+    return astree_adopt(root, 1, declarations);
+
+  /* skip typespec list */
+  size_t i, decl_count = astree_count(declarations);
+  for (i = 1; i < decl_count; ++i) {
+    ASTree *declaration = astree_get(declarations, i);
+    if (declaration->symbol == TOK_IDENT) {
+      (void)translate_global_decl(declarations, declaration);
+    } else if (declaration->symbol == '=') {
+      ASTree *declarator = astree_get(declaration, 0),
+             *initializer = astree_get(declaration, 1),
+             *errnode =
+                 translate_global_init(declarations, declarator, initializer);
+      if (errnode->symbol == TOK_TYPE_ERROR) {
+        (void)astree_remove(errnode, 0);
+        return astree_adopt(errnode, 1, astree_adopt(root, 1, declarations));
+      }
+    } else {
+      abort();
+    }
+  }
+  return astree_adopt(root, 1, declarations);
 }
 
 ASTree *begin_translate_fn(ASTree *declaration, ASTree *declarator,
