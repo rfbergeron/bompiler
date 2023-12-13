@@ -51,13 +51,16 @@ static ASTree *init_scalar(const Type *type, ptrdiff_t disp,
 
 static ASTree *init_literal(Type *arr_type, ptrdiff_t arr_disp, ASTree *literal,
                             ListIter *where) {
+  /* subtract 2 for quotes */
+  size_t literal_length = strlen(literal->lexinfo) - 2;
   if (!type_is_deduced_array(arr_type) &&
-      type_get_width(arr_type) > strlen(literal->lexinfo))
+      type_get_width(arr_type) < literal_length)
     return astree_create_errnode(literal, BCC_TERR_EXCESS_INITIALIZERS, 1,
                                  literal);
-  else if (type_is_deduced_array(arr_type) && type_get_width(arr_type) == 0)
-    /* subtract 2 for quotes, add 1 for nul terminator */
-    arr_type->array.length = strlen(literal->lexinfo) - 2 + 1;
+  else if (type_is_deduced_array(arr_type) &&
+           type_get_width(arr_type) <= literal_length)
+    /* add 1 for nul terminator */
+    arr_type->array.length = literal_length + 1;
 
   if (arr_disp >= 0) {
     return translate_static_literal_init(arr_type, literal, where);

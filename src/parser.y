@@ -273,12 +273,12 @@ return              : TOK_RETURN expr ';'                               { $$ = b
                     | TOK_RETURN ';'                                    { $$ = bcc_yyval = validate_return($1, &EMPTY_EXPR); parser_cleanup (1, $2); }
                     ;
 expr                : assign_expr                                       { $$ = bcc_yyval = $1; }
+                    | TOK_EXTNSN assign_expr                            { $$ = bcc_yyval = $2; parser_cleanup(1, $1); }
                     /* TODO(Robert): should we ever bother converting the left operand? */
                     | expr ',' assign_expr                              { $$ = bcc_yyval = validate_comma($2, $1, parser_make_auto_conv($3, 1)); }
+                    | expr ',' TOK_EXTNSN assign_expr                   { $$ = bcc_yyval = validate_comma($2, $1, parser_make_auto_conv($4, 1)); parser_cleanup(1, $3); }
                     ;
-assign_expr         : assign_expr assign_op cond_expr                   { $$ = bcc_yyval = validate_assignment($2, $1, parser_make_auto_conv($3, 1)); }
-                    | assign_expr assign_op TOK_EXTNSN cond_expr        { $$ = bcc_yyval = validate_assignment($2, $1, parser_make_auto_conv($4, 1)); parser_cleanup(1, $3); }
-                    | TOK_EXTNSN cond_expr                              { $$ = bcc_yyval = $2; parser_cleanup(1, $1); }
+assign_expr         : unary_expr assign_op assign_expr                  { $$ = bcc_yyval = validate_assignment($2, $1, parser_make_auto_conv($3, 1)); }
                     | cond_expr                                         { $$ = bcc_yyval = $1; }
                     ;
 assign_op           : '='                                               { $$ = bcc_yyval = $1; }
@@ -322,14 +322,16 @@ cast_expr           : '(' typespec_list abs_declarator')' unary_expr    { $$ = b
 unary_expr          : postfix_expr                                      { $$ = bcc_yyval = $1; }
                     | TOK_INC unary_expr                                { $$ = bcc_yyval = validate_increment($1, parser_make_auto_conv($2, 0)); }
                     | TOK_DEC unary_expr                                { $$ = bcc_yyval = validate_increment($1, parser_make_auto_conv($2, 0)); }
-                    | '!' unary_expr                                    { $$ = bcc_yyval = validate_not($1, parser_make_auto_conv($2, 1)); }
-                    | '~' unary_expr                                    { $$ = bcc_yyval = validate_complement($1, parser_make_auto_conv($2, 1)); }
-                    | '+' unary_expr                                    { $$ = bcc_yyval = validate_negation(parser_new_sym($1, TOK_POS), parser_make_auto_conv($2, 1)); }
-                    | '-' unary_expr                                    { $$ = bcc_yyval = validate_negation(parser_new_sym($1, TOK_NEG), parser_make_auto_conv($2, 1)); }
-                    | '*' unary_expr                                    { $$ = bcc_yyval = validate_indirection(parser_new_sym($1, TOK_INDIRECTION), parser_make_auto_conv($2, 1)); }
-                    | '&' unary_expr                                    { $$ = bcc_yyval = validate_addrof(parser_new_sym($1, TOK_ADDROF), $2); }
+                    | unary_op cast_expr                                { $$ = bcc_yyval = validate_unary($1, parser_make_auto_conv($2, 1)); }
                     | TOK_SIZEOF unary_expr                             { $$ = bcc_yyval = validate_sizeof($1, parser_make_auto_conv($2, 0)); }
                     | TOK_SIZEOF '(' typespec_list abs_declarator')'    { $$ = bcc_yyval = parse_sizeof($1, $3, $4); parser_cleanup(2, $2, $5); }
+                    ;
+unary_op            : '!'                                               { $$ = bcc_yyval = $1; }
+                    | '~'                                               { $$ = bcc_yyval = $1; }
+                    | '+'                                               { $$ = bcc_yyval = parser_new_sym($1, TOK_POS); }
+                    | '-'                                               { $$ = bcc_yyval = parser_new_sym($1, TOK_NEG); }
+                    | '*'                                               { $$ = bcc_yyval = parser_new_sym($1, TOK_INDIRECTION); }
+                    | '&'                                               { $$ = bcc_yyval = parser_new_sym($1, TOK_ADDROF); }
                     ;
 postfix_expr        : primary_expr                                      { $$ = bcc_yyval = $1; }
                     | postfix_expr TOK_INC                              { $$ = bcc_yyval = validate_increment(parser_new_sym($2, TOK_POST_INC), parser_make_auto_conv($1, 0)); }
@@ -347,6 +349,7 @@ call                : postfix_expr '(' ')'                              { $$ = b
                     ;
 call_args           : postfix_expr '(' assign_expr                      { $$ = bcc_yyval = validate_arg(validate_call(parser_make_auto_conv($1, 1), parser_new_sym($2, TOK_CALL)), parser_make_auto_conv($3, 1)); }
                     | call_args ',' assign_expr                         { $$ = bcc_yyval = validate_arg($1, parser_make_auto_conv($3, 1)); parser_cleanup(1, $2); }
+                    | call_args ',' TOK_EXTNSN assign_expr              { $$ = bcc_yyval = validate_arg($1, parser_make_auto_conv($4, 1)); parser_cleanup(2, $2, $3); }
                     ;
 primary_expr        : TOK_IDENT                                         { $$ = bcc_yyval = validate_ident($1); }
                     | constant                                          { $$ = bcc_yyval = $1; }

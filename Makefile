@@ -25,7 +25,7 @@ LIBOBJ := badmap.o badllist.o badalist.o murmur3.o
 HDRFILES := ${HDR:%=src/%} ${GENHDR:%=build/%} ${LIBHDR}
 OBJFILES := ${OBJ:%=build/%} ${GENOBJ:%=build/%} ${LIBOBJ:%=build/%}
 
-.PHONY: all debug sanitize units badlib test clean test_clean ci format units spotless
+.PHONY: all debug sanitize units badlib test clean test_clean ci format units spotless selftest selftest_clean
 
 all: CFLAGS += -O1
 all: ${EXE}
@@ -98,6 +98,16 @@ test:
 		false; \
 	fi
 
+selftest:
+	@if [ -x "${EXE}" ]; then \
+		echo "make -C selftest"; \
+                env CC="$(readlink -f ./build/bompiler)" \
+		make -C selftest; \
+	else \
+		echo "Please build an executable before running tests."; \
+		false; \
+	fi
+
 clean:
 	make -C badlib/ clean
 	rm -f ${OBJFILES} ${UNITOBJ:%=build/%} ${GENSRC:%=build/%} \
@@ -106,5 +116,8 @@ clean:
 test_clean:
 	make -C test/ clean
 
-spotless: clean test_clean
+selftest_clean:
+	make -C selftest/ clean
+
+spotless: clean test_clean selftest_clean
 	rm -f ${EXE} ${UNITS}

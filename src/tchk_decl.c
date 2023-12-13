@@ -543,7 +543,13 @@ ASTree *define_params(ASTree *declarator, ASTree *param_list) {
 }
 
 ASTree *define_array(ASTree *declarator, ASTree *array) {
-  if (declarator->type != NULL && type_is_incomplete(declarator->type))
+  /* no need to check for incomplete types here; we won't know if the element
+   * type is incomplete until the next declarator or until all declarators are
+   * handled or the declaration specifier type information is appended to the
+   * declarator's type information
+   */
+  if (declarator->type != NULL && type_is_array(declarator->type) &&
+      astree_count(array) == 0)
     return astree_create_errnode(astree_adopt(declarator, 1, array),
                                  BCC_TERR_INCOMPLETE_TYPE, 2, array,
                                  declarator->type);

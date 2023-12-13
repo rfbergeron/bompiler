@@ -155,6 +155,10 @@ ASTree *validate_call(ASTree *expr, ASTree *call) {
   if (status) abort();
   call->type = return_type;
 
+  if (!type_is_void(return_type) && type_is_incomplete(return_type))
+    return astree_create_errnode(astree_adopt(call, 1, expr),
+                                 BCC_TERR_INCOMPLETE_TYPE, 2, call, call->type);
+
   return astree_adopt(call, 1, expr);
 }
 
@@ -504,7 +508,7 @@ ASTree *validate_increment(ASTree *operator, ASTree * operand) {
   }
 }
 
-ASTree *validate_not(ASTree *operator, ASTree * operand) {
+static ASTree *validate_not(ASTree *operator, ASTree * operand) {
   if (operand->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(operator, operand);
   }
@@ -518,7 +522,7 @@ ASTree *validate_not(ASTree *operator, ASTree * operand) {
   }
 }
 
-ASTree *validate_complement(ASTree *operator, ASTree * operand) {
+static ASTree *validate_complement(ASTree *operator, ASTree * operand) {
   if (operand->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(operator, operand);
   }
@@ -535,7 +539,7 @@ ASTree *validate_complement(ASTree *operator, ASTree * operand) {
   }
 }
 
-ASTree *validate_negation(ASTree *operator, ASTree * operand) {
+static ASTree *validate_negation(ASTree *operator, ASTree * operand) {
   if (operand->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(operator, operand);
   }
@@ -552,7 +556,7 @@ ASTree *validate_negation(ASTree *operator, ASTree * operand) {
   }
 }
 
-ASTree *validate_indirection(ASTree *indirection, ASTree *operand) {
+static ASTree *validate_indirection(ASTree *indirection, ASTree *operand) {
   if (operand->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(indirection, operand);
   }
@@ -571,7 +575,7 @@ ASTree *validate_indirection(ASTree *indirection, ASTree *operand) {
   }
 }
 
-ASTree *validate_addrof(ASTree *addrof, ASTree *operand) {
+static ASTree *validate_addrof(ASTree *addrof, ASTree *operand) {
   if (operand->symbol == TOK_TYPE_ERROR)
     return astree_propogate_errnode(addrof, operand);
   if (!(operand->attributes & ATTR_EXPR_LVAL) && !type_is_array(operand->type))
@@ -583,6 +587,25 @@ ASTree *validate_addrof(ASTree *addrof, ASTree *operand) {
   status = type_append(addrof->type, operand->type, 0);
   if (status) abort();
   return evaluate_addrof(addrof, operand);
+}
+
+ASTree *validate_unary(ASTree *unary, ASTree *operand) {
+  switch (unary->symbol) {
+    case '!':
+      return validate_not(unary, operand);
+    case '~':
+      return validate_complement(unary, operand);
+    case TOK_POS:
+      /* fallthrough */
+    case TOK_NEG:
+      return validate_negation(unary, operand);
+    case TOK_INDIRECTION:
+      return validate_indirection(unary, operand);
+    case TOK_ADDROF:
+      return validate_addrof(unary, operand);
+    default:
+      abort();
+  }
 }
 
 ASTree *validate_sizeof(ASTree *sizeof_, ASTree *type_node) {
