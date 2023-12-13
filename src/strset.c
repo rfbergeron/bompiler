@@ -9,7 +9,7 @@
 #include "badmap.h"
 #include "debug.h"
 
-#define MAX_IDENT_LEN 31
+#define MAX_TOKEN_LEN 4095
 
 static const size_t starting_size = 100;
 static Map string_set = {0};
@@ -19,7 +19,7 @@ static int strncmp_wrapper(void *s1, void *s2) {
   if (!s1 || !s2) {
     ret = s1 == s2;
   } else {
-    ret = !strncmp(s1, s2, MAX_IDENT_LEN);
+    ret = !strncmp(s1, s2, MAX_TOKEN_LEN);
   }
   return ret;
 }
@@ -54,8 +54,7 @@ const char *string_set_intern(const char *string) {
         ret, len, ret);
     map_insert(&string_set, ret, len, ret);
   } else {
-    const size_t len2 = strlen(ret);
-    if (len2 != len) {
+    if (strcmp(string, ret) != 0) {
       fprintf(stderr, "fuck you\n");
       abort();
     }
