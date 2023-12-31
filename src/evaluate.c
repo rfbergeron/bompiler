@@ -11,247 +11,308 @@
 #include "stdlib.h"
 #include "yyparse.h"
 
-#define SHCA(optext, type, dest, left_value, right_value)                     \
+#define MIN(x, y) ((x) > (y) ? (y) : (x))
+#define GENERIC_SELECT(optext, dest_value, common_type, left_value,           \
+                       right_value)                                           \
   do {                                                                        \
-    size_t selector = type_get_width(type)                                    \
-                      << 4 * (type_is_signed(type) || type_is_pointer(type)); \
-    switch (selector) {                                                       \
-      case X64_SIZEOF_CHAR:                                                   \
-        dest = (unsigned char)(left_value)optext(right_value);                \
-        break;                                                                \
-      case X64_SIZEOF_SHORT:                                                  \
-        dest = (unsigned short)(left_value)optext(right_value);               \
-        break;                                                                \
-      case X64_SIZEOF_INT:                                                    \
-        dest = (unsigned int)(left_value)optext(right_value);                 \
-        break;                                                                \
-      case X64_SIZEOF_LONG:                                                   \
-        dest = (unsigned long)(left_value)optext(right_value);                \
-        break;                                                                \
-      case X64_SIZEOF_CHAR << 4:                                              \
-        dest = (signed char)(left_value)optext(right_value);                  \
-        break;                                                                \
-      case X64_SIZEOF_SHORT << 4:                                             \
-        dest = (short)(left_value)optext(right_value);                        \
-        break;                                                                \
-      case X64_SIZEOF_INT << 4:                                               \
-        dest = (int)(left_value)optext(right_value);                          \
-        break;                                                                \
-      case X64_SIZEOF_LONG << 4:                                              \
-        dest = (long)(left_value)optext(right_value);                         \
-        break;                                                                \
+    if (type_get_width(common_type) == X64_SIZEOF_LONG) {                     \
+      if (type_is_unsigned(common_type)) {                                    \
+        (dest_value) =                                                        \
+            (unsigned long)(left_value)optext(unsigned long)(right_value);    \
+      } else {                                                                \
+        (dest_value) =                                                        \
+            (signed long)(left_value)optext(signed long)(right_value);        \
+      }                                                                       \
+    } else if (type_get_width(common_type) == X64_SIZEOF_INT &&               \
+               type_is_unsigned(common_type)) {                               \
+      (dest_value) =                                                          \
+          (unsigned int)(left_value)optext(unsigned int)(right_value);        \
+    } else {                                                                  \
+      (dest_value) = (signed int)(left_value)optext(signed int)(right_value); \
     }                                                                         \
   } while (0)
-#define BINCA(optext, type, dest, left_value, right_value)                    \
+#define BINARY_EVAL(optext, dest_value, common_type, left, right)              \
+  do {                                                                         \
+    assert(type_is_arithmetic(common_type) &&                                  \
+           type_is_arithmetic(left->type) && type_is_arithmetic(right->type)); \
+    if (type_is_unsigned(left->type)) {                                        \
+      if (type_is_unsigned(right->type)) {                                     \
+        GENERIC_SELECT(optext, dest_value, common_type,                        \
+                       left->constant.integral.unsigned_value,                 \
+                       right->constant.integral.unsigned_value);               \
+      } else {                                                                 \
+        GENERIC_SELECT(optext, dest_value, common_type,                        \
+                       left->constant.integral.unsigned_value,                 \
+                       right->constant.integral.signed_value);                 \
+      }                                                                        \
+    } else if (type_is_unsigned(right->type)) {                                \
+      GENERIC_SELECT(optext, dest_value, common_type,                          \
+                     left->constant.integral.signed_value,                     \
+                     right->constant.integral.unsigned_value);                 \
+    } else {                                                                   \
+      GENERIC_SELECT(optext, dest_value, common_type,                          \
+                     left->constant.integral.signed_value,                     \
+                     right->constant.integral.signed_value);                   \
+    }                                                                          \
+  } while (0)
+#define COMPARATOR_SELECT(optext, dest_value, common_type, left_value,        \
+                          right_value)                                        \
   do {                                                                        \
-    size_t selector = type_get_width(type)                                    \
-                      << 4 * (type_is_signed(type) || type_is_pointer(type)); \
-    switch (selector) {                                                       \
-      case X64_SIZEOF_CHAR:                                                   \
-        dest = (unsigned char)(left_value)optext(unsigned char)(right_value); \
-        break;                                                                \
-      case X64_SIZEOF_SHORT:                                                  \
-        dest =                                                                \
-            (unsigned short)(left_value)optext(unsigned short)(right_value);  \
-        break;                                                                \
-      case X64_SIZEOF_INT:                                                    \
-        dest = (unsigned int)(left_value)optext(unsigned int)(right_value);   \
-        break;                                                                \
-      case X64_SIZEOF_LONG:                                                   \
-        dest = (unsigned long)(left_value)optext(unsigned long)(right_value); \
-        break;                                                                \
-      case X64_SIZEOF_CHAR << 4:                                              \
-        dest = (signed char)(left_value)optext(signed char)(right_value);     \
-        break;                                                                \
-      case X64_SIZEOF_SHORT << 4:                                             \
-        dest = (short)(left_value)optext(short)(right_value);                 \
-        break;                                                                \
-      case X64_SIZEOF_INT << 4:                                               \
-        dest = (int)(left_value)optext(int)(right_value);                     \
-        break;                                                                \
-      case X64_SIZEOF_LONG << 4:                                              \
-        dest = (long)(left_value)optext(long)(right_value);                   \
-        break;                                                                \
+    if (type_get_width(common_type) == X64_SIZEOF_LONG) {                     \
+      if (type_is_unsigned(common_type)) {                                    \
+        (dest_value) =                                                        \
+            (unsigned long)(left_value)optext(unsigned long)(right_value);    \
+      } else {                                                                \
+        (dest_value) =                                                        \
+            (signed long)(left_value)optext(signed long)(right_value);        \
+      }                                                                       \
+    } else if (type_get_width(common_type) == X64_SIZEOF_INT &&               \
+               type_is_unsigned(common_type)) {                               \
+      (dest_value) =                                                          \
+          (unsigned int)(left_value)optext(unsigned int)(right_value);        \
+    } else {                                                                  \
+      (dest_value) = (signed int)(left_value)optext(signed int)(right_value); \
     }                                                                         \
   } while (0)
-#define UNCA(optext, type, dest, value)                                       \
-  do {                                                                        \
-    size_t selector = type_get_width(type)                                    \
-                      << 4 * (type_is_signed(type) || type_is_pointer(type)); \
-    switch (selector) {                                                       \
-      case X64_SIZEOF_CHAR:                                                   \
-        dest = optext(unsigned char)(value);                                  \
-        break;                                                                \
-      case X64_SIZEOF_SHORT:                                                  \
-        dest = optext(unsigned short)(value);                                 \
-        break;                                                                \
-      case X64_SIZEOF_INT:                                                    \
-        dest = optext(unsigned int)(value);                                   \
-        break;                                                                \
-      case X64_SIZEOF_LONG:                                                   \
-        dest = optext(unsigned long)(value);                                  \
-        break;                                                                \
-      case X64_SIZEOF_CHAR << 4:                                              \
-        dest = optext(signed char)(value);                                    \
-        break;                                                                \
-      case X64_SIZEOF_SHORT << 4:                                             \
-        dest = optext(short)(value);                                          \
-        break;                                                                \
-      case X64_SIZEOF_INT << 4:                                               \
-        dest = optext(int)(value);                                            \
-        break;                                                                \
-      case X64_SIZEOF_LONG << 4:                                              \
-        dest = optext(long)(value);                                           \
-        break;                                                                \
-    }                                                                         \
+#define COMPARATOR_EVAL(optext, comparator, left, right)                       \
+  do {                                                                         \
+    assert(type_is_arithmetic(left->type) && type_is_arithmetic(right->type)); \
+    Type *common_type;                                                         \
+    if (type_is_pointer(left->type) || type_is_pointer(right->type)) {         \
+      common_type = (Type *)TYPE_LONG;                                         \
+    } else {                                                                   \
+      int status =                                                             \
+          type_arithmetic_conversions(&common_type, left->type, right->type);  \
+      if (status) abort();                                                     \
+    }                                                                          \
+    if (type_is_unsigned(left->type)) {                                        \
+      if (type_is_unsigned(right->type)) {                                     \
+        COMPARATOR_SELECT(optext, comparator->constant.integral.signed_value,  \
+                          common_type, left->constant.integral.unsigned_value, \
+                          right->constant.integral.unsigned_value);            \
+      } else {                                                                 \
+        COMPARATOR_SELECT(optext, comparator->constant.integral.signed_value,  \
+                          common_type, left->constant.integral.unsigned_value, \
+                          right->constant.integral.signed_value);              \
+      }                                                                        \
+    } else if (type_is_unsigned(right->type)) {                                \
+      COMPARATOR_SELECT(optext, comparator->constant.integral.signed_value,    \
+                        common_type, left->constant.integral.signed_value,     \
+                        right->constant.integral.unsigned_value);              \
+    } else {                                                                   \
+      COMPARATOR_SELECT(optext, comparator->constant.integral.signed_value,    \
+                        common_type, left->constant.integral.signed_value,     \
+                        right->constant.integral.signed_value);                \
+    }                                                                          \
   } while (0)
-#define BINOP_CASE(opchar, optext, optrans)                                 \
-  case opchar:                                                              \
-    if ((left->attributes & right->attributes & ATTR_EXPR_CONST) &&         \
-        !((left->attributes | right->attributes) & ATTR_CONST_ADDR)) {      \
-      operator->attributes |=(left->attributes | right->attributes) &       \
-          ATTR_MASK_CONST;                                                  \
-      BINCA(optext, operator->type, operator->constant.integral.value,      \
-            left->constant.integral.value, right->constant.integral.value); \
-      return astree_adopt(operator, 2, left, right);                        \
-    } else {                                                                \
-      maybe_load_cexpr(right, NULL);                                        \
-      maybe_load_cexpr(left, right->first_instr);                           \
-      return optrans(operator, left, right);                                \
+#define SHIFT_SELECT(optext, shift, left_value, right_value)    \
+  do {                                                          \
+    if (type_get_width(shift->type) == X64_SIZEOF_LONG) {       \
+      if (type_is_unsigned(shift->type)) {                      \
+        shift->constant.integral.unsigned_value =               \
+            (unsigned long)(left_value)optext(right_value);     \
+      } else {                                                  \
+        shift->constant.integral.signed_value =                 \
+            (signed long)(left_value)optext(right_value);       \
+      }                                                         \
+    } else if (type_get_width(shift->type) == X64_SIZEOF_INT && \
+               type_is_unsigned(shift->type)) {                 \
+      shift->constant.integral.unsigned_value =                 \
+          (unsigned int)(left_value)optext(right_value);        \
+    } else {                                                    \
+      shift->constant.integral.signed_value =                   \
+          (signed int)(left_value)optext(right_value);          \
+    }                                                           \
+  } while (0)
+#define SHIFT_EVAL(optext, shift, left, right)                                 \
+  do {                                                                         \
+    assert(type_is_arithmetic(shift->type) &&                                  \
+           type_is_arithmetic(left->type) && type_is_arithmetic(right->type)); \
+    if (type_is_unsigned(left->type)) {                                        \
+      if (type_is_unsigned(right->type)) {                                     \
+        SHIFT_SELECT(optext, shift, left->constant.integral.unsigned_value,    \
+                     right->constant.integral.unsigned_value);                 \
+      } else {                                                                 \
+        SHIFT_SELECT(optext, shift, left->constant.integral.unsigned_value,    \
+                     right->constant.integral.signed_value);                   \
+      }                                                                        \
+    } else if (type_is_unsigned(right->type)) {                                \
+      SHIFT_SELECT(optext, shift, left->constant.integral.signed_value,        \
+                   right->constant.integral.unsigned_value);                   \
+    } else {                                                                   \
+      SHIFT_SELECT(optext, shift, left->constant.integral.signed_value,        \
+                   right->constant.integral.signed_value);                     \
+    }                                                                          \
+  } while (0)
+#define UNARY_SELECT(optext, operator, operand_value)        \
+  do {                                                       \
+    if (type_get_width(operator->type) == X64_SIZEOF_LONG) { \
+      if (type_is_unsigned(operator->type)) {                \
+        operator->constant.integral.unsigned_value =         \
+            optext(unsigned long)(operand_value);            \
+      } else {                                               \
+        operator->constant.integral.signed_value =           \
+            optext(signed long)(operand_value);              \
+      }                                                      \
+    } else if (type_is_unsigned(operator->type)) {           \
+      operator->constant.integral.unsigned_value =           \
+          optext(unsigned int)(operand_value);               \
+    } else {                                                 \
+      operator->constant.integral.signed_value =             \
+          optext(signed int)(operand_value);                 \
+    }                                                        \
+  } while (0)
+#define UNARY_EVAL(optext, operator, operand)                                  \
+  do {                                                                         \
+    assert(type_is_arithmetic(operator->type) &&                               \
+           type_is_arithmetic(operand->type));                                 \
+    if (type_is_unsigned(operand->type)) {                                     \
+      UNARY_SELECT(optext, operator,                                           \
+                   operand->constant.integral.unsigned_value);                 \
+    } else {                                                                   \
+      UNARY_SELECT(optext, operator, operand->constant.integral.signed_value); \
+    }                                                                          \
+  } while (0)
+#define BINOP_CASE(opchar, optext, optrans)                                   \
+  case opchar:                                                                \
+    if ((left->attributes & ATTR_MASK_CONST) == ATTR_CONST_INT &&             \
+        (right->attributes & ATTR_MASK_CONST) == ATTR_CONST_INT) {            \
+      operator->attributes |= ATTR_CONST_INT;                                 \
+      if (type_is_unsigned(operator->type)) {                                 \
+        BINARY_EVAL(optext, operator->constant.integral.unsigned_value,       \
+                            operator->type, left, right);                     \
+      } else {                                                                \
+        BINARY_EVAL(                                                          \
+            optext, operator->constant.integral.signed_value, operator->type, \
+            left, right);                                                     \
+      }                                                                       \
+      return astree_adopt(operator, 2, left, right);                          \
+    } else {                                                                  \
+      maybe_load_cexpr(right, NULL);                                          \
+      maybe_load_cexpr(left, right->first_instr);                             \
+      return optrans(operator, left, right);                                  \
     }
 #define UNOP_CASE(opchar, optext, optrans)                            \
   case opchar:                                                        \
-    if ((operand->attributes & ATTR_EXPR_CONST) &&                    \
-        !(operand->attributes & ATTR_CONST_ADDR)) {                   \
-      operator->attributes |= operand->attributes & ATTR_MASK_CONST;  \
-      UNCA(optext, operator->type, operator->constant.integral.value, \
-           operand->constant.integral.value);                         \
+    if ((operator->attributes & ATTR_MASK_CONST) == ATTR_CONST_INT) { \
+      operator->attributes |= ATTR_CONST_INT;                         \
+      UNARY_EVAL(optext, operator, operand);                          \
       return astree_adopt(operator, 1, operand);                      \
     } else {                                                          \
       maybe_load_cexpr(operand, NULL);                                \
       return optrans(operator, operand);                              \
     }
 
+/* NOTE: the lexer only parses numbers as unsigned values; if it attempted to
+ * parse explicitly signed values it would swallow up addition and subtraction
+ * operators
+ */
 ASTree *evaluate_intcon(ASTree *intcon) {
-  intcon->attributes |= ATTR_EXPR_CONST;
+  intcon->attributes |= ATTR_CONST_INT;
   errno = 0;
-  unsigned long unsigned_value = 0;
-  long signed_value = strtol(intcon->lexinfo, NULL, 0);
+  char *endptr = NULL;
+  unsigned long value = strtoul(intcon->lexinfo, &endptr, 0);
   if (errno == ERANGE) {
-    if (signed_value == LONG_MIN) {
-      return astree_create_errnode(intcon, BCC_TERR_CONST_TOO_LARGE, 1, intcon);
-    } else {
-      errno = 0;
-      unsigned_value = strtoul(intcon->lexinfo, NULL, 0);
-      if (errno == ERANGE) {
-        return astree_create_errnode(intcon, BCC_TERR_CONST_TOO_SMALL, 1,
-                                     intcon);
-      } else {
-        intcon->constant.integral.value = unsigned_value;
-      }
-    }
-  } else {
-    intcon->constant.integral.value = signed_value;
+    return astree_create_errnode(intcon, BCC_TERR_CONST_TOO_LARGE, 1, intcon);
+  } else if (errno == EINVAL || endptr == intcon->lexinfo) {
+    /* no characters parsed; lexer should make this impossible... */
+    abort();
   }
 
-  size_t lexinfo_len = strlen(intcon->lexinfo);
-  /* TODO(Robert): This is... disgusting. Perhaps there is a better way. */
-  if (lexinfo_len == 1) {
-    intcon->type = (Type *)TYPE_INT;
-  } else if (intcon->lexinfo[lexinfo_len - 1] == 'u' ||
-             intcon->lexinfo[lexinfo_len - 1] == 'U') {
-    if (intcon->lexinfo[lexinfo_len - 2] == 'l' ||
-        intcon->lexinfo[lexinfo_len - 2] == 'L') {
-      intcon->type = (Type *)TYPE_UNSIGNED_LONG;
-    } else if (signed_value >= INT_MIN && signed_value <= INT_MAX) {
-      intcon->type = (Type *)TYPE_UNSIGNED_INT;
-    } else {
-      intcon->type = (Type *)TYPE_UNSIGNED_LONG;
-    }
-  } else if (intcon->lexinfo[lexinfo_len - 1] == 'l' ||
-             intcon->lexinfo[lexinfo_len - 1] == 'L') {
-    if (intcon->lexinfo[lexinfo_len - 2] == 'u' ||
-        intcon->lexinfo[lexinfo_len - 2] == 'U') {
-      intcon->type = (Type *)TYPE_UNSIGNED_LONG;
-    } else if (unsigned_value == 0) {
-      intcon->type = (Type *)TYPE_LONG;
-    } else {
-      intcon->type = (Type *)TYPE_UNSIGNED_LONG;
-    }
-  } else if (intcon->lexinfo[0] == '0') {
-    if (unsigned_value != 0) {
-      intcon->type = (Type *)TYPE_UNSIGNED_LONG;
-    } else if (signed_value >= INT_MIN && signed_value <= INT_MAX) {
-      intcon->type = (Type *)TYPE_INT;
-    } else if (signed_value >= 0 && signed_value <= UINT_MAX) {
-      intcon->type = (Type *)TYPE_UNSIGNED_INT;
-    } else {
-      intcon->type = (Type *)TYPE_LONG;
-    }
-  } else if (unsigned_value != 0) {
-    intcon->type = (Type *)TYPE_UNSIGNED_LONG;
-  } else if (signed_value <= INT_MAX && signed_value >= INT_MIN) {
-    intcon->type = (Type *)TYPE_INT;
-  } else {
-    intcon->type = (Type *)TYPE_LONG;
+  int is_signed = 1, is_long = 0;
+  switch (endptr[0]) {
+    case '\0':
+      break;
+    case 'u':
+      /* fallthrough */
+    case 'U':
+      is_signed = 0;
+      if (endptr[1] == 'l' || endptr[1] == 'L') is_long = 1;
+      break;
+    case 'l':
+      /* fallthrough */
+    case 'L':
+      is_long = 1;
+      if (endptr[1] == 'u' || endptr[1] == 'U') is_signed = 0;
+      break;
+    default:
+      abort();
   }
+
+  if ((!is_signed && is_long) || value > LONG_MAX) {
+    intcon->type = (Type *)TYPE_UNSIGNED_LONG;
+    intcon->constant.integral.unsigned_value = value;
+  } else if (is_long || value > UINT_MAX) {
+    intcon->type = (Type *)TYPE_LONG;
+    intcon->constant.integral.signed_value = value;
+  } else if (!is_signed || value > INT_MAX) {
+    intcon->type = (Type *)TYPE_UNSIGNED_INT;
+    intcon->constant.integral.unsigned_value = value;
+  } else {
+    intcon->type = (Type *)TYPE_INT;
+    intcon->constant.integral.signed_value = value;
+  }
+
   return intcon;
 }
 
 ASTree *evaluate_charcon(ASTree *charcon) {
-  charcon->attributes |= ATTR_EXPR_CONST;
-  const char *const_str = charcon->lexinfo + 1;
-  /* size_t const_str_len = strlen(const_str) - 1; */
-  if (const_str[0] == '\\') {
-    if (const_str[1] == 'x') {
-      /* hex number */
-      charcon->constant.integral.value = strtol(&const_str[2], NULL, 16);
-    } else if (isdigit(const_str[1])) {
-      /* octal number */
-      charcon->constant.integral.value = strtol(&const_str[1], NULL, 8);
-    } else {
-      /* ASCII control sequence, \?, \", \', or \\ */
-      switch (const_str[1]) {
-        case 'n':
-          charcon->constant.integral.value = '\n';
-          break;
-        case 't':
-          charcon->constant.integral.value = '\t';
-          break;
-        case 'v':
-          charcon->constant.integral.value = '\v';
-          break;
-        case 'b':
-          charcon->constant.integral.value = '\b';
-          break;
-        case 'r':
-          charcon->constant.integral.value = '\r';
-          break;
-        case 'f':
-          charcon->constant.integral.value = '\f';
-          break;
-        case 'a':
-          charcon->constant.integral.value = '\a';
-          break;
-        case '\\':
-          charcon->constant.integral.value = '\\';
-          break;
-        case '\?':
-          charcon->constant.integral.value = '\?';
-          break;
-        case '\'':
-          charcon->constant.integral.value = '\'';
-          break;
-        case '"':
-          charcon->constant.integral.value = '"';
-          break;
-        default:
-          charcon->constant.integral.value = '\0';
-      }
-    }
-  } else {
-    charcon->constant.integral.value = const_str[0];
+  charcon->attributes |= ATTR_CONST_INT;
+  if (charcon->lexinfo[1] != '\\') {
+    charcon->constant.integral.signed_value = charcon->lexinfo[1];
+    return charcon;
   }
+
+  char escaped_char = charcon->lexinfo[2];
+  if (escaped_char == 'x') {
+    /* hex number */
+    charcon->constant.integral.signed_value =
+        (char)strtol(&charcon->lexinfo[3], NULL, 16);
+  } else if (isdigit(escaped_char)) {
+    /* octal number */
+    charcon->constant.integral.signed_value =
+        (char)strtol(&charcon->lexinfo[2], NULL, 8);
+  } else {
+    /* ASCII control sequence, \?, \", \', or \\ */
+    switch (escaped_char) {
+      case 'n':
+        charcon->constant.integral.signed_value = '\n';
+        break;
+      case 't':
+        charcon->constant.integral.signed_value = '\t';
+        break;
+      case 'v':
+        charcon->constant.integral.signed_value = '\v';
+        break;
+      case 'b':
+        charcon->constant.integral.signed_value = '\b';
+        break;
+      case 'r':
+        charcon->constant.integral.signed_value = '\r';
+        break;
+      case 'f':
+        charcon->constant.integral.signed_value = '\f';
+        break;
+      case 'a':
+        charcon->constant.integral.signed_value = '\a';
+        break;
+      case '\\':
+        charcon->constant.integral.signed_value = '\\';
+        break;
+      case '\?':
+        charcon->constant.integral.signed_value = '\?';
+        break;
+      case '\'':
+        charcon->constant.integral.signed_value = '\'';
+        break;
+      case '"':
+        charcon->constant.integral.signed_value = '"';
+        break;
+      default:
+        charcon->constant.integral.signed_value = '\0';
+    }
+  }
+
   return charcon;
 }
 
@@ -259,12 +320,12 @@ ASTree *evaluate_stringcon(ASTree *stringcon) {
   const char *stringcon_label;
   (void)asmgen_literal_label(stringcon->lexinfo, &stringcon_label);
   assert(stringcon_label != NULL);
-  stringcon->attributes |= ATTR_CONST_INIT | ATTR_CONST_ADDR | ATTR_EXPR_CONST;
-  stringcon->constant.address.label = stringcon_label;
-  stringcon->constant.address.disp = 0;
+  stringcon->attributes |= ATTR_CONST_INIT;
+  stringcon->constant.label = stringcon_label;
+  stringcon->constant.integral.signed_value = 0;
   (void)state_get_symbol(state, stringcon_label, strlen(stringcon_label),
-                         &stringcon->constant.address.symval);
-  assert(stringcon->constant.address.symval != NULL);
+                         &stringcon->constant.symval);
+  assert(stringcon->constant.symval != NULL);
   return stringcon;
 }
 
@@ -274,25 +335,23 @@ ASTree *evaluate_ident(ASTree *ident) {
   SymbolValue *symval = NULL;
   (void)state_get_symbol(state, id_str, id_str_len, &symval);
   if (symval->flags & (SYMFLAG_STORE_EXT | SYMFLAG_STORE_STAT)) {
-    ident->attributes |= ATTR_EXPR_CONST;
-    ident->attributes |= ATTR_CONST_INIT;
-    ident->attributes |= ATTR_CONST_ADDR;
-    ident->constant.address.symval = symval;
-    ident->constant.address.disp = 0;
+    ident->attributes |= ATTR_CONST_MAYBE;
+    ident->constant.symval = symval;
+    ident->constant.integral.signed_value = 0;
     if (type_is_function(symval->type))
-      ident->constant.address.label = mk_fnptr_text(ident->lexinfo);
+      ident->constant.label = mk_fnptr_text(ident->lexinfo);
     else if (symval->flags & SYMFLAG_LINK_NONE)
-      ident->constant.address.label =
+      ident->constant.label =
           mk_static_label(ident->lexinfo, symval->static_id);
     else
-      ident->constant.address.label = ident->lexinfo;
+      ident->constant.label = ident->lexinfo;
     return ident;
   } else if (symval->flags & SYMFLAG_ENUM_CONST) {
-    ident->attributes |= ATTR_EXPR_CONST;
+    ident->attributes |= ATTR_CONST_INT;
     TagValue *tag_value = ident->type->tag.value;
     int *value = map_get(&tag_value->data.enumerators.by_name,
                          (char *)ident->lexinfo, strlen(ident->lexinfo));
-    ident->constant.integral.value = *value;
+    ident->constant.integral.signed_value = *value;
     return ident;
   } else {
     return translate_ident(ident);
@@ -300,329 +359,343 @@ ASTree *evaluate_ident(ASTree *ident) {
 }
 
 ASTree *evaluate_addition(ASTree *addition, ASTree *left, ASTree *right) {
-  if (!(left->attributes & right->attributes & ATTR_EXPR_CONST) ||
-      (left->attributes & right->attributes & ATTR_CONST_ADDR) ||
-      ((left->attributes & ATTR_CONST_ADDR) && type_is_pointer(right->type)) ||
-      ((right->attributes & ATTR_CONST_ADDR) && type_is_pointer(left->type))) {
+  if ((left->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT ||
+      (right->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT ||
+      (left->constant.label != NULL && right->constant.label != NULL) ||
+      ((left->constant.label != NULL) && type_is_pointer(right->type)) ||
+      ((right->constant.label != NULL) && type_is_pointer(left->type))) {
     maybe_load_cexpr(right, NULL);
     maybe_load_cexpr(left, right->first_instr);
     return translate_addition(addition, left, right);
-  } else if ((left->attributes & ATTR_CONST_ADDR)) {
-    size_t stride =
-        type_is_pointer(left->type) ? type_elem_width(left->type) : 1;
-    addition->attributes |= left->attributes & ATTR_MASK_CONST;
+  } else if (type_is_pointer(left->type)) {
+    addition->attributes |= MIN(left->attributes & ATTR_MASK_CONST,
+                                right->attributes & ATTR_MASK_CONST);
     addition->constant = left->constant;
-    addition->constant.address.disp +=
-        (long)(right->constant.integral.value * stride);
-  } else if ((right->attributes & ATTR_CONST_ADDR)) {
-    size_t stride =
-        type_is_pointer(right->type) ? type_elem_width(right->type) : 1;
-    addition->attributes |= right->attributes & ATTR_MASK_CONST;
+    size_t stride = type_elem_width(left->type);
+    if (type_is_signed(right->type) || type_is_enum(right->type))
+      addition->constant.integral.signed_value +=
+          (long)(right->constant.integral.signed_value * stride);
+    else
+      addition->constant.integral.signed_value +=
+          (long)(right->constant.integral.unsigned_value * stride);
+  } else if (type_is_pointer(right->type)) {
+    addition->attributes |= MIN(left->attributes & ATTR_MASK_CONST,
+                                right->attributes & ATTR_MASK_CONST);
     addition->constant = right->constant;
-    addition->constant.address.disp +=
-        (long)(left->constant.integral.value * stride);
+    size_t stride = type_elem_width(right->type);
+    if (type_is_signed(left->type) || type_is_enum(left->type))
+      addition->constant.integral.signed_value +=
+          (long)(left->constant.integral.signed_value * stride);
+    else
+      addition->constant.integral.signed_value +=
+          (long)(left->constant.integral.unsigned_value * stride);
   } else {
-    size_t left_stride =
-        type_is_pointer(right->type) ? type_elem_width(right->type) : 1;
-    size_t right_stride =
-        type_is_pointer(left->type) ? type_elem_width(left->type) : 1;
-    addition->attributes |=
-        (left->attributes | right->attributes) & ATTR_MASK_CONST;
-    BINCA(+, addition->type, addition->constant.integral.value,
-          left->constant.integral.value * left_stride,
-          right->constant.integral.value * right_stride);
+    addition->attributes |= MIN(left->attributes & ATTR_MASK_CONST,
+                                right->attributes & ATTR_MASK_CONST);
+    if (type_is_unsigned(addition->type)) {
+      BINARY_EVAL(+, addition->constant.integral.unsigned_value, addition->type,
+                  left, right);
+    } else {
+      BINARY_EVAL(+, addition->constant.integral.signed_value, addition->type,
+                  left, right);
+    }
   }
   return astree_adopt(addition, 2, left, right);
 }
 
+/* we can rely on the fact that pointer subtraction is only valid if both
+ * operands have pointer type or only the left has pointer type to simplify
+ * this logic
+ *
+ * constexpr evaluation would fail if:
+ * 1. both operands have pointer type, but only the right operand has an
+ * address component
+ * 2. both operands have pointer type and both operands have an address
+ * component, but the address is different
+ * 3. only the left operand has pointer type, but the right operand has an
+ * address component
+ * 4. neither operand has pointer type and both operands have an address
+ * component, but the address is different
+ * 5. neither operand has pointer type, and both operands have an address
+ * component, but the address is different
+ *
+ * simplified:
+ * 1. if both operands have an address, they must be the same
+ * 2. if the right operand has an address, the left shall also have one
+ *
+ * further simplified:
+ * the right operand must have no address or the same address as the left
+ * operand
+ *
+ * when performing integer subtraction, there are 3 possibilities:
+ * 1. neither operand has an address component
+ * 2. both operands have an address component
+ * 3. only the left operand has an address component
+ */
 ASTree *evaluate_subtraction(ASTree *subtraction, ASTree *left, ASTree *right) {
-  if ((left->attributes & right->attributes & ATTR_CONST_ADDR) &&
-      left->constant.address.symval == right->constant.address.symval &&
-      (type_is_pointer(right->type) || !type_is_pointer(left->type))) {
-    size_t stride =
-        type_is_pointer(left->type) ? type_elem_width(left->type) : 1;
-    subtraction->attributes |= ATTR_EXPR_CONST | ATTR_CONST_INIT;
-    subtraction->constant.integral.value =
-        (left->constant.address.disp - right->constant.address.disp) /
-        (long)stride;
-  } else if ((left->attributes & ATTR_CONST_ADDR) &&
-             (right->attributes & ATTR_EXPR_CONST) &&
-             !(right->attributes & ATTR_CONST_ADDR)) {
-    size_t stride =
-        type_is_pointer(left->type) ? type_elem_width(left->type) : 1;
-    subtraction->attributes |= left->attributes & ATTR_MASK_CONST;
-    subtraction->constant = left->constant;
-    subtraction->constant.address.disp -=
-        (long)(right->constant.integral.value * stride);
-  } else if ((left->attributes & right->attributes & ATTR_EXPR_CONST) &&
-             !((left->attributes | right->attributes) & ATTR_CONST_ADDR)) {
-    size_t left_stride =
-        type_is_pointer(right->type) ? type_elem_width(right->type) : 1;
-    size_t right_stride =
-        type_is_pointer(left->type) ? type_elem_width(left->type) : 1;
-    subtraction->attributes |=
-        (left->attributes | right->attributes) & ATTR_MASK_CONST;
-    BINCA(-, subtraction->type, subtraction->constant.integral.value,
-          left->constant.integral.value * left_stride,
-          right->constant.integral.value * right_stride);
-  } else {
+  if ((left->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT ||
+      (right->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT ||
+      (right->constant.label != NULL &&
+       right->constant.label != left->constant.label)) {
     maybe_load_cexpr(right, NULL);
     maybe_load_cexpr(left, right->first_instr);
     return translate_addition(subtraction, left, right);
+  } else if (type_is_pointer(right->type)) {
+    size_t stride = type_elem_width(right->type);
+    subtraction->attributes |= ATTR_CONST_INIT;
+    subtraction->constant.integral.signed_value =
+        (left->constant.integral.signed_value -
+         right->constant.integral.signed_value) /
+        (long)stride;
+  } else if (type_is_pointer(left->type)) {
+    size_t stride = type_elem_width(left->type);
+    subtraction->attributes |= ATTR_CONST_INIT;
+    subtraction->constant = left->constant;
+    if (type_is_signed(right->type) || type_is_enum(right->type))
+      subtraction->constant.integral.signed_value -=
+          (long)(right->constant.integral.signed_value * stride);
+    else
+      subtraction->constant.integral.signed_value -=
+          (long)(right->constant.integral.unsigned_value * stride);
+  } else {
+    subtraction->attributes |= ATTR_CONST_INIT;
+    if (left->constant.label != right->constant.label) {
+      subtraction->constant.label = left->constant.label;
+      subtraction->constant.symval = left->constant.symval;
+    }
+    if (type_is_unsigned(subtraction->type)) {
+      BINARY_EVAL(-, subtraction->constant.integral.unsigned_value,
+                  subtraction->type, left, right);
+    } else {
+      BINARY_EVAL(-, subtraction->constant.integral.signed_value,
+                  subtraction->type, left, right);
+    }
   }
   return astree_adopt(subtraction, 2, left, right);
 }
 
-ASTree *evaluate_shiftl(ASTree *shiftl, ASTree *left, ASTree *right) {
-  if ((left->attributes & right->attributes & ATTR_EXPR_CONST) &&
-      !((left->attributes | right->attributes) & ATTR_CONST_ADDR)) {
-    shiftl->attributes |=
-        (left->attributes | right->attributes) & ATTR_MASK_CONST;
-    SHCA(<<, shiftl->type, shiftl->constant.integral.value,
-         left->constant.integral.value, right->constant.integral.value);
-    return astree_adopt(shiftl, 2, left, right);
+ASTree *evaluate_shift(ASTree *shift, ASTree *left, ASTree *right) {
+  if ((left->attributes & ATTR_MASK_CONST) >= ATTR_CONST_INIT &&
+      (right->attributes & ATTR_MASK_CONST) >= ATTR_CONST_INIT &&
+      left->constant.label == NULL && right->constant.label == NULL) {
+    shift->attributes |= MIN(left->attributes & ATTR_MASK_CONST,
+                             right->attributes & ATTR_MASK_CONST);
+    if (shift->symbol == TOK_SHL) {
+      if (type_is_unsigned(shift->type)) {
+        SHIFT_EVAL(<<, shift, left, right);
+      } else {
+        SHIFT_EVAL(<<, shift, left, right);
+      }
+    } else {
+      if (type_is_unsigned(shift->type)) {
+        SHIFT_EVAL(>>, shift, left, right);
+      } else {
+        SHIFT_EVAL(>>, shift, left, right);
+      }
+    }
+    return astree_adopt(shift, 2, left, right);
   } else {
     maybe_load_cexpr(right, NULL);
     maybe_load_cexpr(left, right->first_instr);
-    return translate_binop(shiftl, left, right);
-  }
-}
-
-ASTree *evaluate_shiftr(ASTree *shiftr, ASTree *left, ASTree *right) {
-  if ((left->attributes & right->attributes & ATTR_EXPR_CONST) &&
-      !((left->attributes | right->attributes) & ATTR_CONST_ADDR)) {
-    shiftr->attributes |=
-        (left->attributes | right->attributes) & ATTR_MASK_CONST;
-    SHCA(>>, shiftr->type, shiftr->constant.integral.value,
-         left->constant.integral.value, right->constant.integral.value);
-    return astree_adopt(shiftr, 2, left, right);
-  } else {
-    maybe_load_cexpr(right, NULL);
-    maybe_load_cexpr(left, right->first_instr);
-    return translate_binop(shiftr, left, right);
+    return translate_binop(shift, left, right);
   }
 }
 
 ASTree *evaluate_relational(ASTree *relational, ASTree *left, ASTree *right) {
-  int pointer_relation =
-      (left->attributes & right->attributes & ATTR_CONST_ADDR) &&
-      left->constant.address.symval == right->constant.address.symval;
-  int arithmetic_relation =
-      (left->attributes & right->attributes & ATTR_EXPR_CONST) &&
-      !((left->attributes | right->attributes) & ATTR_CONST_ADDR);
-  if (pointer_relation || arithmetic_relation) {
-    relational->attributes |=
-        ATTR_EXPR_CONST |
-        ((left->attributes | right->attributes) & ATTR_CONST_INIT);
-    Type *common_type;
-    if (type_is_pointer(left->type) || type_is_pointer(right->type)) {
-      common_type = (Type *)TYPE_LONG;
-    } else {
-      int status =
-          type_arithmetic_conversions(&common_type, left->type, right->type);
-      if (status) abort();
-    }
-
-    switch (relational->symbol) {
-      case '<':
-        BINCA(<, common_type, relational->constant.integral.value,
-              left->constant.integral.value, right->constant.integral.value);
-        break;
-      case TOK_LE:
-        BINCA(<=, common_type, relational->constant.integral.value,
-              left->constant.integral.value, right->constant.integral.value);
-        break;
-      case '>':
-        BINCA(>, common_type, relational->constant.integral.value,
-              left->constant.integral.value, right->constant.integral.value);
-        break;
-      case TOK_GE:
-        BINCA(>=, common_type, relational->constant.integral.value,
-              left->constant.integral.value, right->constant.integral.value);
-        break;
-      default:
-        abort();
-    }
-    return astree_adopt(relational, 2, left, right);
-  } else {
-    maybe_load_cexpr(right, NULL);
-    maybe_load_cexpr(left, right->first_instr);
-    return translate_comparison(relational, left, right);
+  if ((left->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT ||
+      (right->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT ||
+      left->constant.label != right->constant.label) {
   }
+
+  relational->attributes |= MIN(left->attributes & ATTR_MASK_CONST,
+                                right->attributes & ATTR_MASK_CONST);
+
+  switch (relational->symbol) {
+    case '<':
+      COMPARATOR_EVAL(<, relational, left, right);
+      break;
+    case TOK_LE:
+      COMPARATOR_EVAL(<=, relational, left, right);
+      break;
+    case '>':
+      COMPARATOR_EVAL(>, relational, left, right);
+      break;
+    case TOK_GE:
+      COMPARATOR_EVAL(>=, relational, left, right);
+      break;
+    default:
+      abort();
+  }
+
+  return astree_adopt(relational, 2, left, right);
 }
 
 ASTree *evaluate_equality(ASTree *equality, ASTree *left, ASTree *right) {
-  if (left->attributes & right->attributes & ATTR_CONST_ADDR) {
-    equality->attributes |= ATTR_EXPR_CONST | ATTR_CONST_INIT;
-    equality->constant.integral.value =
-        left->constant.address.symval == right->constant.address.symval &&
-        left->constant.address.disp == right->constant.address.disp;
-  } else if ((left->attributes & ATTR_CONST_ADDR) &&
-             (right->attributes & ATTR_EXPR_CONST) &&
-             right->constant.integral.value == 0) {
-    equality->attributes |= ATTR_EXPR_CONST | ATTR_CONST_INIT;
-    equality->constant.integral.value = equality->symbol == TOK_NE;
-  } else if ((right->attributes & ATTR_CONST_ADDR) &&
-             (left->attributes & ATTR_EXPR_CONST) &&
-             left->constant.integral.value == 0) {
-    equality->attributes |= ATTR_EXPR_CONST | ATTR_CONST_INIT;
-    equality->constant.integral.value = equality->symbol == TOK_NE;
-  } else if ((left->attributes & right->attributes & ATTR_EXPR_CONST) &&
-             !((left->attributes | right->attributes) & ATTR_CONST_ADDR)) {
-    equality->attributes |= ATTR_EXPR_CONST;
-    Type *promoted_type;
-    int status =
-        type_arithmetic_conversions(&promoted_type, left->type, right->type);
-    if (status) abort();
-    BINCA(==, promoted_type, equality->constant.integral.value,
-          left->constant.integral.value, right->constant.integral.value);
-    equality->constant.integral.value ^= equality->symbol == TOK_NE;
-  } else {
+  if ((left->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT ||
+      (right->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT ||
+      (left->constant.label != right->constant.label &&
+       (left->constant.integral.signed_value != 0 ||
+        right->constant.integral.signed_value != 0))) {
+    /* TODO(Robert): access integral component of constant value using the
+     * appropriate sign based on the type of the operand. may not be
+     * necessary for correct behavior.
+     */
     maybe_load_cexpr(right, NULL);
     maybe_load_cexpr(left, right->first_instr);
     return translate_comparison(equality, left, right);
   }
+
+  equality->attributes |= MIN(left->attributes & ATTR_MASK_CONST,
+                              right->attributes & ATTR_MASK_CONST);
+  Type *common_type;
+  if (type_is_pointer(left->type) || type_is_pointer(right->type)) {
+    common_type = (Type *)TYPE_LONG;
+  } else {
+    int status =
+        type_arithmetic_conversions(&common_type, left->type, right->type);
+    if (status) abort();
+  }
+
+  if (left->constant.label != right->constant.label) {
+    equality->constant.integral.signed_value = equality->symbol == TOK_NE;
+  } else if (equality->symbol == TOK_NE) {
+    COMPARATOR_EVAL(!=, equality, left, right);
+  } else {
+    COMPARATOR_EVAL(==, equality, left, right);
+  }
+
   return astree_adopt(equality, 2, left, right);
 }
 
 ASTree *evaluate_logical(ASTree *logical, ASTree *left, ASTree *right) {
-  if (left->attributes & right->attributes & ATTR_EXPR_CONST) {
-    logical->attributes =
-        ATTR_EXPR_CONST |
-        ((left->attributes | right->attributes) & ATTR_CONST_INIT);
-    if (logical->symbol == TOK_OR) {
-      logical->constant.integral.value =
-          ((left->attributes & ATTR_CONST_ADDR) ||
-           left->constant.integral.value) ||
-          ((right->attributes & ATTR_CONST_ADDR) ||
-           right->constant.integral.value);
-    } else {
-      logical->constant.integral.value =
-          ((left->attributes & ATTR_CONST_ADDR) ||
-           left->constant.integral.value) &&
-          ((right->attributes & ATTR_CONST_ADDR) ||
-           right->constant.integral.value);
-    }
-    return astree_adopt(logical, 2, left, right);
-  } else {
+  if ((left->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT ||
+      (right->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT) {
     maybe_load_cexpr(right, NULL);
     maybe_load_cexpr(left, right->first_instr);
     return translate_logical(logical, left, right);
   }
+
+  logical->attributes |= MIN(left->attributes & ATTR_MASK_CONST,
+                             right->attributes & ATTR_MASK_CONST);
+  logical->constant.integral.signed_value =
+      logical->symbol == TOK_OR
+          ? (left->constant.label != NULL ||
+             left->constant.integral.unsigned_value != 0 ||
+             right->constant.label != NULL ||
+             right->constant.integral.unsigned_value != 0)
+          : ((left->constant.label != NULL ||
+              left->constant.integral.unsigned_value != 0) &&
+             (right->constant.label != NULL ||
+              right->constant.integral.unsigned_value != 0));
+  return astree_adopt(logical, 2, left, right);
 }
 
 ASTree *evaluate_cast(ASTree *cast, ASTree *expr) {
-  if (expr->attributes & ATTR_EXPR_CONST) {
-    cast->attributes |= expr->attributes & ATTR_MASK_CONST;
-    if (expr->attributes & ATTR_CONST_ADDR) {
-      cast->constant = expr->constant;
-    } else {
-      if (type_is_pointer(cast->type)) cast->attributes |= ATTR_CONST_INIT;
-      UNCA(+, cast->type, cast->constant.integral.value,
-           expr->constant.integral.value);
-    }
-    return astree_adopt(cast, 1, expr);
-  } else {
+  if ((expr->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT) {
     maybe_load_cexpr(expr, NULL);
     return translate_cast(cast, expr);
   }
+
+  cast->attributes |= !type_is_integral(cast->type)
+                          ? ATTR_CONST_INIT
+                          : (expr->attributes & ATTR_MASK_CONST);
+
+  if (expr->constant.label != NULL) {
+    cast->constant = expr->constant;
+  } else {
+    UNARY_EVAL(+, cast, expr);
+  }
+
+  return astree_adopt(cast, 1, expr);
 }
 
 ASTree *evaluate_conditional(ASTree *qmark, ASTree *condition,
                              ASTree *true_expr, ASTree *false_expr) {
-  if (condition->attributes & true_expr->attributes & false_expr->attributes &
-      ATTR_EXPR_CONST) {
-    ASTree *selected_expr = (condition->attributes & ATTR_CONST_ADDR) ||
-                                    condition->constant.integral.value
-                                ? true_expr
-                                : false_expr;
-    qmark->constant = selected_expr->constant;
-    qmark->attributes |= (selected_expr->attributes & ATTR_MASK_CONST) |
-                         (condition->attributes & ATTR_CONST_INIT);
-    if (!(selected_expr->attributes & ATTR_CONST_ADDR)) {
-      UNCA(+, qmark->type, qmark->constant.integral.value,
-           selected_expr->constant.integral.value);
-    } else {
-      qmark->constant = selected_expr->constant;
-    }
-    return astree_adopt(qmark, 3, condition, true_expr, false_expr);
-  } else {
+  if ((condition->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT ||
+      (true_expr->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT ||
+      (false_expr->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT) {
     maybe_load_cexpr(false_expr, NULL);
     maybe_load_cexpr(true_expr, false_expr->first_instr);
     maybe_load_cexpr(condition, true_expr->first_instr);
     return translate_conditional(qmark, condition, true_expr, false_expr);
   }
+
+  ASTree *selected_expr =
+      condition->constant.label != NULL ||
+              condition->constant.integral.unsigned_value != 0
+          ? true_expr
+          : false_expr;
+  qmark->attributes |= MIN(condition->attributes & ATTR_MASK_CONST,
+                           MIN(true_expr->attributes & ATTR_MASK_CONST,
+                               false_expr->attributes & ATTR_MASK_CONST));
+  if (selected_expr->constant.label == NULL) {
+    UNARY_EVAL(+, qmark, selected_expr);
+  } else {
+    qmark->constant = selected_expr->constant;
+  }
+  return astree_adopt(qmark, 3, condition, true_expr, false_expr);
 }
 
-/* TODO(Robert): determine if `constant.address.symval` should actually be
+/* TODO(Robert): determine if `constant.symval` should actually be
  * propogated by this function. currently, we do it because the register
  * allocator expects a symbol to be there for pic mode operands. this may
  * not even be necessary at all since pic mode operands use no registers
  * except for the instruction pointer, whose liveness we don't care about
  */
 ASTree *evaluate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
-  if ((pointer->attributes & ATTR_CONST_ADDR) &&
-      !(index->attributes & ATTR_CONST_ADDR) &&
-      (index->attributes & ATTR_EXPR_CONST)) {
-    assert(pointer->constant.address.symval != NULL);
-    subscript->attributes |= pointer->attributes & ATTR_MASK_CONST;
-    subscript->constant.address.label = pointer->constant.address.label;
-    subscript->constant.address.symval = pointer->constant.address.symval;
-    subscript->constant.address.disp = pointer->constant.address.disp +
-                                       (long)(index->constant.integral.value *
-                                              type_get_width(subscript->type));
-  } else if (!((pointer->attributes | index->attributes) & ATTR_CONST_ADDR) &&
-             (pointer->attributes & index->attributes & ATTR_EXPR_CONST)) {
-    subscript->attributes |= pointer->attributes & ATTR_MASK_CONST;
-    subscript->constant.integral.value =
-        (long)pointer->constant.integral.value +
-        (long)(index->constant.integral.value *
-               type_get_width(subscript->type));
-  } else {
+  if ((pointer->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT ||
+      (index->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT ||
+      index->constant.label != NULL) {
     maybe_load_cexpr(index, NULL);
     maybe_load_cexpr(pointer, index->first_instr);
     return translate_subscript(subscript, pointer, index);
   }
+
+  subscript->attributes |= ATTR_CONST_MAYBE;
+  subscript->constant = pointer->constant;
+  size_t stride = type_get_width(subscript->type);
+  subscript->constant.integral.signed_value +=
+      (long)(index->constant.integral.signed_value * stride);
+
   return astree_adopt(subscript, 2, pointer, index);
 }
 
 ASTree *evaluate_addrof(ASTree *addrof, ASTree *operand) {
-  if (operand->attributes & ATTR_EXPR_CONST) {
-    addrof->attributes |= operand->attributes & ATTR_MASK_CONST;
-    addrof->constant = operand->constant;
-    return astree_adopt(addrof, 1, operand);
-  } else {
+  if ((operand->attributes & ATTR_MASK_CONST) != ATTR_CONST_MAYBE) {
     maybe_load_cexpr(operand, NULL);
     return translate_addrof(addrof, operand);
+  } else {
+    addrof->attributes |= ATTR_CONST_INIT;
+    addrof->constant = operand->constant;
+    return astree_adopt(addrof, 1, operand);
   }
 }
 
-/* TODO(Robert): determine if `constant.address.symval` should be set to the
+/* TODO(Robert): determine if `constant.symval` should be set to the
  * symval of the member being referenced. also, in the case of a constant
  * address being used between multiple functions, find a way to clear the
  * liveness info for all symbols before determining liveness.
  */
 ASTree *evaluate_reference(ASTree *reference, ASTree *struct_, ASTree *member) {
-  if (struct_->attributes & ATTR_CONST_ADDR) {
+  if ((struct_->attributes & ATTR_MASK_CONST) < ATTR_CONST_MAYBE) {
+    maybe_load_cexpr(struct_, NULL);
+    return translate_reference(reference, struct_, member);
+  } else {
     Type *tag_type;
     if (reference->symbol == TOK_ARROW)
       assert(!type_strip_declarator(&tag_type, struct_->type));
     else
       tag_type = struct_->type;
-    reference->attributes |= struct_->attributes & ATTR_MASK_CONST;
+
     SymbolValue *symval = type_member_name(tag_type, member->lexinfo);
     assert(symval);
-    reference->constant.address.symval = symval;
-    reference->constant.address.label = struct_->constant.address.label;
-    reference->constant.address.disp =
-        struct_->constant.address.disp + (long)symval->disp;
+    reference->constant.symval = symval;
+    reference->constant.integral.signed_value =
+        struct_->constant.integral.signed_value + symval->disp;
+    reference->constant.label = struct_->constant.label;
+    reference->attributes |= ATTR_CONST_MAYBE;
+
     return astree_adopt(reference, 2, struct_, member);
-  } else {
-    /* scalars should not be castable to aggregates */
-    assert(!(struct_->attributes & ATTR_EXPR_CONST) ||
-           reference->symbol == TOK_ARROW);
-    maybe_load_cexpr(struct_, NULL);
-    return translate_reference(reference, struct_, member);
   }
 }
 
@@ -646,9 +719,9 @@ ASTree *evaluate_binop(ASTree *operator, ASTree * left, ASTree *right) {
     case TOK_GE:
       return evaluate_relational(operator, left, right);
     case TOK_SHL:
-      return evaluate_shiftl(operator, left, right);
+      return evaluate_shift(operator, left, right);
     case TOK_SHR:
-      return evaluate_shiftr(operator, left, right);
+      return evaluate_shift(operator, left, right);
     case '+':
       return evaluate_addition(operator, left, right);
     case '-':
@@ -669,20 +742,21 @@ ASTree *evaluate_unop(ASTree *operator, ASTree * operand) {
     /* treat like a cast */
     UNOP_CASE(TOK_POS, +, translate_cast);
     case '!':
-      if ((operator->attributes & ATTR_EXPR_CONST) &&
-          !(operator->attributes & ATTR_CONST_ADDR)) {
+      if ((operator->attributes & ATTR_MASK_CONST) >= ATTR_CONST_INIT) {
         operator->attributes |= operand->attributes & ATTR_MASK_CONST;
-        /* cast to operand type, not operator type */
-        UNCA(!, operand->type, operator->constant.integral.value,
-             operand->constant.integral.value);
+        operator->constant.integral.signed_value =(
+            type_is_unsigned(operand->type) &&
+            operand->constant.integral.unsigned_value != 0) ||
+            operand->constant.integral.signed_value != 0 ||
+            operand->constant.label != NULL;
         return astree_adopt(operator, 1, operand);
       } else {
         maybe_load_cexpr(operand, NULL);
         return translate_logical_not(operator, operand);
       }
     case TOK_SIZEOF:
-      operator->attributes |= ATTR_EXPR_CONST;
-      operator->constant.integral.value = type_get_width(
+      operator->attributes |= ATTR_CONST_INT;
+      operator->constant.integral.unsigned_value = type_get_width(
           operand->symbol == TOK_DECLARATION ? astree_get(operand, 1)->type
                                              : operand->type);
       return astree_adopt(operator, 1, operand);

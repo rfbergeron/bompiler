@@ -417,12 +417,12 @@ ASTree *validate_array_size(ASTree *array, ASTree *expr) {
   if (expr->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(array, expr);
   }
-  if (!type_is_integral(expr->type) || !(expr->attributes & ATTR_EXPR_CONST) ||
-      (expr->attributes & ATTR_CONST_INIT)) {
+  if (!type_is_integral(expr->type) ||
+      (expr->attributes & ATTR_MASK_CONST) != ATTR_CONST_INT) {
     return astree_create_errnode(astree_adopt(array, 1, expr),
                                  BCC_TERR_EXPECTED_INTCONST, 2, array, expr);
   }
-  if (expr->constant.integral.value == 0) {
+  if (astree_is_const_zero(expr)) {
     return astree_create_errnode(astree_adopt(array, 1, expr),
                                  BCC_TERR_EXPECTED_NONZERO, 2, array, expr);
   }
@@ -562,9 +562,13 @@ ASTree *define_array(ASTree *declarator, ASTree *array) {
   int status;
   if (astree_count(array) == 0)
     status = type_init_array(&array_type, 0, 1);
+  else if (type_is_unsigned(astree_get(array, 0)->type))
+    status = type_init_array(
+        &array_type, astree_get(array, 0)->constant.integral.unsigned_value, 0);
   else
-    status = type_init_array(&array_type,
-                             astree_get(array, 0)->constant.integral.value, 0);
+    status = type_init_array(
+        &array_type, astree_get(array, 0)->constant.integral.signed_value, 0);
+
   if (status) abort();
   if (declarator->type != NULL) {
     status = type_append(declarator->type, array_type, 0);
@@ -1078,16 +1082,20 @@ ASTree *define_enumerator(ASTree *enum_, ASTree *ident_node, ASTree *equal_sign,
        */
       return astree_propogate_errnode(enum_, errnode);
     }
-    if (!(expr->attributes & ATTR_EXPR_CONST) ||
-        (expr->attributes & ATTR_CONST_INIT)) {
+    if ((expr->attributes & ATTR_MASK_CONST) != ATTR_CONST_INT) {
       astree_adopt(left_brace, 1,
                    astree_adopt(equal_sign, 2, ident_node, expr));
       return astree_create_errnode(enum_, BCC_TERR_EXPECTED_ARITHCONST, 2,
                                    equal_sign, expr);
     }
     int *value = malloc(sizeof(int));
-    *value = tagval->data.enumerators.last_value =
-        expr->constant.integral.value;
+    if (type_is_unsigned(expr->type)) {
+      *value = tagval->data.enumerators.last_value =
+          expr->constant.integral.unsigned_value;
+    } else {
+      *value = tagval->data.enumerators.last_value =
+          expr->constant.integral.signed_value;
+    }
     int status = map_insert(&tagval->data.enumerators.by_name, (char *)ident,
                             ident_len, value);
     assert(status == 0);

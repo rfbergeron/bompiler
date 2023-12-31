@@ -181,8 +181,7 @@ ASTree *validate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
 
   Type *case_const_spec = expr->type;
   if (!type_is_integral(case_const_spec) ||
-      !(expr->attributes & ATTR_EXPR_CONST) ||
-      (expr->attributes & ATTR_CONST_INIT)) {
+      (expr->attributes & ATTR_MASK_CONST) != ATTR_CONST_INT) {
     return astree_create_errnode(astree_adopt(case_, 2, expr, stmt),
                                  BCC_TERR_EXPECTED_INTCONST, 2, case_, expr);
   }

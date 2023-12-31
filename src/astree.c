@@ -55,9 +55,9 @@ ASTree *astree_init(int symbol, const Location location, const char *info) {
    * type of a pointer argument */
   llist_init(&tree->children, (void (*)(void *))(astree_destroy), NULL);
   tree->symbol_table = NULL;
-  tree->constant.address.symval = NULL;
-  tree->constant.address.label = NULL;
-  tree->constant.address.disp = 0L;
+  tree->constant.integral.signed_value = 0L;
+  tree->constant.label = NULL;
+  tree->constant.symval = NULL;
   return tree;
 }
 
@@ -251,9 +251,11 @@ ASTree *astree_propogate_errnode_a(ASTree *parent, size_t count,
 size_t astree_count(ASTree *parent) { return llist_size(&parent->children); }
 
 int astree_is_const_zero(const ASTree *tree) {
-  return (tree->attributes & ATTR_EXPR_CONST) &&
-         !(tree->attributes & ATTR_CONST_ADDR) &&
-         (tree->constant.integral.value == 0);
+  return (tree->attributes & ATTR_MASK_CONST) >= ATTR_CONST_INIT &&
+         type_is_integral(tree->type) &&
+         (type_is_signed(tree->type) || type_is_enum(tree->type)
+              ? tree->constant.integral.signed_value == 0
+              : tree->constant.integral.unsigned_value == 0);
 }
 
 #ifndef UNIT_TESTING
@@ -289,20 +291,20 @@ int astree_to_string(ASTree *tree, char *buffer) {
   if (characters_printed < 0) return characters_printed;
 
   if (strlen(tname) > 4) tname += 4;
-  if (tree->attributes & ATTR_EXPR_CONST) {
-    if (tree->attributes & ATTR_CONST_ADDR) {
+  if ((tree->attributes & ATTR_MASK_CONST) >= ATTR_CONST_INIT) {
+    if (tree->constant.label != NULL) {
       return sprintf(buffer, "%s \"%s\" {%s} {%s} {%s} { %s%+li }", tname,
                      tree->lexinfo, locstr, typestr, attrstr,
-                     tree->constant.address.label,
-                     (long)tree->constant.address.disp);
+                     tree->constant.label,
+                     tree->constant.integral.signed_value);
     } else if (type_is_signed(tree->type)) {
       return sprintf(buffer, "%s \"%s\" {%s} {%s} {%s} { %li }", tname,
                      tree->lexinfo, locstr, typestr, attrstr,
-                     (long)tree->constant.integral.value);
+                     tree->constant.integral.signed_value);
     } else {
       return sprintf(buffer, "%s \"%s\" {%s} {%s} {%s} { %lu }", tname,
                      tree->lexinfo, locstr, typestr, attrstr,
-                     tree->constant.integral.value);
+                     tree->constant.integral.unsigned_value);
     }
   } else {
     return sprintf(buffer, "%s \"%s\" {%s} {%s} {%s}", tname, tree->lexinfo,
