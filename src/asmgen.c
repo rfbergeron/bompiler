@@ -721,21 +721,24 @@ ASTree *translate_empty_expr(ASTree *empty_expr) {
 }
 
 void maybe_load_cexpr(ASTree *expr, ListIter *where) {
-  if (expr->attributes & ATTR_EXPR_CONST) {
+  if ((expr->attributes & ATTR_MASK_CONST) >= ATTR_CONST_INIT) {
     InstructionData *load_data;
     if (type_is_void(expr->type)) {
       /* emit NOP when casting a constant to void */
       load_data = instr_init(OP_NOP);
-    } else if (expr->attributes & ATTR_CONST_ADDR) {
+    } else if ((expr->attributes & ATTR_MASK_CONST) == ATTR_CONST_INIT) {
       load_data = instr_init(OP_LEA);
-      set_op_pic(&load_data->src, expr->constant.address.disp,
-                 expr->constant.address.label, expr->constant.address.symval);
+      set_op_pic(&load_data->src, expr->constant.integral.signed_value,
+                 expr->constant.label, expr->constant.symval);
       set_op_reg(&load_data->dest, REG_QWORD, next_vreg());
       load_data->persist_flags |= PERSIST_DEST_CLEAR;
     } else {
       load_data = instr_init(OP_MOV);
-      set_op_imm(&load_data->src, expr->constant.integral.value,
-                 type_is_signed(expr->type));
+      if (type_is_unsigned(expr->type)) {
+        set_op_imm(&load_data->src, expr->constant.integral.unsigned_value, 1);
+      } else {
+        set_op_imm(&load_data->src, expr->constant.integral.signed_value, 0);
+      }
       set_op_reg(&load_data->dest, type_get_width(expr->type), next_vreg());
       load_data->persist_flags |= PERSIST_DEST_CLEAR;
     }
@@ -2624,8 +2627,11 @@ ASTree *translate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
   /* TODO(Robert): is the MOV necessary? the other operand is a register */
   InstructionData *mov_data = instr_init(OP_MOV);
   set_op_reg(&mov_data->dest, type_get_width(control_type), next_vreg());
-  set_op_imm(&mov_data->src, expr->constant.integral.value,
-             type_is_signed(control_type));
+  if (type_is_unsigned(control_type)) {
+    set_op_imm(&mov_data->src, expr->constant.integral.unsigned_value, 0);
+  } else {
+    set_op_imm(&mov_data->src, expr->constant.integral.signed_value, 1);
+  }
   InstructionData *test_data = instr_init(OP_TEST);
   set_op_reg(&test_data->dest, type_get_width(control_type),
              state_get_control_reg(state));
@@ -2684,13 +2690,13 @@ ASTree *translate_static_scalar_init(const Type *type, ASTree *initializer,
       abort();
   }
   InstructionData *data = instr_init(directive);
-  if (initializer->attributes & ATTR_CONST_ADDR) {
-    set_op_pic(&data->dest, initializer->constant.address.disp,
-               initializer->constant.address.label,
-               initializer->constant.address.symval);
+  if (initializer->constant.label != NULL) {
+    set_op_pic(&data->dest, initializer->constant.integral.signed_value,
+               initializer->constant.label, initializer->constant.symval);
+  } else if (type_is_unsigned(type)) {
+    set_op_imm(&data->dest, initializer->constant.integral.unsigned_value, 1);
   } else {
-    set_op_imm(&data->dest, initializer->constant.integral.value,
-               type_is_signed(type));
+    set_op_imm(&data->dest, initializer->constant.integral.signed_value, 0);
   }
   int status = liter_push_back(where, &where, 1, data);
   if (status) abort();
@@ -2703,17 +2709,19 @@ ASTree *translate_static_scalar_init(const Type *type, ASTree *initializer,
 
 ASTree *translate_auto_scalar_init(const Type *type, ptrdiff_t disp,
                                    ASTree *initializer, ListIter *where) {
-  assert(initializer->attributes & ATTR_EXPR_CONST);
+  assert((initializer->attributes & ATTR_MASK_CONST) >= ATTR_CONST_INIT);
   InstructionData *load_data;
-  if (initializer->attributes & ATTR_CONST_ADDR) {
+  if (initializer->constant.label != NULL) {
     load_data = instr_init(OP_LEA);
-    set_op_pic(&load_data->src, initializer->constant.address.disp,
-               initializer->constant.address.label,
-               initializer->constant.address.symval);
+    set_op_pic(&load_data->src, initializer->constant.integral.signed_value,
+               initializer->constant.label, initializer->constant.symval);
+  } else if (type_is_unsigned(type)) {
+    load_data = instr_init(OP_MOV);
+    set_op_imm(&load_data->src, initializer->constant.integral.unsigned_value,
+               0);
   } else {
     load_data = instr_init(OP_MOV);
-    set_op_imm(&load_data->src, initializer->constant.integral.value,
-               type_is_signed(type));
+    set_op_imm(&load_data->src, initializer->constant.integral.signed_value, 1);
   }
   set_op_reg(&load_data->dest, type_get_width(type), next_vreg());
   InstructionData *store_data = instr_init(OP_MOV);
@@ -2733,7 +2741,7 @@ ASTree *translate_static_literal_init(const Type *arr_type, ASTree *literal,
                                       ListIter *where) {
   size_t i;
   for (i = 0; i < literals_size; ++i) {
-    if (literals[i].label == literal->constant.address.label) {
+    if (literals[i].label == literal->constant.label) {
       const char *str = literals[i].literal;
       size_t arr_width = type_get_width(arr_type);
       size_t literal_length = strlen(str) - 2;
@@ -2800,8 +2808,8 @@ ASTree *translate_static_literal_init(const Type *arr_type, ASTree *literal,
 ASTree *translate_auto_literal_init(const Type *arr_type, ptrdiff_t arr_disp,
                                     ASTree *literal, ListIter *where) {
   InstructionData *literal_lea_data = instr_init(OP_LEA);
-  set_op_pic(&literal_lea_data->src, literal->constant.address.disp,
-             literal->constant.address.label, literal->constant.address.symval);
+  set_op_pic(&literal_lea_data->src, literal->constant.integral.signed_value,
+             literal->constant.label, literal->constant.symval);
   set_op_reg(&literal_lea_data->dest, REG_QWORD, next_vreg());
   /* need to clear persistence because `bulk_mtom` always sets it */
   literal_lea_data->persist_flags |= PERSIST_DEST_CLEAR;
@@ -2916,7 +2924,7 @@ static ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
     }
   } else if (initializer->symbol != TOK_INIT_LIST &&
              initializer->symbol != TOK_STRINGCON &&
-             !(initializer->attributes & ATTR_EXPR_CONST)) {
+             (initializer->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT) {
     /* TODO(Robert): consider inserting this instruction later in the sequence,
      * perhaps after the initializer's code, so that it occurs closer to where
      * the actual assignment happens

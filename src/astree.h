@@ -12,11 +12,12 @@ enum attribute {
   ATTR_NONE = 0,              /* no attributes set */
   ATTR_EXPR_LVAL = 1 << 0,    /* refers to an assignable location */
   ATTR_STMT_DEFAULT = 1 << 1, /* switch statement has a default label */
-  ATTR_EXPR_CONST = 1 << 2,   /* node refers to a valid constant expression */
-  ATTR_CONST_INIT = 1 << 3,   /* constant expression is only for initializers */
-  ATTR_CONST_ADDR = 1 << 4,   /* constant expression includes an address */
-  NUM_ATTRIBUTES = 5,         /* number of attribute flags */
-  ATTR_MASK_CONST = ATTR_EXPR_CONST | ATTR_CONST_INIT | ATTR_CONST_ADDR
+  ATTR_CONST_NONE = 0,        /* not a constant expression */
+  ATTR_CONST_MAYBE = 1 << 2,  /* can become constant expression */
+  ATTR_CONST_INIT = 1 << 3,   /* valid initializer constexpr */
+  ATTR_CONST_INT = 3 << 2,    /* valid integral constexpr */
+  NUM_ATTRIBUTES = 4,         /* number of attribute flags */
+  ATTR_MASK_CONST = ATTR_CONST_INT
 };
 
 typedef struct astree {
@@ -25,15 +26,13 @@ typedef struct astree {
   SymbolTable *symbol_table; /* symbol table for scope, if applicable */
   ListIter *first_instr;
   ListIter *last_instr;
-  union {
-    struct {
-      long disp;
-      const char *label;
-      SymbolValue *symval;
-    } address;
-    struct {
-      unsigned long value;
+  struct {
+    union {
+      signed long signed_value;
+      unsigned long unsigned_value;
     } integral;
+    const char *label;
+    SymbolValue *symval;
   } constant;
   Location loc; /* source location */
   size_t jump_id;
@@ -46,7 +45,7 @@ typedef struct astree {
 
 #define EMPTY_EXPR_VALUE                                                   \
   {                                                                        \
-    NULL, ";", NULL, NULL, NULL, {{0L, NULL, NULL}}, LOC_EMPTY_VALUE, 0UL, \
+    NULL, ";", NULL, NULL, NULL, {{0L}, NULL, NULL}, LOC_EMPTY_VALUE, 0UL, \
         0UL, 0UL, BLIB_LLIST_EMPTY, ';', ATTR_NONE                         \
   }
 #define UNWRAP(node) \
