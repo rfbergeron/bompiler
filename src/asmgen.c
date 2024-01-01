@@ -22,6 +22,7 @@
 #define MAX_IDENT_LEN 31
 #define MAX_INSTR_DEBUG_LENGTH 4096
 #define MAX_OPERAND_DEBUG_LENGTH 1024
+#define ARRAY_ELEM_COUNT(array) (sizeof(array) / sizeof((array)[0]))
 
 #define GENERATE_STRING(CODE, TYPE, BOOL, WRITES) #CODE,
 #define GENERATE_TYPE(CODE, TYPE, BOOL, WRITES) \
@@ -70,26 +71,20 @@ static const char FN_PTR_FMT[] = "%s@GOTPCREL";
  * preserved registers: rbx, rsp, rbp, r12-r15
  * other registers: r10, r11
  */
-static const size_t RAX_VREG = 0;
-static const size_t RCX_VREG = 1;
-static const size_t RDX_VREG = 2;
-static const size_t RBX_VREG = 3;
-const size_t RSP_VREG = 4;
-const size_t RBP_VREG = 5;
-static const size_t RSI_VREG = 6;
-static const size_t RDI_VREG = 7;
 static const size_t PARAM_REGS[] = {RDI_VREG, RSI_VREG, RDX_VREG,
-                                    RCX_VREG, 8,        9};
+                                    RCX_VREG, R8_VREG,  R9_VREG};
+static const size_t PARAM_REG_COUNT = ARRAY_ELEM_COUNT(PARAM_REGS);
 static const size_t RETURN_REGS[] = {RAX_VREG, RDX_VREG};
-static const size_t PRESERVED_REGS[] = {RBX_VREG, RSP_VREG, RBP_VREG, 12,
-                                        13,       14,       15};
-const size_t VOLATILE_REGS[] = {
-    RAX_VREG, RDX_VREG, RCX_VREG, RSI_VREG, RDI_VREG, 8, 9, 10, 11};
-static const size_t PARAM_REG_COUNT = 6;
-/* static const size_t RETURN_REG_COUNT = 2; */
-static const size_t PRESERVED_REG_COUNT = 7;
-const size_t VOLATILE_REG_COUNT = 9;
-const size_t REAL_REG_COUNT = PRESERVED_REG_COUNT + VOLATILE_REG_COUNT;
+/* #define RETURN_REG_COUNT ARRAY_ELEM_COUNT(RETURN_REGS) */
+static const size_t PRESERVED_REGS[] = {RBX_VREG, RSP_VREG, RBP_VREG, R12_VREG,
+                                        R13_VREG, R14_VREG, R15_VREG};
+static const size_t PRESERVED_REG_COUNT = ARRAY_ELEM_COUNT(PRESERVED_REGS);
+const size_t VOLATILE_REGS[] = {RAX_VREG, RDX_VREG, RCX_VREG,
+                                RSI_VREG, RDI_VREG, R8_VREG,
+                                R9_VREG,  R10_VREG, R11_VREG};
+const size_t VOLATILE_REG_COUNT = ARRAY_ELEM_COUNT(VOLATILE_REGS);
+const size_t REAL_REG_COUNT =
+    ARRAY_ELEM_COUNT(PRESERVED_REGS) + ARRAY_ELEM_COUNT(VOLATILE_REGS);
 /* number of eightbytes occupied by the function prologue on the stack */
 static const size_t PROLOGUE_EIGHTBYTES = 8;
 static const char VREG_REG_TABLE[][5] = {
@@ -1794,7 +1789,7 @@ ASTree *translate_call(ASTree *call) {
   InstructionData *load_fn_data = instr_init(OP_MOV);
   load_fn_data->src = fn_pointer_data->dest;
   /* use r10 or r11 since those are never used for args */
-  set_op_reg(&load_fn_data->dest, type_get_width(fn_pointer->type), 11);
+  set_op_reg(&load_fn_data->dest, type_get_width(fn_pointer->type), R11_VREG);
   InstructionData *call_data = instr_init(OP_CALL);
   call_data->dest = load_fn_data->dest;
   status = llist_push_back(instructions, load_fn_data);

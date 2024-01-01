@@ -56,6 +56,7 @@ int skip_type_check = 0;
 int skip_asm = 0;
 int skip_allocator = 0;
 int skip_liveness = 0;
+int skip_diagnostics = 0;
 int stdin_tmp_fileno;
 
 void destroy_cpp_args(void) {
@@ -67,7 +68,7 @@ void destroy_cpp_args(void) {
 void scan_options(int argc, char **argv) {
   opterr = 0;
   for (;;) {
-    int option = getopt(argc, argv, "@:D:I:lycaAL");
+    int option = getopt(argc, argv, "@:D:I:lycaALd");
 
     if (option == EOF) break;
     switch (option) {
@@ -108,6 +109,9 @@ void scan_options(int argc, char **argv) {
         break;
       case 'L':
         skip_liveness = 1;
+        break;
+      case 'd':
+        skip_diagnostics = 1;
         break;
       default:
         fprintf(stderr, "-%c: invalid option\n", (char)optopt);
@@ -258,10 +262,12 @@ int main(int argc, char **argv) {
     goto cleanup;
   }
 
+  if (skip_diagnostics) goto skip_diagnostics;
   string_set_print(strfile);
   astree_print_symbols(UNWRAP(parser_root), symfile, 0);
   astree_print_tree(UNWRAP(parser_root), astfile, 0);
   generator_debug_il(ilfile);
+skip_diagnostics:
   if (skip_asm) goto skip_asm;
   generator_print_il(asmfile);
 skip_asm:
