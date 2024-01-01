@@ -1021,7 +1021,7 @@ ASTree *finalize_tag_def(ASTree *tag) {
 ASTree *define_enumerator(ASTree *enum_, ASTree *ident_node, ASTree *equal_sign,
                           ASTree *expr) {
   ASTree *left_brace =
-      astree_get(enum_, astree_count(UNWRAP(enum_)) == 2 ? 1 : 0);
+      astree_get(UNWRAP(enum_), astree_count(UNWRAP(enum_)) == 2 ? 1 : 0);
   if (enum_->symbol == TOK_TYPE_ERROR) {
     /* ASTree *real_enum = astree_get(enum_, 0); */
     if (equal_sign != NULL) {

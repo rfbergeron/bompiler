@@ -204,6 +204,7 @@ static void update_liveness(InstructionData *data, Operand *operand) {
     case MODE_NONE:
     case MODE_DIRECT:
     case MODE_IMMEDIATE:
+    case MODE_PIC:
       break;
     case MODE_REGISTER:
       if (operand->reg.num < REAL_REG_COUNT) break;
@@ -234,10 +235,6 @@ static void update_liveness(InstructionData *data, Operand *operand) {
                        (data->persist_flags & PERSIST_DEST_SET)) ||
                           (operand == &data->src &&
                            (data->persist_flags & PERSIST_SRC_SET)));
-      break;
-    case MODE_PIC:
-      operand->pic.next_use = operand->pic.symval->next_use;
-      operand->pic.symval->next_use = data;
       break;
     case MODE_SCALE:
       if (operand->sca.base < REAL_REG_COUNT) goto skip_base;

@@ -12,8 +12,8 @@
 #include "yyparse.h"
 
 #define MIN(x, y) ((x) > (y) ? (y) : (x))
-#define GENERIC_SELECT(optext, dest_value, common_type, left_value,           \
-                       right_value)                                           \
+#define BINARY_SELECT(optext, dest_value, common_type, left_value,            \
+                      right_value)                                            \
   do {                                                                        \
     if (type_get_width(common_type) == X64_SIZEOF_LONG) {                     \
       if (type_is_unsigned(common_type)) {                                    \
@@ -37,22 +37,22 @@
            type_is_arithmetic(left->type) && type_is_arithmetic(right->type)); \
     if (type_is_unsigned(left->type)) {                                        \
       if (type_is_unsigned(right->type)) {                                     \
-        GENERIC_SELECT(optext, dest_value, common_type,                        \
-                       left->constant.integral.unsigned_value,                 \
-                       right->constant.integral.unsigned_value);               \
+        BINARY_SELECT(optext, dest_value, common_type,                         \
+                      left->constant.integral.unsigned_value,                  \
+                      right->constant.integral.unsigned_value);                \
       } else {                                                                 \
-        GENERIC_SELECT(optext, dest_value, common_type,                        \
-                       left->constant.integral.unsigned_value,                 \
-                       right->constant.integral.signed_value);                 \
+        BINARY_SELECT(optext, dest_value, common_type,                         \
+                      left->constant.integral.unsigned_value,                  \
+                      right->constant.integral.signed_value);                  \
       }                                                                        \
     } else if (type_is_unsigned(right->type)) {                                \
-      GENERIC_SELECT(optext, dest_value, common_type,                          \
-                     left->constant.integral.signed_value,                     \
-                     right->constant.integral.unsigned_value);                 \
+      BINARY_SELECT(optext, dest_value, common_type,                           \
+                    left->constant.integral.signed_value,                      \
+                    right->constant.integral.unsigned_value);                  \
     } else {                                                                   \
-      GENERIC_SELECT(optext, dest_value, common_type,                          \
-                     left->constant.integral.signed_value,                     \
-                     right->constant.integral.signed_value);                   \
+      BINARY_SELECT(optext, dest_value, common_type,                           \
+                    left->constant.integral.signed_value,                      \
+                    right->constant.integral.signed_value);                    \
     }                                                                          \
   } while (0)
 #define COMPARATOR_SELECT(optext, dest_value, common_type, left_value,        \
@@ -85,7 +85,11 @@
           type_arithmetic_conversions(&common_type, left->type, right->type);  \
       if (status) abort();                                                     \
     }                                                                          \
-    if (type_is_unsigned(left->type)) {                                        \
+    if (left->constant.label != NULL) {                                        \
+      comparator->constant.integral.signed_value =                             \
+          left->constant.integral.signed_value optext                          \
+              right->constant.integral.signed_value;                           \
+    } else if (type_is_unsigned(left->type)) {                                 \
       if (type_is_unsigned(right->type)) {                                     \
         COMPARATOR_SELECT(optext, comparator->constant.integral.signed_value,  \
                           common_type, left->constant.integral.unsigned_value, \
@@ -192,15 +196,15 @@
       maybe_load_cexpr(left, right->first_instr);                             \
       return optrans(operator, left, right);                                  \
     }
-#define UNOP_CASE(opchar, optext, optrans)                            \
-  case opchar:                                                        \
-    if ((operator->attributes & ATTR_MASK_CONST) == ATTR_CONST_INT) { \
-      operator->attributes |= ATTR_CONST_INT;                         \
-      UNARY_EVAL(optext, operator, operand);                          \
-      return astree_adopt(operator, 1, operand);                      \
-    } else {                                                          \
-      maybe_load_cexpr(operand, NULL);                                \
-      return optrans(operator, operand);                              \
+#define UNOP_CASE(opchar, optext, optrans)                           \
+  case opchar:                                                       \
+    if ((operand->attributes & ATTR_MASK_CONST) == ATTR_CONST_INT) { \
+      operator->attributes |= ATTR_CONST_INT;                        \
+      UNARY_EVAL(optext, operator, operand);                         \
+      return astree_adopt(operator, 1, operand);                     \
+    } else {                                                         \
+      maybe_load_cexpr(operand, NULL);                               \
+      return optrans(operator, operand);                             \
     }
 
 /* NOTE: the lexer only parses numbers as unsigned values; if it attempted to
@@ -458,7 +462,8 @@ ASTree *evaluate_subtraction(ASTree *subtraction, ASTree *left, ASTree *right) {
       subtraction->constant.integral.signed_value -=
           (long)(right->constant.integral.unsigned_value * stride);
   } else {
-    subtraction->attributes |= ATTR_CONST_INIT;
+    subtraction->attributes |= MIN(left->attributes & ATTR_MASK_CONST,
+                                   right->attributes & ATTR_MASK_CONST);
     if (left->constant.label != right->constant.label) {
       subtraction->constant.label = left->constant.label;
       subtraction->constant.symval = left->constant.symval;
@@ -505,6 +510,9 @@ ASTree *evaluate_relational(ASTree *relational, ASTree *left, ASTree *right) {
   if ((left->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT ||
       (right->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT ||
       left->constant.label != right->constant.label) {
+    maybe_load_cexpr(right, NULL);
+    maybe_load_cexpr(left, right->first_instr);
+    return translate_comparison(relational, left, right);
   }
 
   relational->attributes |= MIN(left->attributes & ATTR_MASK_CONST,
@@ -536,10 +544,6 @@ ASTree *evaluate_equality(ASTree *equality, ASTree *left, ASTree *right) {
       (left->constant.label != right->constant.label &&
        (left->constant.integral.signed_value != 0 ||
         right->constant.integral.signed_value != 0))) {
-    /* TODO(Robert): access integral component of constant value using the
-     * appropriate sign based on the type of the operand. may not be
-     * necessary for correct behavior.
-     */
     maybe_load_cexpr(right, NULL);
     maybe_load_cexpr(left, right->first_instr);
     return translate_comparison(equality, left, right);
@@ -547,14 +551,6 @@ ASTree *evaluate_equality(ASTree *equality, ASTree *left, ASTree *right) {
 
   equality->attributes |= MIN(left->attributes & ATTR_MASK_CONST,
                               right->attributes & ATTR_MASK_CONST);
-  Type *common_type;
-  if (type_is_pointer(left->type) || type_is_pointer(right->type)) {
-    common_type = (Type *)TYPE_LONG;
-  } else {
-    int status =
-        type_arithmetic_conversions(&common_type, left->type, right->type);
-    if (status) abort();
-  }
 
   if (left->constant.label != right->constant.label) {
     equality->constant.integral.signed_value = equality->symbol == TOK_NE;
@@ -600,13 +596,33 @@ ASTree *evaluate_cast(ASTree *cast, ASTree *expr) {
                           ? ATTR_CONST_INIT
                           : (expr->attributes & ATTR_MASK_CONST);
 
-  if (expr->constant.label != NULL) {
+  if (expr->constant.label != NULL || !type_is_arithmetic(cast->type)) {
     cast->constant = expr->constant;
   } else {
     UNARY_EVAL(+, cast, expr);
   }
 
   return astree_adopt(cast, 1, expr);
+}
+
+ASTree *evaluate_auto_conv(ASTree *auto_conv, ASTree *expr) {
+  if ((expr->attributes & ATTR_MASK_CONST) == ATTR_CONST_MAYBE &&
+      type_is_pointer(auto_conv->type)) {
+    auto_conv->attributes |= ATTR_CONST_INIT;
+    auto_conv->constant = expr->constant;
+    return astree_adopt(auto_conv, 1, expr);
+  } else if ((expr->attributes & ATTR_MASK_CONST) >= ATTR_CONST_INIT) {
+    auto_conv->attributes |= expr->attributes & ATTR_MASK_CONST;
+    if (type_is_arithmetic(auto_conv->type)) {
+      UNARY_EVAL(+, auto_conv, expr);
+    } else {
+      auto_conv->constant = expr->constant;
+    }
+    return astree_adopt(auto_conv, 1, expr);
+  } else {
+    maybe_load_cexpr(expr, NULL);
+    return translate_cast(auto_conv, expr);
+  }
 }
 
 ASTree *evaluate_conditional(ASTree *qmark, ASTree *condition,

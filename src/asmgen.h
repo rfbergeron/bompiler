@@ -153,9 +153,7 @@ typedef union operand {
   struct oppic {
     AddressMode mode;
     const char *lab;
-    SymbolValue *symval;
     intmax_t disp;
-    struct instruction_data *next_use;
   } pic;
   struct opind {
     AddressMode mode;
@@ -196,8 +194,7 @@ InstructionData *instr_init(Opcode opcode);
 void set_op_reg(Operand *operand, RegWidth width, size_t num);
 void set_op_imm(Operand *operand, uintmax_t val, int is_signed);
 void set_op_dir(Operand *operand, const char *label);
-void set_op_pic(Operand *operand, intmax_t disp, const char *label,
-                SymbolValue *symval);
+void set_op_pic(Operand *operand, intmax_t disp, const char *label);
 void set_op_ind(Operand *operand, intmax_t disp, size_t num);
 void set_op_sca(Operand *operand, IndexScale scale, intmax_t disp, size_t base,
                 size_t index);

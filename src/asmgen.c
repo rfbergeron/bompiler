@@ -247,14 +247,10 @@ void set_op_dir(Operand *operand, const char *label) {
   operand->dir.lab = label;
 }
 
-void set_op_pic(Operand *operand, intmax_t disp, const char *label,
-                SymbolValue *symval) {
-  assert(symval != NULL);
+void set_op_pic(Operand *operand, intmax_t disp, const char *label) {
   operand->pic.mode = MODE_PIC;
   operand->pic.disp = disp;
   operand->pic.lab = label;
-  operand->pic.symval = symval;
-  operand->pic.next_use = NULL;
 }
 
 void set_op_ind(Operand *operand, intmax_t disp, size_t num) {
@@ -721,15 +717,16 @@ ASTree *translate_empty_expr(ASTree *empty_expr) {
 }
 
 void maybe_load_cexpr(ASTree *expr, ListIter *where) {
-  if ((expr->attributes & ATTR_MASK_CONST) >= ATTR_CONST_INIT) {
+  if ((expr->attributes & ATTR_MASK_CONST) != ATTR_CONST_NONE) {
     InstructionData *load_data;
     if (type_is_void(expr->type)) {
       /* emit NOP when casting a constant to void */
       load_data = instr_init(OP_NOP);
-    } else if ((expr->attributes & ATTR_MASK_CONST) == ATTR_CONST_INIT) {
+    } else if (expr->constant.label != NULL) {
+      /* use LEA when expression has an address component */
       load_data = instr_init(OP_LEA);
       set_op_pic(&load_data->src, expr->constant.integral.signed_value,
-                 expr->constant.label, expr->constant.symval);
+                 expr->constant.label);
       set_op_reg(&load_data->dest, REG_QWORD, next_vreg());
       load_data->persist_flags |= PERSIST_DEST_CLEAR;
     } else {
@@ -767,9 +764,9 @@ ASTree *translate_ident(ASTree *ident) {
   if (symval->flags & SYMFLAG_STORE_STAT) {
     if (symval->flags & SYMFLAG_LINK_NONE) {
       set_op_pic(&lea_data->src, NO_DISP,
-                 mk_static_label(ident->lexinfo, symval->static_id), symval);
+                 mk_static_label(ident->lexinfo, symval->static_id));
     } else {
-      set_op_pic(&lea_data->src, NO_DISP, ident->lexinfo, symval);
+      set_op_pic(&lea_data->src, NO_DISP, ident->lexinfo);
     }
   } else {
     set_op_ind(&lea_data->src, symval->disp, RBP_VREG);
@@ -2692,7 +2689,7 @@ ASTree *translate_static_scalar_init(const Type *type, ASTree *initializer,
   InstructionData *data = instr_init(directive);
   if (initializer->constant.label != NULL) {
     set_op_pic(&data->dest, initializer->constant.integral.signed_value,
-               initializer->constant.label, initializer->constant.symval);
+               initializer->constant.label);
   } else if (type_is_unsigned(type)) {
     set_op_imm(&data->dest, initializer->constant.integral.unsigned_value, 1);
   } else {
@@ -2714,7 +2711,7 @@ ASTree *translate_auto_scalar_init(const Type *type, ptrdiff_t disp,
   if (initializer->constant.label != NULL) {
     load_data = instr_init(OP_LEA);
     set_op_pic(&load_data->src, initializer->constant.integral.signed_value,
-               initializer->constant.label, initializer->constant.symval);
+               initializer->constant.label);
   } else if (type_is_unsigned(type)) {
     load_data = instr_init(OP_MOV);
     set_op_imm(&load_data->src, initializer->constant.integral.unsigned_value,
@@ -2809,7 +2806,7 @@ ASTree *translate_auto_literal_init(const Type *arr_type, ptrdiff_t arr_disp,
                                     ASTree *literal, ListIter *where) {
   InstructionData *literal_lea_data = instr_init(OP_LEA);
   set_op_pic(&literal_lea_data->src, literal->constant.integral.signed_value,
-             literal->constant.label, literal->constant.symval);
+             literal->constant.label);
   set_op_reg(&literal_lea_data->dest, REG_QWORD, next_vreg());
   /* need to clear persistence because `bulk_mtom` always sets it */
   literal_lea_data->persist_flags |= PERSIST_DEST_CLEAR;
@@ -2930,6 +2927,7 @@ static ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
      * the actual assignment happens
      */
     assign_stack_space(symval);
+    maybe_load_cexpr(initializer, NULL);
 
     InstructionData *lea_data = instr_init(OP_LEA);
     set_op_ind(&lea_data->src, symval->disp, RBP_VREG);
@@ -3423,11 +3421,10 @@ int operand_debug(Operand *operand, char *str) {
       return sprintf(str,
                      " (PIC):\n"
                      "\t\tSymbol: %p \"%s\"\n"
-                     "\t\tDisplacement: %li\n"
-                     "\t\tNext use: %p\n",
-                     (void *)operand->pic.symval,
+                     "\t\tDisplacement: %li\n",
+                     operand->pic.lab,
                      operand->pic.lab == NULL ? "" : operand->pic.lab,
-                     operand->pic.disp, (void *)operand->pic.next_use);
+                     operand->pic.disp);
     case MODE_INDIRECT:
       return sprintf(str,
                      " (INDIRECT):\n"

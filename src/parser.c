@@ -221,10 +221,6 @@ BCC_YYSTATIC ASTree *parser_make_label(ASTree *ident) {
   return astree_init(TOK_LABEL, ident->loc, "_label");
 }
 
-/* TODO(Robert): make sure that `evaluate_cast` does what it is supposed to here
- * and consider moving to a different location. including `evaluate.h` just for
- * this function seems a little silly.
- */
 BCC_YYSTATIC ASTree *parser_make_auto_conv(ASTree *tree, int convert_arrays) {
   if (tree->type == NULL || (!type_is_function(tree->type) &&
                              !(convert_arrays && type_is_array(tree->type))))
@@ -232,7 +228,7 @@ BCC_YYSTATIC ASTree *parser_make_auto_conv(ASTree *tree, int convert_arrays) {
   ASTree *auto_conv = astree_init(TOK_AUTO_CONV, tree->loc, "_auto_conv");
   int status = type_pointer_conversions(&auto_conv->type, tree->type);
   if (status) abort();
-  return evaluate_cast(auto_conv, tree);
+  return evaluate_auto_conv(auto_conv, tree);
 }
 
 BCC_YYSTATIC ASTree *parser_make_attributes_list(void) {
