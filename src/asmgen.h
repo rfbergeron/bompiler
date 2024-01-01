@@ -87,6 +87,23 @@
   GENERATOR(DATA, OPTYPE_DIRECTIVE, 0, 0)    \
   GENERATOR(FILE, OPTYPE_DIRECTIVE, 0, 0)
 
+#define RAX_VREG 0UL
+#define RCX_VREG 1UL
+#define RDX_VREG 2UL
+#define RBX_VREG 3UL
+#define RSP_VREG 4UL
+#define RBP_VREG 5UL
+#define RSI_VREG 6UL
+#define RDI_VREG 7UL
+#define R8_VREG 8UL
+#define R9_VREG 9UL
+#define R10_VREG 10UL
+#define R11_VREG 11UL
+#define R12_VREG 12UL
+#define R13_VREG 13UL
+#define R14_VREG 14UL
+#define R15_VREG 15UL
+
 #define GENERATE_ENUM(CODE, TYPE, BOOL, WRITES) OP_##CODE,
 typedef enum opcode { FOREACH_OPCODE(GENERATE_ENUM) OPCODE_COUNT } Opcode;
 #undef GENERATE_ENUM
@@ -181,8 +198,6 @@ typedef struct instruction_data {
   Operand src;
 } InstructionData;
 
-extern const size_t RSP_VREG;
-extern const size_t RBP_VREG;
 extern const size_t REAL_REG_COUNT;
 extern const size_t VOLATILE_REGS[];
 extern const size_t VOLATILE_REG_COUNT;
