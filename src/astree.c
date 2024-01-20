@@ -208,6 +208,9 @@ ASTree *astree_create_errnode(ASTree *child, ErrorCode code, size_t info_size,
   }
 }
 
+/* TODO(Robert): consider giving this function the ability to correctly
+ * propogate error nodes for more complex tree structures, like enums
+ */
 ASTree *astree_propogate_errnode(ASTree *parent, ASTree *child) {
   if (child->symbol != TOK_TYPE_ERROR) {
     (void)astree_adopt(UNWRAP(parent), 1, child);

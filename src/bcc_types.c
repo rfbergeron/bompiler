@@ -834,6 +834,7 @@ int types_equivalent(const Type *type1, const Type *type2,
     case TYPE_CODE_ARRAY:
       type_strip_declarator(&stripped_type1, type1);
       type_strip_declarator(&stripped_type2, type2);
+      /* TODO(Robert): check if both arrays have deduced length */
       return type1->array.length == type2->array.length &&
              types_equivalent(stripped_type1, stripped_type2, ignore_qualifiers,
                               ignore_storage_class);
