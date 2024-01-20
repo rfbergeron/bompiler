@@ -8,9 +8,15 @@
 #include "stdlib.h"
 
 /* TODO(Robert): make naming consistent */
-/* TODO(Robert): Type: make sure that type information is propogated correctly,
- * meaning mostly that the type of syntax tree nodes is set to `NULL` when it
- * gets moved up the tree
+/* TODO(Robert): because init lists are hard to type check, all type checking
+ * for initializers should occur in `init.c`, not here, and occurrs
+ * simultaneously with code generation. currently, `traverse_initializer`
+ * can't handle struct/union assignment when the initializer is not an
+ * initializer list.
+ *
+ * in short, initialization is a mess and the code that performs it is all
+ * over the place. it would be nice if it was all togther so that i don't
+ * forget to do any type checking, like i did before
  */
 
 /* tags will need two passes to define their members: the first for inserting
@@ -18,8 +24,7 @@
  * the members and put them into an auxspec
  */
 ASTree *validate_tag_typespec(ASTree *spec_list, ASTree *tag) {
-  if (!type_is_none(spec_list->type) ||
-      type_add_flags(tag->type, type_get_flags(spec_list->type)))
+  if (type_add_flags(tag->type, type_get_flags(spec_list->type)))
     return astree_create_errnode(astree_adopt(spec_list, 1, tag),
                                  BCC_TERR_INCOMPATIBLE_SPEC, 2, spec_list, tag);
 
@@ -228,6 +233,8 @@ static int linkage_valid(unsigned int new_flags, unsigned int old_flags) {
 static int is_array_completion(const Type *new_type, const Type *old_type) {
   if (!type_is_array(new_type) || !type_is_array(old_type))
     return 0;
+  else if (!new_type->array.deduce_length && !old_type->array.deduce_length)
+    return 0;
   else if (new_type->array.length != 0 && old_type->array.length != 0)
     return 0;
 
@@ -297,9 +304,6 @@ ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
     if (status) abort();
   }
 
-  /* TODO(Robert): determine if type names need to have a symbol defined for
-   * them for any reason
-   */
   if (declarator->symbol == TOK_TYPE_NAME) return declarator;
 
   const char *identifier = declarator->symbol == TOK_TYPE_NAME
@@ -322,12 +326,24 @@ ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
       if (status) abort();
       declarator->type = exists->type;
       return declarator;
-      /* TODO(Robert): i'm not sure what the point of this is... */
     } else if (is_array_completion(declarator->type, exists->type)) {
-      int status = type_destroy(exists->type);
-      if (status) abort();
-      exists->type = declarator->type;
-      declarator->type = exists->type;
+      if (exists->type->array.length == 0 &&
+          declarator->type->array.length != 0) {
+        /* replace type information in place since it may have been used */
+        /* TODO(Robert): add a function `type_replace` or similar that replaces
+         * type information in place
+         */
+        exists->type->array.deduce_length =
+            declarator->type->array.deduce_length;
+        exists->type->array.length = declarator->type->array.length;
+        int status = type_destroy(declarator->type);
+        if (status) abort();
+        declarator->type = exists->type;
+      } else {
+        int status = type_destroy(declarator->type);
+        if (status) abort();
+        declarator->type = exists->type;
+      }
       return declarator;
     } else if (type_is_function(exists->type) &&
                type_is_function(declarator->type)) {
@@ -349,12 +365,6 @@ ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
           /* give existing symbol a prototype; the existing type info may have
            * already been used elsewhere so we need to replace the contents
            * of the type info in place
-           */
-          /* TODO(Robert): because the type checker should consider any
-           * arguments to a function without a prototype to be valid, the
-           * assembly generator should use the argument list and not the
-           * parameter list to marshal arguments for calls to old-style
-           * functions
            */
           assert(exists->type->function.parameters == NULL);
           *(exists->type) = *(declarator->type);
@@ -666,48 +676,14 @@ ASTree *define_symbol(ASTree *decl_list, ASTree *equal_sign,
         BCC_TERR_REDEFINITION, 1, declarator);
   symval->flags |= SYMFLAG_DEFINED;
   equal_sign->type = declarator->type;
-  /* TODO(Robert): because init lists are hard to type check, all type checking
-   * for initializers should occur in `init.c`, not here, and occurrs
-   * simultaneously with code generation. currently, `traverse_initializer`
-   * can't handle struct/union assignment when the initializer is not an
-   * initializer list.
-   *
-   * in short, initialization is a mess and the code that performs it is all
-   * over the place. it would be nice if it was all togther so that i don't
-   * forget to do any type checking, like i did before
+  /* code is emitted by `validate_fnbody_content`, `validate_topdecl`, or
+   * `validate_block_content` and type checking is performed in `init.c`
    */
-  /* TODO(Robert): do not allow string literals or initializer lists to exceed
-   * capacity for fixed size arrays, either here or in init.c
-   */
-  /* TODO(Robert): according to the standard, attempting to modify a string
-   * literal is undefined behavior, and the type of a string literal is
-   * `char []`. It is not const-qualified. However, the compiler marks string
-   * literals as `const` and stores them in read-only memory. I am not sure if
-   * this behavior is standards-compliant.
-   */
-  if (initializer->symbol != TOK_INIT_LIST &&
-      !((type_is_char_array(declarator->type) ||
-         type_is_pointer(declarator->type)) &&
-        initializer->symbol == TOK_STRINGCON) &&
-      !types_assignable(declarator->type, initializer->type,
-                        astree_is_const_zero(initializer))) {
-    return astree_create_errnode(
-        astree_adopt(decl_list, 1,
-                     astree_adopt(equal_sign, 2, declarator, initializer)),
-        BCC_TERR_INCOMPATIBLE_TYPES, 3, equal_sign, declarator->type,
-        initializer->type);
-  } else {
-    /* wait to emit code until `finalize_declaration` */
-    return astree_adopt(decl_list, 1,
-                        astree_adopt(equal_sign, 2, declarator, initializer));
-  }
+  return astree_adopt(decl_list, 1,
+                      astree_adopt(equal_sign, 2, declarator, initializer));
 }
 
 ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
-  /* TODO(Robert): make sure that the declaration location is that of the
-   * earliest forward declaration, but that the names of the parameters are
-   * from the actual definition of the function.
-   */
   declarator = validate_declaration(declaration, declarator);
   if (declaration->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(declaration, 2, declarator, body);
@@ -720,13 +696,10 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
                                           strlen(declarator->lexinfo), &symval);
   assert(in_current_scope);
   assert(symval != NULL);
-  if (!type_is_function(symval->type)) {
-    return astree_create_errnode(astree_adopt(declaration, 2, declarator, body),
-                                 BCC_TERR_EXPECTED_FUNCTION, 1, declarator);
-  } else if (symval->flags & SYMFLAG_DEFINED) {
+  assert(type_is_function(symval->type));
+  if (symval->flags & SYMFLAG_DEFINED)
     return astree_create_errnode(astree_adopt(declaration, 2, declarator, body),
                                  BCC_TERR_REDEFINITION, 1, declarator);
-  }
 
   /* param list should be first child for properly defined functions */
   ASTree *param_list = astree_get(declarator, 0);
@@ -750,19 +723,11 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
     param_list->symbol_table = NULL;
   }
   int status = state_push_table(state, body->symbol_table);
-  if (status) {
-    return astree_create_errnode(astree_adopt(declaration, 2, declarator, body),
-                                 BCC_TERR_LIBRARY_FAILURE, 0);
-  }
+  if (status) abort();
 
-  /* TODO(Robert): set function to a dummy value even in the event of failure so
-   * that return statements in the body may be processed in some way
-   */
   assert(declarator->symbol == TOK_IDENT);
   status = state_set_function(state, declarator->lexinfo, symval);
-  if (status)
-    return astree_create_errnode(astree_adopt(declaration, 2, declarator, body),
-                                 BCC_TERR_FAILURE, 0);
+  if (status) abort();
   return begin_translate_fn(declaration, declarator, body);
 }
 
@@ -908,11 +873,12 @@ ASTree *validate_tag_decl(ASTree *tag_type_node, ASTree *tag_name_node) {
         return astree_adopt(tag_type_node, 1, tag_name_node);
       }
     } else {
-      /* TODO(Robert): error handling */
-      TagValue *tag_value = NULL;
+      TagValue *tag_value;
       if (tag_type != exists->tag) {
         tag_value = tag_value_init(tag_type);
-        assert(!state_insert_tag(state, tag_name, tag_name_len, tag_value));
+        if (tag_value == NULL) abort();
+        if (!state_insert_tag(state, tag_name, tag_name_len, tag_value))
+          abort();
       } else {
         tag_value = exists;
       }
@@ -924,10 +890,10 @@ ASTree *validate_tag_decl(ASTree *tag_type_node, ASTree *tag_name_node) {
       return astree_adopt(tag_type_node, 1, tag_name_node);
     }
   } else if (tag_type != TAG_ENUM) {
-    /* TODO(Robert): error handling */
     TagValue *tag_value = tag_value_init(tag_type);
-    assert(!state_insert_tag(state, tag_name, tag_name_len, tag_value));
-    int status =
+    int status = state_insert_tag(state, tag_name, tag_name_len, tag_value);
+    if (status) abort();
+    status =
         type_init_tag(&tag_type_node->type, QUAL_FLAG_NONE | STOR_FLAG_NONE,
                       tag_name, tag_value);
     if (status) abort();
@@ -952,13 +918,13 @@ ASTree *validate_tag_def(ASTree *tag_type_node, ASTree *tag_name_node,
         astree_adopt(tag_type_node, 2, tag_name_node, left_brace),
         BCC_TERR_REDEFINITION, 1, tag_name_node);
   } else {
-    /* TODO(Robert): error handling */
     TagValue *tag_value;
     if (exists && is_redeclaration) {
       tag_value = exists;
     } else {
       tag_value = tag_value_init(tag_type);
-      assert(!state_insert_tag(state, tag_name, tag_name_len, tag_value));
+      if (tag_value == NULL) abort();
+      if (!state_insert_tag(state, tag_name, tag_name_len, tag_value)) abort();
     }
 
     int status =
@@ -989,12 +955,9 @@ ASTree *finalize_tag_def(ASTree *tag) {
   ASTree *errnode = NULL;
   if (tag->symbol == TOK_TYPE_ERROR) {
     errnode = tag;
-    tag = astree_get(tag, 0);
+    tag = UNWRAP(tag);
   }
 
-  /* TODO(Robert): Type: make sure that all type information has been processed
-   * correctly by this point; before the base type and alignment were set here
-   */
   TagValue *tag_value = tag->type->tag.value;
   tag_value->is_defined = 1;
 
@@ -1004,10 +967,13 @@ ASTree *finalize_tag_def(ASTree *tag) {
       SymbolTable *member_scope =
           llist_pop_back(&tag_value->data.enumerators.struct_name_spaces);
       assert(member_scope != NULL);
-      assert(!state_push_table(state, member_scope));
+      if (!state_push_table(state, member_scope)) abort();
     }
   } else {
-    assert(!state_pop_table(state));
+    /* pop member scope from stack */
+    if (state_peek_table(state) == tag_value->data.members.by_name &&
+        !state_pop_table(state))
+      abort();
     /* pad aggregate so that it can tile an array */
     if (tag_value->alignment != 0) {
       size_t padding =
@@ -1073,13 +1039,9 @@ ASTree *define_enumerator(ASTree *enum_, ASTree *ident_node, ASTree *equal_sign,
 
   TagValue *tagval = symval->type->tag.value;
   if (equal_sign != NULL) {
-    /* TODO?(Robert): evaluate enumeration constants */
     if (expr->symbol == TOK_TYPE_ERROR) {
       ASTree *errnode = astree_propogate_errnode(
           astree_adopt(equal_sign, 1, ident_node), expr);
-      /* TODO?(Robert): have error propogation function handle more complex
-       * syntax tree structures
-       */
       return astree_propogate_errnode(enum_, errnode);
     }
     if ((expr->attributes & ATTR_MASK_CONST) != ATTR_CONST_INT) {

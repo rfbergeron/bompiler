@@ -12,6 +12,10 @@
 #include "state.h"
 #include "symtable.h"
 
+/* TODO(Robert): make sure that function calls emit correct code when calling
+ * a function that has not been prototyped
+ */
+
 #define MAX_OPCODE_LENGTH 8
 #define MAX_OPERAND_LENGTH 64
 #define MAX_LABEL_LENGTH 64

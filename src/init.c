@@ -4,6 +4,9 @@
 #include "assert.h"
 #include "tchk_decl.h"
 
+/* TODO(Robert): perform type checking for all initializers here. this should
+ * be as simple as adding a call to `types_assignable` in `init_scalar`
+ */
 /* TODO(Robert): do not allow string literals or initializer lists to exceed
  * capacity for fixed size arrays, either here or in tchk_decl.c
  */
@@ -49,6 +52,7 @@ static ASTree *init_scalar(const Type *type, ptrdiff_t disp,
   }
 }
 
+/* TODO(Robert): handle initialization of pointers to char */
 static ASTree *init_literal(Type *arr_type, ptrdiff_t arr_disp, ASTree *literal,
                             ListIter *where) {
   /* subtract 2 for quotes */

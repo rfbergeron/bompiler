@@ -268,6 +268,9 @@ void state_push_continue_id(CompilerState *state, size_t id) {
 
 void state_dec_jump_id_count(CompilerState *state) { --state->jump_id_count; }
 
+/* TODO(Robert): this function should not return an error code; if it fails it
+ * means that something is very wrong and it would probably be best to die
+ */
 int state_set_function(CompilerState *state, const char *function_name,
                        SymbolValue *function_symval) {
   if (state->enclosing_function != NULL) {
