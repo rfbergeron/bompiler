@@ -350,7 +350,7 @@ int type_is_integer(const Type *type) {
           (type->base.flags & SPEC_FLAG_LOW_MASK) == SPEC_FLAG_CHAR);
 }
 
-/* TODO(Robert): should this return true for pointers? */
+/* pointers are not considered signed or unsigend */
 int type_is_signed(const Type *type) {
   return type_is_integer(type) && !(type->base.flags & SPEC_FLAG_UNSIGNED);
 }
@@ -464,7 +464,9 @@ int type_is_const(const Type *type) {
     case TYPE_CODE_POINTER:
       return !!(type->pointer.qualifiers & QUAL_FLAG_CONST);
     case TYPE_CODE_ARRAY:
-      /* TODO(Robert): determine if arrays should be considered const */
+      /* arrays are not const, they are non-assignable lvalues. arrays may not
+       * have qualifiers, but their elements can.
+       */
       return 0;
     case TYPE_CODE_BASE:
       return !!(type->base.flags & QUAL_FLAG_CONST);
@@ -550,9 +552,6 @@ int type_is_declarator(const Type *type) {
 
 int type_is_none(const Type *type) { return type->any.code == TYPE_CODE_NONE; }
 
-/* TODO(Robert): make sure that the incompleteness check on arrays with deduced
- * length makes sense
- */
 int type_is_incomplete(const Type *type) {
   if (type_is_void(type) || type_is_none(type)) {
     return 1;
@@ -794,9 +793,6 @@ static int params_equivalent(const Type *type1, const Type *type2) {
   return 1;
 }
 
-/* TODO(Robert): determine if this function should report pointer and array
- * declarators as being equivalent. for now, they are not
- */
 int types_equivalent(const Type *type1, const Type *type2,
                      int ignore_qualifiers, int ignore_storage_class) {
   if (type1->any.code != type2->any.code) return 0;
@@ -834,8 +830,8 @@ int types_equivalent(const Type *type1, const Type *type2,
     case TYPE_CODE_ARRAY:
       type_strip_declarator(&stripped_type1, type1);
       type_strip_declarator(&stripped_type2, type2);
-      /* TODO(Robert): check if both arrays have deduced length */
-      return type1->array.length == type2->array.length &&
+      return type1->array.deduce_length == type2->array.deduce_length &&
+             type1->array.length == type2->array.length &&
              types_equivalent(stripped_type1, stripped_type2, ignore_qualifiers,
                               ignore_storage_class);
     case TYPE_CODE_FUNCTION:
@@ -849,17 +845,14 @@ int types_equivalent(const Type *type1, const Type *type2,
   }
 }
 
+/* TODO(Robert): consider checking to make sure that the destination is not
+ * const-qualified here instead of elsewhere
+ */
 int types_assignable(const Type *dest, const Type *src, int is_const_zero) {
   if (type_is_arithmetic(dest) && type_is_arithmetic(src)) {
     return 1;
   } else if ((type_is_struct(dest) && type_is_struct(src)) ||
              (type_is_union(dest) && type_is_union(src))) {
-    /* TODO(Robert): determine why `types_equivalent` wasn't used here before */
-    /*
-    AuxSpec *dest_aux = llist_front(&dest->auxspecs);
-    AuxSpec *src_aux = llist_front(&src->auxspecs);
-    return dest_aux->data.tag.val == src_aux->data.tag.val;
-    */
     return types_equivalent(dest, src, 1, 1);
   } else if (type_is_pointer(dest) && type_is_pointer(src)) {
     if (types_equivalent(dest, src, 1, 1)) {
@@ -882,12 +875,6 @@ int types_initializable(const Type *dest, const Type *src,
     return 1;
   } else if ((type_is_struct(dest) && type_is_struct(src)) ||
              (type_is_union(dest) && type_is_union(src))) {
-    /* TODO(Robert): determine why `types_equivalent` wasn't used here before */
-    /*
-    AuxSpec *dest_aux = llist_front(&dest->auxspecs);
-    AuxSpec *src_aux = llist_front(&src->auxspecs);
-    return dest_aux->data.tag.val == src_aux->data.tag.val;
-    */
     return types_equivalent(dest, src, 1, 1);
   } else if (type_is_pointer(dest) && type_is_pointer(src)) {
     if (types_equivalent(dest, src, 1, 1)) {
@@ -1063,8 +1050,6 @@ int type_common_qualified_pointer(Type **out, const Type *type1,
   return 0;
 }
 
-/* TODO(Robert): calculate appropriate capacity */
-/* TODO(Robert): make sure this works */
 int type_merge_errors(Type *dest, Type *src) {
   assert(dest->any.code == TYPE_CODE_ERROR && src->any.code == TYPE_CODE_ERROR);
   size_t new_cap = dest->error.errors_cap > src->error.errors_cap
@@ -1086,7 +1071,6 @@ int type_merge_errors(Type *dest, Type *src) {
 }
 
 /* TODO(Robert): create macro or data structure for self-resizing array */
-/* TODO(Robert): make sure this works */
 int type_append_error(Type *type, CompileError *error) {
   assert(type->any.code == TYPE_CODE_ERROR);
   if (type->error.errors_size == type->error.errors_cap) {
@@ -1101,30 +1085,26 @@ int type_append_error(Type *type, CompileError *error) {
   return 0;
 }
 
-/* TODO(Robert): validity check won't work if new_flags has a mixture of type
- * specifiers, type qualifiers, and storage class specifiers. Currently, this
- * is not an issue, but it could be in the future. If this function were able
- * to handle any valid combinations of flags as its operands, it would reduce
- * the number of checks that need to be performed before calling.
- */
 static int flags_valid(unsigned int old_flags, unsigned int new_flags,
                        int allow_stor_flags, int allow_spec_flags) {
-  if (new_flags & QUAL_FLAG_MASK) {
-    return !(new_flags & old_flags);
-  } else if (new_flags & STOR_FLAG_MASK) {
-    return allow_stor_flags && !(old_flags & STOR_FLAG_MASK);
+  if (new_flags & QUAL_FLAG_MASK & old_flags) {
+    return 0; /* duplicate qualifier */
+  } else if ((new_flags & STOR_FLAG_MASK) && (old_flags & STOR_FLAG_MASK)) {
+    return 0; /* multiple storage class specifiers */
+  } else if (!allow_stor_flags && (new_flags & STOR_FLAG_MASK)) {
+    return 0; /* flagset cannot accept storage class specifiers */
   } else if (!allow_spec_flags && (new_flags & SPEC_FLAG_MASK)) {
-    return 0;
+    return 0; /* flagset cannot accept type specifiers */
   } else {
-    /* mask out qualifiers and storage class since new flags aren't those */
-    old_flags &= SPEC_FLAG_MASK;
+    /* mask out qualifiers and storage class since they are valid */
+    old_flags &= SPEC_FLAG_MASK, new_flags &= SPEC_FLAG_MASK;
     switch (new_flags) {
       case SPEC_FLAG_NONE: /* also SPEC_FLAG_INT */
         return 1;
       case SPEC_FLAG_FLOAT:
         /* fallthrough */
       case SPEC_FLAG_VOID:
-        return (old_flags & SPEC_FLAG_MASK) == SPEC_FLAG_NONE;
+        return old_flags == SPEC_FLAG_NONE;
       case SPEC_FLAG_CHAR:
         return (old_flags & ~SPEC_FLAG_SIGN_MASK) == SPEC_FLAG_NONE;
       case SPEC_FLAG_INTEGRAL:
@@ -1144,8 +1124,7 @@ static int flags_valid(unsigned int old_flags, unsigned int new_flags,
                 (old_flags & SPEC_FLAG_LOW_MASK) == SPEC_FLAG_CHAR ||
                 (old_flags & SPEC_FLAG_LOW_MASK) == SPEC_FLAG_NONE);
       case SPEC_FLAG_DOUBLE:
-        return (old_flags & SPEC_FLAG_MASK) == SPEC_FLAG_NONE ||
-               (old_flags & SPEC_FLAG_MASK) == SPEC_FLAG_LONG;
+        return old_flags == SPEC_FLAG_NONE || old_flags == SPEC_FLAG_LONG;
       default:
         abort();
     }
@@ -1269,26 +1248,35 @@ int type_pointer_conversions(Type **out, Type *type) {
   return 0;
 }
 
-/* TODO(Robert): use flags to determine out instead of width and signedness */
 int type_arithmetic_conversions(Type **out, Type *type1, Type *type2) {
   assert(out != NULL);
-  size_t width1 = type_get_width(type1);
-  size_t width2 = type_get_width(type2);
-  if (width1 < X64_SIZEOF_INT && width2 < X64_SIZEOF_INT) {
-    *out = (Type *)TYPE_INT;
-  } else if (width1 > width2) {
+  assert(type_is_arithmetic(type1) && type_is_arithmetic(type2));
+  unsigned int flags1 = type1->any.flags & SPEC_FLAG_MASK;
+  unsigned int flags2 = type2->any.flags & SPEC_FLAG_MASK;
+
+  if (flags1 == SPEC_FLAGS_LONG_DOUBLE || flags2 == SPEC_FLAGS_LONG_DOUBLE) {
+    abort(); /* floating types not implemented */
+  } else if (flags1 == SPEC_FLAG_DOUBLE || flags2 == SPEC_FLAG_DOUBLE) {
+    abort(); /* floating types not implemented */
+  } else if (flags1 == SPEC_FLAG_FLOAT || flags2 == SPEC_FLAG_FLOAT) {
+    abort(); /* floating types not implemented */
+  } else if (flags1 == SPEC_FLAGS_ULONG) {
     *out = type1;
-  } else if (width1 < width2) {
+  } else if (flags2 == SPEC_FLAGS_ULONG) {
     *out = type2;
-  } else if (type_is_unsigned(type1)) {
+  } else if (flags1 == SPEC_FLAGS_SLONG) {
     *out = type1;
-  } else if (type_is_unsigned(type2)) {
+  } else if (flags2 == SPEC_FLAGS_SLONG) {
+    *out = type2;
+  } else if (flags1 == SPEC_FLAGS_UINT) {
+    *out = type1;
+  } else if (flags2 == SPEC_FLAGS_UINT) {
     *out = type2;
   } else {
-    *out = type1;
+    /* no need to check for enum, char, etc. explicitly; all become int */
+    *out = (Type *)TYPE_INT;
   }
 
-  if (type_is_enum(*out)) *out = (Type *)TYPE_INT;
   return 0;
 }
 
