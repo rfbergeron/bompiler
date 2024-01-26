@@ -120,7 +120,6 @@ int symbol_value_print(const SymbolValue *symbol, char *buffer) {
   else
     stor_str = "UNSPECIFIED";
 
-  /* TODO(Robert): check size without snprintf */
   if (symbol->disp < 0) {
     return sprintf(buffer,
                    "{%s} {%s} {WIDTH: %lu, ALIGN: %lu} {LINK: %s, STORE: %s} "
@@ -153,12 +152,16 @@ TagValue *tag_value_init(TagType tag) {
   tagval->is_defined = 0;
   if (tag == TAG_STRUCT || tag == TAG_UNION) {
     tagval->data.members.by_name = symbol_table_init(MEMBER_TABLE);
-    if (tagval->data.members.by_name == NULL)
-      /* TODO(Robert): cleanup data on error */
+    if (tagval->data.members.by_name == NULL) {
+      free(tagval);
       return NULL;
+    }
     int status = llist_init(&tagval->data.members.in_order, NULL, NULL);
-    /* TODO(Robert): cleanup data on error */
-    if (status) return NULL;
+    if (status) {
+      symbol_table_destroy(tagval->data.members.by_name);
+      free(tagval);
+      return NULL;
+    }
   } else if (tag == TAG_ENUM) {
     /* this map stores (char*, int*) pairs, which are the names of enumeration
      * constants and their values, respectively. it is responsible for freeing
@@ -223,10 +226,8 @@ int tag_value_print(const TagValue *tagval, char *buffer, size_t size) {
   int buffer_offset =
       sprintf(buffer, "Type: %s, Width: %lu, Align: %lu, Members: {",
               TAG_TYPE_STRINGS[tagval->tag], tagval->width, tagval->alignment);
-  /* TODO(Robert): check buffer_offset for snprintf errors */
-  /* TODO(Robert): print tags defined within struct and union tags */
+  if (buffer_offset < 0) return -1;
   if (tagval->tag == TAG_STRUCT || tagval->tag == TAG_UNION) {
-    /* TODO(Robert): handle blib errors */
     Map *symbols = tagval->data.members.by_name->primary_namespace;
     ArrayList symnames;
     assert(!alist_init(&symnames, map_size(symbols)));
