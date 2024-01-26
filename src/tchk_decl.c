@@ -1074,6 +1074,9 @@ ASTree *define_enumerator(ASTree *enum_, ASTree *ident_node, ASTree *equal_sign,
   }
 }
 
+/* TODO(Robert): report an error when a record with a member of function type
+ * is declared and replace the check for function types here with an assert
+ */
 ASTree *define_struct_member(ASTree *struct_, ASTree *member) {
   (void)finalize_declaration(member);
   ASTree *left_brace =

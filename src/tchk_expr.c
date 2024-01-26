@@ -19,9 +19,6 @@ ASTree *validate_empty_expr(ASTree *empty_expr) {
 ASTree *validate_intcon(ASTree *intcon) { return evaluate_intcon(intcon); }
 
 ASTree *validate_charcon(ASTree *charcon) {
-  /* TODO(Robert): casting away const bad but also we need to assign a type here
-   * which is not owned by any symbol
-   */
   charcon->type = (Type *)TYPE_CHAR;
   return evaluate_charcon(charcon);
 }
@@ -47,7 +44,6 @@ ASTree *validate_stringcon(ASTree *stringcon) {
         !type_init_array(&symval->type, strlen(stringcon->lexinfo) - 2 + 1, 0));
 
     Type *char_type;
-    /* TODO(Robert): Type: not sure if storage class flag is really necessary */
     assert(!type_init_base(
         &char_type, SPEC_FLAG_CHAR | QUAL_FLAG_CONST | STOR_FLAG_STATIC));
 
@@ -248,32 +244,22 @@ ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
     }
   } else if (type_is_pointer(true_expr->type) &&
              astree_is_const_zero(false_expr)) {
-    /* TODO(Robert): this is awkward and only necessary because `type_copy`
-     * fails for types which terminate in a null pointer
-     */
-    assert(!type_copy(&qmark->type, true_expr->type, 0));
-    Type *elem_type;
-    assert(!type_strip_declarator(&elem_type, qmark->type));
-    assert(!type_destroy(elem_type));
-    qmark->type->pointer.next = NULL;
-    assert(!type_strip_declarator(&elem_type, true_expr->type));
-    assert(!type_append(qmark->type, elem_type, 0));
+    /* duplicate only the pointer type information */
+    qmark->type = malloc(sizeof(*qmark->type));
+    *(qmark->type) = *(true_expr->type);
   } else if (astree_is_const_zero(true_expr) &&
              type_is_pointer(false_expr->type)) {
-    assert(!type_copy(&qmark->type, false_expr->type, 0));
-    Type *elem_type;
-    assert(!type_strip_declarator(&elem_type, qmark->type));
-    assert(!type_destroy(elem_type));
-    qmark->type->pointer.next = NULL;
-    assert(!type_strip_declarator(&elem_type, false_expr->type));
-    assert(!type_append(qmark->type, elem_type, 0));
+    /* duplicate only the pointer type information */
+    qmark->type = malloc(sizeof(*qmark->type));
+    *(qmark->type) = *(false_expr->type);
   } else if ((type_is_pointer(true_expr->type) &&
               type_is_pointer(false_expr->type)) &&
              (type_is_void_pointer(true_expr->type) ||
               type_is_void_pointer(false_expr->type) ||
               types_equivalent(true_expr->type, false_expr->type, 1, 1))) {
-    assert(!type_common_qualified_pointer(&qmark->type, true_expr->type,
-                                          false_expr->type));
+    if (type_common_qualified_pointer(&qmark->type, true_expr->type,
+                                      false_expr->type))
+      abort();
   } else {
     return astree_create_errnode(
         astree_adopt(qmark, 3, condition, true_expr, false_expr),
@@ -302,7 +288,6 @@ ASTree *validate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
   }
 
   ASTree *type_name = astree_get(declaration, 1);
-  /* TODO(Robert): allow cast to void */
   if (!(type_is_scalar(type_name->type) || type_is_void(type_name->type)) ||
       !type_is_scalar(expr->type)) {
     return astree_create_errnode(astree_adopt(cast, 2, declaration, expr),
@@ -321,8 +306,7 @@ static int subtraction_type(Type **out, Type *left_type, Type *right_type) {
     return *out = left_type, 0;
   } else if (type_is_pointer(left_type) && type_is_pointer(right_type) &&
              types_equivalent(left_type, right_type, 1, 1)) {
-    /* TODO(Robert): dedicated pointer difference type constant */
-    /* TODO(Robert): Type: is return a casted const okay here? */
+    /* TODO(Robert): dedicated pointer difference type constant? */
     return *out = (Type *)TYPE_LONG, 0;
   } else {
     return *out = NULL, -1;
@@ -622,10 +606,7 @@ ASTree *validate_sizeof(ASTree *sizeof_, ASTree *type_node) {
     return astree_create_errnode(astree_adopt(sizeof_, 1, type_node),
                                  BCC_TERR_INCOMPLETE_TYPE, 2, sizeof_, type);
   }
-  /* TODO(Robert): compute actual size and also probably make sure that this
-   * is actually the correct type name for the output of sizeof on this
-   * platform
-   */
+
   sizeof_->type = (Type *)TYPE_UNSIGNED_LONG;
   return evaluate_unop(sizeof_, type_node);
 }
@@ -682,9 +663,6 @@ ASTree *validate_reference(ASTree *reference, ASTree *struct_, ASTree *member) {
                                  BCC_TERR_SYM_NOT_FOUND, 1, member);
   } else {
     reference->type = member_symbol->type;
-    /* TODO(Robert): while technically correct, shouldn't it be impossible for
-     * the member to have function type?
-     */
     if (!type_is_array(reference->type) && !type_is_function(reference->type)) {
       reference->attributes |= ATTR_EXPR_LVAL;
     }
@@ -696,9 +674,9 @@ ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src) {
   if (dest->symbol == TOK_TYPE_ERROR || src->symbol == TOK_TYPE_ERROR)
     return astree_propogate_errnode_v(assignment, 2, dest, src);
 
-  /* TODO(Robert): this first `if` clause shouldn't be as comprehensive as it
-   * is; arrays and functions should already not be marked as lvalues assuming
-   * that the compiler is behaving correctly
+  /* I can't find anywhere in the standard that clarifies this, so I have
+   * decided (correctly, I believe) that objects of function or array type are
+   * considered lvalues, but are not assignable
    */
   if (type_is_array(dest->type) || type_is_function(dest->type) ||
       type_is_incomplete(dest->type) || type_is_const(dest->type)) {
