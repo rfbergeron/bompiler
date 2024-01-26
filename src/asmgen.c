@@ -2621,6 +2621,10 @@ ASTree *translate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
   if (control_type == NULL) abort();
 
   /* TODO(Robert): is the MOV necessary? the other operand is a register */
+  /* TODO(Robert): perform arithmetic conversions on constant expression to
+   * switch-case control statement type and use `maybe_load_cexpr` instead
+   * of duplicating its code here
+   */
   InstructionData *mov_data = instr_init(OP_MOV);
   set_op_reg(&mov_data->dest, type_get_width(control_type), next_vreg());
   if (type_is_unsigned(control_type)) {

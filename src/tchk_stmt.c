@@ -126,7 +126,6 @@ ASTree *validate_for(ASTree *for_, ASTree *init_expr, ASTree *pre_iter_expr,
 
   if (pre_iter_expr->symbol != ';') {
     if (!type_is_scalar(pre_iter_expr->type)) {
-      /* TODO(Robert): i don't think this is the correct error code */
       return astree_create_errnode(
           astree_adopt(for_, 4, init_expr, pre_iter_expr, reinit_expr, body),
           BCC_TERR_EXPECTED_SCALCONST, 2, for_, pre_iter_expr);
@@ -175,9 +174,9 @@ ASTree *validate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
     return astree_propogate_errnode_v(case_, 2, expr, stmt);
   }
 
-  if (case_->jump_id == (size_t)-1L)
+  if (case_->jump_id == SIZE_MAX)
     return astree_create_errnode(case_, BCC_TERR_UNEXPECTED_TOKEN, 1, case_);
-  assert(case_->case_id != (size_t)-1L);
+  assert(case_->case_id != SIZE_MAX);
 
   Type *case_const_spec = expr->type;
   if (!type_is_integral(case_const_spec) ||
@@ -186,10 +185,12 @@ ASTree *validate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
                                  BCC_TERR_EXPECTED_INTCONST, 2, case_, expr);
   }
 
-  /* TODO(Robert): remove this call since `translate_case` doesn't need it, or
-   * otherwise use the instructions emitted by it
+  /* For now, let `translate_case` handle loading of the constant value. In the
+   * future, it may be better to perform arithmetic conversions on the integral
+   * constant expressions and then use `maybe_load_cexpr`, since
+   * `translate_case` currently duplicates some of its code.
    */
-  maybe_load_cexpr(expr, stmt->first_instr);
+  /* maybe_load_cexpr(expr, stmt->first_instr); */
   return translate_case(case_, expr, stmt);
 }
 
@@ -198,8 +199,7 @@ ASTree *validate_default(ASTree *default_, ASTree *stmt) {
     return astree_propogate_errnode(default_, stmt);
   }
 
-  /* TODO(Robert): consider changing instances of (size_t)-1L to SIZE_MAX */
-  if (default_->jump_id == (size_t)-1L)
+  if (default_->jump_id == SIZE_MAX)
     return astree_create_errnode(astree_adopt(default_, 1, stmt),
                                  BCC_TERR_UNEXPECTED_TOKEN, 1, default_);
   else if (state_set_selection_default(state))
@@ -226,7 +226,7 @@ ASTree *validate_goto(ASTree *goto_, ASTree *ident) {
 }
 
 ASTree *validate_continue(ASTree *continue_) {
-  if (continue_->jump_id == (size_t)-1L) {
+  if (continue_->jump_id == SIZE_MAX) {
     return astree_create_errnode(continue_, BCC_TERR_UNEXPECTED_TOKEN, 1,
                                  continue_);
   }
@@ -235,7 +235,7 @@ ASTree *validate_continue(ASTree *continue_) {
 }
 
 ASTree *validate_break(ASTree *break_) {
-  if (break_->jump_id == (size_t)-1L) {
+  if (break_->jump_id == SIZE_MAX) {
     return astree_create_errnode(break_, BCC_TERR_UNEXPECTED_TOKEN, 1, break_);
   }
 
