@@ -9,6 +9,7 @@
 #include "symtable.h"
 
 static Type TYPE_VOID_INTERNAL;
+static Type TYPE_POINTER_INTERNAL;
 static Type TYPE_CHAR_INTERNAL;
 static Type TYPE_INT_INTERNAL;
 static Type TYPE_LONG_INTERNAL;
@@ -17,6 +18,7 @@ static Type TYPE_UNSIGNED_LONG_INTERNAL;
 static Type TYPE_NONE_INTERNAL;
 
 const Type *const TYPE_VOID = &TYPE_VOID_INTERNAL;
+const Type *const TYPE_POINTER = &TYPE_POINTER_INTERNAL;
 const Type *const TYPE_CHAR = &TYPE_CHAR_INTERNAL;
 const Type *const TYPE_INT = &TYPE_INT_INTERNAL;
 const Type *const TYPE_LONG = &TYPE_LONG_INTERNAL;
@@ -29,6 +31,9 @@ void type_init_globals(void) {
   TYPE_VOID_INTERNAL.base.code = TYPE_CODE_BASE;
   TYPE_VOID_INTERNAL.base.flags = SPEC_FLAG_VOID;
   TYPE_VOID_INTERNAL.base.symbol = NULL;
+  TYPE_POINTER_INTERNAL.pointer.code = TYPE_CODE_POINTER;
+  TYPE_POINTER_INTERNAL.pointer.qualifiers = QUAL_FLAG_NONE;
+  TYPE_POINTER_INTERNAL.pointer.next = &TYPE_VOID_INTERNAL;
   TYPE_CHAR_INTERNAL.base.code = TYPE_CODE_BASE;
   TYPE_CHAR_INTERNAL.base.flags = SPEC_FLAG_CHAR;
   TYPE_CHAR_INTERNAL.base.symbol = NULL;

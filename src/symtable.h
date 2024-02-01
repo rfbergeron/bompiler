@@ -58,19 +58,20 @@ typedef struct symbol_value {
 
 typedef enum tag_type { TAG_STRUCT = 0, TAG_UNION, TAG_ENUM } TagType;
 
+/* TODO(Robert): make this a tagged union */
 typedef struct tag_value {
   size_t width;     /* struct/enum width */
   size_t alignment; /* struct/enum alignment */
   union {
     struct {
+      SymbolTable *by_name; /* struct members by name */
+      LinkedList in_order;  /* struct members in declaration order */
+    } members;
+    struct {
       Map by_name; /* mapping from names to string constants */
       LinkedList struct_name_spaces; /* temporary struct member storage */
       int last_value;                /* value of last enum constant */
     } enumerators;
-    struct {
-      SymbolTable *by_name; /* struct members by name */
-      LinkedList in_order;  /* struct members in declaration order */
-    } members;
   } data;
   TagType tag;    /* indicates struct, union or enum tag */
   int is_defined; /* used to identify forward declarations */

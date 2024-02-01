@@ -28,7 +28,7 @@ typedef struct reg_desc RegDesc;
 static size_t reg_descs_sizes[16];
 static size_t reg_descs_caps[16];
 /* location of 24-byte region for contents of unspilled registers */
-static const ptrdiff_t unspill_region = -32;
+static const ptrdiff_t unspill_region = -40;
 
 static ptrdiff_t *vreg_descs;
 static size_t vreg_descs_size;
