@@ -185,12 +185,7 @@ ASTree *validate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
                                  BCC_TERR_EXPECTED_INTCONST, 2, case_, expr);
   }
 
-  /* For now, let `translate_case` handle loading of the constant value. In the
-   * future, it may be better to perform arithmetic conversions on the integral
-   * constant expressions and then use `maybe_load_cexpr`, since
-   * `translate_case` currently duplicates some of its code.
-   */
-  /* maybe_load_cexpr(expr, stmt->first_instr); */
+  maybe_load_cexpr(expr, stmt->first_instr);
   return translate_case(case_, expr, stmt);
 }
 

@@ -150,6 +150,7 @@ union type {
 };
 
 extern const Type *const TYPE_VOID;
+extern const Type *const TYPE_POINTER;
 extern const Type *const TYPE_CHAR;
 extern const Type *const TYPE_INT;
 extern const Type *const TYPE_LONG;

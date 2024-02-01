@@ -674,9 +674,8 @@ ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src) {
   if (dest->symbol == TOK_TYPE_ERROR || src->symbol == TOK_TYPE_ERROR)
     return astree_propogate_errnode_v(assignment, 2, dest, src);
 
-  /* I can't find anywhere in the standard that clarifies this, so I have
-   * decided (correctly, I believe) that objects of function or array type are
-   * considered lvalues, but are not assignable
+  /* TODO(Robert): check if struct and union members/submembers are
+   * const-qualified
    */
   if (type_is_array(dest->type) || type_is_function(dest->type) ||
       type_is_incomplete(dest->type) || type_is_const(dest->type)) {
@@ -687,26 +686,17 @@ ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src) {
                                  BCC_TERR_EXPECTED_LVAL, 2, assignment, dest);
   } else {
     switch (assignment->symbol) {
-      int status;
-      Type *result_type;
     incompatible:
       return astree_create_errnode(astree_adopt(assignment, 2, dest, src),
                                    BCC_TERR_INCOMPATIBLE_TYPES, 3, assignment,
                                    dest->type, src->type);
       case TOK_ADDEQ:
-        status = addition_type(&result_type, dest->type, src->type);
-        if (status || result_type == NULL ||
-            !types_assignable(dest->type, result_type,
-                              astree_is_const_zero(src)))
-          goto incompatible;
-        break;
+        /* fallthrough */
       case TOK_SUBEQ:
-        status = subtraction_type(&result_type, dest->type, src->type);
-        if (status || result_type == NULL ||
-            !types_assignable(dest->type, result_type,
-                              astree_is_const_zero(src)))
-          goto incompatible;
-        break;
+        if ((type_is_arithmetic(dest->type) && type_is_arithmetic(src->type)) ||
+            (type_is_pointer(dest->type) && type_is_integral(src->type)))
+          break;
+        goto incompatible;
       case TOK_MULEQ:
         /* fallthrough */
       case TOK_DIVEQ:
