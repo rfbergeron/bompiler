@@ -29,20 +29,11 @@ static const char *VA_LIST_MEMBER_NAMES[] = {
 const Type *TYPE_VA_LIST_POINTER;
 Type *TYPE_VA_LIST_POINTER_INTERNAL;
 
-/* TODO(Robert): yeah i have no idea what this means anymore */
-/* functions, structures, typeids, allocs can have their type
- * assigned when they adopt their children
- */
-
 const char *parser_get_tname(int symbol) {
   return yytname[YYTRANSLATE(symbol)];
 }
 
 BCC_YYSTATIC void make_va_list_type(void) {
-  /* TODO(Robert): This was copied/based on code in `validate_tag_def` and
-   * `define_struct_member` in `tchk_decl`. Attempt to deduplicate later, if
-   * possible.
-   */
   TagValue *builtin_tagval = tag_value_init(TAG_STRUCT);
   int status = state_insert_tag(state, VA_LIST_STRUCT_NAME,
                                 strlen(VA_LIST_STRUCT_NAME), builtin_tagval);
@@ -138,28 +129,41 @@ BCC_YYSTATIC ASTree *parser_new_sym(ASTree *tree, int new_symbol) {
   return tree;
 }
 
-/* TODO(Robert): rather than appending the strings one at a time, it would be
- * more efficient to put the strings together in a list and join them all at
- * once. This would also result in less noise in the diagnostic output; there
- * would be no intermediate strings, just the individual components and the
- * final concatenated output
- */
-BCC_YYSTATIC ASTree *parser_join_strings(ASTree *dest, ASTree *src) {
-  char *joined_string =
-      malloc(sizeof(char) * (strlen(dest->lexinfo) + strlen(src->lexinfo) + 1));
-  (void)strcpy(joined_string, dest->lexinfo);
-  /* omit closing double quote */
-  joined_string[strlen(joined_string) - 1] = '\0';
-  /* omit opening double quote */
-  (void)strcat(joined_string, src->lexinfo + 1);
-  dest->lexinfo = string_set_intern(joined_string);
-  /* `string_set_intern` will copy the string if it isn't present, since the
-   * parser is responsible for handling the memory occupied by normal tokens.
-   * the joined string must be freed.
-   */
+BCC_YYSTATIC ASTree *parser_make_joiner(ASTree *stringcon) {
+  return astree_adopt(astree_init(TOK_STRINGCON, stringcon->loc, "_joiner"), 1,
+                      stringcon);
+}
+
+BCC_YYSTATIC ASTree *parser_join_strings(ASTree *joiner) {
+  assert(strcmp("_joiner", joiner->lexinfo) == 0 && astree_count(joiner) > 0);
+  if (astree_count(joiner) == 1) {
+    ASTree *stringcon = astree_remove(joiner, 0);
+    if (astree_destroy(joiner)) abort();
+    return stringcon;
+  }
+
+  size_t joined_len, i, literal_count = astree_count(joiner);
+  for (joined_len = 0, i = 0; i < literal_count; ++i)
+    /* omit double quotes from length calculation */
+    joined_len += strlen(astree_get(joiner, i)->lexinfo) - 2;
+  /* add one for null byte */
+  char *joined_string = malloc(sizeof(char) * (joined_len + 1)), *endptr;
+  joined_string[joined_len] = '\0';
+
+  for (i = 0, endptr = joined_string; i < literal_count; ++i) {
+    const char *literal = astree_get(joiner, i)->lexinfo;
+    size_t literal_len = strlen(literal);
+    /* omit double quotes from copy */
+    (void)memcpy(endptr, literal + 1, literal_len - 2);
+    endptr += literal_len - 2;
+  }
+
+  assert(joined_string[joined_len] == '\0');
+
+  joiner->lexinfo = string_set_intern(joined_string);
   free(joined_string);
-  assert(!astree_destroy(src));
-  return dest;
+
+  return joiner;
 }
 
 BCC_YYSTATIC ASTree *parser_make_spec_list(ASTree *first_specifier) {
@@ -197,16 +201,7 @@ BCC_YYSTATIC ASTree *parser_make_param_list(ASTree *left_paren,
  * be used to validate type names, with a little tweaking.
  */
 BCC_YYSTATIC ASTree *parser_make_type_name(void) {
-  ASTree *type_name = astree_init(TOK_TYPE_NAME, lexer_get_loc(), "_type_name");
-  /* TODO(Robert): Type: this code no longer makes sense because symbols now
-   * hold a pointer to type information. figure out if it needs to be replaced.
-   */
-  /*
-  SymbolValue *symval =
-      symbol_value_init(&type_name->loc, state_get_sequence(state));
-  type_name->type = &symval->type;
-  */
-  return type_name;
+  return astree_init(TOK_TYPE_NAME, lexer_get_loc(), "_type_name");
 }
 
 BCC_YYSTATIC ASTree *parser_make_cast(ASTree *left_paren, ASTree *spec_list,

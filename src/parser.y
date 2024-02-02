@@ -15,7 +15,8 @@
 
   static ASTree *parser_make_root();
   static ASTree *parser_new_sym(ASTree * tree, int new_symbol);
-  static ASTree *parser_join_strings(ASTree * dest, ASTree * src);
+  static ASTree *parser_make_joiner(ASTree * stringcon);
+  static ASTree *parser_join_strings(ASTree * joiner);
   static ASTree *parser_make_spec_list(ASTree * first_specifier);
   static ASTree *parser_make_declaration(ASTree * spec_list);
   static ASTree *parser_make_param_list(ASTree * left_paren, ASTree * spec_list,
@@ -246,17 +247,15 @@ stmt                : block                                             { $$ = b
                     | TOK_GOTO any_ident ';'                            { $$ = bcc_yyval = validate_goto($1, $2); astree_destroy($3); }
                     | stmt_expr                                         { $$ = bcc_yyval = $1; }
                     ;
-stmt_expr           : expr ';'                                          { $$ = bcc_yyval = $1; astree_destroy($2); }
+stmt_expr           : expr ';'                                          { $$ = bcc_yyval = parser_make_auto_conv($1, 1); astree_destroy($2); }
                     | ';'                                               { $$ = bcc_yyval = validate_empty_expr($1); }
                     ;
 labelled_stmt       : any_ident ':' stmt                                { $$ = bcc_yyval = validate_label(parser_make_label($1), $1, $3); parser_cleanup(1, $2); }
                     | TOK_DEFAULT ':' stmt                              { $$ = bcc_yyval = validate_default($1, $3); parser_cleanup(1, $2); }
                     | TOK_CASE cond_expr   ':' stmt                     { $$ = bcc_yyval = validate_case($1, $2, $4); parser_cleanup(1, $3); }
-                    /* TODO(Robert): can't we just use the empty node instead of changing the symbol for ')' ? */
-                    /* TODO(Robert): do we need to perform automatic conversions for statements? */
                     ;
-for                 : TOK_FOR '(' stmt_expr stmt_expr ')' stmt          { $$ = bcc_yyval = validate_for($1, $3, parser_make_auto_conv($4, 1), parser_new_sym($5, ';'), $6); parser_cleanup(1, $2); }
-                    | TOK_FOR '(' stmt_expr stmt_expr expr ')' stmt     { $$ = bcc_yyval = validate_for($1, $3, parser_make_auto_conv($4, 1), $5, $7); parser_cleanup(2, $2, $6); }
+for                 : TOK_FOR '(' stmt_expr stmt_expr ')' stmt          { $$ = bcc_yyval = validate_for($1, $3, $4, parser_new_sym($5, ';'), $6); parser_cleanup(1, $2); }
+                    | TOK_FOR '(' stmt_expr stmt_expr expr ')' stmt     { $$ = bcc_yyval = validate_for($1, $3, $4, $5, $7); parser_cleanup(2, $2, $6); }
                     ;
 dowhile             : TOK_DO stmt TOK_WHILE '(' expr ')' ';'            { $$ = bcc_yyval = validate_do($1, $2, parser_make_auto_conv($5, 1)); parser_cleanup (4, $3, $4, $6, $7); }
                     ;
@@ -274,9 +273,8 @@ return              : TOK_RETURN expr ';'                               { $$ = b
                     ;
 expr                : assign_expr                                       { $$ = bcc_yyval = $1; }
                     | TOK_EXTNSN assign_expr                            { $$ = bcc_yyval = $2; parser_cleanup(1, $1); }
-                    /* TODO(Robert): should we ever bother converting the left operand? */
-                    | expr ',' assign_expr                              { $$ = bcc_yyval = validate_comma($2, $1, parser_make_auto_conv($3, 1)); }
-                    | expr ',' TOK_EXTNSN assign_expr                   { $$ = bcc_yyval = validate_comma($2, $1, parser_make_auto_conv($4, 1)); parser_cleanup(1, $3); }
+                    | expr ',' assign_expr                              { $$ = bcc_yyval = validate_comma($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
+                    | expr ',' TOK_EXTNSN assign_expr                   { $$ = bcc_yyval = validate_comma($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($4, 1)); parser_cleanup(1, $3); }
                     ;
 assign_expr         : unary_expr assign_op assign_expr                  { $$ = bcc_yyval = validate_assignment($2, $1, parser_make_auto_conv($3, 1)); }
                     | cond_expr                                         { $$ = bcc_yyval = $1; }
@@ -323,6 +321,7 @@ unary_expr          : postfix_expr                                      { $$ = b
                     | TOK_INC unary_expr                                { $$ = bcc_yyval = validate_increment($1, parser_make_auto_conv($2, 0)); }
                     | TOK_DEC unary_expr                                { $$ = bcc_yyval = validate_increment($1, parser_make_auto_conv($2, 0)); }
                     | unary_op cast_expr                                { $$ = bcc_yyval = validate_unary($1, parser_make_auto_conv($2, 1)); }
+                    | '&' cast_expr                                     { $$ = bcc_yyval = validate_unary(parser_new_sym($1, TOK_ADDROF), $2); }
                     | TOK_SIZEOF unary_expr                             { $$ = bcc_yyval = validate_sizeof($1, parser_make_auto_conv($2, 0)); }
                     | TOK_SIZEOF '(' typespec_list abs_declarator')'    { $$ = bcc_yyval = parse_sizeof($1, $3, $4); parser_cleanup(2, $2, $5); }
                     ;
@@ -331,7 +330,6 @@ unary_op            : '!'                                               { $$ = b
                     | '+'                                               { $$ = bcc_yyval = parser_new_sym($1, TOK_POS); }
                     | '-'                                               { $$ = bcc_yyval = parser_new_sym($1, TOK_NEG); }
                     | '*'                                               { $$ = bcc_yyval = parser_new_sym($1, TOK_INDIRECTION); }
-                    | '&'                                               { $$ = bcc_yyval = parser_new_sym($1, TOK_ADDROF); }
                     ;
 postfix_expr        : primary_expr                                      { $$ = bcc_yyval = $1; }
                     | postfix_expr TOK_INC                              { $$ = bcc_yyval = validate_increment(parser_new_sym($2, TOK_POST_INC), parser_make_auto_conv($1, 0)); }
@@ -357,12 +355,12 @@ primary_expr        : TOK_IDENT                                         { $$ = b
                     ;
 constant            : TOK_INTCON                                        { $$ = bcc_yyval = validate_intcon($1); }
                     | TOK_CHARCON                                       { $$ = bcc_yyval = validate_charcon($1); }
-                    | string_literal                                    { $$ = bcc_yyval = validate_stringcon($1); }
+                    | string_literal                                    { $$ = bcc_yyval = validate_stringcon(parser_join_strings($1)); }
                     ;
-string_literal      : TOK_STRINGCON                                     { $$ = bcc_yyval = $1; }
-                    | TOK_PRTY_FN                                       { $$ = bcc_yyval = parse_pretty_function($1); }
-                    | string_literal TOK_STRINGCON                      { $$ = bcc_yyval = parser_join_strings($1, $2); }
-                    | string_literal TOK_PRTY_FN                        { $$ = bcc_yyval = parser_join_strings($1, parse_pretty_function($2)); }
+string_literal      : TOK_STRINGCON                                     { $$ = bcc_yyval = parser_make_joiner($1); }
+                    | TOK_PRTY_FN                                       { $$ = bcc_yyval = parser_make_joiner(parse_pretty_function($2)); }
+                    | string_literal TOK_STRINGCON                      { $$ = bcc_yyval = astree_adopt($1, 1, $2); }
+                    | string_literal TOK_PRTY_FN                        { $$ = bcc_yyval = astree_adopt($1, 1, parse_pretty_function($2)); }
                     ;
 any_ident           : TOK_IDENT                                         { $$ = bcc_yyval = $1; }
                     | TOK_TYPEDEF_NAME                                  { $$ = bcc_yyval = parser_new_sym($1, TOK_IDENT); }
