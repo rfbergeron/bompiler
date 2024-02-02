@@ -117,10 +117,6 @@ int lexer_token(int symbol) {
   return symbol;
 }
 
-/* TODO(Robert): determine if types will always have been normalized by this
- * point and we can just use `typespec_is_*` functions instead of examining
- * flags directly
- */
 int lexer_ident(void) {
   PFDBG1('l', "Determining appropriate token type for identifier %s", yytext);
   SymbolValue *symval = NULL;
@@ -218,7 +214,6 @@ void lexer_dump_filenames(FILE *out) {
   }
 }
 
-/* TODO(Robert): add filename comparator to prevent duplicates */
 void lexer_init_globals() {
   lexer_include_linenrs.data =
       malloc(lexer_include_linenrs.size * sizeof(size_t));

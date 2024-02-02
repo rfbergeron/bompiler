@@ -598,6 +598,10 @@ ASTree *validate_sizeof(ASTree *sizeof_, ASTree *type_node) {
     return astree_propogate_errnode(sizeof_, type_node);
   } else if (type_node->symbol == TOK_DECLARATION) {
     type = astree_get(type_node, 1)->type;
+    if (type_is_function(type)) /* TODO(Robert): better error message */
+      return astree_create_errnode(astree_adopt(sizeof_, 1, type_node),
+                                   BCC_TERR_INCOMPATIBLE_TYPES, 3, sizeof_,
+                                   type, type);
   } else {
     type = type_node->type;
   }
