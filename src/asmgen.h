@@ -198,9 +198,22 @@ typedef struct instruction_data {
   Operand src;
 } InstructionData;
 
-extern const size_t REAL_REG_COUNT;
-extern const size_t VOLATILE_REGS[];
-extern const size_t VOLATILE_REG_COUNT;
+/* unfortunately, we can't use objects to hold array sizes because then they
+ * can't be used in initializer lists, but when we use macros we can't use
+ * arrays with deduced length, since the type will be incomplete in other
+ * translation units
+ */
+#define ARRAY_ELEM_COUNT(array) (sizeof(array) / sizeof((array)[0]))
+extern const size_t PARAM_REGS[6];
+#define PARAM_REG_COUNT ARRAY_ELEM_COUNT(PARAM_REGS)
+/* extern const size_t RETURN_REGS[2]; */
+/* #define RETURN_REG_COUNT ARRAY_ELEM_COUNT(RETURN_REGS) */
+extern const size_t PRESERVED_REGS[7];
+#define PRESERVED_REG_COUNT ARRAY_ELEM_COUNT(PRESERVED_REGS)
+extern const size_t VOLATILE_REGS[9];
+#define VOLATILE_REG_COUNT ARRAY_ELEM_COUNT(VOLATILE_REGS)
+#define REAL_REG_COUNT (VOLATILE_REG_COUNT + PRESERVED_REG_COUNT)
+
 extern ptrdiff_t window_size;
 
 const char *mk_static_label(const char *name, size_t unique_id);

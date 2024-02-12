@@ -105,7 +105,9 @@ BCC_YYSTATIC void make_va_list_type(void) {
 BCC_YYSTATIC ASTree *parser_make_root(void) {
   PFDBG1('p', "Initializing AST, root token code: %d", TOK_ROOT);
   PFDBG1('p', "Translation of token code: %s", parser_get_tname(TOK_ROOT));
-  Location root_loc = {lexer_get_filenr(), 0, 0, 0};
+  Location root_loc = LOC_EMPTY_VALUE;
+  /* assign filenr separately since its not an initializer constant */
+  root_loc.filenr = lexer_get_filenr();
   return astree_init(TOK_ROOT, root_loc, "_root");
 }
 

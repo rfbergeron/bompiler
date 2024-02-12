@@ -244,8 +244,7 @@ static int error_to_string(const CompileError *error, char *buf, size_t size) {
                      decl_buf, abs_decl_buf);
     }
     case BCC_TERR_EXPECTED_CONST:
-      /* TODO(Robert): unused */
-      return 0;
+      return expected_err_to_string(error, "initializer constant", buf);
     case BCC_TERR_EXPECTED_INTEGER:
       return expected_err_to_string(error, "integer", buf);
     case BCC_TERR_EXPECTED_INTCONST:

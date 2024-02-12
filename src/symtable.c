@@ -59,7 +59,7 @@ void destroy_unique_name(const char *str) {
 /*
  * SymbolValue functions
  */
-SymbolValue *symbol_value_init(const Location *loc, const size_t sequence) {
+SymbolValue *symbol_value_init(const Location *loc, size_t sequence) {
   SymbolValue *ret = malloc(sizeof(*ret));
   ret->type = NULL;
   ret->loc = *loc;

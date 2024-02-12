@@ -276,8 +276,7 @@ ASTree *validate_comma(ASTree *comma, ASTree *left, ASTree *right) {
   }
 
   comma->type = right->type;
-  maybe_load_cexpr(right, NULL);
-  return translate_comma(comma, left, right);
+  return evaluate_comma(comma, left, right);
 }
 
 ASTree *validate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
@@ -548,6 +547,7 @@ static ASTree *validate_indirection(ASTree *indirection, ASTree *operand) {
   if (type_is_pointer(operand->type)) {
     int status = type_strip_declarator(&indirection->type, operand->type);
     if (status) abort();
+    /* TODO(Robert): arrays are lvalues */
     if (!type_is_array(indirection->type))
       indirection->attributes |= ATTR_EXPR_LVAL;
     maybe_load_cexpr(operand, NULL);

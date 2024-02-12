@@ -122,6 +122,7 @@ definition          : declaration_list '=' initializer                  { $$ = b
                     ;
 typespec_list       : typespec_list typespec                            { $$ = bcc_yyval = validate_typespec($1, $2); } /* validate_typespec */
                     | typespec                                          { $$ = bcc_yyval = parser_make_spec_list($1); } /* make_spec_list, validate_typespec */
+                    | attr_spec_list                                    { $$ = bcc_yyval = parser_make_spec_list($1); } /* validate typespec frees attributes */
                     ;
 typespec            : TOK_LONG                                          { $$ = bcc_yyval = $1; }
                     | TOK_SIGNED                                        { $$ = bcc_yyval = $1; }
@@ -159,7 +160,8 @@ struct_decl         : struct_decl ',' declarator                        { $$ = b
                     | typespec_list declarator                          { $$ = bcc_yyval = declare_symbol(parser_make_declaration($1), $2); } /* define struct member */
                     | typespec_list abs_declarator                      { $$ = bcc_yyval = declare_symbol(parser_make_declaration($1), $2); } /* define struct member */
                     ;
-enum_spec           : enum_def '}'                                      { $$ = bcc_yyval = finalize_tag_def($1); astree_destroy($2); } /* create tag and iterate over enums */
+enum_spec           : enum_def '}'                                      { $$ = bcc_yyval = finalize_tag_def($1); parser_cleanup(1, $2); } /* create tag and iterate over enums */
+                    | enum_def ',' '}'                                  { $$ = bcc_yyval = finalize_tag_def($1); parser_cleanup(2, $2, $3); } /* create tag and iterate over enums */
                     | TOK_ENUM any_ident                                { $$ = bcc_yyval = validate_tag_decl($1, $2); } /* do nothing */
                     ;
 enum_def            : TOK_ENUM any_ident '{' any_ident                  { $$ = bcc_yyval = define_enumerator(validate_tag_def($1, $2, $3), $4, NULL, NULL); }
@@ -358,7 +360,7 @@ constant            : TOK_INTCON                                        { $$ = b
                     | string_literal                                    { $$ = bcc_yyval = validate_stringcon(parser_join_strings($1)); }
                     ;
 string_literal      : TOK_STRINGCON                                     { $$ = bcc_yyval = parser_make_joiner($1); }
-                    | TOK_PRTY_FN                                       { $$ = bcc_yyval = parser_make_joiner(parse_pretty_function($2)); }
+                    | TOK_PRTY_FN                                       { $$ = bcc_yyval = parser_make_joiner(parse_pretty_function($1)); }
                     | string_literal TOK_STRINGCON                      { $$ = bcc_yyval = astree_adopt($1, 1, $2); }
                     | string_literal TOK_PRTY_FN                        { $$ = bcc_yyval = astree_adopt($1, 1, parse_pretty_function($2)); }
                     ;
