@@ -13,6 +13,7 @@ ASTree *evaluate_conditional(ASTree *qmark, ASTree *condition,
 ASTree *evaluate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index);
 ASTree *evaluate_addrof(ASTree *addrof, ASTree *operand);
 ASTree *evaluate_reference(ASTree *reference, ASTree *struct_, ASTree *member);
+ASTree *evaluate_comma(ASTree *comma, ASTree *left, ASTree *right);
 ASTree *evaluate_binop(ASTree *operator, ASTree * left, ASTree *right);
 ASTree *evaluate_unop(ASTree *operator, ASTree * operand);
 #endif

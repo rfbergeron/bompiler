@@ -28,9 +28,18 @@ const char *SYM_EXT = ".sym";
 const char *IL_EXT = ".il";
 const char *ASM_EXT = ".asm";
 const char *ERR_EXT = ".err";
-/* declare as arrays so that we can use sizeof later */
-const char CPP_FILENAME[] = "cpp";
-const char CPP_STD_ARG[] = "-std=c90";
+
+/* "builtin" preprocessor arguments */
+const char *const CPP_BUILTIN_ARGS[] = {
+    "cpp",
+    "-std=c90",
+    "-D__STRICT_ANSI__", /* suppress gcc specific code in system headers */
+    "-U__GNUC__",
+    "-U__GNUC_MINOR__",
+    "-U__GNUC_PATCHLEVEL__",
+    "-D_UINTPTR_T" /* suppress cmocka `uintptr_t`; its a redefinition */
+};
+
 char name[LINESIZE];
 char strname[LINESIZE];
 char tokname[LINESIZE];
@@ -49,8 +58,9 @@ FILE *asmfile;
 FILE *errfile;
 
 static char **cpp_args;
-static size_t cpp_args_cap = 4;
-static size_t cpp_args_size = 2;
+static size_t cpp_args_cap = 1;
+static size_t cpp_args_size =
+    sizeof(CPP_BUILTIN_ARGS) / sizeof(*CPP_BUILTIN_ARGS);
 
 int skip_type_check = 0;
 int skip_asm = 0;
@@ -80,7 +90,7 @@ void scan_options(int argc, char **argv) {
       case 'I':
         PFDBG2('c', "Preprocessor argument: -%c%s", option, optarg);
         /* leave two slots empty for file name and NULL pointer */
-        if (cpp_args_size == cpp_args_cap - 2)
+        if (cpp_args_size >= cpp_args_cap - 2)
           cpp_args = realloc(cpp_args, sizeof(*cpp_args) * (cpp_args_cap *= 2));
         /* add one for nul terminator and two for dash and option */
         cpp_args[cpp_args_size] =
@@ -124,12 +134,14 @@ int main(int argc, char **argv) {
   yydebug = 0;
   yy_flex_debug = 0;
 
-  cpp_args = malloc(sizeof(*cpp_args) * cpp_args_cap);
-  /* allocate space so that these can be freed in `destroy_cpp_args` */
-  cpp_args[0] = malloc(sizeof(CPP_FILENAME));
-  strcpy(cpp_args[0], CPP_FILENAME);
-  cpp_args[1] = malloc(sizeof(CPP_STD_ARG));
-  strcpy(cpp_args[1], CPP_STD_ARG);
+  while (cpp_args_cap < cpp_args_size + 2) cpp_args_cap *= 2;
+  cpp_args = malloc(cpp_args_cap * sizeof(*cpp_args));
+
+  size_t i;
+  for (i = 0; i < cpp_args_size; ++i) {
+    cpp_args[i] = malloc((strlen(CPP_BUILTIN_ARGS[i]) + 1) * sizeof(char));
+    strcpy(cpp_args[i], CPP_BUILTIN_ARGS[i]);
+  }
 
   scan_options(argc, argv);
 

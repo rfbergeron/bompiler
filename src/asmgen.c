@@ -15,6 +15,9 @@
 /* TODO(Robert): make sure that function calls emit correct code when calling
  * a function that has not been prototyped
  */
+/* TODO(Robert): function prototypes currently do not have the correct
+ * directives emitted; they are being treated as objects
+ */
 
 #define MAX_OPCODE_LENGTH 8
 #define MAX_OPERAND_LENGTH 64
@@ -26,7 +29,6 @@
 #define MAX_IDENT_LEN 31
 #define MAX_INSTR_DEBUG_LENGTH 4096
 #define MAX_OPERAND_DEBUG_LENGTH 1024
-#define ARRAY_ELEM_COUNT(array) (sizeof(array) / sizeof((array)[0]))
 
 #define GENERATE_STRING(CODE, TYPE, BOOL, WRITES) #CODE,
 #define GENERATE_TYPE(CODE, TYPE, BOOL, WRITES) \
@@ -75,20 +77,15 @@ static const char FN_PTR_FMT[] = "%s@GOTPCREL";
  * preserved registers: rbx, rsp, rbp, r12-r15
  * other registers: r10, r11
  */
-static const size_t PARAM_REGS[] = {RDI_VREG, RSI_VREG, RDX_VREG,
-                                    RCX_VREG, R8_VREG,  R9_VREG};
-static const size_t PARAM_REG_COUNT = ARRAY_ELEM_COUNT(PARAM_REGS);
+const size_t PARAM_REGS[] = {RDI_VREG, RSI_VREG, RDX_VREG,
+                             RCX_VREG, R8_VREG,  R9_VREG};
 static const size_t RETURN_REGS[] = {RAX_VREG, RDX_VREG};
-/* #define RETURN_REG_COUNT ARRAY_ELEM_COUNT(RETURN_REGS) */
-static const size_t PRESERVED_REGS[] = {RBX_VREG, RSP_VREG, RBP_VREG, R12_VREG,
-                                        R13_VREG, R14_VREG, R15_VREG};
-static const size_t PRESERVED_REG_COUNT = ARRAY_ELEM_COUNT(PRESERVED_REGS);
+const size_t PRESERVED_REGS[] = {RBX_VREG, RSP_VREG, RBP_VREG, R12_VREG,
+                                 R13_VREG, R14_VREG, R15_VREG};
 const size_t VOLATILE_REGS[] = {RAX_VREG, RDX_VREG, RCX_VREG,
                                 RSI_VREG, RDI_VREG, R8_VREG,
                                 R9_VREG,  R10_VREG, R11_VREG};
-const size_t VOLATILE_REG_COUNT = ARRAY_ELEM_COUNT(VOLATILE_REGS);
-const size_t REAL_REG_COUNT =
-    ARRAY_ELEM_COUNT(PRESERVED_REGS) + ARRAY_ELEM_COUNT(VOLATILE_REGS);
+
 /* number of eightbytes occupied by the function prologue on the stack */
 static const size_t PROLOGUE_EIGHTBYTES = 8;
 static const char VREG_REG_TABLE[][5] = {
@@ -740,6 +737,7 @@ ASTree *translate_empty_expr(ASTree *empty_expr) {
 
 void maybe_load_cexpr(ASTree *expr, ListIter *where) {
   if ((expr->attributes & ATTR_MASK_CONST) != ATTR_CONST_NONE) {
+    assert(expr->first_instr == NULL && expr->last_instr == NULL);
     InstructionData *load_data;
     if (type_is_void(expr->type)) {
       /* emit NOP when casting a constant to void */
@@ -2064,9 +2062,13 @@ int translate_params(ASTree *declarator) {
   if (type_is_variadic_function(fn_type) && param_reg_index < PARAM_REG_COUNT) {
     reg_save_area_disp = assign_stack_space(TYPE_VA_SPILL_REGION);
     ListIter *temp = llist_iter_last(instructions);
-    int status =
-        bulk_rtom(RBP_VREG, reg_save_area_disp, PARAM_REGS + param_reg_index,
-                  TYPE_VA_SPILL_REGION, temp);
+    /* because spill region type is large enough to hold all registers, we must
+     * copy all registers to the stack when the function is variadic since
+     * `bulk_rtom` determines the number of registers to copy based on the size
+     * of the type
+     */
+    int status = bulk_rtom(RBP_VREG, reg_save_area_disp, PARAM_REGS,
+                           TYPE_VA_SPILL_REGION, temp);
     if (status) abort();
     free(temp);
   }
@@ -2602,6 +2604,7 @@ ASTree *translate_default(ASTree *default_, ASTree *stmt) {
 
 ASTree *translate_static_scalar_init(const Type *type, ASTree *initializer,
                                      ListIter *where) {
+  assert(initializer->first_instr == NULL && initializer->last_instr == NULL);
   Opcode directive;
   switch (type_get_width(type)) {
     case X64_SIZEOF_LONG:
@@ -2639,6 +2642,7 @@ ASTree *translate_static_scalar_init(const Type *type, ASTree *initializer,
 
 ASTree *translate_auto_scalar_init(const Type *type, ptrdiff_t disp,
                                    ASTree *initializer, ListIter *where) {
+  assert(initializer->first_instr == NULL && initializer->last_instr == NULL);
   assert((initializer->attributes & ATTR_MASK_CONST) >= ATTR_CONST_INIT);
   InstructionData *load_data;
   if (initializer->constant.label != NULL) {
@@ -2669,6 +2673,7 @@ ASTree *translate_auto_scalar_init(const Type *type, ptrdiff_t disp,
 
 ASTree *translate_static_literal_init(const Type *arr_type, ASTree *literal,
                                       ListIter *where) {
+  assert(literal->first_instr == NULL && literal->last_instr == NULL);
   size_t i;
   for (i = 0; i < literals_size; ++i) {
     if (literals[i].label == literal->constant.label) {
@@ -2737,6 +2742,7 @@ ASTree *translate_static_literal_init(const Type *arr_type, ASTree *literal,
 
 ASTree *translate_auto_literal_init(const Type *arr_type, ptrdiff_t arr_disp,
                                     ASTree *literal, ListIter *where) {
+  assert(literal->first_instr == NULL && literal->last_instr == NULL);
   InstructionData *literal_lea_data = instr_init(OP_LEA);
   set_op_pic(&literal_lea_data->src, literal->constant.integral.signed_value,
              literal->constant.label);

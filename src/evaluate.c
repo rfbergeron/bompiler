@@ -715,6 +715,21 @@ ASTree *evaluate_reference(ASTree *reference, ASTree *struct_, ASTree *member) {
   }
 }
 
+ASTree *evaluate_comma(ASTree *comma, ASTree *left, ASTree *right) {
+  comma->attributes |= right->attributes & ATTR_EXPR_LVAL;
+  if ((right->attributes & ATTR_MASK_CONST) != ATTR_CONST_NONE &&
+      (left->attributes & ATTR_MASK_CONST) != ATTR_CONST_NONE) {
+    comma->attributes |= (right->attributes & ATTR_MASK_CONST) == ATTR_CONST_INT
+                             ? ATTR_CONST_INIT
+                             : (right->attributes & ATTR_MASK_CONST);
+    comma->constant = right->constant;
+  } else {
+    maybe_load_cexpr(right, NULL);
+    maybe_load_cexpr(left, right->first_instr);
+  }
+  return translate_comma(comma, left, right);
+}
+
 ASTree *evaluate_binop(ASTree *operator, ASTree * left, ASTree *right) {
   switch (operator->symbol) {
     BINOP_CASE('&', &, translate_binop);

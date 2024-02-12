@@ -42,19 +42,24 @@ static ASTree *init_scalar(const Type *type, ptrdiff_t disp,
               initializer->symbol == TOK_STRINGCON) ||
              types_assignable(type, initializer->type,
                               astree_is_const_zero(initializer))) {
-    if (disp >= 0)
-      return translate_static_scalar_init(type, initializer, where);
-    else
+    if (disp >= 0) {
+      if ((initializer->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT)
+        return astree_create_errnode(initializer, BCC_TERR_EXPECTED_CONST, 1,
+                                     initializer);
+      else
+        return translate_static_scalar_init(type, initializer, where);
+    } else {
       return translate_auto_scalar_init(type, disp, initializer, where);
+    }
   } else {
     return astree_create_errnode(initializer, BCC_TERR_INCOMPATIBLE_TYPES, 3,
                                  initializer, type, initializer->type);
   }
 }
 
-/* TODO(Robert): handle initialization of pointers to char */
 static ASTree *init_literal(Type *arr_type, ptrdiff_t arr_disp, ASTree *literal,
                             ListIter *where) {
+  assert((literal->attributes & ATTR_MASK_CONST) == ATTR_CONST_INIT);
   /* subtract 2 for quotes */
   size_t literal_length = strlen(literal->lexinfo) - 2;
   if (!type_is_deduced_array(arr_type) &&
@@ -191,7 +196,11 @@ static ASTree *init_agg_member(Type *member_type, ptrdiff_t disp,
                                ListIter *where) {
   ASTree *initializer = astree_get(init_list, *init_index);
   ASTree *errnode;
-  if (type_is_scalar(member_type)) {
+  if (initializer->symbol != TOK_INIT_LIST &&
+      (initializer->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT) {
+    return astree_create_errnode(init_list, BCC_TERR_EXPECTED_CONST, 1,
+                                 initializer);
+  } else if (type_is_scalar(member_type)) {
     ++*init_index;
     errnode = init_scalar(member_type, disp, initializer, where);
   } else if (type_is_char_array(member_type) &&
@@ -208,20 +217,18 @@ static ASTree *init_agg_member(Type *member_type, ptrdiff_t disp,
   } else if (type_is_union(member_type)) {
     errnode = init_union(member_type, disp, init_list, init_index, where);
   } else {
-    errnode =
-        astree_create_errnode(initializer, BCC_TERR_INCOMPATIBLE_TYPES, 3,
-                              initializer, member_type, initializer->type);
+    return astree_create_errnode(init_list, BCC_TERR_INCOMPATIBLE_TYPES, 3,
+                                 initializer, member_type, initializer->type);
   }
 
   if (errnode->symbol == TOK_TYPE_ERROR &&
-      initializer->symbol != TOK_INIT_LIST && type_is_aggregate(member_type)) {
+      (type_is_scalar(member_type) || initializer->symbol == TOK_INIT_LIST ||
+       initializer->symbol == TOK_STRINGCON)) {
+    /* make errnode parent of init list, not the initializer */
     assert(astree_get(errnode, 0) == initializer);
     (void)astree_remove(errnode, 0);
     return astree_adopt(errnode, 1, init_list);
   } else {
-    /* no need to move the error node (if present) when the braces for the
-     * initializer were elided; it should be the root of the tree already
-     */
     return init_list;
   }
 }

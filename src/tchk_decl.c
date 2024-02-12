@@ -149,8 +149,12 @@ ASTree *validate_typespec(ASTree *spec_list, ASTree *spec) {
   assert(spec_list->type != NULL);
   assert(!type_is_declarator(spec_list->type));
 
-  if (spec->symbol == TOK_STRUCT || spec->symbol == TOK_UNION ||
-      spec->symbol == TOK_ENUM) {
+  if (spec->symbol == TOK_ATTR_LIST) {
+    int status = astree_destroy(spec);
+    if (status) abort();
+    return spec_list;
+  } else if (spec->symbol == TOK_STRUCT || spec->symbol == TOK_UNION ||
+             spec->symbol == TOK_ENUM) {
     return validate_tag_typespec(spec_list, spec);
   } else if (spec->symbol == TOK_TYPEDEF_NAME) {
     return validate_type_id_typespec(spec_list, spec);
@@ -924,7 +928,7 @@ ASTree *validate_tag_def(ASTree *tag_type_node, ASTree *tag_name_node,
     } else {
       tag_value = tag_value_init(tag_type);
       if (tag_value == NULL) abort();
-      if (!state_insert_tag(state, tag_name, tag_name_len, tag_value)) abort();
+      if (state_insert_tag(state, tag_name, tag_name_len, tag_value)) abort();
     }
 
     int status =
@@ -967,12 +971,12 @@ ASTree *finalize_tag_def(ASTree *tag) {
       SymbolTable *member_scope =
           llist_pop_back(&tag_value->data.enumerators.struct_name_spaces);
       assert(member_scope != NULL);
-      if (!state_push_table(state, member_scope)) abort();
+      if (state_push_table(state, member_scope)) abort();
     }
   } else {
     /* pop member scope from stack */
     if (state_peek_table(state) == tag_value->data.members.by_name &&
-        !state_pop_table(state))
+        state_pop_table(state))
       abort();
     /* pad aggregate so that it can tile an array */
     if (tag_value->alignment != 0) {
