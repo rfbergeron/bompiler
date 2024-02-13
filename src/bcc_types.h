@@ -5,14 +5,21 @@
 #include "bcc_err.h"
 #include "stdio.h"
 
-#define X64_SIZEOF_LONG (size_t)8
-#define X64_ALIGNOF_LONG (size_t)8
-#define X64_SIZEOF_INT (size_t)4
-#define X64_ALIGNOF_INT (size_t)4
-#define X64_SIZEOF_SHORT (size_t)2
-#define X64_ALIGNOF_SHORT (size_t)2
-#define X64_SIZEOF_CHAR (size_t)1
-#define X64_ALIGNOF_CHAR (size_t)1
+#define X64_SIZEOF_LONG ((size_t)8UL)
+#define X64_ALIGNOF_LONG ((size_t)8UL)
+#define X64_SIZEOF_INT ((size_t)4UL)
+#define X64_ALIGNOF_INT ((size_t)4UL)
+#define X64_SIZEOF_SHORT ((size_t)2UL)
+#define X64_ALIGNOF_SHORT ((size_t)2UL)
+#define X64_SIZEOF_CHAR ((size_t)1UL)
+#define X64_ALIGNOF_CHAR ((size_t)1UL)
+
+#define X64_SIZEOF_FLOAT ((size_t)4UL)
+#define X64_ALIGNOF_FLOAT ((size_t)4UL)
+#define X64_SIZEOF_DOUBLE ((size_t)8UL)
+#define X64_ALIGNOF_DOUBLE ((size_t)8UL)
+#define X64_SIZEOF_LONG_DOUBLE ((size_t)16UL)
+#define X64_ALIGNOF_LONG_DOUBLE ((size_t)16UL)
 
 typedef enum type_code {
   TYPE_CODE_NONE,

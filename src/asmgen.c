@@ -2567,8 +2567,7 @@ ASTree *translate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
   set_op_reg(&test_data->dest, type_get_width(control_type),
              state_get_control_reg(state));
   test_data->src = expr_data->dest;
-  /* persist test register between basic blocks */
-  test_data->persist_flags = PERSIST_DEST_SET;
+  test_data->persist_flags = PERSIST_DEST_SET | PERSIST_SRC_SET;
 
   InstructionData *jmp_data = instr_init(OP_JNE);
   /* NOTE: because of the way case ids are used, they do not require special
@@ -2941,7 +2940,8 @@ static ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
   assert(symval && in_current_scope);
 
   if (declarator->symbol == TOK_TYPE_NAME ||
-      (symval->flags & SYMFLAG_INHERIT) || (symval->flags & SYMFLAG_TYPEDEF)) {
+      (symval->flags & SYMFLAG_INHERIT) || (symval->flags & SYMFLAG_TYPEDEF) ||
+      (symval->flags & SYMFLAG_STORE_EXT)) {
     return declaration;
   } else if (symval->flags & SYMFLAG_STORE_STAT) {
     assign_static_space(declarator->lexinfo, symval);
@@ -2953,12 +2953,6 @@ static ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
     if (status) abort();
   } else if (symval->flags & SYMFLAG_STORE_AUTO) {
     symval->disp = assign_stack_space(symval->type);
-  } else if (symval->flags & SYMFLAG_STORE_EXT) {
-    InstructionData *globl_data = instr_init(OP_GLOBL);
-    set_op_dir(&globl_data->dest, declarator->lexinfo);
-    int status =
-        liter_push_back(before_definition, &before_definition, 1, globl_data);
-    if (status) abort();
   }
 
   return declaration;
@@ -3027,12 +3021,9 @@ static ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
                                           strlen(declarator->lexinfo), &symval);
   assert(in_current_scope && symval);
 
-  if (symval->flags & SYMFLAG_STORE_EXT) {
-    assert(symval->flags & SYMFLAG_LINK_EXT);
-    InstructionData *globl_data = instr_init(OP_GLOBL);
-    set_op_dir(&globl_data->dest, declarator->lexinfo);
-    int status = llist_push_back(instructions, globl_data);
-    if (status) abort();
+  if ((symval->flags & SYMFLAG_STORE_EXT) ||
+      type_is_function(declarator->type)) {
+    return declaration;
   } else if (symval->flags & SYMFLAG_STORE_STAT) {
     InstructionData *bss_data = instr_init(OP_BSS);
     int status = llist_push_back(instructions, bss_data);
