@@ -627,6 +627,12 @@ static size_t type_base_alignment(const Type *type) {
       /* fallthrough */
     case SPEC_FLAGS_ULONG:
       return X64_ALIGNOF_LONG;
+    case SPEC_FLAG_FLOAT:
+      return X64_ALIGNOF_FLOAT;
+    case SPEC_FLAG_DOUBLE:
+      return X64_ALIGNOF_DOUBLE;
+    case SPEC_FLAGS_LONG_DOUBLE:
+      return X64_ALIGNOF_LONG_DOUBLE;
     default:
       abort();
   }
@@ -680,6 +686,12 @@ static size_t type_base_width(const Type *type) {
       /* fallthrough */
     case SPEC_FLAGS_ULONG:
       return X64_SIZEOF_LONG;
+    case SPEC_FLAG_FLOAT:
+      return X64_SIZEOF_FLOAT;
+    case SPEC_FLAG_DOUBLE:
+      return X64_SIZEOF_DOUBLE;
+    case SPEC_FLAGS_LONG_DOUBLE:
+      return X64_SIZEOF_LONG_DOUBLE;
     default:
       abort();
   }
