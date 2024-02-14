@@ -1130,6 +1130,26 @@ ASTree *translate_unop(ASTree *operator, ASTree * operand) {
   return astree_adopt(operator, 1, operand);
 }
 
+ASTree *translate_sizeof(ASTree *sizeof_, ASTree *operand) {
+  if (operand->first_instr == NULL) {
+    assert(operand->last_instr == NULL);
+    return astree_adopt(sizeof_, 1, operand);
+  }
+
+  assert(operand->last_instr != NULL);
+  while (liter_get(operand->first_instr) != liter_get(operand->last_instr)) {
+    int status = liter_delete(operand->first_instr);
+    if (status) abort();
+  }
+
+  int status = liter_delete(operand->first_instr);
+  if (status) abort();
+  free(operand->first_instr);
+  free(operand->last_instr);
+  operand->first_instr = operand->last_instr = NULL;
+  return astree_adopt(sizeof_, 1, operand);
+}
+
 static void convert_int_to_offset(const Operand *int_op, const Type *ptr_type,
                                   ListIter *where, ListIter **out) {
   assert(type_is_pointer(ptr_type));
@@ -2782,18 +2802,21 @@ ASTree *translate_auto_literal_init(const Type *arr_type, ptrdiff_t arr_disp,
 }
 
 int translate_static_prelude(ASTree *declarator, SymbolValue *symval,
-                             ListIter *where) {
-  if (symval->flags & SYMFLAG_LINK_EXT) {
-    InstructionData *globl_data = instr_init(OP_GLOBL);
-    set_op_dir(&globl_data->dest, declarator->lexinfo);
-    int status = liter_push_back(where, &where, 1, globl_data);
-    if (status) return status;
-  }
-
+                             ListIter *where, int is_initialized) {
   const char *identifier =
       symval->flags & SYMFLAG_LINK_NONE
           ? mk_static_label(declarator->lexinfo, symval->static_id)
           : declarator->lexinfo;
+
+  InstructionData *section_data;
+  if (type_is_const(symval->type)) {
+    section_data = instr_init(OP_SECTION);
+    set_op_dir(&section_data->dest, ".rodata");
+  } else if (is_initialized) {
+    section_data = instr_init(OP_DATA);
+  } else {
+    section_data = instr_init(OP_BSS);
+  }
 
   InstructionData *align_data = instr_init(OP_ALIGN);
   set_op_imm(&align_data->dest, type_get_alignment(declarator->type),
@@ -2806,11 +2829,20 @@ int translate_static_prelude(ASTree *declarator, SymbolValue *symval,
   set_op_imm(&size_data->src, type_get_width(declarator->type), IMM_UNSIGNED);
   InstructionData *label_data = instr_init(OP_NONE);
   label_data->label = identifier;
+
   /* this call to `liter_push_back` should mutate `where` in-place, since the
    * output parameter points to the input parameter
    */
-  return liter_push_back(where, &where, 4, align_data, type_data, size_data,
-                         label_data);
+  if (symval->flags & SYMFLAG_LINK_EXT) {
+    InstructionData *globl_data = instr_init(OP_GLOBL);
+    set_op_dir(&globl_data->dest, declarator->lexinfo);
+
+    return liter_push_back(where, &where, 6, globl_data, section_data,
+                           align_data, type_data, size_data, label_data);
+  } else {
+    return liter_push_back(where, &where, 5, section_data, align_data,
+                           type_data, size_data, label_data);
+  }
 }
 
 static ASTree *translate_static_local_init(ASTree *declaration,
@@ -2822,10 +2854,6 @@ static ASTree *translate_static_local_init(ASTree *declaration,
   (void)state_get_symbol(state, (char *)declarator->lexinfo,
                          strlen(declarator->lexinfo), &symval);
   assign_static_space(declarator->lexinfo, symval);
-  InstructionData *data_data = instr_init(OP_DATA);
-  int status =
-      liter_push_back(before_definition, &before_definition, 1, data_data);
-  if (status) abort();
   ListIter *temp = liter_copy(before_definition);
   ASTree *errnode = traverse_initializer(declarator->type, symval->disp,
                                          initializer, before_definition);
@@ -2836,7 +2864,7 @@ static ASTree *translate_static_local_init(ASTree *declaration,
   }
 
   /* wait to do this so that deduced array sizes are set */
-  status = translate_static_prelude(declarator, symval, temp);
+  int status = translate_static_prelude(declarator, symval, temp, 1);
   if (status) abort();
   free(temp);
 
@@ -2945,11 +2973,8 @@ static ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
     return declaration;
   } else if (symval->flags & SYMFLAG_STORE_STAT) {
     assign_static_space(declarator->lexinfo, symval);
-    InstructionData *bss_data = instr_init(OP_BSS);
     int status =
-        liter_push_back(before_definition, &before_definition, 1, bss_data);
-    if (status) abort();
-    status = translate_static_prelude(declarator, symval, before_definition);
+        translate_static_prelude(declarator, symval, before_definition, 0);
     if (status) abort();
   } else if (symval->flags & SYMFLAG_STORE_AUTO) {
     symval->disp = assign_stack_space(symval->type);
@@ -2989,9 +3014,6 @@ static ASTree *translate_global_init(ASTree *declaration, ASTree *declarator,
                                           strlen(declarator->lexinfo), &symval);
   assert(in_current_scope && symval);
 
-  InstructionData *data_data = instr_init(OP_DATA);
-  int status = llist_push_back(instructions, data_data);
-  if (status) abort();
   free(before_definition);
   before_definition = llist_iter_last(instructions);
   ListIter *temp = liter_copy(before_definition);
@@ -2999,7 +3021,7 @@ static ASTree *translate_global_init(ASTree *declaration, ASTree *declarator,
   ASTree *errnode = traverse_initializer(declarator->type, NO_DISP, initializer,
                                          before_definition);
   /* wait to do this so that deduced array sizes are set */
-  status = translate_static_prelude(declarator, symval, temp);
+  int status = translate_static_prelude(declarator, symval, temp, 1);
   free(temp);
   if (status) abort();
   free(before_definition);
@@ -3025,11 +3047,8 @@ static ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
       type_is_function(declarator->type)) {
     return declaration;
   } else if (symval->flags & SYMFLAG_STORE_STAT) {
-    InstructionData *bss_data = instr_init(OP_BSS);
-    int status = llist_push_back(instructions, bss_data);
-    if (status) abort();
     ListIter *temp = llist_iter_last(instructions);
-    status = translate_static_prelude(declarator, symval, temp);
+    int status = translate_static_prelude(declarator, symval, temp, 0);
     free(temp);
     if (status) abort();
     InstructionData *zero_data = instr_init(OP_ZERO);

@@ -245,6 +245,7 @@ ASTree *translate_reference(ASTree *reference, ASTree *struct_, ASTree *member);
 ASTree *translate_post_inc_dec(ASTree *post_inc_dec, ASTree *operand);
 ASTree *translate_inc_dec(ASTree *inc_dec, ASTree *operand);
 ASTree *translate_unop(ASTree *operator, ASTree * operand);
+ASTree *translate_sizeof(ASTree *sizeof_, ASTree *operand);
 ASTree *translate_addition(ASTree *operator, ASTree * left, ASTree *right);
 ASTree *translate_multiplication(ASTree *operator, ASTree * left,
                                  ASTree *right);

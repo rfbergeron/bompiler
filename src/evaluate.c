@@ -790,7 +790,7 @@ ASTree *evaluate_unop(ASTree *operator, ASTree * operand) {
       operator->constant.integral.unsigned_value = type_get_width(
           operand->symbol == TOK_DECLARATION ? astree_get(operand, 1)->type
                                              : operand->type);
-      return astree_adopt(operator, 1, operand);
+      return translate_sizeof(operator, operand);
     default:
       fprintf(stderr,
               "FATAL: attempted to evaluate constant expression with "
