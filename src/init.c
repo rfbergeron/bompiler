@@ -108,22 +108,19 @@ ASTree *init_array(Type *arr_type, ptrdiff_t arr_disp, ASTree *init_list,
   if (type_is_deduced_array(arr_type)) {
     arr_type->array.length = elem_index;
   } else if (zero_count > 0) {
-    int status;
     if (arr_disp >= 0) {
-      status = static_zero_pad(zero_count, where);
+      static_zero_pad(zero_count, where);
     } else {
-      status = liter_advance(where, 1);
+      int status = liter_advance(where, 1);
       if (status) abort();
       ListIter *temp = liter_prev(where, 1);
       if (temp == NULL) abort();
-      status =
-          bulk_mzero(RBP_VREG, arr_disp, type_get_width(arr_type) - zero_count,
-                     arr_type, temp);
+      bulk_mzero(RBP_VREG, arr_disp, type_get_width(arr_type) - zero_count,
+                 arr_type, temp);
       free(temp);
-      if (!status) status = liter_advance(where, -1);
+      status = liter_advance(where, -1);
+      if (status) abort();
     }
-
-    if (status) abort();
   }
   return init_list;
 }
@@ -139,10 +136,7 @@ ASTree *init_union(const Type *union_type, ptrdiff_t union_disp,
     return astree_adopt(errnode, 1, init_list);
   }
   size_t zero_count = type_get_width(union_type) - type_get_width(member_type);
-  if (union_disp >= 0 && zero_count > 0) {
-    int status = static_zero_pad(zero_count, where);
-    if (status) abort(); /* library failure */
-  }
+  if (union_disp >= 0 && zero_count > 0) static_zero_pad(zero_count, where);
   return init_list;
 }
 
@@ -158,10 +152,8 @@ ASTree *init_struct(const Type *struct_type, ptrdiff_t struct_disp,
     Type *member_type = member_symval->type;
     size_t member_padding = type_get_padding(member_type, bytes_initialized);
     ptrdiff_t member_disp = struct_disp + member_symval->disp;
-    if (member_disp >= 0 && member_padding > 0) {
-      int status = static_zero_pad(member_padding, where);
-      if (status) abort(); /* library failure */
-    }
+    if (member_disp >= 0 && member_padding > 0)
+      static_zero_pad(member_padding, where);
     ASTree *errnode =
         init_agg_member(member_type, member_disp, init_list, init_index, where);
     if (errnode->symbol == TOK_TYPE_ERROR) {
@@ -172,21 +164,18 @@ ASTree *init_struct(const Type *struct_type, ptrdiff_t struct_disp,
   }
   size_t struct_width = type_get_width(struct_type);
   if (bytes_initialized < struct_width) {
-    int status;
     if (struct_disp >= 0) {
-      status = static_zero_pad(struct_width - bytes_initialized, where);
+      static_zero_pad(struct_width - bytes_initialized, where);
     } else {
-      status = liter_advance(where, 1);
+      int status = liter_advance(where, 1);
       if (status) abort();
       ListIter *temp = liter_prev(where, 1);
       if (temp == NULL) abort();
-      status = bulk_mzero(RBP_VREG, struct_disp, bytes_initialized, struct_type,
-                          temp);
+      bulk_mzero(RBP_VREG, struct_disp, bytes_initialized, struct_type, temp);
       free(temp);
-      if (!status) status = liter_advance(where, -1);
+      status = liter_advance(where, -1);
+      if (status) abort();
     }
-
-    if (status) abort(); /* library failure */
   }
   return init_list;
 }
