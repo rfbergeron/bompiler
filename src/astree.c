@@ -345,20 +345,20 @@ int astree_print_tree(ASTree *tree, FILE *out, int depth) {
   return 0;
 }
 
-int location_ge(Location *loc1, Location *loc2) {
+static int location_ge(Location *loc1, Location *loc2) {
   return loc1->filenr > loc2->filenr ||
          (loc1->filenr == loc2->filenr && loc1->linenr > loc2->linenr) ||
          (loc1->filenr == loc2->filenr && loc1->linenr == loc2->linenr &&
           loc1->offset >= loc2->offset);
 }
 
-int compare_symval_pairs(MapPair *pair1, MapPair *pair2) {
+static int compare_symval_pairs(MapPair *pair1, MapPair *pair2) {
   SymbolValue *symval1 = pair1->value;
   SymbolValue *symval2 = pair2->value;
   return location_ge(&symval1->loc, &symval2->loc);
 }
 
-const char *table_type_to_str(TableType type) {
+static const char *table_type_to_str(TableType type) {
   switch (type) {
     case FUNCTION_TABLE:
       return "FUNCTION SCOPE";
@@ -375,7 +375,7 @@ const char *table_type_to_str(TableType type) {
   }
 }
 
-int print_sym_child_helper(ASTree *tree, FILE *out, int depth) {
+static int print_sym_child_helper(ASTree *tree, FILE *out, int depth) {
   ASTree *block = NULL;
   switch (tree->symbol) {
     case TOK_ROOT:
@@ -426,7 +426,7 @@ int print_sym_child_helper(ASTree *tree, FILE *out, int depth) {
   }
 }
 
-int print_sym_pair_helper(MapPair *pair, FILE *out, int depth) {
+static int print_sym_pair_helper(MapPair *pair, FILE *out, int depth) {
   static char symval_str[LINESIZE];
   const char *symname = pair->key;
   int padding_plus_symname = strlen(symname) + depth * 2;
@@ -440,8 +440,10 @@ int astree_print_symbols(ASTree *block, FILE *out, int depth) {
   int ret = 0;
   Map *primary_namespace = block->symbol_table->primary_namespace;
   ArrayList symval_pairs;
-  assert(!alist_init(&symval_pairs, map_size(primary_namespace)));
-  assert(!map_pairs(primary_namespace, &symval_pairs));
+  int status = alist_init(&symval_pairs, map_size(primary_namespace));
+  if (status) abort();
+  status = map_pairs(primary_namespace, &symval_pairs);
+  if (status) abort();
   alist_ssort(&symval_pairs, (BlibComparator)compare_symval_pairs);
 
   size_t pair_index = 0, child_index = 0;
@@ -480,7 +482,8 @@ fail:
           "astree node, symbol: %s, lexinfo: %s\n",
           parser_get_tname(block->symbol), block->lexinfo);
 cleanup:
-  assert(!alist_destroy(&symval_pairs, free));
+  status = alist_destroy(&symval_pairs, free);
+  if (status) abort();
   return ret;
 }
 #endif
