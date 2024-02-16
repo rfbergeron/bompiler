@@ -228,9 +228,9 @@ void set_op_sca(Operand *operand, IndexScale scale, intmax_t disp, size_t base,
                 size_t index);
 void maybe_load_cexpr(ASTree *expr, ListIter *where);
 size_t asmgen_literal_label(const char *literal, const char **out);
-int bulk_mzero(size_t dest_memreg, ptrdiff_t dest_disp, size_t skip_bytes,
-               const Type *type, ListIter *where);
-int static_zero_pad(size_t count, ListIter *where);
+void bulk_mzero(size_t dest_memreg, ptrdiff_t dest_disp, size_t skip_bytes,
+                const Type *type, ListIter *where);
+void static_zero_pad(size_t count, ListIter *where);
 OpType optype_from_opcode(Opcode opcode);
 ASTree *translate_empty_expr(ASTree *empty_expr);
 ASTree *translate_ident(ASTree *ident);
