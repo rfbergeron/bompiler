@@ -697,8 +697,9 @@ ASTree *validate_fnbody_content(ASTree *function, ASTree *fnbody_content) {
   if (function->symbol == TOK_TYPE_ERROR) {
     if (fnbody_content->symbol == TOK_TYPE_ERROR) {
       (void)astree_adopt(fnbody, 1, astree_remove(fnbody_content, 0));
-      assert(!type_merge_errors(function->type, fnbody_content->type));
-      assert(!astree_destroy(fnbody_content));
+      (void)type_merge_errors(function->type, fnbody_content->type);
+      int status = astree_destroy(fnbody_content);
+      if (status) abort();
       return function;
     } else {
       (void)astree_adopt(fnbody, 1, fnbody_content);
@@ -726,9 +727,11 @@ ASTree *finalize_function(ASTree *function) {
   ASTree *ret = function;
   if (body->symbol_table->label_namespace != NULL) {
     ArrayList label_strs;
-    assert(!alist_init(&label_strs,
-                       map_size(body->symbol_table->label_namespace)));
-    assert(!map_keys(body->symbol_table->label_namespace, &label_strs));
+    int status =
+        alist_init(&label_strs, map_size(body->symbol_table->label_namespace));
+    if (status) abort();
+    status = map_keys(body->symbol_table->label_namespace, &label_strs);
+    if (status) abort();
     size_t i;
     for (i = 0; i < alist_size(&label_strs); ++i) {
       const char *label_str = alist_get(&label_strs, i);
@@ -739,7 +742,8 @@ ASTree *finalize_function(ASTree *function) {
                                     labval->tree);
       }
     }
-    assert(!alist_destroy(&label_strs, NULL));
+    status = alist_destroy(&label_strs, NULL);
+    if (status) abort();
   }
   SymbolValue *symval = state_get_function(state);
   symval->flags |= SYMFLAG_DEFINED;
@@ -794,9 +798,11 @@ ASTree *validate_unique_tag(ASTree *tag_type_node, ASTree *left_brace) {
     /* remove struct/union member tables from scope stack */
     SymbolTable *top_scope = state_peek_table(state);
     while (top_scope->type == MEMBER_TABLE) {
-      assert(!llist_push_back(&tag_value->data.enumerators.struct_name_spaces,
-                              top_scope));
-      assert(!state_pop_table(state));
+      int status = llist_push_back(
+          &tag_value->data.enumerators.struct_name_spaces, top_scope);
+      if (status) abort();
+      status = state_pop_table(state);
+      if (status) abort();
       top_scope = state_peek_table(state);
     }
     tag_value->width = 4;
@@ -886,9 +892,11 @@ ASTree *validate_tag_def(ASTree *tag_type_node, ASTree *tag_name_node,
       /* remove struct/union member tables from scope stack */
       SymbolTable *top_scope = state_peek_table(state);
       while (top_scope->type == MEMBER_TABLE) {
-        assert(!llist_push_back(&tag_value->data.enumerators.struct_name_spaces,
-                                top_scope));
-        assert(!state_pop_table(state));
+        int status = llist_push_back(
+            &tag_value->data.enumerators.struct_name_spaces, top_scope);
+        if (status) abort();
+        status = state_pop_table(state);
+        if (status) abort();
         top_scope = state_peek_table(state);
       }
       tag_value->width = 4;
@@ -1009,7 +1017,7 @@ ASTree *define_enumerator(ASTree *enum_, ASTree *ident_node, ASTree *equal_sign,
     }
     int status = map_insert(&tagval->data.enumerators.by_name, (char *)ident,
                             ident_len, value);
-    assert(status == 0);
+    if (status) abort();
     astree_adopt(left_brace, 1, astree_adopt(equal_sign, 2, ident_node, expr));
     return enum_;
   } else {
@@ -1017,7 +1025,7 @@ ASTree *define_enumerator(ASTree *enum_, ASTree *ident_node, ASTree *equal_sign,
     *value = ++tagval->data.enumerators.last_value;
     int status = map_insert(&tagval->data.enumerators.by_name, (char *)ident,
                             ident_len, value);
-    assert(status == 0);
+    if (status) abort();
     astree_adopt(left_brace, 1, ident_node);
     return enum_;
   }
