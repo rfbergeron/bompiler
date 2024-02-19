@@ -40,14 +40,12 @@ ASTree *validate_stringcon(ASTree *stringcon) {
     symval->static_id = static_id;
 
     /* subtract 2 for quotes, add one for terminating nul */
-    assert(
-        !type_init_array(&symval->type, strlen(stringcon->lexinfo) - 2 + 1, 0));
+    symval->type = type_init_array(strlen(stringcon->lexinfo) - 2 + 1, 0);
 
-    Type *char_type;
-    assert(!type_init_base(
-        &char_type, SPEC_FLAG_CHAR | QUAL_FLAG_CONST | STOR_FLAG_STATIC));
+    Type *char_type =
+        type_init_base(SPEC_FLAG_CHAR | QUAL_FLAG_CONST | STOR_FLAG_STATIC);
 
-    assert(!type_append(symval->type, char_type, 0));
+    (void)type_append(symval->type, char_type, 0);
     assert(!state_insert_symbol(state, stringcon_label, strlen(stringcon_label),
                                 symval));
   }
@@ -81,10 +79,8 @@ ASTree *finalize_call(ASTree *call) {
     return call;
   }
   ASTree *function = astree_get(call, 0);
-  Type *function_type;
   /* first type node is pointer; second is function */
-  int status = type_strip_declarator(&function_type, function->type);
-  if (status) abort();
+  Type *function_type = type_strip_declarator(function->type);
   assert(function_type->any.code == TYPE_CODE_FUNCTION);
   /* subtract one since function expression is also a child */
   if (astree_count(call) - 1 < function_type->function.parameters_size) {
@@ -105,10 +101,8 @@ ASTree *validate_arg(ASTree *call, ASTree *arg) {
     return astree_propogate_errnode(call, arg);
   /* functon subtree is the first child of the call node */
   ASTree *function = astree_get(call, 0);
-  Type *function_type;
   /* first type should be pointer; next should be function */
-  int status = type_strip_declarator(&function_type, function->type);
-  if (status) abort();
+  Type *function_type = type_strip_declarator(function->type);
   assert(function_type->any.code == TYPE_CODE_FUNCTION);
   /* subtract one since function expression is also a child */
   size_t param_index = astree_count(call) - 1;
@@ -143,12 +137,9 @@ ASTree *validate_call(ASTree *expr, ASTree *call) {
                                  BCC_TERR_EXPECTED_FN_PTR, 2, call, expr);
 
   /* strip pointer */
-  Type *function_type, *return_type;
-  int status = type_strip_declarator(&function_type, expr->type);
-  if (status) abort();
+  Type *function_type = type_strip_declarator(expr->type);
   /* strip function */
-  status = type_strip_declarator(&return_type, function_type);
-  if (status) abort();
+  Type *return_type = type_strip_declarator(function_type);
   call->type = return_type;
 
   if (!type_is_void(return_type) && type_is_incomplete(return_type))
@@ -225,9 +216,8 @@ ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
    */
   if (type_is_arithmetic(true_expr->type) &&
       type_is_arithmetic(false_expr->type)) {
-    int status = type_arithmetic_conversions(&qmark->type, true_expr->type,
-                                             false_expr->type);
-    if (status) abort();
+    qmark->type =
+        type_arithmetic_conversions(true_expr->type, false_expr->type);
   } else if ((type_is_struct(true_expr->type) &&
               type_is_struct(false_expr->type)) ||
              (type_is_union(true_expr->type) &&
@@ -257,9 +247,8 @@ ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
              (type_is_void_pointer(true_expr->type) ||
               type_is_void_pointer(false_expr->type) ||
               types_equivalent(true_expr->type, false_expr->type, 1, 1))) {
-    if (type_common_qualified_pointer(&qmark->type, true_expr->type,
-                                      false_expr->type))
-      abort();
+    qmark->type =
+        type_common_qualified_pointer(true_expr->type, false_expr->type);
   } else {
     return astree_create_errnode(
         astree_adopt(qmark, 3, condition, true_expr, false_expr),
@@ -300,7 +289,8 @@ ASTree *validate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
 
 static int subtraction_type(Type **out, Type *left_type, Type *right_type) {
   if (type_is_arithmetic(left_type) && type_is_arithmetic(right_type)) {
-    return type_arithmetic_conversions(out, left_type, right_type);
+    *out = type_arithmetic_conversions(left_type, right_type);
+    return 0;
   } else if (type_is_pointer(left_type) && type_is_integral(right_type)) {
     return *out = left_type, 0;
   } else if (type_is_pointer(left_type) && type_is_pointer(right_type) &&
@@ -314,7 +304,8 @@ static int subtraction_type(Type **out, Type *left_type, Type *right_type) {
 
 static int addition_type(Type **out, Type *left_type, Type *right_type) {
   if (type_is_arithmetic(left_type) && type_is_arithmetic(right_type)) {
-    return type_arithmetic_conversions(out, left_type, right_type);
+    *out = type_arithmetic_conversions(left_type, right_type);
+    return 0;
   } else if (type_is_pointer(left_type) && type_is_integral(right_type)) {
     return *out = left_type, 0;
   } else if (type_is_integral(left_type) && type_is_pointer(right_type)) {
@@ -417,9 +408,7 @@ ASTree *validate_multiply(ASTree *operator, ASTree * left, ASTree *right) {
     return astree_propogate_errnode_v(operator, 2, left, right);
   }
   if (type_is_arithmetic(left->type) && type_is_arithmetic(right->type)) {
-    int status =
-        type_arithmetic_conversions(&operator->type, left->type, right->type);
-    if (status) abort();
+    operator->type = type_arithmetic_conversions(left->type, right->type);
     return evaluate_binop(operator, left, right);
   } else {
     return astree_create_errnode(astree_adopt(operator, 2, left, right),
@@ -433,9 +422,7 @@ ASTree *validate_shift(ASTree *operator, ASTree * left, ASTree *right) {
     return astree_propogate_errnode_v(operator, 2, left, right);
   }
   if (type_is_integral(left->type) && type_is_integral(right->type)) {
-    int status = type_arithmetic_conversions(&operator->type, left->type,
-                                             (Type *)TYPE_INT);
-    if (status) abort();
+    operator->type = type_arithmetic_conversions(left->type, (Type *)TYPE_INT);
     return evaluate_binop(operator, left, right);
   } else {
     return astree_create_errnode(astree_adopt(operator, 2, left, right),
@@ -449,9 +436,7 @@ ASTree *validate_bitwise(ASTree *operator, ASTree * left, ASTree *right) {
     return astree_propogate_errnode_v(operator, 2, left, right);
   }
   if (type_is_integral(left->type) && type_is_integral(right->type)) {
-    int status =
-        type_arithmetic_conversions(&operator->type, left->type, right->type);
-    if (status) abort();
+    operator->type = type_arithmetic_conversions(left->type, right->type);
     return evaluate_binop(operator, left, right);
   } else {
     return astree_create_errnode(astree_adopt(operator, 2, left, right),
@@ -477,9 +462,8 @@ ASTree *validate_increment(ASTree *operator, ASTree * operand) {
                ? translate_post_inc_dec(operator, operand)
                : translate_inc_dec(operator, operand);
   } else if (type_is_arithmetic(operand->type)) {
-    int status = type_arithmetic_conversions(&operator->type, operand->type,
-                                             (Type *)TYPE_INT);
-    if (status) abort();
+    operator->type =
+        type_arithmetic_conversions(operand->type, (Type *)TYPE_INT);
     maybe_load_cexpr(operand, NULL);
     return operator->symbol == TOK_POST_INC || operator->symbol == TOK_POST_DEC
                ? translate_post_inc_dec(operator, operand)
@@ -511,9 +495,8 @@ static ASTree *validate_complement(ASTree *operator, ASTree * operand) {
   }
 
   if (type_is_integral(operand->type)) {
-    int status = type_arithmetic_conversions(&operator->type, operand->type,
-                                             (Type *)TYPE_INT);
-    if (status) abort();
+    operator->type =
+        type_arithmetic_conversions(operand->type, (Type *)TYPE_INT);
     return evaluate_unop(operator, operand);
   } else {
     return astree_create_errnode(astree_adopt(operator, 1, operand),
@@ -528,9 +511,8 @@ static ASTree *validate_negation(ASTree *operator, ASTree * operand) {
   }
 
   if (type_is_arithmetic(operand->type)) {
-    int status = type_arithmetic_conversions(&operator->type, operand->type,
-                                             (Type *)TYPE_INT);
-    if (status) abort();
+    operator->type =
+        type_arithmetic_conversions(operand->type, (Type *)TYPE_INT);
     return evaluate_unop(operator, operand);
   } else {
     return astree_create_errnode(astree_adopt(operator, 1, operand),
@@ -545,8 +527,7 @@ static ASTree *validate_indirection(ASTree *indirection, ASTree *operand) {
   }
 
   if (type_is_pointer(operand->type)) {
-    int status = type_strip_declarator(&indirection->type, operand->type);
-    if (status) abort();
+    indirection->type = type_strip_declarator(operand->type);
     /* TODO(Robert): arrays are lvalues */
     if (!type_is_array(indirection->type))
       indirection->attributes |= ATTR_EXPR_LVAL;
@@ -566,10 +547,8 @@ static ASTree *validate_addrof(ASTree *addrof, ASTree *operand) {
     return astree_create_errnode(astree_adopt(addrof, 1, operand),
                                  BCC_TERR_EXPECTED_LVAL, 2, addrof, operand);
 
-  int status = type_init_pointer(&addrof->type, QUAL_FLAG_NONE);
-  if (status) abort();
-  status = type_append(addrof->type, operand->type, 0);
-  if (status) abort();
+  addrof->type = type_init_pointer(QUAL_FLAG_NONE);
+  (void)type_append(addrof->type, operand->type, 0);
   return evaluate_addrof(addrof, operand);
 }
 
@@ -630,8 +609,8 @@ ASTree *validate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
                                  BCC_TERR_EXPECTED_INTEGER, 2, subscript,
                                  index);
   } else {
-    int status = type_strip_declarator(&subscript->type, pointer->type);
-    if (status) abort();
+    subscript->type = type_strip_declarator(pointer->type);
+    /* TODO(Robert): arrays are lvalues */
     if (!type_is_array(subscript->type) && !type_is_function(subscript->type)) {
       subscript->attributes |= ATTR_EXPR_LVAL;
     }
@@ -650,8 +629,7 @@ ASTree *validate_reference(ASTree *reference, ASTree *struct_, ASTree *member) {
       return astree_create_errnode(astree_adopt(reference, 2, struct_, member),
                                    BCC_TERR_EXPECTED_TAG_PTR, 2, reference,
                                    struct_->type);
-    int status = type_strip_declarator(&tag_type, struct_->type);
-    if (status) abort();
+    tag_type = type_strip_declarator(struct_->type);
   } else {
     if (!type_is_struct(struct_->type) && !type_is_union(struct_->type))
       return astree_create_errnode(astree_adopt(reference, 2, struct_, member),

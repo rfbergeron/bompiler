@@ -141,12 +141,10 @@ union type {
     unsigned int flags;
     const char *name;
     struct tag_value *value;
-    struct symbol_value *symbol;
   } tag;
   struct {
     TypeCode code;
     unsigned int flags;
-    struct symbol_value *symbol;
   } base;
   struct {
     TypeCode code;
@@ -169,17 +167,21 @@ extern const Type *TYPE_VA_LIST_POINTER;
 extern const Type *const TYPE_NONE;
 
 void type_init_globals(void);
-int type_init_none(Type **out, unsigned int flags);
-int type_init_pointer(Type **out, unsigned int qualifiers);
-int type_init_array(Type **out, size_t length, int deduce_length);
-int type_init_function(Type **out, size_t parameters_size, Type **parameters,
-                       int is_variadic, int is_old_style);
-int type_init_tag(Type **out, unsigned int flags, const char *tag_name,
-                  struct tag_value *tag_value);
-int type_init_base(Type **out, unsigned int flags);
-int type_init_error(Type **out, CompileError *error);
-int type_destroy(Type *type);
+
+Type *type_init_none(unsigned int flags);
+Type *type_init_pointer(unsigned int qualifiers);
+Type *type_init_array(size_t length, int deduce_length);
+Type *type_init_function(size_t parameters_size, Type **parameters,
+                         int is_variadic, int is_old_style);
+Type *type_init_tag(unsigned int flags, const char *tag_name,
+                    struct tag_value *tag_value);
+Type *type_init_base(unsigned int flags);
+Type *type_init_error(CompileError *error);
+
+void type_destroy(Type *type);
+
 int type_to_str(const Type *type, char *buf);
+
 int type_is_void(const Type *type);
 int type_is_integer(const Type *type);
 int type_is_signed(const Type *type);
@@ -225,23 +227,20 @@ size_t type_elem_width(const Type *type);
 size_t type_get_eightbytes(const Type *type);
 size_t type_get_padding(const Type *type, size_t to_pad);
 unsigned int type_get_flags(const Type *type);
-struct symbol_value *type_get_symbol(const Type *type);
 int types_equivalent(const Type *type1, const Type *type2,
                      int ignore_qualifiers, int ignore_storage_class);
 int types_assignable(const Type *dest, const Type *src, int is_const_zero);
 
-int type_strip_declarator(Type **dest, const Type *src);
-int type_strip_all_declarators(Type **out, const Type *type);
-int type_append(Type *dest, Type *src, int copy_src);
-int type_copy(Type **out, const Type *type, int clear_typedef_flag);
-int type_common_qualified_pointer(Type **out, const Type *type1,
-                                  const Type *type2);
-int type_merge_errors(Type *dest, Type *src);
-int type_append_error(Type *type, CompileError *error);
+Type *type_strip_declarator(const Type *type);
+Type *type_get_declspecs(Type *type);
+Type *type_append(Type *dest, Type *src, int copy_src);
+Type *type_copy(const Type *type, int clear_typedef_flag);
+Type *type_common_qualified_pointer(const Type *type1, const Type *type2);
+Type *type_merge_errors(Type *dest, Type *src);
+void type_append_error(Type *type, CompileError *error);
 int type_add_flags(Type *type, unsigned int flags);
 int type_normalize(Type *type);
-int type_pointer_conversions(Type **out, Type *type);
-int type_arithmetic_conversions(Type **out, Type *type1, Type *type2);
-int type_set_symbol(Type *type, struct symbol_value *symbol);
+Type *type_pointer_conversions(Type *type);
+Type *type_arithmetic_conversions(Type *type1, Type *type2);
 
 #endif

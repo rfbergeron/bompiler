@@ -910,14 +910,10 @@ ASTree *translate_comparison(ASTree *operator, ASTree * left, ASTree *right) {
   operator->first_instr = liter_copy(left->first_instr);
   if (operator->first_instr == NULL) abort();
 
-  Type *common_type;
-  if (type_is_pointer(left->type) || type_is_pointer(right->type)) {
-    common_type = (Type *)TYPE_LONG;
-  } else {
-    int status =
-        type_arithmetic_conversions(&common_type, left->type, right->type);
-    if (status) abort();
-  }
+  Type *common_type =
+      (type_is_pointer(left->type) || type_is_pointer(right->type))
+          ? (Type *)TYPE_LONG
+          : type_arithmetic_conversions(left->type, right->type);
 
   scalar_conversions(left, common_type);
   InstructionData *left_data = liter_get(left->last_instr);
@@ -1021,8 +1017,7 @@ ASTree *translate_reference(ASTree *reference, ASTree *struct_,
   Type *record_type;
   if (reference->symbol == TOK_ARROW) {
     scalar_conversions(struct_, struct_->type);
-    int status = type_strip_declarator(&record_type, struct_->type);
-    if (status) abort();
+    record_type = type_strip_declarator(struct_->type);
   } else {
     record_type = struct_->type;
   }
@@ -1153,13 +1148,11 @@ static void convert_int_to_offset(const Operand *int_op, const Type *ptr_type,
   assert(where != NULL);
   assert(int_op->all.mode == MODE_REGISTER);
 
-  Type *element_type;
-  int status = type_strip_declarator(&element_type, ptr_type);
-  if (status) abort();
+  Type *element_type = type_strip_declarator(ptr_type);
   InstructionData *imul_data = instr_init(OP_IMUL);
   imul_data->dest = *int_op;
   set_op_imm(&imul_data->src, type_get_width(element_type), IMM_UNSIGNED);
-  status = liter_push_back(where, out, 1, imul_data);
+  int status = liter_push_back(where, out, 1, imul_data);
   if (status) abort();
 }
 
@@ -1415,14 +1408,12 @@ static void assign_add(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   /* TODO(Robert): copied from translate_addition */
   /* use two-operand IMUL, since it is more convenient in this case */
   if (type_is_pointer(lvalue->type) && !type_is_pointer(rvalue->type)) {
-    Type *element_type;
-    int status = type_strip_declarator(&element_type, lvalue->type);
-    if (status) abort();
+    Type *element_type = type_strip_declarator(lvalue->type);
     InstructionData *mul_data = instr_init(OP_IMUL);
     mul_data->dest = rvalue_data->dest;
     set_op_imm(&mul_data->src, type_get_width(element_type), IMM_UNSIGNED);
-    status = liter_push_back(rvalue->last_instr, &assignment->last_instr, 3,
-                             mul_data, assignment_data, dummy_data);
+    int status = liter_push_back(rvalue->last_instr, &assignment->last_instr, 3,
+                                 mul_data, assignment_data, dummy_data);
     if (status) abort();
   } else {
     int status = liter_push_back(rvalue->last_instr, &assignment->last_instr, 2,
@@ -1432,10 +1423,7 @@ static void assign_add(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
 }
 
 static void assign_mul(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
-  Type *common_type;
-  int status =
-      type_arithmetic_conversions(&common_type, lvalue->type, rvalue->type);
-  if (status) abort();
+  Type *common_type = type_arithmetic_conversions(lvalue->type, rvalue->type);
 
   InstructionData *lvalue_data = liter_get(lvalue->last_instr);
   scalar_conversions(lvalue, common_type);
@@ -1492,10 +1480,10 @@ static void assign_mul(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   dummy_data->dest = dummy_data->src = mov_data->dest;
   dummy_data->persist_flags |= PERSIST_DEST_CLEAR;
 
-  status = liter_push_back(rvalue->last_instr, &assignment->last_instr, 10,
-                           push_rdx_data, push_rax_data, zero_rdx_data,
-                           mov_rax_data, operator_data, store_data, mov_data,
-                           pop_rax_data, pop_rdx_data, dummy_data);
+  int status = liter_push_back(
+      rvalue->last_instr, &assignment->last_instr, 10, push_rdx_data,
+      push_rax_data, zero_rdx_data, mov_rax_data, operator_data, store_data,
+      mov_data, pop_rax_data, pop_rdx_data, dummy_data);
   if (status) abort();
 }
 
@@ -1625,9 +1613,7 @@ static void translate_args(ASTree *call) {
       (void)assign_stack_space(call->type);
     }
   }
-  Type *function_type;
-  int status = type_strip_declarator(&function_type, astree_get(call, 0)->type);
-  if (status) abort();
+
   size_t i;
   for (i = 1; i < astree_count(call); ++i) {
     PFDBG1('g', "Translating parameter %i", i);
@@ -1660,9 +1646,6 @@ static void save_call_subexprs(ASTree *call) {
     }
   }
 
-  Type *function_type;
-  int status = type_strip_declarator(&function_type, astree_get(call, 0)->type);
-  if (status) abort();
   for (i = 0; i < astree_count(call); ++i) {
     ASTree *subexpr = astree_get(call, i);
     /* turn lvalues into rvalues and extend all scalar arguments to be eight
@@ -1679,8 +1662,8 @@ static void save_call_subexprs(ASTree *call) {
     set_op_ind(&spill_data->dest,
                spill_regions[call->spill_eightbytes - (i + 1)], RBP_VREG);
     spill_data->persist_flags |= PERSIST_SRC_SET;
-    status = liter_push_back(subexpr->last_instr, &subexpr->last_instr, 1,
-                             spill_data);
+    int status = liter_push_back(subexpr->last_instr, &subexpr->last_instr, 1,
+                                 spill_data);
     if (status) abort();
   }
 }
@@ -2005,9 +1988,7 @@ ASTree *translate_va_arg(ASTree *va_arg_, ASTree *expr, ASTree *type_name) {
 static void translate_params(ASTree *declarator) {
   ASTree *fn_dirdecl = astree_get(declarator, astree_count(declarator) - 1);
   const Type *fn_type = declarator->type;
-  Type *ret_type;
-  int status = type_strip_declarator(&ret_type, fn_type);
-  if (status) abort();
+  Type *ret_type = type_strip_declarator(fn_type);
   /* account for hidden out param */
   param_reg_index = type_get_eightbytes(ret_type) > 2 ? 1 : 0;
   if (param_reg_index == 1) {
@@ -2390,9 +2371,7 @@ static void return_scalar(ASTree *ret, ASTree *expr) {
   SymbolValue *function_symval = state_get_function(state);
   const Type *function_type = function_symval->type;
   /* strip function */
-  Type *return_type;
-  int status = type_strip_declarator(&return_type, function_type);
-  if (status) abort();
+  Type *return_type = type_strip_declarator(function_type);
   scalar_conversions(expr, return_type);
   InstructionData *expr_data = liter_get(expr->last_instr);
 
@@ -2400,7 +2379,7 @@ static void return_scalar(ASTree *ret, ASTree *expr) {
   mov_data->src = expr_data->dest;
   set_op_reg(&mov_data->dest, type_get_width(return_type), RAX_VREG);
   mov_data->persist_flags |= PERSIST_SRC_SET;
-  status = llist_push_back(instructions, mov_data);
+  int status = llist_push_back(instructions, mov_data);
   if (status) abort();
 
   restore_preserved_regs();

@@ -75,11 +75,11 @@ int symbol_value_destroy(SymbolValue *symbol_value) {
   PFDBG0('t', "freeing symbol value");
   if (symbol_value == NULL) return 0;
 
-  int status = type_destroy(symbol_value->type);
+  type_destroy(symbol_value->type);
   free(symbol_value);
 
   PFDBG0('t', "done");
-  return status;
+  return 0;
 }
 
 #ifndef UNIT_TESTING

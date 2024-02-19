@@ -77,14 +77,10 @@
 #define COMPARATOR_EVAL(optext, comparator, left, right)                       \
   do {                                                                         \
     assert(type_is_arithmetic(left->type) && type_is_arithmetic(right->type)); \
-    Type *common_type;                                                         \
-    if (type_is_pointer(left->type) || type_is_pointer(right->type)) {         \
-      common_type = (Type *)TYPE_LONG;                                         \
-    } else {                                                                   \
-      int status =                                                             \
-          type_arithmetic_conversions(&common_type, left->type, right->type);  \
-      if (status) abort();                                                     \
-    }                                                                          \
+    Type *common_type =                                                        \
+        (type_is_pointer(left->type) || type_is_pointer(right->type))          \
+            ? (Type *)TYPE_LONG                                                \
+            : type_arithmetic_conversions(left->type, right->type);            \
     if (left->constant.label != NULL) {                                        \
       comparator->constant.integral.signed_value =                             \
           left->constant.integral.signed_value optext                          \
@@ -697,11 +693,9 @@ ASTree *evaluate_reference(ASTree *reference, ASTree *struct_, ASTree *member) {
     maybe_load_cexpr(struct_, NULL);
     return translate_reference(reference, struct_, member);
   } else {
-    Type *tag_type;
-    if (reference->symbol == TOK_ARROW)
-      assert(!type_strip_declarator(&tag_type, struct_->type));
-    else
-      tag_type = struct_->type;
+    Type *tag_type = reference->symbol == TOK_ARROW
+                         ? type_strip_declarator(struct_->type)
+                         : struct_->type;
 
     SymbolValue *symval = type_member_name(tag_type, member->lexinfo);
     assert(symval);
