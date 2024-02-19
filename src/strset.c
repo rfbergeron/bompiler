@@ -66,8 +66,10 @@ const char *string_set_intern(const char *string) {
 int string_set_print(FILE *out) {
   PFDBG0('s', "Printing string set");
   ArrayList key_list;
-  assert(!alist_init(&key_list, map_size(&string_set)));
-  assert(!map_keys(&string_set, &key_list));
+  int status = alist_init(&key_list, map_size(&string_set));
+  if (status) abort();
+  status = map_keys(&string_set, &key_list);
+  if (status) abort();
 
   size_t i;
   for (i = 0; i < alist_size(&key_list); ++i) {
@@ -77,6 +79,7 @@ int string_set_print(FILE *out) {
     fprintf(out, "string_set[%4lu,%4lu]: %p->\"%s\"\n", map_location[0],
             map_location[1], (void *)key, key);
   }
-  assert(!alist_destroy(&key_list, NULL));
+  status = alist_destroy(&key_list, NULL);
+  if (status) abort();
   return 0;
 }
