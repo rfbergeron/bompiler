@@ -69,8 +69,7 @@ ASTree *validate_switch_expr(ASTree *expr) {
   }
   Type *promoted_type =
       type_arithmetic_conversions(expr->type, (Type *)TYPE_INT);
-  int status = state_set_control_type(state, promoted_type);
-  if (status) abort();
+  state_set_control_type(state, promoted_type);
   maybe_load_cexpr(expr, NULL);
   return expr;
 }
@@ -155,10 +154,7 @@ ASTree *validate_label(ASTree *label, ASTree *ident_node, ASTree *stmt) {
     LabelValue *labval = malloc(sizeof(*labval));
     labval->tree = ident_node;
     labval->is_defined = 1;
-    int status = state_insert_label(state, ident, ident_len, labval);
-    if (status) {
-      abort();
-    }
+    state_insert_label(state, ident, ident_len, labval);
     return translate_label(label, ident_node, stmt);
   }
 }
@@ -193,9 +189,11 @@ ASTree *validate_default(ASTree *default_, ASTree *stmt) {
   if (default_->jump_id == SIZE_MAX)
     return astree_create_errnode(astree_adopt(default_, 1, stmt),
                                  BCC_TERR_UNEXPECTED_TOKEN, 1, default_);
-  else if (state_set_selection_default(state))
+  else if (state_get_selection_default(state))
     return astree_create_errnode(astree_adopt(default_, 1, stmt),
                                  BCC_TERR_UNEXPECTED_TOKEN, 1, default_);
+  else
+    state_set_selection_default(state);
 
   return translate_default(default_, stmt);
 }
@@ -208,10 +206,7 @@ ASTree *validate_goto(ASTree *goto_, ASTree *ident) {
     LabelValue *labval = malloc(sizeof(*labval));
     labval->tree = ident;
     labval->is_defined = 0;
-    int status = state_insert_label(state, ident_str, ident_str_len, labval);
-    if (status) {
-      abort();
-    }
+    state_insert_label(state, ident_str, ident_str_len, labval);
   }
   return translate_goto(goto_, ident);
 }
@@ -235,10 +230,7 @@ ASTree *validate_break(ASTree *break_) {
 
 ASTree *validate_block(ASTree *block) {
   block->symbol_table = symbol_table_init(BLOCK_TABLE);
-  int status = state_push_table(state, block->symbol_table);
-  if (status) {
-    return astree_create_errnode(block, BCC_TERR_LIBRARY_FAILURE, 0);
-  }
+  state_push_table(state, block->symbol_table);
   return block;
 }
 
@@ -255,9 +247,6 @@ ASTree *validate_block_content(ASTree *block, ASTree *block_content) {
 }
 
 ASTree *finalize_block(ASTree *block) {
-  int status = state_pop_table(state);
-  if (status) {
-    return astree_create_errnode(block, BCC_TERR_LIBRARY_FAILURE, 0);
-  }
+  state_pop_table(state);
   return translate_block(block);
 }

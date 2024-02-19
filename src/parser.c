@@ -35,11 +35,9 @@ const char *parser_get_tname(int symbol) {
 
 BCC_YYSTATIC void make_va_list_type(void) {
   TagValue *builtin_tagval = tag_value_init(TAG_STRUCT);
-  int status = state_insert_tag(state, VA_LIST_STRUCT_NAME,
-                                strlen(VA_LIST_STRUCT_NAME), builtin_tagval);
-  if (status) abort();
-  status = state_push_table(state, builtin_tagval->data.members.by_name);
-  if (status) abort();
+  state_insert_tag(state, VA_LIST_STRUCT_NAME, strlen(VA_LIST_STRUCT_NAME),
+                   builtin_tagval);
+  state_push_table(state, builtin_tagval->data.members.by_name);
   builtin_tagval->alignment = X64_ALIGNOF_LONG;
   builtin_tagval->width = 2 * X64_SIZEOF_LONG + 2 * X64_SIZEOF_INT;
   builtin_tagval->is_defined = 1;
@@ -62,13 +60,11 @@ BCC_YYSTATIC void make_va_list_type(void) {
     int status = llist_push_back(member_list, member_symval);
     if (status) abort();
     const char *symname = VA_LIST_MEMBER_NAMES[i];
-    status =
-        state_insert_symbol(state, symname, strlen(symname), member_symval);
+    state_insert_symbol(state, symname, strlen(symname), member_symval);
     if (status) abort();
   }
 
-  status = state_pop_table(state);
-  if (status) abort();
+  state_pop_table(state);
   SymbolValue *builtin_symval =
       symbol_value_init(&LOC_EMPTY, state_get_sequence(state));
   builtin_symval->flags = SYMFLAG_TYPEDEF | SYMFLAG_DEFINED;
@@ -76,9 +72,8 @@ BCC_YYSTATIC void make_va_list_type(void) {
   Type *struct_type =
       type_init_tag(STOR_FLAG_TYPEDEF, VA_LIST_STRUCT_NAME, builtin_tagval);
   (void)type_append(builtin_symval->type, struct_type, 0);
-  status = state_insert_symbol(state, VA_LIST_TYPEDEF_NAME,
-                               strlen(VA_LIST_TYPEDEF_NAME), builtin_symval);
-  if (status) abort();
+  state_insert_symbol(state, VA_LIST_TYPEDEF_NAME, strlen(VA_LIST_TYPEDEF_NAME),
+                      builtin_symval);
   /* copy type info */
   Type *va_list_type_temp = type_copy(builtin_symval->type, 1);
   /* convert to pointer and free array */
@@ -108,8 +103,7 @@ void parser_init_globals(void) {
 
 void parser_destroy_globals(void) {
   type_destroy(TYPE_VA_LIST_POINTER_INTERNAL);
-  int status = astree_destroy(parser_root);
-  if (status) abort();
+  astree_destroy(parser_root);
 }
 
 BCC_YYSTATIC ASTree *parser_new_sym(ASTree *tree, int new_symbol) {
@@ -126,7 +120,7 @@ BCC_YYSTATIC ASTree *parser_join_strings(ASTree *joiner) {
   assert(strcmp("_joiner", joiner->lexinfo) == 0 && astree_count(joiner) > 0);
   if (astree_count(joiner) == 1) {
     ASTree *stringcon = astree_remove(joiner, 0);
-    if (astree_destroy(joiner)) abort();
+    astree_destroy(joiner);
     return stringcon;
   }
 
@@ -234,7 +228,7 @@ BCC_YYSTATIC ASTree *parse_pretty_function(ASTree *pretty_function) {
                                     string_set_intern(fn_str));
   /* free quoted function name since strset duplicates it */
   free(fn_str);
-  (void)astree_destroy(pretty_function);
+  astree_destroy(pretty_function);
   return fn_str_node;
 }
 

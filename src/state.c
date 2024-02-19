@@ -1,5 +1,7 @@
 #include "state.h"
 
+#include <assert.h>
+
 #include "stdlib.h"
 
 extern size_t next_vreg(void);
@@ -18,33 +20,26 @@ CompilerState *state_init(void) {
   return state;
 }
 
-int state_destroy(CompilerState *state) {
-  if (state == NULL) return 0;
-  llist_destroy(&state->table_stack);
-  llist_destroy(&state->switch_stack);
+void state_destroy(CompilerState *state) {
+  if (state == NULL) return;
+  int status = llist_destroy(&state->table_stack);
+  if (status) abort();
+  status = llist_destroy(&state->switch_stack);
+  if (status) abort();
   size_t_stack_destroy(&state->break_stack);
   size_t_stack_destroy(&state->continue_stack);
   free(state);
-  return 0;
 }
 
-int state_push_table(CompilerState *state, SymbolTable *table) {
-  if (llist_front(&state->table_stack) == table) {
-    fprintf(stderr, "ERROR: attempted to enter same scope twice.\n");
-    return -1;
-  } else {
-    return llist_push_front(&state->table_stack, table);
-  }
+void state_push_table(CompilerState *state, SymbolTable *table) {
+  assert(llist_front(&state->table_stack) != table);
+  int status = llist_push_front(&state->table_stack, table);
+  if (status) abort();
 }
 
-int state_pop_table(CompilerState *state) {
-  if (llist_empty(&state->table_stack)) {
-    fprintf(stderr, "ERROR: attempted to leave scope at top level.\n");
-    return -1;
-  } else {
-    (void)llist_pop_front(&state->table_stack);
-    return 0;
-  }
+void state_pop_table(CompilerState *state) {
+  assert(!llist_empty(&state->table_stack));
+  (void)llist_pop_front(&state->table_stack);
 }
 
 SymbolTable *state_peek_table(CompilerState *state) {
@@ -73,17 +68,12 @@ int state_get_symbol(CompilerState *state, const char *ident,
   return i == 0;
 }
 
-int state_insert_symbol(CompilerState *state, const char *ident,
-                        const size_t ident_len, SymbolValue *symval) {
+void state_insert_symbol(CompilerState *state, const char *ident,
+                         const size_t ident_len, SymbolValue *symval) {
   SymbolTable *top_scope = llist_front(&state->table_stack);
   /* TODO(Robert): rewrite symbol table functions */
-  SymbolValue *exists = symbol_table_get(top_scope, ident, ident_len);
-  if (exists) {
-    fprintf(stderr, "ERROR: redeclaration of symbol \"%s\".\n", ident);
-    return -1;
-  } else {
-    return symbol_table_insert(top_scope, ident, ident_len, symval);
-  }
+  assert(symbol_table_get(top_scope, ident, ident_len) == NULL);
+  symbol_table_insert(top_scope, ident, ident_len, symval);
 }
 
 size_t state_get_sequence(CompilerState *state) {
@@ -106,8 +96,8 @@ int state_get_tag(CompilerState *state, const char *ident,
   return i == 0;
 }
 
-int state_insert_tag(CompilerState *state, const char *ident,
-                     const size_t ident_len, TagValue *tagval) {
+void state_insert_tag(CompilerState *state, const char *ident,
+                      const size_t ident_len, TagValue *tagval) {
   SymbolTable *top_scope = NULL;
   size_t i;
   for (i = 0; i < llist_size(&state->table_stack); ++i) {
@@ -115,15 +105,9 @@ int state_insert_tag(CompilerState *state, const char *ident,
     if (top_scope->tag_namespace != NULL) break;
   }
 
-  if (top_scope->tag_namespace == NULL) return -1;
-  TagValue *exists = symbol_table_get_tag(top_scope, ident, ident_len);
-  if (exists) {
-    /* TODO(Robert): allow redefinition of tags in certain circumstances */
-    fprintf(stderr, "ERROR: redeclaration of tag \"%s\".\n", ident);
-    return -1;
-  } else {
-    return symbol_table_insert_tag(top_scope, ident, ident_len, tagval);
-  }
+  assert(top_scope->tag_namespace != NULL);
+  assert(symbol_table_get_tag(top_scope, ident, ident_len) == NULL);
+  symbol_table_insert_tag(top_scope, ident, ident_len, tagval);
 }
 
 LabelValue *state_get_label(CompilerState *state, const char *ident,
@@ -137,15 +121,12 @@ LabelValue *state_get_label(CompilerState *state, const char *ident,
   return symbol_table_get_label(function_table, ident, ident_len);
 }
 
-int state_insert_label(CompilerState *state, const char *ident,
-                       const size_t ident_len, LabelValue *labval) {
+void state_insert_label(CompilerState *state, const char *ident,
+                        const size_t ident_len, LabelValue *labval) {
   SymbolTable *function_table =
       llist_get(&state->table_stack, llist_size(&state->table_stack) - 2);
-  if (function_table == NULL || function_table->label_namespace == NULL) {
-    fprintf(stderr, "ERROR: attempt to insert label at top level.\n");
-    return -1;
-  }
-  return symbol_table_insert_label(function_table, ident, ident_len, labval);
+  assert(function_table != NULL && function_table->label_namespace != NULL);
+  symbol_table_insert_label(function_table, ident, ident_len, labval);
 }
 
 size_t state_get_selection_id(CompilerState *state) {
@@ -241,21 +222,17 @@ void state_inc_case_id(CompilerState *state) {
   if (info != NULL) ++info->case_id;
 }
 
-int state_set_selection_default(CompilerState *state) {
+void state_set_selection_default(CompilerState *state) {
   SwitchInfo *info = llist_front(&state->switch_stack);
   /* do not call if there is no switch info */
-  if (info == NULL) abort();
-  if (info->has_default) return 1;
+  assert(info != NULL && info->has_default == 0);
   info->has_default = 1;
-  return 0;
 }
 
-int state_set_control_type(CompilerState *state, const Type *type) {
+void state_set_control_type(CompilerState *state, const Type *type) {
   SwitchInfo *info = llist_front(&state->switch_stack);
-  if (info == NULL) return -1;
-  if (info->control_type != NULL) abort();
+  assert(info != NULL && info->control_type == NULL);
   info->control_type = type;
-  return 0;
 }
 
 void state_push_break_id(CompilerState *state, size_t id) {
@@ -268,20 +245,12 @@ void state_push_continue_id(CompilerState *state, size_t id) {
 
 void state_dec_jump_id_count(CompilerState *state) { --state->jump_id_count; }
 
-/* TODO(Robert): this function should not return an error code; if it fails it
- * means that something is very wrong and it would probably be best to die
- */
-int state_set_function(CompilerState *state, const char *function_name,
-                       SymbolValue *function_symval) {
-  if (state->enclosing_function != NULL) {
-    fprintf(stderr,
-            "ERROR: attempt to set enclosing function while inside "
-            "another function.\n");
-    return -1;
-  }
+void state_set_function(CompilerState *state, const char *function_name,
+                        SymbolValue *function_symval) {
+  assert(state->enclosing_function == NULL &&
+         state->enclosing_function_name == NULL);
   state->enclosing_function = function_symval;
   state->enclosing_function_name = function_name;
-  return 0;
 }
 
 const char *state_get_function_name(CompilerState *state) {
@@ -292,15 +261,9 @@ SymbolValue *state_get_function(CompilerState *state) {
   return state->enclosing_function;
 }
 
-int state_unset_function(CompilerState *state) {
-  if (state->enclosing_function == NULL) {
-    fprintf(stderr,
-            "ERROR: attempt to unset enclosing function while at file "
-            "scope.\n");
-    return -1;
-  } else {
-    state->enclosing_function = NULL;
-    state->enclosing_function_name = NULL;
-    return 0;
-  }
+void state_unset_function(CompilerState *state) {
+  assert(state->enclosing_function != NULL &&
+         state->enclosing_function_name != NULL);
+  state->enclosing_function = NULL;
+  state->enclosing_function_name = NULL;
 }

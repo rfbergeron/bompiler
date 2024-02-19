@@ -46,9 +46,8 @@ ASTree *validate_stringcon(ASTree *stringcon) {
         type_init_base(SPEC_FLAG_CHAR | QUAL_FLAG_CONST | STOR_FLAG_STATIC);
 
     (void)type_append(symval->type, char_type, 0);
-    int status = state_insert_symbol(state, stringcon_label,
-                                     strlen(stringcon_label), symval);
-    if (status) abort();
+    state_insert_symbol(state, stringcon_label, strlen(stringcon_label),
+                        symval);
   }
 
   stringcon->type = symval->type;
@@ -269,6 +268,7 @@ ASTree *validate_comma(ASTree *comma, ASTree *left, ASTree *right) {
   return evaluate_comma(comma, left, right);
 }
 
+/* TODO(Robert): allow casting void to void */
 ASTree *validate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
   if (declaration->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(cast, 2, declaration, expr);

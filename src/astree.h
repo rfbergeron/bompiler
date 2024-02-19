@@ -53,7 +53,7 @@ typedef struct astree {
 extern ASTree EMPTY_EXPR;
 
 ASTree *astree_init(int symbol, const Location location, const char *lexinfo);
-int astree_destroy(ASTree *tree);
+void astree_destroy(ASTree *tree);
 ASTree *astree_adopt(ASTree *parent, const size_t count, ...);
 ASTree *astree_replace(ASTree *parent, const size_t index, ASTree *child);
 ASTree *astree_get(ASTree *parent, const size_t index);

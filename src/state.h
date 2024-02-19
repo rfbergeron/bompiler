@@ -28,23 +28,23 @@ typedef struct compiler_state {
 extern CompilerState *state;
 
 CompilerState *state_init(void);
-int state_destroy(CompilerState *state);
-int state_push_table(CompilerState *state, SymbolTable *table);
-int state_pop_table(CompilerState *state);
+void state_destroy(CompilerState *state);
+void state_push_table(CompilerState *state, SymbolTable *table);
+void state_pop_table(CompilerState *state);
 SymbolTable *state_peek_table(CompilerState *state);
 int state_get_symbol(CompilerState *state, const char *ident,
                      const size_t ident_len, SymbolValue **out);
-int state_insert_symbol(CompilerState *state, const char *ident,
-                        const size_t ident_len, SymbolValue *symval);
+void state_insert_symbol(CompilerState *state, const char *ident,
+                         const size_t ident_len, SymbolValue *symval);
 size_t state_get_sequence(CompilerState *state);
 int state_get_tag(CompilerState *state, const char *ident,
                   const size_t ident_len, TagValue **out);
-int state_insert_tag(CompilerState *state, const char *ident,
-                     const size_t ident_len, TagValue *tagval);
+void state_insert_tag(CompilerState *state, const char *ident,
+                      const size_t ident_len, TagValue *tagval);
 LabelValue *state_get_label(CompilerState *state, const char *ident,
                             const size_t ident_len);
-int state_insert_label(CompilerState *state, const char *ident,
-                       const size_t ident_len, LabelValue *labval);
+void state_insert_label(CompilerState *state, const char *ident,
+                        const size_t ident_len, LabelValue *labval);
 size_t state_get_selection_id(CompilerState *state);
 size_t state_get_case_id(CompilerState *state);
 size_t state_get_control_reg(CompilerState *state);
@@ -58,15 +58,15 @@ void state_pop_break_id(CompilerState *state);
 void state_pop_continue_id(CompilerState *state);
 void state_push_selection_id(CompilerState *state, size_t id);
 void state_inc_case_id(CompilerState *state);
-int state_set_selection_default(CompilerState *state);
-int state_set_control_type(CompilerState *state, const Type *type);
+void state_set_selection_default(CompilerState *state);
+void state_set_control_type(CompilerState *state, const Type *type);
 void state_push_break_id(CompilerState *state, size_t id);
 void state_push_continue_id(CompilerState *state, size_t id);
 void state_dec_jump_id_count(CompilerState *state);
-int state_set_function(CompilerState *state, const char *function_name,
-                       SymbolValue *function_symval);
+void state_set_function(CompilerState *state, const char *function_name,
+                        SymbolValue *function_symval);
 SymbolValue *state_get_function(CompilerState *state);
 const char *state_get_function_name(CompilerState *state);
-int state_unset_function(CompilerState *state);
+void state_unset_function(CompilerState *state);
 
 #endif

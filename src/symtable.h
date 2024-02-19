@@ -98,26 +98,26 @@ typedef struct label_value {
 
 /* SymbolValue functions */
 SymbolValue *symbol_value_init(const Location *loc, size_t sequence);
-int symbol_value_destroy(SymbolValue *symbol_value);
+void symbol_value_destroy(SymbolValue *symbol_value);
 int symbol_value_print(const SymbolValue *symbol, char *buffer);
 
 /* TagValue functions */
 TagValue *tag_value_init(TagType tag);
-int tag_value_destroy(TagValue *tagval);
+void tag_value_destroy(TagValue *tagval);
 
 /* symbol table functions */
 SymbolTable *symbol_table_init(TableType type);
-int symbol_table_destroy(SymbolTable *table);
-int symbol_table_insert(SymbolTable *table, const char *ident,
-                        const size_t ident_len, SymbolValue *symval);
+void symbol_table_destroy(SymbolTable *table);
+void symbol_table_insert(SymbolTable *table, const char *ident,
+                         const size_t ident_len, SymbolValue *symval);
 SymbolValue *symbol_table_get(SymbolTable *table, const char *ident,
                               const size_t ident_len);
-int symbol_table_insert_tag(SymbolTable *table, const char *ident,
-                            const size_t ident_len, TagValue *tagval);
+void symbol_table_insert_tag(SymbolTable *table, const char *ident,
+                             const size_t ident_len, TagValue *tagval);
 TagValue *symbol_table_get_tag(SymbolTable *table, const char *ident,
                                const size_t ident_len);
-int symbol_table_insert_label(SymbolTable *table, const char *ident,
-                              const size_t ident_len, LabelValue *labval);
+void symbol_table_insert_label(SymbolTable *table, const char *ident,
+                               const size_t ident_len, LabelValue *labval);
 LabelValue *symbol_table_get_label(SymbolTable *table, const char *ident,
                                    const size_t ident_len);
 #endif
