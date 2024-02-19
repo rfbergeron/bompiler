@@ -234,7 +234,7 @@ BCC_YYSTATIC ASTree *parse_pretty_function(ASTree *pretty_function) {
                                     string_set_intern(fn_str));
   /* free quoted function name since strset duplicates it */
   free(fn_str);
-  assert(!astree_destroy(pretty_function));
+  (void)astree_destroy(pretty_function);
   return fn_str_node;
 }
 

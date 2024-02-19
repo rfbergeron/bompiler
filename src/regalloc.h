@@ -3,7 +3,7 @@
 #include "badllist.h"
 #include "symtable.h"
 
-int liveness_sr(ListIter *first, ListIter *last);
-int allocate_regs(ListIter *first, ListIter *last);
+void liveness_sr(ListIter *first, ListIter *last);
+void allocate_regs(ListIter *first, ListIter *last);
 
 #endif
