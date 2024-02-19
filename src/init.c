@@ -80,9 +80,7 @@ static ASTree *init_literal(Type *arr_type, ptrdiff_t arr_disp, ASTree *literal,
 
 ASTree *init_array(Type *arr_type, ptrdiff_t arr_disp, ASTree *init_list,
                    size_t *init_index, ListIter *where) {
-  Type *elem_type;
-  int status = type_strip_declarator(&elem_type, arr_type);
-  if (status) abort();
+  Type *elem_type = type_strip_declarator(arr_type);
   size_t elem_width = type_get_width(elem_type),
          elem_count = type_member_count(arr_type),
          init_count = astree_count(init_list), elem_index;

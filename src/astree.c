@@ -197,13 +197,11 @@ ASTree *astree_create_errnode(ASTree *child, ErrorCode code, size_t info_size,
   va_end(info_ptrs);
 
   if (child->symbol == TOK_TYPE_ERROR) {
-    int status = type_append_error(child->type, error);
-    if (status) abort();
+    type_append_error(child->type, error);
     return child;
   } else {
     ASTree *errnode = astree_init(TOK_TYPE_ERROR, child->loc, "_terr");
-    int status = type_init_error(&errnode->type, error);
-    if (status) abort();
+    errnode->type = type_init_error(error);
     return astree_adopt(errnode, 1, child);
   }
 }
@@ -220,10 +218,9 @@ ASTree *astree_propogate_errnode(ASTree *parent, ASTree *child) {
     (void)astree_adopt(parent, 1, real_child);
     return child;
   } else {
-    int status = type_merge_errors(parent->type, child->type);
-    if (status) abort();
+    (void)type_merge_errors(parent->type, child->type);
     (void)astree_adopt(UNWRAP(parent), 1, astree_remove(child, 0));
-    status = astree_destroy(child);
+    int status = astree_destroy(child);
     if (status) abort();
     return parent;
   }

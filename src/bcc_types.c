@@ -30,123 +30,109 @@ void type_init_globals(void) {
   /* we have to do this here since designated initializers don't exist in c90 */
   TYPE_VOID_INTERNAL.base.code = TYPE_CODE_BASE;
   TYPE_VOID_INTERNAL.base.flags = SPEC_FLAG_VOID;
-  TYPE_VOID_INTERNAL.base.symbol = NULL;
   TYPE_POINTER_INTERNAL.pointer.code = TYPE_CODE_POINTER;
   TYPE_POINTER_INTERNAL.pointer.qualifiers = QUAL_FLAG_NONE;
   TYPE_POINTER_INTERNAL.pointer.next = &TYPE_VOID_INTERNAL;
   TYPE_CHAR_INTERNAL.base.code = TYPE_CODE_BASE;
   TYPE_CHAR_INTERNAL.base.flags = SPEC_FLAG_CHAR;
-  TYPE_CHAR_INTERNAL.base.symbol = NULL;
   TYPE_INT_INTERNAL.base.code = TYPE_CODE_BASE;
   TYPE_INT_INTERNAL.base.flags = SPEC_FLAGS_SINT;
-  TYPE_INT_INTERNAL.base.symbol = NULL;
   TYPE_LONG_INTERNAL.base.code = TYPE_CODE_BASE;
   TYPE_LONG_INTERNAL.base.flags = SPEC_FLAGS_SLONG;
-  TYPE_LONG_INTERNAL.base.symbol = NULL;
   TYPE_UNSIGNED_INT_INTERNAL.base.code = TYPE_CODE_BASE;
   TYPE_UNSIGNED_INT_INTERNAL.base.flags = SPEC_FLAGS_UINT;
-  TYPE_UNSIGNED_INT_INTERNAL.base.symbol = NULL;
   TYPE_UNSIGNED_LONG_INTERNAL.base.code = TYPE_CODE_BASE;
   TYPE_UNSIGNED_LONG_INTERNAL.base.flags = SPEC_FLAGS_ULONG;
-  TYPE_UNSIGNED_LONG_INTERNAL.base.symbol = NULL;
   TYPE_NONE_INTERNAL.any.code = TYPE_CODE_NONE;
   TYPE_NONE_INTERNAL.any.flags = 0;
 }
 
-int type_init_none(Type **out, unsigned int flags) {
+Type *type_init_none(unsigned int flags) {
   /* may only be called with storage class and qualifier flags */
   assert(!(flags & SPEC_FLAG_MASK));
-  if (out == NULL) return -1;
-  *out = malloc(sizeof(Type));
-  (*out)->any.code = TYPE_CODE_NONE;
-  (*out)->any.flags = flags;
-  return 0;
+  Type *type = malloc(sizeof(Type));
+  type->any.code = TYPE_CODE_NONE;
+  type->any.flags = flags;
+  return type;
 }
 
-int type_init_pointer(Type **out, unsigned int qualifiers) {
+Type *type_init_pointer(unsigned int qualifiers) {
   /* may only be called with qualifier flags */
   assert(!(qualifiers & ~QUAL_FLAG_MASK));
-  if (out == NULL) return -1;
-  *out = malloc(sizeof(Type));
-  (*out)->pointer.code = TYPE_CODE_POINTER;
-  (*out)->pointer.qualifiers = qualifiers;
-  (*out)->pointer.next = NULL;
-  return 0;
+  Type *type = malloc(sizeof(Type));
+  type->pointer.code = TYPE_CODE_POINTER;
+  type->pointer.qualifiers = qualifiers;
+  type->pointer.next = NULL;
+  return type;
 }
 
-int type_init_array(Type **out, size_t length, int deduce_length) {
-  if (out == NULL) return -1;
-  *out = malloc(sizeof(Type));
-  (*out)->array.code = TYPE_CODE_ARRAY;
-  (*out)->array.length = length;
-  (*out)->array.deduce_length = deduce_length;
-  (*out)->array.next = NULL;
-  return 0;
+Type *type_init_array(size_t length, int deduce_length) {
+  Type *type = malloc(sizeof(Type));
+  type->array.code = TYPE_CODE_ARRAY;
+  type->array.length = length;
+  type->array.deduce_length = deduce_length;
+  type->array.next = NULL;
+  return type;
 }
 
-int type_init_function(Type **out, size_t parameters_size, Type **parameters,
-                       int is_variadic, int is_old_style) {
-  if (out == NULL) return -1;
-  *out = malloc(sizeof(Type));
-  (*out)->function.code = TYPE_CODE_FUNCTION;
-  (*out)->function.parameters_size = parameters_size;
-  (*out)->function.parameters = parameters;
-  (*out)->function.is_variadic = is_variadic;
-  (*out)->function.is_old_style = is_old_style;
-  (*out)->function.next = NULL;
-  return 0;
+Type *type_init_function(size_t parameters_size, Type **parameters,
+                         int is_variadic, int is_old_style) {
+  Type *type = malloc(sizeof(Type));
+  type->function.code = TYPE_CODE_FUNCTION;
+  type->function.parameters_size = parameters_size;
+  type->function.parameters = parameters;
+  type->function.is_variadic = is_variadic;
+  type->function.is_old_style = is_old_style;
+  type->function.next = NULL;
+  return type;
 }
 
-int type_init_tag(Type **out, unsigned int flags, const char *tag_name,
-                  TagValue *tag_value) {
+Type *type_init_tag(unsigned int flags, const char *tag_name,
+                    TagValue *tag_value) {
   /* flags may not include type specifiers */
   assert(!(flags & SPEC_FLAG_MASK));
-  if (out == NULL || tag_name == NULL || tag_value == NULL) return -1;
-  *out = malloc(sizeof(Type));
+  assert(tag_name != NULL && tag_value != NULL);
+  Type *type = malloc(sizeof(Type));
   switch (tag_value->tag) {
     case TAG_STRUCT:
-      (*out)->tag.code = TYPE_CODE_STRUCT;
+      type->tag.code = TYPE_CODE_STRUCT;
       break;
     case TAG_UNION:
-      (*out)->tag.code = TYPE_CODE_UNION;
+      type->tag.code = TYPE_CODE_UNION;
       break;
     case TAG_ENUM:
-      (*out)->tag.code = TYPE_CODE_ENUM;
+      type->tag.code = TYPE_CODE_ENUM;
       break;
     default:
       abort();
   }
-  (*out)->tag.flags = flags;
-  (*out)->tag.name = tag_name;
-  (*out)->tag.value = tag_value;
-  (*out)->tag.symbol = NULL;
-  return 0;
+  type->tag.flags = flags;
+  type->tag.name = tag_name;
+  type->tag.value = tag_value;
+  return type;
 }
 
-int type_init_base(Type **out, unsigned int flags) {
+Type *type_init_base(unsigned int flags) {
   /* flag must include a type specifier */
   assert(flags & SPEC_FLAG_MASK);
-  if (out == NULL) return -1;
-  *out = malloc(sizeof(Type));
-  (*out)->base.code = TYPE_CODE_BASE;
-  (*out)->base.flags = flags;
-  (*out)->base.symbol = NULL;
+  Type *type = malloc(sizeof(Type));
+  type->base.code = TYPE_CODE_BASE;
+  type->base.flags = flags;
+  return type;
+}
+
+Type *type_init_error(CompileError *error) {
+  assert(error != NULL);
+  Type *type = malloc(sizeof(Type));
+  type->error.code = TYPE_CODE_ERROR;
+  type->error.errors_cap = 4;
+  type->error.errors_size = 1;
+  type->error.errors = malloc(4 * sizeof(Type));
+  type->error.errors[0] = error;
   return 0;
 }
 
-int type_init_error(Type **out, CompileError *error) {
-  if (out == NULL || error == NULL) return -1;
-  *out = malloc(sizeof(Type));
-  (*out)->error.code = TYPE_CODE_ERROR;
-  (*out)->error.errors_cap = 4;
-  (*out)->error.errors_size = 1;
-  (*out)->error.errors = malloc(4 * sizeof(Type));
-  if ((*out)->error.errors == NULL) abort();
-  (*out)->error.errors[0] = error;
-  return 0;
-}
-
-int type_destroy(Type *type) {
+void type_destroy(Type *type) {
   while (type != NULL) {
     Type *current = type;
     size_t i;
@@ -154,15 +140,16 @@ int type_destroy(Type *type) {
       default:
         abort();
       case TYPE_CODE_NONE:
-        free(current);
-        return 0;
+        /* fallthrough */
       case TYPE_CODE_STRUCT:
         /* fallthrough */
       case TYPE_CODE_UNION:
         /* fallthrough */
       case TYPE_CODE_ENUM:
+        /* fallthrough */
+      case TYPE_CODE_BASE:
         free(current);
-        return 0;
+        return;
       case TYPE_CODE_POINTER:
         type = type->pointer.next;
         free(current);
@@ -176,22 +163,18 @@ int type_destroy(Type *type) {
         type = type->array.next;
         free(current);
         break;
-      case TYPE_CODE_BASE:
-        free(current);
-        return 0;
       case TYPE_CODE_ERROR:
         for (i = 0; i < current->error.errors_size; ++i)
           compile_error_destroy(current->error.errors[i]);
         free(current->error.errors);
         free(current);
-        return 0;
+        return;
     }
   }
   /* a properly formed type should never reach this point, but if the type
    * was formed erroneously and we're performing cleanup it is possible that
    * this singly-linked list may be NULL, so it's not necessarily an error.
    */
-  return 0;
 }
 
 static const char *qual_get_str(unsigned int qualifiers) {
@@ -769,32 +752,6 @@ unsigned int type_get_flags(const Type *type) {
   }
 }
 
-SymbolValue *type_get_symbol(const Type *type) {
-  Type *stripped;
-  int status = type_strip_all_declarators(&stripped, type);
-  if (type == NULL || status) return NULL;
-  switch (type->any.code) {
-    case TYPE_CODE_STRUCT:
-      /* fallthrough */
-    case TYPE_CODE_ENUM:
-      /* fallthrough */
-    case TYPE_CODE_UNION:
-      return stripped->tag.symbol;
-    case TYPE_CODE_BASE:
-      return stripped->base.symbol;
-    case TYPE_CODE_NONE:
-      /* fallthrough */
-    case TYPE_CODE_ARRAY:
-      /* fallthrough */
-    case TYPE_CODE_FUNCTION:
-      /* fallthrough */
-    case TYPE_CODE_POINTER:
-      /* fallthrough */
-    default:
-      return NULL;
-  }
-}
-
 static int params_equivalent(const Type *type1, const Type *type2) {
   assert(type_is_function(type1) && type_is_function(type2));
   if (type1->function.parameters_size != type2->function.parameters_size)
@@ -836,8 +793,8 @@ int types_equivalent(const Type *type1, const Type *type2,
       return !flags_diff && type1->tag.name == type2->tag.name &&
              type1->tag.value == type2->tag.value;
     case TYPE_CODE_POINTER:
-      type_strip_declarator(&stripped_type1, type1);
-      type_strip_declarator(&stripped_type2, type2);
+      stripped_type1 = type_strip_declarator(type1);
+      stripped_type2 = type_strip_declarator(type2);
       if (!ignore_qualifiers &&
           type1->pointer.qualifiers != type2->pointer.qualifiers)
         return 0;
@@ -845,15 +802,15 @@ int types_equivalent(const Type *type1, const Type *type2,
         return types_equivalent(stripped_type1, stripped_type2,
                                 ignore_qualifiers, ignore_storage_class);
     case TYPE_CODE_ARRAY:
-      type_strip_declarator(&stripped_type1, type1);
-      type_strip_declarator(&stripped_type2, type2);
+      stripped_type1 = type_strip_declarator(type1);
+      stripped_type2 = type_strip_declarator(type2);
       return type1->array.deduce_length == type2->array.deduce_length &&
              type1->array.length == type2->array.length &&
              types_equivalent(stripped_type1, stripped_type2, ignore_qualifiers,
                               ignore_storage_class);
     case TYPE_CODE_FUNCTION:
-      type_strip_declarator(&stripped_type1, type1);
-      type_strip_declarator(&stripped_type2, type2);
+      stripped_type1 = type_strip_declarator(type1);
+      stripped_type2 = type_strip_declarator(type2);
       return types_equivalent(stripped_type1, stripped_type2, ignore_qualifiers,
                               ignore_storage_class) &&
              params_equivalent(type1, type2);
@@ -906,8 +863,9 @@ int types_initializable(const Type *dest, const Type *src,
   }
 }
 
-int type_strip_declarator(Type **dest, const Type *src) {
-  switch (src->any.code) {
+Type *type_strip_declarator(const Type *type) {
+  assert(type_is_declarator(type));
+  switch (type->any.code) {
     case TYPE_CODE_NONE:
       /* fallthrough */
     case TYPE_CODE_STRUCT:
@@ -919,30 +877,28 @@ int type_strip_declarator(Type **dest, const Type *src) {
     case TYPE_CODE_BASE:
       /* fallthrough */
     default:
-      *dest = NULL;
-      return -1;
+      return NULL;
     case TYPE_CODE_ARRAY:
-      *dest = src->array.next;
-      return 0;
+      assert(type->array.next != NULL);
+      return type->array.next;
     case TYPE_CODE_FUNCTION:
-      *dest = src->function.next;
-      return 0;
+      assert(type->function.next != NULL);
+      return type->function.next;
     case TYPE_CODE_POINTER:
-      *dest = src->pointer.next;
-      return 0;
+      assert(type->pointer.next != NULL);
+      return type->pointer.next;
   }
 }
 
-int type_strip_all_declarators(Type **out, const Type *type) {
-  int status = type_strip_declarator(out, type);
-  while (*out != NULL && type_is_declarator(*out) &&
-         !(status = type_strip_declarator(out, *out)))
-    ;
-  return *out == NULL ? -1 : status;
+Type *type_get_declspecs(Type *type) {
+  assert(type != NULL);
+  while (type_is_declarator(type)) type = type_strip_declarator(type);
+  assert(type != NULL);
+  return type;
 }
 
-int type_append(Type *dest, Type *src, int copy_src) {
-  if (dest == NULL) return -1;
+Type *type_append(Type *dest, Type *src, int copy_src) {
+  assert(dest != NULL);
   Type *current = dest;
   while ((type_is_array(current) && current->array.next != NULL) ||
          (type_is_pointer(current) && current->pointer.next != NULL) ||
@@ -974,88 +930,73 @@ int type_append(Type *dest, Type *src, int copy_src) {
     case TYPE_CODE_UNION:
       /* fallthrough */
     case TYPE_CODE_ENUM:
-      return -1;
+      abort();
     case TYPE_CODE_POINTER:
-      if (copy_src)
-        assert(!type_copy(&current->pointer.next, src, 0));
-      else
-        current->pointer.next = src;
-      return 0;
+      current->pointer.next = copy_src ? type_copy(src, 0) : src;
+      return dest;
     case TYPE_CODE_ARRAY:
-      if (copy_src)
-        assert(!type_copy(&current->array.next, src, 0));
-      else
-        current->array.next = src;
-      return 0;
+      current->array.next = copy_src ? type_copy(src, 0) : src;
+      return dest;
     case TYPE_CODE_FUNCTION:
-      if (copy_src)
-        assert(!type_copy(&current->function.next, src, 0));
-      else
-        current->function.next = src;
-      return 0;
+      current->function.next = copy_src ? type_copy(src, 0) : src;
+      return dest;
   }
 }
 
-int type_copy(Type **out, const Type *type, int clear_typedef_flag) {
-  if (out == NULL || type == NULL) return -1;
+Type *type_copy(const Type *type, int clear_typedef_flag) {
+  assert(type != NULL);
   Type anchor;
   anchor.pointer.code = TYPE_CODE_POINTER;
   anchor.pointer.next = NULL;
   anchor.pointer.qualifiers = 0;
-  Type **out_current = &anchor.pointer.next;
+  Type **type_tail = &anchor.pointer.next;
   const Type *in_current = type;
 
   while (in_current != NULL) {
-    *out_current = malloc(sizeof(Type));
-    **out_current = *in_current;
-    switch ((*out_current)->any.code) {
+    *type_tail = malloc(sizeof(Type));
+    **type_tail = *in_current;
+    switch ((*type_tail)->any.code) {
       case TYPE_CODE_NONE:
         /* fallthrough */
       default:
         abort();
       case TYPE_CODE_BASE:
-        if (clear_typedef_flag)
-          (*out_current)->base.flags &= ~STOR_FLAG_TYPEDEF;
-        *out = anchor.pointer.next;
-        return 0;
+        if (clear_typedef_flag) (*type_tail)->base.flags &= ~STOR_FLAG_TYPEDEF;
+        return anchor.pointer.next;
       case TYPE_CODE_STRUCT:
         /* fallthrough */
       case TYPE_CODE_UNION:
         /* fallthrough */
       case TYPE_CODE_ENUM:
-        if (clear_typedef_flag) (*out_current)->tag.flags &= ~STOR_FLAG_TYPEDEF;
-        *out = anchor.pointer.next;
-        return 0;
+        if (clear_typedef_flag) (*type_tail)->tag.flags &= ~STOR_FLAG_TYPEDEF;
+        return anchor.pointer.next;
       case TYPE_CODE_ARRAY:
-        out_current = &((*out_current)->array.next);
+        type_tail = &((*type_tail)->array.next);
         in_current = in_current->array.next;
         break;
       case TYPE_CODE_POINTER:
-        out_current = &((*out_current)->pointer.next);
+        type_tail = &((*type_tail)->pointer.next);
         in_current = in_current->pointer.next;
         break;
       case TYPE_CODE_FUNCTION:
         /* create new array for parameters */
-        (*out_current)->function.parameters =
+        (*type_tail)->function.parameters =
             malloc(in_current->function.parameters_size *
                    sizeof(*in_current->function.parameters));
         size_t i;
         for (i = 0; i < in_current->function.parameters_size; ++i)
-          (*out_current)->function.parameters[i] =
+          (*type_tail)->function.parameters[i] =
               in_current->function.parameters[i];
-        out_current = &((*out_current)->function.next);
+        type_tail = &((*type_tail)->function.next);
         in_current = in_current->function.next;
         break;
     }
   }
 
-  *out = anchor.pointer.next;
-  /* indicates that an incomplete/malformed type was copied */
-  return 1;
+  return anchor.pointer.next;
 }
 
-int type_common_qualified_pointer(Type **out, const Type *type1,
-                                  const Type *type2) {
+Type *type_common_qualified_pointer(const Type *type1, const Type *type2) {
   Type *new_pointer = malloc(sizeof(Type));
   new_pointer->pointer.code = TYPE_CODE_POINTER;
   new_pointer->pointer.qualifiers =
@@ -1063,11 +1004,10 @@ int type_common_qualified_pointer(Type **out, const Type *type1,
   new_pointer->pointer.next = type_is_void_pointer(type1->pointer.next)
                                   ? type1->pointer.next
                                   : type2->pointer.next;
-  *out = new_pointer;
-  return 0;
+  return new_pointer;
 }
 
-int type_merge_errors(Type *dest, Type *src) {
+Type *type_merge_errors(Type *dest, Type *src) {
   assert(dest->any.code == TYPE_CODE_ERROR && src->any.code == TYPE_CODE_ERROR);
   size_t new_cap = dest->error.errors_cap > src->error.errors_cap
                        ? dest->error.errors_cap
@@ -1084,11 +1024,11 @@ int type_merge_errors(Type *dest, Type *src) {
     dest->error.errors[dest->error.errors_size++] = src->error.errors[i];
   /* prevent src from freeing error info when it is destroyed */
   src->error.errors_size = 0;
-  return 0;
+  return dest;
 }
 
 /* TODO(Robert): create macro or data structure for self-resizing array */
-int type_append_error(Type *type, CompileError *error) {
+void type_append_error(Type *type, CompileError *error) {
   assert(type->any.code == TYPE_CODE_ERROR);
   if (type->error.errors_size == type->error.errors_cap) {
     type->error.errors_cap *= 2;
@@ -1099,7 +1039,6 @@ int type_append_error(Type *type, CompileError *error) {
   }
 
   type->error.errors[type->error.errors_size++] = error;
-  return 0;
 }
 
 static int flags_valid(unsigned int old_flags, unsigned int new_flags,
@@ -1165,7 +1104,7 @@ int type_add_flags(Type *type, unsigned int flags) {
     case TYPE_CODE_NONE:
       assert((type->any.flags & SPEC_FLAG_MASK) == 0);
       if (!flags_valid(type->any.flags, flags, 1, 1)) {
-        return 1;
+        return -1;
       } else if ((flags & SPEC_FLAG_MASK) != 0) {
         unsigned int old_flags = type->any.flags;
         type->base.code = TYPE_CODE_BASE;
@@ -1177,31 +1116,31 @@ int type_add_flags(Type *type, unsigned int flags) {
       /* fallthrough */
     case TYPE_CODE_BASE:
       if (!flags_valid(type->base.flags, flags, 1, 1))
-        return 1;
+        return -1;
       else
         return type->base.flags |= flags, 0;
     case TYPE_CODE_POINTER:
       if (!flags_valid(type->pointer.qualifiers, flags, 0, 0))
-        return 1;
+        return -1;
       else
         return type->pointer.qualifiers |= flags, 0;
     case TYPE_CODE_STRUCT:
     case TYPE_CODE_UNION:
     case TYPE_CODE_ENUM:
       if (!flags_valid(type->tag.flags, flags, 1, 0))
-        return 1;
+        return -1;
       else
         return type->tag.flags |= flags, 0;
   }
 }
 
+/* TODO(Robert): ensure that objects with automatic storage class have their
+ * type defaulted to `int`
+ */
 int type_normalize(Type *type) {
-  if (type_is_declarator(type)) {
-    int status = type_strip_all_declarators(&type, type);
-    if (status) return status;
-  }
+  type = type_get_declspecs(type);
 
-  if (type == NULL || type->any.code == TYPE_CODE_NONE)
+  if (type->any.code == TYPE_CODE_NONE)
     return -1;
   else if (type->any.code != TYPE_CODE_BASE)
     return 0;
@@ -1228,7 +1167,7 @@ int type_normalize(Type *type) {
                               : SPEC_FLAGS_SLONG;
       return 0;
     } else { /* in the future, support `long long` */
-      abort();
+      return -1;
     }
   } else {
     if (!(type->base.flags & SPEC_FLAG_SIGN_MASK))
@@ -1242,31 +1181,22 @@ int type_normalize(Type *type) {
  * types. Replaces old type with appropriately converted type. Can safely be
  * called when `expr` is an error.
  */
-int type_pointer_conversions(Type **out, Type *type) {
+Type *type_pointer_conversions(Type *type) {
   if (type_is_function(type) || type_is_array(type)) {
     /* do not override out until we know that we have succeeded so that the
      * type information is not lost when we fail
      */
-    Type *pointer_type;
-    int status = type_init_pointer(&pointer_type, 0);
-    if (status) return -1;
-
-    if (type_is_array(type)) {
-      status = type_strip_declarator(&(pointer_type->pointer.next), type);
-      if (status) abort();
-    } else {
-      pointer_type->pointer.next = type;
-    }
-    *out = pointer_type;
+    Type *pointer_type = type_init_pointer(SPEC_FLAG_NONE);
+    Type *append_type =
+        type_is_array(type) ? type_strip_declarator(type) : type;
+    return type_append(pointer_type, append_type, 0);
   } else {
-    *out = type;
+    return type;
   }
-
-  return 0;
 }
 
-int type_arithmetic_conversions(Type **out, Type *type1, Type *type2) {
-  assert(out != NULL);
+Type *type_arithmetic_conversions(Type *type1, Type *type2) {
+  assert(type1 != NULL && type2 != NULL);
   assert(type_is_arithmetic(type1) && type_is_arithmetic(type2));
   unsigned int flags1 = type1->any.flags & SPEC_FLAG_MASK;
   unsigned int flags2 = type2->any.flags & SPEC_FLAG_MASK;
@@ -1278,48 +1208,19 @@ int type_arithmetic_conversions(Type **out, Type *type1, Type *type2) {
   } else if (flags1 == SPEC_FLAG_FLOAT || flags2 == SPEC_FLAG_FLOAT) {
     abort(); /* floating types not implemented */
   } else if (flags1 == SPEC_FLAGS_ULONG) {
-    *out = type1;
+    return type1;
   } else if (flags2 == SPEC_FLAGS_ULONG) {
-    *out = type2;
+    return type2;
   } else if (flags1 == SPEC_FLAGS_SLONG) {
-    *out = type1;
+    return type1;
   } else if (flags2 == SPEC_FLAGS_SLONG) {
-    *out = type2;
+    return type2;
   } else if (flags1 == SPEC_FLAGS_UINT) {
-    *out = type1;
+    return type1;
   } else if (flags2 == SPEC_FLAGS_UINT) {
-    *out = type2;
+    return type2;
   } else {
     /* no need to check for enum, char, etc. explicitly; all become int */
-    *out = (Type *)TYPE_INT;
-  }
-
-  return 0;
-}
-
-int type_set_symbol(Type *type, SymbolValue *symbol) {
-  int status = type_strip_all_declarators(&type, type);
-  if (status || type == NULL) return -1;
-  switch (type->any.code) {
-    case TYPE_CODE_STRUCT:
-      /* fallthrough */
-    case TYPE_CODE_ENUM:
-      /* fallthrough */
-    case TYPE_CODE_UNION:
-      type->tag.symbol = symbol;
-      return 0;
-    case TYPE_CODE_BASE:
-      type->base.symbol = symbol;
-      return 0;
-    case TYPE_CODE_NONE:
-      /* fallthrough */
-    case TYPE_CODE_ARRAY:
-      /* fallthrough */
-    case TYPE_CODE_FUNCTION:
-      /* fallthrough */
-    case TYPE_CODE_POINTER:
-      /* fallthrough */
-    default:
-      return -1;
+    return (Type *)TYPE_INT;
   }
 }

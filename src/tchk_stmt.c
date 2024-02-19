@@ -11,9 +11,7 @@ ASTree *validate_return(ASTree *ret, ASTree *expr) {
   if (expr->symbol == TOK_TYPE_ERROR)
     return astree_propogate_errnode(ret, expr);
   SymbolValue *symval = state_get_function(state);
-  Type *return_type;
-  int status = type_strip_declarator(&return_type, symval->type);
-  if (status) abort();
+  Type *return_type = type_strip_declarator(symval->type);
 
   if (expr != &EMPTY_EXPR) {
     if (types_assignable(return_type, expr->type, astree_is_const_zero(expr))) {
@@ -69,11 +67,9 @@ ASTree *validate_switch_expr(ASTree *expr) {
   if (!type_is_integral(expr->type)) {
     return astree_create_errnode(expr, BCC_TERR_EXPECTED_INTEGER, 1, expr);
   }
-  Type *promoted_type;
-  int status =
-      type_arithmetic_conversions(&promoted_type, expr->type, (Type *)TYPE_INT);
-  if (status) abort();
-  status = state_set_control_type(state, promoted_type);
+  Type *promoted_type =
+      type_arithmetic_conversions(expr->type, (Type *)TYPE_INT);
+  int status = state_set_control_type(state, promoted_type);
   if (status) abort();
   maybe_load_cexpr(expr, NULL);
   return expr;
