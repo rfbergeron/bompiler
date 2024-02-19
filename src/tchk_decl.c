@@ -258,6 +258,8 @@ static const char *create_unique_name(ASTree *tree) {
   size_t name_len = strlen(filenr_str) + strlen(linenr_str) +
                     strlen(offset_str) + strlen(node_str) + 3;
   char *name = malloc(sizeof(char) * (name_len + 1));
+  /* gcc doesn't like the printf below unless we make check malloc */
+  if (name == NULL) abort();
 
   sprintf(name, "%s_%s_%s_%s", filenr_str, linenr_str, offset_str, node_str);
   return name;
@@ -455,6 +457,9 @@ ASTree *validate_param(ASTree *param_list, ASTree *declaration,
       int is_param =
           state_get_symbol(state, declarator->lexinfo,
                            strlen(declarator->lexinfo), &param_symval);
+#ifdef NDEBUG
+      (void)is_param;
+#endif
       assert(param_symval != NULL);
       assert(is_param);
       param_symval->type = declarator->type;
@@ -651,6 +656,9 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
   SymbolValue *symval;
   int in_current_scope = state_get_symbol(state, declarator->lexinfo,
                                           strlen(declarator->lexinfo), &symval);
+#ifdef NDEBUG
+  (void)in_current_scope;
+#endif
   assert(in_current_scope);
   assert(symval != NULL);
   assert(type_is_function(symval->type));
@@ -1062,6 +1070,9 @@ ASTree *define_struct_member(ASTree *struct_, ASTree *member) {
     SymbolValue *symval;
     int is_member = state_get_symbol(state, declarator->lexinfo,
                                      strlen(declarator->lexinfo), &symval);
+#ifdef NDEBUG
+    (void)is_member;
+#endif
     assert(is_member);
     assert(symval != NULL);
     size_t member_alignment = type_get_alignment(declarator->type);

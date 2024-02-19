@@ -30,6 +30,9 @@ OBJFILES := ${OBJ:%=build/%} ${GENOBJ:%=build/%} ${LIBOBJ:%=build/%}
 all: CFLAGS += -O1
 all: ${EXE}
 
+release: CFLAGS += -O2 -DNDEBUG -fsanitize=address,undefined -fstack-protector-all
+release: ${EXE}
+
 debug: CFLAGS += -O0 -pg -g -fsanitize=undefined -fstack-protector-all
 debug: LDFLAGS += -Wl,-Map=./output.map
 debug: ${EXE}
