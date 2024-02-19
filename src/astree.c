@@ -61,10 +61,8 @@ ASTree *astree_init(int symbol, const Location location, const char *info) {
   return tree;
 }
 
-int astree_destroy(ASTree *tree) {
-  if (tree == NULL || tree == &EMPTY_EXPR) {
-    return 0;
-  }
+void astree_destroy(ASTree *tree) {
+  if (tree == NULL || tree == &EMPTY_EXPR) return;
 
   PFDBG2('t', "Freeing an astree with symbol: %s, lexinfo: %s",
          parser_get_tname(tree->symbol), tree->lexinfo);
@@ -127,18 +125,13 @@ int astree_destroy(ASTree *tree) {
   }
 
   /* free symbol table if present */
-  status = symbol_table_destroy(tree->symbol_table);
-  if (status) {
-    fprintf(stderr, "unable to destroy symbol table\n");
-    abort();
-  }
+  symbol_table_destroy(tree->symbol_table);
 
   /* free instruction iterators */
   free(tree->first_instr);
   free(tree->last_instr);
 
   free(tree);
-  return 0;
 }
 
 ASTree *astree_adopt(ASTree *parent, const size_t count, ...) {
@@ -220,8 +213,7 @@ ASTree *astree_propogate_errnode(ASTree *parent, ASTree *child) {
   } else {
     (void)type_merge_errors(parent->type, child->type);
     (void)astree_adopt(UNWRAP(parent), 1, astree_remove(child, 0));
-    int status = astree_destroy(child);
-    if (status) abort();
+    astree_destroy(child);
     return parent;
   }
 }

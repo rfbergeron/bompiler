@@ -71,15 +71,14 @@ SymbolValue *symbol_value_init(const Location *loc, size_t sequence) {
   return ret;
 }
 
-int symbol_value_destroy(SymbolValue *symbol_value) {
+void symbol_value_destroy(SymbolValue *symbol_value) {
   PFDBG0('t', "freeing symbol value");
-  if (symbol_value == NULL) return 0;
+  if (symbol_value == NULL) return;
 
   type_destroy(symbol_value->type);
   free(symbol_value);
 
   PFDBG0('t', "done");
-  return 0;
 }
 
 #ifndef UNIT_TESTING
@@ -182,38 +181,25 @@ TagValue *tag_value_init(TagType tag) {
   return tagval;
 }
 
-int tag_value_destroy(TagValue *tagval) {
+void tag_value_destroy(TagValue *tagval) {
   if (tagval == NULL) {
-    return 0;
+    return;
   } else if (tagval->tag == TAG_STRUCT || tagval->tag == TAG_UNION) {
     int status = llist_destroy(&tagval->data.members.in_order);
     if (status) {
       fprintf(stderr, "your data structures library sucks\n");
       abort();
     }
-    status = symbol_table_destroy(tagval->data.members.by_name);
-    if (status) {
-      fprintf(stderr, "unable to destroy struct member table\n");
-      abort();
-    }
+    symbol_table_destroy(tagval->data.members.by_name);
   } else if (tagval->tag == TAG_ENUM) {
     int status = map_destroy(&tagval->data.enumerators.by_name);
-    if (status) {
-      fprintf(stderr, "your data structures library sucks\n");
-      abort();
-    }
+    if (status) abort();
     status = llist_destroy(&tagval->data.enumerators.struct_name_spaces);
-    if (status) {
-      fprintf(stderr, "your data structures library sucks\n");
-      abort();
-    }
+    if (status) abort();
   } else {
-    /* error: invalid tag type */
-    fprintf(stderr, "ERROR: invalid tag type; unable to free tag value.\n");
-    return -1;
+    abort();
   }
   free(tagval);
-  return 0;
 }
 
 #ifndef UNIT_TESTING
@@ -287,9 +273,9 @@ SymbolTable *symbol_table_init(TableType type) {
   return table;
 }
 
-int symbol_table_destroy(SymbolTable *table) {
+void symbol_table_destroy(SymbolTable *table) {
   PFDBG0('t', "Freeing symbol table");
-  if (table == NULL) return 0;
+  if (table == NULL) return;
   switch (table->type) {
     int status;
     case FUNCTION_TABLE:
@@ -308,14 +294,15 @@ int symbol_table_destroy(SymbolTable *table) {
       if (status) abort();
       free(table->primary_namespace);
       break;
+    default:
+      abort();
   }
   free(table);
-  return 0;
 }
 
-int symbol_table_insert(SymbolTable *table, const char *ident,
-                        const size_t ident_len, SymbolValue *symval) {
-  return map_insert(table->primary_namespace, (char *)ident, ident_len, symval);
+void symbol_table_insert(SymbolTable *table, const char *ident,
+                         const size_t ident_len, SymbolValue *symval) {
+  map_insert(table->primary_namespace, (char *)ident, ident_len, symval);
 }
 
 SymbolValue *symbol_table_get(SymbolTable *table, const char *ident,
@@ -323,9 +310,9 @@ SymbolValue *symbol_table_get(SymbolTable *table, const char *ident,
   return map_get(table->primary_namespace, (char *)ident, ident_len);
 }
 
-int symbol_table_insert_tag(SymbolTable *table, const char *ident,
-                            const size_t ident_len, TagValue *tagval) {
-  return map_insert(table->tag_namespace, (char *)ident, ident_len, tagval);
+void symbol_table_insert_tag(SymbolTable *table, const char *ident,
+                             const size_t ident_len, TagValue *tagval) {
+  map_insert(table->tag_namespace, (char *)ident, ident_len, tagval);
 }
 
 TagValue *symbol_table_get_tag(SymbolTable *table, const char *ident,
@@ -333,9 +320,9 @@ TagValue *symbol_table_get_tag(SymbolTable *table, const char *ident,
   return map_get(table->tag_namespace, (char *)ident, ident_len);
 }
 
-int symbol_table_insert_label(SymbolTable *table, const char *ident,
-                              const size_t ident_len, LabelValue *labval) {
-  return map_insert(table->label_namespace, (char *)ident, ident_len, labval);
+void symbol_table_insert_label(SymbolTable *table, const char *ident,
+                               const size_t ident_len, LabelValue *labval) {
+  map_insert(table->label_namespace, (char *)ident, ident_len, labval);
 }
 
 LabelValue *symbol_table_get_label(SymbolTable *table, const char *ident,
