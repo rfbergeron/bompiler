@@ -46,8 +46,9 @@ ASTree *validate_stringcon(ASTree *stringcon) {
         type_init_base(SPEC_FLAG_CHAR | QUAL_FLAG_CONST | STOR_FLAG_STATIC);
 
     (void)type_append(symval->type, char_type, 0);
-    assert(!state_insert_symbol(state, stringcon_label, strlen(stringcon_label),
-                                symval));
+    int status = state_insert_symbol(state, stringcon_label,
+                                     strlen(stringcon_label), symval);
+    if (status) abort();
   }
 
   stringcon->type = symval->type;
