@@ -230,8 +230,10 @@ int tag_value_print(const TagValue *tagval, char *buffer, size_t size) {
   if (tagval->tag == TAG_STRUCT || tagval->tag == TAG_UNION) {
     Map *symbols = tagval->data.members.by_name->primary_namespace;
     ArrayList symnames;
-    assert(!alist_init(&symnames, map_size(symbols)));
-    assert(!map_keys(symbols, &symnames));
+    int status = alist_init(&symnames, map_size(symbols));
+    if (status) abort();
+    status = map_keys(symbols, &symnames);
+    if (status) abort();
     size_t i;
     for (i = 0; i < alist_size(&symnames); ++i) {
       static char symbuf[LINESIZE];
@@ -243,7 +245,8 @@ int tag_value_print(const TagValue *tagval, char *buffer, size_t size) {
           sprintf(buffer + buffer_offset, "%s: %s, ", symname, symbuf);
       buffer_offset += characters_printed;
     }
-    assert(!alist_destroy(&symnames, NULL));
+    status = alist_destroy(&symnames, NULL);
+    if (status) abort();
   }
 
   return sprintf(buffer + buffer_offset, "}");
@@ -257,24 +260,28 @@ SymbolTable *symbol_table_init(TableType type) {
   SymbolTable *table = calloc(1, sizeof(*table));
   table->type = type;
   switch (type) {
+    int status;
     case FUNCTION_TABLE:
       table->label_namespace = malloc(sizeof(Map));
-      assert(!map_init(table->label_namespace, DEFAULT_MAP_SIZE, NULL, free,
-                       strncmp_wrapper));
+      status = map_init(table->label_namespace, DEFAULT_MAP_SIZE, NULL, free,
+                        strncmp_wrapper);
+      if (status) abort();
       /* fallthrough */
     case TRANS_UNIT_TABLE:
     case BLOCK_TABLE:
       table->tag_namespace = malloc(sizeof(Map));
-      assert(!map_init(table->tag_namespace, DEFAULT_MAP_SIZE,
-                       (void (*)(void *))destroy_unique_name,
-                       (void (*)(void *))tag_value_destroy, strncmp_wrapper));
+      status = map_init(table->tag_namespace, DEFAULT_MAP_SIZE,
+                        (void (*)(void *))destroy_unique_name,
+                        (void (*)(void *))tag_value_destroy, strncmp_wrapper);
+      if (status) abort();
       /* fallthrough */
     case MEMBER_TABLE:
       table->primary_namespace = malloc(sizeof(Map));
-      assert(!map_init(table->primary_namespace, DEFAULT_MAP_SIZE,
-                       (void (*)(void *))destroy_unique_name,
-                       (void (*)(void *))symbol_value_destroy,
-                       strncmp_wrapper));
+      status =
+          map_init(table->primary_namespace, DEFAULT_MAP_SIZE,
+                   (void (*)(void *))destroy_unique_name,
+                   (void (*)(void *))symbol_value_destroy, strncmp_wrapper);
+      if (status) abort();
       break;
   }
   return table;
@@ -284,17 +291,21 @@ int symbol_table_destroy(SymbolTable *table) {
   PFDBG0('t', "Freeing symbol table");
   if (table == NULL) return 0;
   switch (table->type) {
+    int status;
     case FUNCTION_TABLE:
-      assert(!map_destroy(table->label_namespace));
+      status = map_destroy(table->label_namespace);
+      if (status) abort();
       free(table->label_namespace);
       /* fallthrough */
     case TRANS_UNIT_TABLE:
     case BLOCK_TABLE:
-      assert(!map_destroy(table->tag_namespace));
+      status = map_destroy(table->tag_namespace);
+      if (status) abort();
       free(table->tag_namespace);
       /* fallthrough */
     case MEMBER_TABLE:
-      assert(!map_destroy(table->primary_namespace));
+      status = map_destroy(table->primary_namespace);
+      if (status) abort();
       free(table->primary_namespace);
       break;
   }
