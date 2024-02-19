@@ -89,19 +89,16 @@ static void bblock_destroy(BBlock *block) {
   free(block);
 }
 
-static int bblock_add_follower(BBlock *bblock, BBlock *follower) {
-  if (bblock == NULL || follower == NULL) return -1;
+static void bblock_add_follower(BBlock *bblock, BBlock *follower) {
+  assert(bblock != NULL && follower != NULL);
   if (bblock->followers_size == bblock->followers_cap) {
-    BBlock **new_followers = realloc(
+    bblock->followers = realloc(
         bblock->followers, sizeof(BBlock *) * (bblock->followers_cap <<= 1));
-    if (new_followers == NULL) return -1;
-    bblock->followers = new_followers;
   }
   bblock->followers[bblock->followers_size++] = follower;
-  return 0;
 }
 
-static int bblock_partition(ListIter *first, ListIter *last, ArrayList *out) {
+static void bblock_partition(ListIter *first, ListIter *last, ArrayList *out) {
   ListIter *exit_leader = liter_prev(last, 1);
   if (exit_leader == NULL) abort();
   while (instr_is_directive(liter_get(exit_leader)))
@@ -124,9 +121,8 @@ static int bblock_partition(ListIter *first, ListIter *last, ArrayList *out) {
 
   while (current->node != exit_leader->node) {
     BBlock *block = bblock_init(liter_copy(current));
-    int status = bblock_add_follower(alist_peek(out), block);
-    if (status) abort();
-    status = alist_push(out, block);
+    bblock_add_follower(alist_peek(out), block);
+    int status = alist_push(out, block);
     if (status) abort();
     for (;;) {
       int status = liter_advance(current, 1);
@@ -144,11 +140,9 @@ static int bblock_partition(ListIter *first, ListIter *last, ArrayList *out) {
   }
 
   free(current);
-  status = bblock_add_follower(alist_peek(out), exit_block);
-  if (status) abort();
+  bblock_add_follower(alist_peek(out), exit_block);
   status = alist_push(out, exit_block);
   if (status) abort();
-  return 0;
 }
 
 /* TODO(Robert): this function is more complicated than it needs to be. while it
@@ -189,14 +183,17 @@ static void liveness_helper(size_t *vreg_num, InstructionData **next_use_out,
 
   /* PERSIST_*_SET takes precedence over PERSIST_*_CLEAR */
   if (set_persist) {
-    assert(
-        !map_insert(&persist_table, vreg_num, sizeof(*vreg_num), new_next_use));
+    int status =
+        map_insert(&persist_table, vreg_num, sizeof(*vreg_num), new_next_use);
+    if (status) abort();
   } else if (clear_persist) {
     /* don't check return value; persist table may not have an entry */
     (void)map_delete(&persist_table, vreg_num, sizeof(*vreg_num));
   }
 
-  assert(!map_insert(&bblock_table, vreg_num, sizeof(*vreg_num), new_next_use));
+  int status =
+      map_insert(&bblock_table, vreg_num, sizeof(*vreg_num), new_next_use);
+  if (status) abort();
 }
 
 static void update_liveness(InstructionData *data, Operand *operand) {
@@ -266,7 +263,7 @@ static void update_liveness(InstructionData *data, Operand *operand) {
   }
 }
 
-static int liveness_bblock(BBlock *block) {
+static void liveness_bblock(BBlock *block) {
   ListIter *first = block->leader;
   ListIter *last = block->followers[0]->leader;
   ListIter *current = liter_prev(last, 1);
@@ -279,7 +276,6 @@ static int liveness_bblock(BBlock *block) {
     if (liter_advance(current, -1)) abort();
   }
   free(current);
-  return 0;
 }
 
 /* very simple compare function for badlib map */
@@ -290,7 +286,7 @@ static int compare_regnums(size_t *r1, size_t *r2) {
     return *r1 == *r2;
 }
 
-int liveness_sr(ListIter *first, ListIter *last) {
+void liveness_sr(ListIter *first, ListIter *last) {
   int status = map_init(&bblock_table, DEFAULT_MAP_SIZE, NULL, NULL,
                         (BlibComparator)compare_regnums);
   if (status) abort();
@@ -300,31 +296,31 @@ int liveness_sr(ListIter *first, ListIter *last) {
   ArrayList bblocks;
   status = alist_init(&bblocks, 0);
   if (status) abort();
-  status = bblock_partition(first, last, &bblocks);
-  if (status) abort();
+  bblock_partition(first, last, &bblocks);
 
   size_t i, bblocks_size = alist_size(&bblocks);
   /* skip first and last bblock, which contain only directives */
   for (i = 2; i < bblocks_size; ++i) {
     BBlock *block = alist_get(&bblocks, bblocks_size - i);
-    int status = liveness_bblock(block);
-    if (status) abort();
+    liveness_bblock(block);
     InstructionData *leader_data = liter_get(block->leader);
     leader_data->comment = LEADER_COMMENT;
     if (map_clear(&bblock_table)) abort();
   }
 
-  assert(!map_destroy(&bblock_table));
-  assert(!map_destroy(&persist_table));
-  assert(!alist_destroy(&bblocks, (BlibDestroyer)bblock_destroy));
-  return 0;
+  status = map_destroy(&bblock_table);
+  if (status) abort();
+  status = map_destroy(&persist_table);
+  if (status) abort();
+  status = alist_destroy(&bblocks, (BlibDestroyer)bblock_destroy);
+  if (status) abort();
 }
 
-static int assign_or_spill(size_t *vreg_num, size_t vreg_width,
-                           unsigned short *used_volatile) {
+static void assign_or_spill(size_t *vreg_num, size_t vreg_width,
+                            unsigned short *used_volatile) {
   if (*vreg_num < REAL_REG_COUNT) {
     *used_volatile |= 1 << *vreg_num;
-    return 0;
+    return;
   }
 
   size_t vreg_index = *vreg_num - REAL_REG_COUNT;
@@ -385,13 +381,12 @@ static int assign_or_spill(size_t *vreg_num, size_t vreg_width,
 
   if (vreg_descs[vreg_index] >= 0)
     *used_volatile |= 1 << vreg_descs[vreg_index];
-  return 0;
 }
 
-static int select_reg(ListIter *where, size_t *vreg_num, size_t vreg_width,
-                      InstructionData *next_use,
-                      unsigned short *used_volatile) {
-  if (*vreg_num < REAL_REG_COUNT) return 0;
+static void select_reg(ListIter *where, size_t *vreg_num, size_t vreg_width,
+                       InstructionData *next_use,
+                       unsigned short *used_volatile) {
+  if (*vreg_num < REAL_REG_COUNT) return;
   ptrdiff_t location = vreg_descs[*vreg_num - REAL_REG_COUNT];
   if (location >= 0) {
     assert(reg_descs[location][reg_descs_sizes[location] - 1].vreg_num ==
@@ -443,11 +438,10 @@ static int select_reg(ListIter *where, size_t *vreg_num, size_t vreg_width,
     /* set vreg to unspill reg */
     *vreg_num = unspill_reg;
   }
-  return 0;
 }
 
-static int reg_thunk(ListIter *where, Operand *operand,
-                     unsigned short *used_volatile) {
+static void reg_thunk(ListIter *where, Operand *operand,
+                      unsigned short *used_volatile) {
   switch (operand->all.mode) {
     default:
       abort();
@@ -455,22 +449,25 @@ static int reg_thunk(ListIter *where, Operand *operand,
     case MODE_PIC:
     case MODE_DIRECT:
     case MODE_IMMEDIATE:
-      return 0;
+      return;
     case MODE_REGISTER:
-      return select_reg(where, &operand->reg.num, operand->reg.width,
-                        operand->reg.next_use, used_volatile);
+      select_reg(where, &operand->reg.num, operand->reg.width,
+                 operand->reg.next_use, used_volatile);
+      return;
     case MODE_INDIRECT:
-      return select_reg(where, &operand->ind.num, REG_QWORD,
-                        operand->ind.next_use, used_volatile);
+      select_reg(where, &operand->ind.num, REG_QWORD, operand->ind.next_use,
+                 used_volatile);
+      return;
     case MODE_SCALE:
-      return select_reg(where, &operand->sca.base, REG_QWORD,
-                        operand->sca.base_next_use, used_volatile) ||
-             select_reg(where, &operand->sca.index, REG_QWORD,
-                        operand->sca.index_next_use, used_volatile);
+      select_reg(where, &operand->sca.base, REG_QWORD,
+                 operand->sca.base_next_use, used_volatile);
+      select_reg(where, &operand->sca.index, REG_QWORD,
+                 operand->sca.index_next_use, used_volatile);
+      return;
   }
 }
 
-static int assign_thunk(Operand *operand, unsigned short *used_volatile) {
+static void assign_thunk(Operand *operand, unsigned short *used_volatile) {
   switch (operand->all.mode) {
     default:
       abort();
@@ -478,23 +475,28 @@ static int assign_thunk(Operand *operand, unsigned short *used_volatile) {
     case MODE_PIC:
     case MODE_DIRECT:
     case MODE_IMMEDIATE:
-      return 0;
+      return;
     case MODE_REGISTER:
-      return assign_or_spill(&operand->reg.num, operand->reg.width,
-                             used_volatile);
+      assign_or_spill(&operand->reg.num, operand->reg.width, used_volatile);
+      return;
     case MODE_INDIRECT:
-      return assign_or_spill(&operand->ind.num, REG_QWORD, used_volatile);
+      assign_or_spill(&operand->ind.num, REG_QWORD, used_volatile);
+      return;
     case MODE_SCALE:
-      return assign_or_spill(&operand->sca.base, REG_QWORD, used_volatile) ||
-             assign_or_spill(&operand->sca.index, REG_QWORD, used_volatile);
+      assign_or_spill(&operand->sca.base, REG_QWORD, used_volatile);
+      assign_or_spill(&operand->sca.index, REG_QWORD, used_volatile);
+      return;
   }
 }
 
-static int src_thunk_in_fn(ListIter *where, InstructionData *data,
-                           unsigned short *used_volatile) {
+static void src_thunk_in_fn(ListIter *where, InstructionData *data,
+                            unsigned short *used_volatile) {
   /* normal register assignment */
-  if (data->src.all.mode != MODE_REGISTER || data->src.reg.num < REAL_REG_COUNT)
-    return reg_thunk(where, &data->src, used_volatile);
+  if (data->src.all.mode != MODE_REGISTER ||
+      data->src.reg.num < REAL_REG_COUNT) {
+    reg_thunk(where, &data->src, used_volatile);
+    return;
+  }
 
   size_t vreg_index = data->src.reg.num - REAL_REG_COUNT;
   ptrdiff_t location = vreg_descs[vreg_index];
@@ -545,33 +547,30 @@ static int src_thunk_in_fn(ListIter *where, InstructionData *data,
         data->src.reg.next_use;
   } else {
     /* replace register normally */
-    return reg_thunk(where, &data->src, used_volatile);
+    reg_thunk(where, &data->src, used_volatile);
+    return;
   }
-  return 0;
 }
 
-static int dest_thunk_in_fn(ListIter *where, InstructionData *data,
-                            unsigned short *used_volatile) {
+static void dest_thunk_in_fn(ListIter *where, InstructionData *data,
+                             unsigned short *used_volatile) {
   if (data->dest.all.mode != MODE_REGISTER) {
-    return reg_thunk(where, &data->dest, used_volatile);
+    reg_thunk(where, &data->dest, used_volatile);
   } else if (data->dest.reg.num < REAL_REG_COUNT) {
     /* setting argument register; mark it as clobbered */
     if (data->opcode != OP_PUSH) regs_clobbered |= 1 << data->dest.reg.num;
-    return 0;
   } else if (data->dest.reg.num - REAL_REG_COUNT >= vreg_descs_size ||
              vreg_descs[data->dest.reg.num - REAL_REG_COUNT] ==
                  (ptrdiff_t)REAL_REG_COUNT) {
     /* unmapped virtual register; use rax */
     data->dest.reg.num = 0;
     regs_clobbered |= 1 << 0;
-    return 0;
   } else if (vreg_descs[data->dest.reg.num - REAL_REG_COUNT] < 0) {
     /* spilled mapped virtual register; we should be at the call instruction */
     /* replace with an indirect mode operand */
     assert(data->opcode == OP_CALL);
     set_op_ind(&data->dest, vreg_descs[data->dest.reg.num - REAL_REG_COUNT],
                RBP_VREG);
-    return 0;
   } else if (regs_clobbered &
              1 << vreg_descs[data->dest.reg.num - REAL_REG_COUNT]) {
     /* clobbered mapped virtual register; should be at call */
@@ -589,22 +588,24 @@ static int dest_thunk_in_fn(ListIter *where, InstructionData *data,
     /* remember to set next use information */
     reg_descs[location][reg_descs_sizes[location] - 1].next_use =
         data->src.reg.next_use;
-    return 0;
   } else {
-    return reg_thunk(where, &data->dest, used_volatile);
+    reg_thunk(where, &data->dest, used_volatile);
   }
 }
 
-static int select_regs(ListIter *where) {
+static void select_regs(ListIter *where) {
   InstructionData *data = liter_get(where);
   used_volatile = 0;
-  int status = in_function ? src_thunk_in_fn(where, data, &used_volatile) ||
-                                 dest_thunk_in_fn(where, data, &used_volatile)
-                           : assign_thunk(&data->src, &used_volatile) ||
-                                 assign_thunk(&data->dest, &used_volatile) ||
-                                 reg_thunk(where, &data->src, &used_volatile) ||
-                                 reg_thunk(where, &data->dest, &used_volatile);
-  if (status) abort();
+  if (in_function) {
+    src_thunk_in_fn(where, data, &used_volatile);
+    dest_thunk_in_fn(where, data, &used_volatile);
+  } else {
+    assign_thunk(&data->src, &used_volatile);
+    assign_thunk(&data->dest, &used_volatile);
+    reg_thunk(where, &data->src, &used_volatile);
+    reg_thunk(where, &data->dest, &used_volatile);
+  }
+
   if (data->opcode == OP_CALL) {
     in_function = 0;
   } else if (data->opcode == OP_PUSH && data->dest.all.mode == MODE_REGISTER &&
@@ -612,10 +613,9 @@ static int select_regs(ListIter *where) {
     in_function = 1;
     regs_clobbered = 0;
   }
-  return 0;
 }
 
-int allocate_regs(ListIter *first, ListIter *last) {
+void allocate_regs(ListIter *first, ListIter *last) {
   size_t i;
   for (i = 0; i < 16; ++i) {
     reg_descs_sizes[i] = 0;
@@ -644,14 +644,12 @@ int allocate_regs(ListIter *first, ListIter *last) {
    * should always be in immediate or direct mode
    */
   while (current->node != last->node) {
-    int status = select_regs(current);
-    if (status) abort();
-    status = liter_advance(current, 1);
+    select_regs(current);
+    int status = liter_advance(current, 1);
     if (status) abort();
   }
 
   free(current);
   for (i = 0; i < 16; ++i) free(reg_descs[i]);
   free(vreg_descs);
-  return 0;
 }

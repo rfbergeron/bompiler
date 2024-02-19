@@ -3082,12 +3082,10 @@ ASTree *end_translate_fn(ASTree *declaration) {
   if (before_definition == NULL) abort();
 
   if (skip_liveness) goto no_live;
-  status = liveness_sr(declaration->first_instr, declaration->last_instr);
-  if (status) abort();
+  liveness_sr(declaration->first_instr, declaration->last_instr);
   if (skip_allocator) goto no_alloc;
   /* this function will adjust window_size to account for spilled bytes */
-  status = allocate_regs(declaration->first_instr, declaration->last_instr);
-  if (status) abort();
+  allocate_regs(declaration->first_instr, declaration->last_instr);
 no_live:;
 no_alloc:;
 
