@@ -2010,6 +2010,9 @@ static void translate_params(ASTree *declarator) {
       int in_current_scope =
           state_get_symbol(state, param_decl->lexinfo,
                            strlen(param_decl->lexinfo), &param_symval);
+#ifdef NDEBUG
+      (void)in_current_scope;
+#endif
       assert(in_current_scope && param_symval);
       size_t param_symval_eightbytes = type_get_eightbytes(param_symval->type);
       if (param_symval_eightbytes <= 2 &&
@@ -2838,6 +2841,9 @@ static ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
   SymbolValue *symval = NULL;
   int in_current_scope = state_get_symbol(state, (char *)declarator->lexinfo,
                                           strlen(declarator->lexinfo), &symval);
+#ifdef NDEBUG
+  (void)in_current_scope;
+#endif
   assert(in_current_scope && symval);
 
   if (symval->flags & SYMFLAG_STORE_STAT) {
@@ -2883,6 +2889,9 @@ static ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
   SymbolValue *symval = NULL;
   int in_current_scope = state_get_symbol(state, (char *)declarator->lexinfo,
                                           strlen(declarator->lexinfo), &symval);
+#ifdef NDEBUG
+  (void)in_current_scope;
+#endif
   assert(symval && in_current_scope);
 
   if (declarator->symbol == TOK_TYPE_NAME ||
@@ -2930,6 +2939,9 @@ static ASTree *translate_global_init(ASTree *declaration, ASTree *declarator,
   SymbolValue *symval = NULL;
   int in_current_scope = state_get_symbol(state, (char *)declarator->lexinfo,
                                           strlen(declarator->lexinfo), &symval);
+#ifdef NDEBUG
+  (void)in_current_scope;
+#endif
   assert(in_current_scope && symval);
 
   free(before_definition);
@@ -2959,6 +2971,9 @@ static ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
   SymbolValue *symval = NULL;
   int in_current_scope = state_get_symbol(state, (char *)declarator->lexinfo,
                                           strlen(declarator->lexinfo), &symval);
+#ifdef NDEBUG
+  (void)in_current_scope;
+#endif
   assert(in_current_scope && symval);
 
   if ((symval->flags & SYMFLAG_STORE_EXT) ||

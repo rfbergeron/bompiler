@@ -841,28 +841,6 @@ int types_assignable(const Type *dest, const Type *src, int is_const_zero) {
   }
 }
 
-int types_initializable(const Type *dest, const Type *src,
-                        int src_is_const_zero, int src_is_init_list) {
-  assert((src == NULL) ^ src_is_init_list);
-  assert(!(src_is_const_zero && src_is_init_list));
-  if (type_is_arithmetic(dest) && type_is_arithmetic(src)) {
-    return 1;
-  } else if ((type_is_struct(dest) && type_is_struct(src)) ||
-             (type_is_union(dest) && type_is_union(src))) {
-    return types_equivalent(dest, src, 1, 1);
-  } else if (type_is_pointer(dest) && type_is_pointer(src)) {
-    if (types_equivalent(dest, src, 1, 1)) {
-      return 1;
-    } else if (type_is_void_pointer(dest) || type_is_void_pointer(src)) {
-      return 1;
-    } else {
-      return 0;
-    }
-  } else {
-    return src_is_const_zero && type_is_pointer(dest);
-  }
-}
-
 Type *type_strip_declarator(const Type *type) {
   assert(type_is_declarator(type));
   switch (type->any.code) {
