@@ -1,15 +1,17 @@
 #include "regalloc.h"
 
 #include <assert.h>
+/* why on earth is SIZE_MAX in stdint.h and not limits.h? */
+#include <limits.h>
+#include <stdint.h>
+#include <string.h>
 
-#include "asmgen.h"
 #include "badalist.h"
 #include "badmap.h"
-#include "limits.h"
-#include "string.h"
+#include "instr.h"
 #include "symtable.h"
 
-/* TODO(Robert): consider putting `InstructionData` and perhaps basic block
+/* TODO(Robert): consider putting `Instruction` and perhaps basic block
  * structures and operations in a separate translation unit, since they are
  * shared by the allocator and generator
  */
@@ -22,13 +24,14 @@ typedef struct basic_block {
 
 static struct reg_desc {
   size_t vreg_num;
-  InstructionData *next_use;
+  Instruction *next_use;
 } *reg_descs[16];
 typedef struct reg_desc RegDesc;
 static size_t reg_descs_sizes[16];
 static size_t reg_descs_caps[16];
 /* location of 24-byte region for contents of unspilled registers */
 static const ptrdiff_t unspill_region = -40;
+extern ptrdiff_t window_size;
 
 static ptrdiff_t *vreg_descs;
 static size_t vreg_descs_size;
@@ -41,8 +44,8 @@ static int in_function;
 static unsigned short regs_clobbered;
 static unsigned short used_volatile;
 
-static int instr_is_jump(InstructionData *data) {
-  switch (data->opcode) {
+static int instr_is_jump(Instruction *instr) {
+  switch (instr->opcode) {
     case OP_JMP:
     case OP_JE:
     case OP_JNE:
@@ -62,13 +65,11 @@ static int instr_is_jump(InstructionData *data) {
   }
 }
 
-static int instr_is_directive(InstructionData *data) {
-  return optype_from_opcode(data->opcode) == OPTYPE_DIRECTIVE;
+static int instr_is_directive(Instruction *instr) {
+  return optype_from_opcode(instr->opcode) == OPTYPE_DIRECTIVE;
 }
 
-static int instr_has_label(InstructionData *data) {
-  return data->label != NULL;
-}
+static int instr_has_label(Instruction *instr) { return instr->label != NULL; }
 
 static BBlock *bblock_init(ListIter *leader) {
   if (leader == NULL) return NULL;
@@ -153,25 +154,25 @@ static void bblock_partition(ListIter *first, ListIter *last, ArrayList *out) {
  * at the beginning of the instruction. very few instructions write to dest in
  * a purely destructive manner; namely the SETcc, MOV, and LEA instructions.
  */
-static int instr_writes_dest(InstructionData *data) {
+static int instr_writes_dest(Instruction *instr) {
 #define GENERATE_WRITES(CODE, TYPE, BOOL, WRITES) WRITES,
   static const int OPCODE_WRITE_TABLE[] = {FOREACH_OPCODE(GENERATE_WRITES)};
 #undef GENERATE_WRITES
-  if (data->opcode == OP_MOV && data->src.all.mode == MODE_REGISTER &&
-      data->dest.all.mode == MODE_REGISTER &&
-      data->dest.reg.num == data->src.reg.num) {
+  if (instr->opcode == OP_MOV && instr->src.all.mode == MODE_REGISTER &&
+      instr->dest.all.mode == MODE_REGISTER &&
+      instr->dest.reg.num == instr->src.reg.num) {
     /* dummy mov from a register to itself; vreg is still live */
-    assert(data->dest.reg.width == data->src.reg.width);
+    assert(instr->dest.reg.width == instr->src.reg.width);
     return 0;
   } else {
-    return OPCODE_WRITE_TABLE[data->opcode];
+    return OPCODE_WRITE_TABLE[instr->opcode];
   }
 }
 
-static void liveness_helper(size_t *vreg_num, InstructionData **next_use_out,
+static void liveness_helper(size_t *vreg_num, Instruction **next_use_out,
                             int clear_persist, int set_persist) {
   /* new use info must be in `next_use_out` */
-  InstructionData *new_next_use = *next_use_out;
+  Instruction *new_next_use = *next_use_out;
   /* dummy variable for `map_find` */
   size_t unused[2];
   if (map_find(&bblock_table, vreg_num, sizeof(*vreg_num), unused)) {
@@ -196,7 +197,7 @@ static void liveness_helper(size_t *vreg_num, InstructionData **next_use_out,
   if (status) abort();
 }
 
-static void update_liveness(InstructionData *data, Operand *operand) {
+static void update_liveness(Instruction *instr, Operand *operand) {
   switch (operand->all.mode) {
     case MODE_NONE:
     case MODE_DIRECT:
@@ -209,54 +210,54 @@ static void update_liveness(InstructionData *data, Operand *operand) {
        * dest without making use of the existing value
        */
       operand->reg.next_use =
-          operand == &data->dest && instr_writes_dest(data) ? NULL : data;
+          operand == &instr->dest && instr_writes_dest(instr) ? NULL : instr;
       liveness_helper(&operand->reg.num, &operand->reg.next_use,
-                      (operand == &data->dest &&
-                       (data->persist_flags & PERSIST_DEST_CLEAR)) ||
-                          (operand == &data->src &&
-                           (data->persist_flags & PERSIST_SRC_CLEAR)),
-                      (operand == &data->dest &&
-                       (data->persist_flags & PERSIST_DEST_SET)) ||
-                          (operand == &data->src &&
-                           (data->persist_flags & PERSIST_SRC_SET)));
+                      (operand == &instr->dest &&
+                       (instr->persist_flags & PERSIST_DEST_CLEAR)) ||
+                          (operand == &instr->src &&
+                           (instr->persist_flags & PERSIST_SRC_CLEAR)),
+                      (operand == &instr->dest &&
+                       (instr->persist_flags & PERSIST_DEST_SET)) ||
+                          (operand == &instr->src &&
+                           (instr->persist_flags & PERSIST_SRC_SET)));
       break;
     case MODE_INDIRECT:
       if (operand->ind.num < REAL_REG_COUNT) break;
-      operand->ind.next_use = data;
+      operand->ind.next_use = instr;
       liveness_helper(&operand->ind.num, &operand->ind.next_use,
-                      (operand == &data->dest &&
-                       (data->persist_flags & PERSIST_DEST_CLEAR)) ||
-                          (operand == &data->src &&
-                           (data->persist_flags & PERSIST_SRC_CLEAR)),
-                      (operand == &data->dest &&
-                       (data->persist_flags & PERSIST_DEST_SET)) ||
-                          (operand == &data->src &&
-                           (data->persist_flags & PERSIST_SRC_SET)));
+                      (operand == &instr->dest &&
+                       (instr->persist_flags & PERSIST_DEST_CLEAR)) ||
+                          (operand == &instr->src &&
+                           (instr->persist_flags & PERSIST_SRC_CLEAR)),
+                      (operand == &instr->dest &&
+                       (instr->persist_flags & PERSIST_DEST_SET)) ||
+                          (operand == &instr->src &&
+                           (instr->persist_flags & PERSIST_SRC_SET)));
       break;
     case MODE_SCALE:
       if (operand->sca.base < REAL_REG_COUNT) goto skip_base;
-      operand->sca.base_next_use = data;
+      operand->sca.base_next_use = instr;
       liveness_helper(&operand->sca.base, &operand->sca.base_next_use,
-                      (operand == &data->dest &&
-                       (data->persist_flags & PERSIST_DEST_CLEAR)) ||
-                          (operand == &data->src &&
-                           (data->persist_flags & PERSIST_SRC_CLEAR)),
-                      (operand == &data->dest &&
-                       (data->persist_flags & PERSIST_DEST_SET)) ||
-                          (operand == &data->src &&
-                           (data->persist_flags & PERSIST_SRC_SET)));
+                      (operand == &instr->dest &&
+                       (instr->persist_flags & PERSIST_DEST_CLEAR)) ||
+                          (operand == &instr->src &&
+                           (instr->persist_flags & PERSIST_SRC_CLEAR)),
+                      (operand == &instr->dest &&
+                       (instr->persist_flags & PERSIST_DEST_SET)) ||
+                          (operand == &instr->src &&
+                           (instr->persist_flags & PERSIST_SRC_SET)));
     skip_base:
       if (operand->sca.index < REAL_REG_COUNT) break;
-      operand->sca.index_next_use = data;
+      operand->sca.index_next_use = instr;
       liveness_helper(&operand->sca.index, &operand->sca.index_next_use,
-                      (operand == &data->dest &&
-                       (data->persist_flags & PERSIST_DEST_CLEAR)) ||
-                          (operand == &data->src &&
-                           (data->persist_flags & PERSIST_SRC_CLEAR)),
-                      (operand == &data->dest &&
-                       (data->persist_flags & PERSIST_DEST_SET)) ||
-                          (operand == &data->src &&
-                           (data->persist_flags & PERSIST_SRC_SET)));
+                      (operand == &instr->dest &&
+                       (instr->persist_flags & PERSIST_DEST_CLEAR)) ||
+                          (operand == &instr->src &&
+                           (instr->persist_flags & PERSIST_SRC_CLEAR)),
+                      (operand == &instr->dest &&
+                       (instr->persist_flags & PERSIST_DEST_SET)) ||
+                          (operand == &instr->src &&
+                           (instr->persist_flags & PERSIST_SRC_SET)));
       break;
     default:
       abort();
@@ -269,10 +270,10 @@ static void liveness_bblock(BBlock *block) {
   ListIter *current = liter_prev(last, 1);
   if (current == NULL) abort();
   while (current->node != first->node->prev) {
-    InstructionData *data = liter_get(current);
-    if (data == NULL) abort();
-    update_liveness(data, &data->dest);
-    update_liveness(data, &data->src);
+    Instruction *instr = liter_get(current);
+    if (instr == NULL) abort();
+    update_liveness(instr, &instr->dest);
+    update_liveness(instr, &instr->src);
     if (liter_advance(current, -1)) abort();
   }
   free(current);
@@ -303,8 +304,8 @@ void liveness_sr(ListIter *first, ListIter *last) {
   for (i = 2; i < bblocks_size; ++i) {
     BBlock *block = alist_get(&bblocks, bblocks_size - i);
     liveness_bblock(block);
-    InstructionData *leader_data = liter_get(block->leader);
-    leader_data->comment = LEADER_COMMENT;
+    Instruction *leader_instr = liter_get(block->leader);
+    leader_instr->comment = LEADER_COMMENT;
     if (map_clear(&bblock_table)) abort();
   }
 
@@ -384,8 +385,7 @@ static void assign_or_spill(size_t *vreg_num, size_t vreg_width,
 }
 
 static void select_reg(ListIter *where, size_t *vreg_num, size_t vreg_width,
-                       InstructionData *next_use,
-                       unsigned short *used_volatile) {
+                       Instruction *next_use, unsigned short *used_volatile) {
   if (*vreg_num < REAL_REG_COUNT) return;
   ptrdiff_t location = vreg_descs[*vreg_num - REAL_REG_COUNT];
   if (location >= 0) {
@@ -412,28 +412,28 @@ static void select_reg(ListIter *where, size_t *vreg_num, size_t vreg_width,
     assert(unspill_disp <= 16);
     assert(unspill_reg != REAL_REG_COUNT);
     /* save contents of unspill reg */
-    InstructionData *store_unspill_data = instr_init(OP_MOV);
-    set_op_reg(&store_unspill_data->src, REG_QWORD, unspill_reg);
-    set_op_ind(&store_unspill_data->dest, unspill_region + unspill_disp,
+    Instruction *store_unspill_instr = instr_init(OP_MOV);
+    set_op_reg(&store_unspill_instr->src, REG_QWORD, unspill_reg);
+    set_op_ind(&store_unspill_instr->dest, unspill_region + unspill_disp,
                RBP_VREG);
     /* load spilled vreg into unspill reg */
-    InstructionData *load_spill_data = instr_init(OP_MOV);
-    set_op_ind(&load_spill_data->src, location, RBP_VREG);
-    set_op_reg(&load_spill_data->dest, vreg_width, unspill_reg);
+    Instruction *load_spill_instr = instr_init(OP_MOV);
+    set_op_ind(&load_spill_instr->src, location, RBP_VREG);
+    set_op_reg(&load_spill_instr->dest, vreg_width, unspill_reg);
     int status =
-        liter_push_front(where, NULL, 2, store_unspill_data, load_spill_data);
+        liter_push_front(where, NULL, 2, store_unspill_instr, load_spill_instr);
     if (status) abort();
     /* spill register again */
-    InstructionData *store_spill_data = instr_init(OP_MOV);
-    set_op_reg(&store_spill_data->src, vreg_width, unspill_reg);
-    set_op_ind(&store_spill_data->dest, location, RBP_VREG);
+    Instruction *store_spill_instr = instr_init(OP_MOV);
+    set_op_reg(&store_spill_instr->src, vreg_width, unspill_reg);
+    set_op_ind(&store_spill_instr->dest, location, RBP_VREG);
     /* load original value back into unspill register */
-    InstructionData *load_unspill_data = instr_init(OP_MOV);
-    set_op_ind(&load_unspill_data->src, unspill_region + unspill_disp,
+    Instruction *load_unspill_instr = instr_init(OP_MOV);
+    set_op_ind(&load_unspill_instr->src, unspill_region + unspill_disp,
                RBP_VREG);
-    set_op_reg(&load_unspill_data->dest, REG_QWORD, unspill_reg);
+    set_op_reg(&load_unspill_instr->dest, REG_QWORD, unspill_reg);
     status =
-        liter_push_back(where, NULL, 2, store_spill_data, load_unspill_data);
+        liter_push_back(where, NULL, 2, store_spill_instr, load_unspill_instr);
     if (status) abort();
     /* set vreg to unspill reg */
     *vreg_num = unspill_reg;
@@ -489,127 +489,128 @@ static void assign_thunk(Operand *operand, unsigned short *used_volatile) {
   }
 }
 
-static void src_thunk_in_fn(ListIter *where, InstructionData *data,
+static void src_thunk_in_fn(ListIter *where, Instruction *instr,
                             unsigned short *used_volatile) {
   /* normal register assignment */
-  if (data->src.all.mode != MODE_REGISTER ||
-      data->src.reg.num < REAL_REG_COUNT) {
-    reg_thunk(where, &data->src, used_volatile);
+  if (instr->src.all.mode != MODE_REGISTER ||
+      instr->src.reg.num < REAL_REG_COUNT) {
+    reg_thunk(where, &instr->src, used_volatile);
     return;
   }
 
-  size_t vreg_index = data->src.reg.num - REAL_REG_COUNT;
+  size_t vreg_index = instr->src.reg.num - REAL_REG_COUNT;
   ptrdiff_t location = vreg_descs[vreg_index];
   if (vreg_descs_size <= vreg_index || location == (ptrdiff_t)REAL_REG_COUNT) {
     /* bulk_mtom vreg -> use rax no matter what */
-    data->src.reg.num = 0;
+    instr->src.reg.num = 0;
   } else if (location < 0) {
     /* unspill in function call */
-    if (data->dest.all.mode == MODE_REGISTER) {
+    if (instr->dest.all.mode == MODE_REGISTER) {
       /* change operand to indirect mode if argument is passed in register */
-      set_op_ind(&data->src, location, RBP_VREG);
+      set_op_ind(&instr->src, location, RBP_VREG);
     } else {
       /* use rax to move to another stack location and mark it as clobbered */
-      InstructionData *unspill_data = instr_init(OP_MOV);
-      set_op_ind(&unspill_data->src, location, RBP_VREG);
-      set_op_reg(&unspill_data->dest, data->src.reg.width, 0);
-      int status = liter_push_front(where, NULL, 1, unspill_data);
+      Instruction *unspill_instr = instr_init(OP_MOV);
+      set_op_ind(&unspill_instr->src, location, RBP_VREG);
+      set_op_reg(&unspill_instr->dest, instr->src.reg.width, 0);
+      int status = liter_push_front(where, NULL, 1, unspill_instr);
       if (status) abort();
-      data->src = unspill_data->dest;
+      instr->src = unspill_instr->dest;
       regs_clobbered |= 1 << 0;
     }
   } else if (regs_clobbered & 1 << location) {
     /* value already clobbered -> load from stack, rsp-relative */
     assert(reg_descs[location][reg_descs_sizes[location] - 1].vreg_num ==
-           data->src.reg.num);
+           instr->src.reg.num);
     ptrdiff_t volatile_index = 0;
     while ((size_t)volatile_index < VOLATILE_REG_COUNT &&
            VOLATILE_REGS[volatile_index] != (size_t)location)
       ++volatile_index;
     assert((size_t)volatile_index < VOLATILE_REG_COUNT);
-    if (data->dest.all.mode == MODE_REGISTER) {
+    if (instr->dest.all.mode == MODE_REGISTER) {
       /* change operand to indirect mode if argument is passed in register */
-      set_op_ind(&data->src, volatile_index * 8, RSP_VREG);
+      set_op_ind(&instr->src, volatile_index * 8, RSP_VREG);
     } else {
       /* otherwise, use rax to move to another stack location and mark it as
        * clobbered
        */
-      InstructionData *unspill_data = instr_init(OP_MOV);
-      set_op_ind(&unspill_data->src, volatile_index * 8, RSP_VREG);
-      set_op_reg(&unspill_data->dest, data->src.reg.width, 0);
-      int status = liter_push_front(where, NULL, 1, unspill_data);
+      Instruction *unspill_instr = instr_init(OP_MOV);
+      set_op_ind(&unspill_instr->src, volatile_index * 8, RSP_VREG);
+      set_op_reg(&unspill_instr->dest, instr->src.reg.width, 0);
+      int status = liter_push_front(where, NULL, 1, unspill_instr);
       if (status) abort();
-      data->src = unspill_data->dest;
+      instr->src = unspill_instr->dest;
       regs_clobbered |= 1 << 0;
     }
     /* remember to set next use information */
     reg_descs[location][reg_descs_sizes[location] - 1].next_use =
-        data->src.reg.next_use;
+        instr->src.reg.next_use;
   } else {
     /* replace register normally */
-    reg_thunk(where, &data->src, used_volatile);
+    reg_thunk(where, &instr->src, used_volatile);
     return;
   }
 }
 
-static void dest_thunk_in_fn(ListIter *where, InstructionData *data,
+static void dest_thunk_in_fn(ListIter *where, Instruction *instr,
                              unsigned short *used_volatile) {
-  if (data->dest.all.mode != MODE_REGISTER) {
-    reg_thunk(where, &data->dest, used_volatile);
-  } else if (data->dest.reg.num < REAL_REG_COUNT) {
+  if (instr->dest.all.mode != MODE_REGISTER) {
+    reg_thunk(where, &instr->dest, used_volatile);
+  } else if (instr->dest.reg.num < REAL_REG_COUNT) {
     /* setting argument register; mark it as clobbered */
-    if (data->opcode != OP_PUSH) regs_clobbered |= 1 << data->dest.reg.num;
-  } else if (data->dest.reg.num - REAL_REG_COUNT >= vreg_descs_size ||
-             vreg_descs[data->dest.reg.num - REAL_REG_COUNT] ==
+    if (instr->opcode != OP_PUSH) regs_clobbered |= 1 << instr->dest.reg.num;
+  } else if (instr->dest.reg.num - REAL_REG_COUNT >= vreg_descs_size ||
+             vreg_descs[instr->dest.reg.num - REAL_REG_COUNT] ==
                  (ptrdiff_t)REAL_REG_COUNT) {
     /* unmapped virtual register; use rax */
-    data->dest.reg.num = 0;
+    instr->dest.reg.num = 0;
     regs_clobbered |= 1 << 0;
-  } else if (vreg_descs[data->dest.reg.num - REAL_REG_COUNT] < 0) {
+  } else if (vreg_descs[instr->dest.reg.num - REAL_REG_COUNT] < 0) {
     /* spilled mapped virtual register; we should be at the call instruction */
     /* replace with an indirect mode operand */
-    assert(data->opcode == OP_CALL);
-    set_op_ind(&data->dest, vreg_descs[data->dest.reg.num - REAL_REG_COUNT],
+    assert(instr->opcode == OP_CALL);
+    set_op_ind(&instr->dest, vreg_descs[instr->dest.reg.num - REAL_REG_COUNT],
                RBP_VREG);
   } else if (regs_clobbered &
-             1 << vreg_descs[data->dest.reg.num - REAL_REG_COUNT]) {
+             1 << vreg_descs[instr->dest.reg.num - REAL_REG_COUNT]) {
     /* clobbered mapped virtual register; should be at call */
     /* replace with rsp-relative indirect mode operand */
-    ptrdiff_t location = vreg_descs[data->dest.reg.num - REAL_REG_COUNT];
-    assert(data->opcode == OP_CALL);
+    ptrdiff_t location = vreg_descs[instr->dest.reg.num - REAL_REG_COUNT];
+    assert(instr->opcode == OP_CALL);
     assert(reg_descs[location][reg_descs_sizes[location] - 1].vreg_num ==
-           data->dest.reg.num);
+           instr->dest.reg.num);
     ptrdiff_t volatile_index = 0;
     while ((size_t)volatile_index < VOLATILE_REG_COUNT &&
            VOLATILE_REGS[volatile_index] != (size_t)location)
       ++volatile_index;
     assert((size_t)volatile_index < VOLATILE_REG_COUNT);
-    set_op_ind(&data->dest, volatile_index * 8, RSP_VREG);
+    set_op_ind(&instr->dest, volatile_index * 8, RSP_VREG);
     /* remember to set next use information */
     reg_descs[location][reg_descs_sizes[location] - 1].next_use =
-        data->src.reg.next_use;
+        instr->src.reg.next_use;
   } else {
-    reg_thunk(where, &data->dest, used_volatile);
+    reg_thunk(where, &instr->dest, used_volatile);
   }
 }
 
 static void select_regs(ListIter *where) {
-  InstructionData *data = liter_get(where);
+  Instruction *instr = liter_get(where);
   used_volatile = 0;
   if (in_function) {
-    src_thunk_in_fn(where, data, &used_volatile);
-    dest_thunk_in_fn(where, data, &used_volatile);
+    src_thunk_in_fn(where, instr, &used_volatile);
+    dest_thunk_in_fn(where, instr, &used_volatile);
   } else {
-    assign_thunk(&data->src, &used_volatile);
-    assign_thunk(&data->dest, &used_volatile);
-    reg_thunk(where, &data->src, &used_volatile);
-    reg_thunk(where, &data->dest, &used_volatile);
+    assign_thunk(&instr->src, &used_volatile);
+    assign_thunk(&instr->dest, &used_volatile);
+    reg_thunk(where, &instr->src, &used_volatile);
+    reg_thunk(where, &instr->dest, &used_volatile);
   }
 
-  if (data->opcode == OP_CALL) {
+  if (instr->opcode == OP_CALL) {
     in_function = 0;
-  } else if (data->opcode == OP_PUSH && data->dest.all.mode == MODE_REGISTER &&
-             data->dest.reg.num == 11) {
+  } else if (instr->opcode == OP_PUSH &&
+             instr->dest.all.mode == MODE_REGISTER &&
+             instr->dest.reg.num == 11) {
     in_function = 1;
     regs_clobbered = 0;
   }
