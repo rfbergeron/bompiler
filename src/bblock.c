@@ -7,30 +7,37 @@
 
 BBlock *bblock_init(ListIter *leader) {
   if (leader == NULL) return NULL;
-  BBlock *block = malloc(sizeof(BBlock));
-  if (block == NULL) return NULL;
-  block->leader = leader;
-  block->followers = malloc(sizeof(BBlock *));
-  if (block->followers == NULL) return free(block->leader), free(block), NULL;
-  block->followers_cap = 1;
-  block->followers_size = 0;
-  return block;
+  BBlock *bblock = malloc(sizeof(BBlock));
+  bblock->leader = leader;
+  bblock->seq_follower = NULL;
+  bblock->jump_follower = NULL;
+  return bblock;
 }
 
-void bblock_destroy(BBlock *block) {
-  if (block == NULL) return;
-  free(block->leader);
-  free(block->followers);
-  free(block);
+void bblock_destroy(BBlock *bblock) {
+  if (bblock == NULL) return;
+  free(bblock->leader);
+  free(bblock);
 }
 
-static void bblock_add_follower(BBlock *bblock, BBlock *follower) {
-  assert(bblock != NULL && follower != NULL);
-  if (bblock->followers_size == bblock->followers_cap) {
-    bblock->followers = realloc(
-        bblock->followers, sizeof(BBlock *) * (bblock->followers_cap <<= 1));
-  }
-  bblock->followers[bblock->followers_size++] = follower;
+ListIter *bblock_get_leader(BBlock *bblock) {
+  return bblock == NULL ? NULL : bblock->leader;
+}
+
+BBlock *bblock_get_seq_follower(BBlock *bblock) {
+  return bblock == NULL ? NULL : bblock->seq_follower;
+}
+
+void bblock_set_seq_follower(BBlock *bblock, BBlock *follower) {
+  bblock->seq_follower = follower;
+}
+
+BBlock *bblock_get_jump_follower(BBlock *bblock) {
+  return bblock == NULL ? NULL : bblock->jump_follower;
+}
+
+void bblock_set_jump_follower(BBlock *bblock, BBlock *follower) {
+  bblock->jump_follower = follower;
 }
 
 static int instr_is_directive(Instruction *instr) {
@@ -60,7 +67,8 @@ static int instr_is_jump(Instruction *instr) {
 
 static int instr_has_label(Instruction *instr) { return instr->label != NULL; }
 
-void bblock_partition(ListIter *first, ListIter *last, ArrayList *out) {
+size_t bblock_partition(ListIter *first, ListIter *last, BBlock ***out) {
+  static const size_t BBLOCKS_START_CAP = 4;
   ListIter *exit_leader = liter_prev(last, 1);
   if (exit_leader == NULL) abort();
   while (instr_is_directive(liter_get(exit_leader)))
@@ -70,10 +78,15 @@ void bblock_partition(ListIter *first, ListIter *last, ArrayList *out) {
   BBlock *exit_block = bblock_init(exit_leader);
   if (exit_block == NULL) abort();
 
+  size_t bblocks_cap = BBLOCKS_START_CAP;
+  size_t bblocks_size = 0;
+  BBlock **bblocks = malloc(bblocks_cap * sizeof(BBlock *));
+
   BBlock *enter_block = bblock_init(liter_copy(first));
   if (enter_block == NULL) abort();
-  status = alist_push(out, enter_block);
-  if (status) abort();
+  if (bblocks_size >= bblocks_cap)
+    bblocks = realloc(bblocks, (bblocks_cap <<= 1) * sizeof(BBlock *));
+  bblocks[bblocks_size++] = enter_block;
   /* TODO(Robert): iterator comparison functions */
   ListIter *current = liter_copy(first);
   if (current == NULL) abort();
@@ -83,9 +96,10 @@ void bblock_partition(ListIter *first, ListIter *last, ArrayList *out) {
 
   while (current->node != exit_leader->node) {
     BBlock *block = bblock_init(liter_copy(current));
-    bblock_add_follower(alist_peek(out), block);
-    int status = alist_push(out, block);
-    if (status) abort();
+    bblock_set_seq_follower(bblocks[bblocks_size - 1], block);
+    if (bblocks_size >= bblocks_cap)
+      bblocks = realloc(bblocks, (bblocks_cap <<= 1) * sizeof(BBlock *));
+    bblocks[bblocks_size++] = block;
     for (;;) {
       int status = liter_advance(current, 1);
       if (status) {
@@ -102,7 +116,10 @@ void bblock_partition(ListIter *first, ListIter *last, ArrayList *out) {
   }
 
   free(current);
-  bblock_add_follower(alist_peek(out), exit_block);
-  status = alist_push(out, exit_block);
-  if (status) abort();
+  bblock_set_seq_follower(bblocks[bblocks_size - 1], exit_block);
+  if (bblocks_size >= bblocks_cap)
+    bblocks = realloc(bblocks, (bblocks_cap <<= 1) * sizeof(BBlock *));
+  bblocks[bblocks_size++] = exit_block;
+  *out = bblocks;
+  return bblocks_size;
 }

@@ -6,7 +6,6 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "badalist.h"
 #include "badmap.h"
 #include "bblock.h"
 #include "instr.h"
@@ -154,7 +153,7 @@ static void update_liveness(Instruction *instr, Operand *operand) {
 
 static void liveness_bblock(BBlock *block) {
   ListIter *first = block->leader;
-  ListIter *last = block->followers[0]->leader;
+  ListIter *last = bblock_get_leader(bblock_get_seq_follower(block));
   ListIter *current = liter_prev(last, 1);
   if (current == NULL) abort();
   while (current->node != first->node->prev) {
@@ -182,26 +181,25 @@ void liveness_sr(ListIter *first, ListIter *last) {
   status = map_init(&persist_table, DEFAULT_MAP_SIZE, NULL, NULL,
                     (BlibComparator)compare_regnums);
   if (status) abort();
-  ArrayList bblocks;
-  status = alist_init(&bblocks, 0);
-  if (status) abort();
-  bblock_partition(first, last, &bblocks);
+  BBlock **bblocks;
+  size_t bblocks_size = bblock_partition(first, last, &bblocks);
+  assert(bblocks_size > 0);
 
-  size_t i, bblocks_size = alist_size(&bblocks);
+  size_t i;
   /* skip first and last bblock, which contain only directives */
   for (i = 2; i < bblocks_size; ++i) {
-    BBlock *block = alist_get(&bblocks, bblocks_size - i);
+    BBlock *block = bblocks[bblocks_size - i];
     liveness_bblock(block);
     Instruction *leader_instr = liter_get(block->leader);
     leader_instr->comment = LEADER_COMMENT;
     if (map_clear(&bblock_table)) abort();
   }
 
+  for (i = 0; i < bblocks_size; ++i) bblock_destroy(bblocks[i]);
+  free(bblocks);
   status = map_destroy(&bblock_table);
   if (status) abort();
   status = map_destroy(&persist_table);
-  if (status) abort();
-  status = alist_destroy(&bblocks, (BlibDestroyer)bblock_destroy);
   if (status) abort();
 }
 
