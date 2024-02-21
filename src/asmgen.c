@@ -30,7 +30,7 @@
 #define MAX_INSTR_DEBUG_LENGTH 4096
 #define MAX_OPERAND_DEBUG_LENGTH 1024
 
-static const char LOCAL_FMT[] = ".L%s";
+static const char LOCAL_FMT[] = ".L%lu$%s";
 static const char STATIC_FMT[] = "%s.%lu";
 static const char COND_FMT[] = ".LC%lu";
 static const char END_FMT[] = ".LE%lu";
@@ -76,6 +76,8 @@ static Map *generated_text;
 
 static ptrdiff_t *spill_regions = NULL;
 static size_t spill_regions_count = 0;
+
+static size_t fn_count;
 
 const Type *TYPE_VA_SPILL_REGION;
 
@@ -155,8 +157,10 @@ const char *mk_case_label(size_t switch_id, size_t case_id) {
 }
 
 const char *mk_local_label(const char *name) {
-  size_t label_len = strlen(name) + sizeof(LOCAL_FMT) - 2;
-  return deduplicate_text(label_len, LOCAL_FMT, name);
+  char temp[64];
+  sprintf(temp, "%lu", fn_count);
+  size_t label_len = strlen(name) + strlen(temp) + sizeof(LOCAL_FMT) - 5;
+  return deduplicate_text(label_len, LOCAL_FMT, fn_count, name);
 }
 
 const char *mk_fn_size(const char *name) {
@@ -2925,6 +2929,7 @@ ASTree *translate_global_declarations(ASTree *root, ASTree *declarations) {
 ASTree *begin_translate_fn(ASTree *declaration, ASTree *declarator,
                            ASTree *body) {
   PFDBG0('g', "Translating function prologue");
+  ++fn_count;
   window_size = INIT_WINDOW_SIZE;
   Instruction *text_instr = instr_init(OP_TEXT);
   int status = llist_push_back(instructions, text_instr);
