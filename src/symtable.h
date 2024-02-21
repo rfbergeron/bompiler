@@ -100,6 +100,7 @@ typedef struct label_value {
 SymbolValue *symbol_value_init(const Location *loc, size_t sequence);
 void symbol_value_destroy(SymbolValue *symbol_value);
 int symbol_value_print(const SymbolValue *symbol, char *buffer);
+int symbol_is_lvalue(const SymbolValue *symbol);
 
 /* TagValue functions */
 TagValue *tag_value_init(TagType tag);

@@ -63,11 +63,7 @@ ASTree *validate_ident(ASTree *ident) {
   if (symval) {
     PFDBG1('t', "Assigning %s a symbol", id_str);
     ident->type = symval->type;
-    if (!type_is_array(ident->type) && !type_is_function(ident->type) &&
-        !type_is_typedef(ident->type) &&
-        !(symval->flags & SYMFLAG_ENUM_CONST)) {
-      ident->attributes |= ATTR_EXPR_LVAL;
-    }
+    if (symbol_is_lvalue(symval)) ident->attributes |= ATTR_EXPR_LVAL;
     return evaluate_ident(ident);
   } else {
     return astree_create_errnode(ident, BCC_TERR_SYM_NOT_FOUND, 1, ident);
@@ -191,7 +187,6 @@ ASTree *validate_va_arg(ASTree *va_arg_, ASTree *expr, ASTree *type_name) {
                                  BCC_TERR_INCOMPATIBLE_TYPES, 3, va_arg_,
                                  TYPE_VA_LIST_POINTER, expr->type);
   va_arg_->type = arg_type;
-  va_arg_->attributes |= ATTR_EXPR_LVAL;
   return translate_va_arg(va_arg_, expr, type_name);
 }
 
@@ -449,9 +444,7 @@ ASTree *validate_bitwise(ASTree *operator, ASTree * left, ASTree *right) {
 ASTree *validate_increment(ASTree *operator, ASTree * operand) {
   if (operand->symbol == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(operator, operand);
-    /* TODO(Robert): separate error for arrays */
-  } else if (!(operand->attributes & ATTR_EXPR_LVAL) ||
-             type_is_array(operand->type)) {
+  } else if (!(operand->attributes & ATTR_EXPR_LVAL)) {
     return astree_create_errnode(astree_adopt(operator, 1, operand),
                                  BCC_TERR_EXPECTED_LVAL, 2, operator, operand);
   }
@@ -529,8 +522,7 @@ static ASTree *validate_indirection(ASTree *indirection, ASTree *operand) {
 
   if (type_is_pointer(operand->type)) {
     indirection->type = type_strip_declarator(operand->type);
-    /* TODO(Robert): arrays are lvalues */
-    if (!type_is_array(indirection->type))
+    if (type_is_object(indirection->type))
       indirection->attributes |= ATTR_EXPR_LVAL;
     maybe_load_cexpr(operand, NULL);
     return translate_indirection(indirection, operand);
@@ -544,7 +536,7 @@ static ASTree *validate_indirection(ASTree *indirection, ASTree *operand) {
 static ASTree *validate_addrof(ASTree *addrof, ASTree *operand) {
   if (operand->symbol == TOK_TYPE_ERROR)
     return astree_propogate_errnode(addrof, operand);
-  if (!(operand->attributes & ATTR_EXPR_LVAL) && !type_is_array(operand->type))
+  if (!(operand->attributes & ATTR_EXPR_LVAL))
     return astree_create_errnode(astree_adopt(addrof, 1, operand),
                                  BCC_TERR_EXPECTED_LVAL, 2, addrof, operand);
 
@@ -611,10 +603,8 @@ ASTree *validate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
                                  index);
   } else {
     subscript->type = type_strip_declarator(pointer->type);
-    /* TODO(Robert): arrays are lvalues */
-    if (!type_is_array(subscript->type) && !type_is_function(subscript->type)) {
+    if (type_is_object(subscript->type))
       subscript->attributes |= ATTR_EXPR_LVAL;
-    }
     return evaluate_subscript(subscript, pointer, index);
   }
 }
@@ -646,9 +636,8 @@ ASTree *validate_reference(ASTree *reference, ASTree *struct_, ASTree *member) {
                                  BCC_TERR_SYM_NOT_FOUND, 1, member);
   } else {
     reference->type = member_symbol->type;
-    if (!type_is_array(reference->type) && !type_is_function(reference->type)) {
+    if (type_is_object(reference->type))
       reference->attributes |= ATTR_EXPR_LVAL;
-    }
     return evaluate_reference(reference, struct_, member);
   }
 }
@@ -660,8 +649,7 @@ ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src) {
   /* TODO(Robert): check if struct and union members/submembers are
    * const-qualified
    */
-  if (type_is_array(dest->type) || type_is_function(dest->type) ||
-      type_is_incomplete(dest->type) || type_is_const(dest->type)) {
+  if (type_is_incomplete(dest->type) || type_is_const(dest->type)) {
     return astree_create_errnode(astree_adopt(assignment, 2, dest, src),
                                  BCC_TERR_EXPECTED_LVAL, 2, assignment, dest);
   } else if (!(dest->attributes & ATTR_EXPR_LVAL)) {

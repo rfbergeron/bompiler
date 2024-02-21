@@ -140,6 +140,11 @@ int symbol_value_print(const SymbolValue *symbol, char *buffer) {
 }
 #endif
 
+int symbol_is_lvalue(const SymbolValue *symbol) {
+  return type_is_object(symbol->type) && !(symbol->flags & SYMFLAG_TYPEDEF) &&
+         !(symbol->flags & SYMFLAG_ENUM_CONST);
+}
+
 /*
  * TagValue functions
  */
