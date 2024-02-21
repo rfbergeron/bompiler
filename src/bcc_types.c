@@ -377,6 +377,10 @@ int type_is_function(const Type *type) {
   return type->any.code == TYPE_CODE_FUNCTION;
 }
 
+int type_is_object(const Type *type) {
+  return !type_is_function(type) && !type_is_array(type);
+}
+
 int type_is_variadic_function(const Type *type) {
   return type->any.code == TYPE_CODE_FUNCTION && type->function.is_variadic;
 }
@@ -490,42 +494,6 @@ int type_is_volatile(const Type *type) {
 
 int type_is_qualified(const Type *type) {
   return type_is_const(type) || type_is_volatile(type);
-}
-
-int type_is_typedef(const Type *type) {
-  while (type != NULL && (type->any.code == TYPE_CODE_POINTER ||
-                          type->any.code == TYPE_CODE_ARRAY ||
-                          type->any.code == TYPE_CODE_FUNCTION)) {
-    switch (type->any.code) {
-      case TYPE_CODE_POINTER:
-        type = type->pointer.next;
-        break;
-      case TYPE_CODE_ARRAY:
-        type = type->array.next;
-        break;
-      case TYPE_CODE_FUNCTION:
-        type = type->function.next;
-        break;
-      default:
-        abort();
-    }
-  }
-
-  if (type == NULL) abort();
-  switch (type->any.code) {
-    case TYPE_CODE_STRUCT:
-      /* fallthrough */
-    case TYPE_CODE_UNION:
-      /* fallthrough */
-    case TYPE_CODE_ENUM:
-      return !!(type->tag.flags & STOR_FLAG_TYPEDEF);
-    case TYPE_CODE_BASE:
-      return !!(type->base.flags & STOR_FLAG_TYPEDEF);
-    case TYPE_CODE_NONE:
-      return !!(type->base.flags & STOR_FLAG_TYPEDEF);
-    default:
-      abort();
-  }
 }
 
 int type_is_error(const Type *type) {

@@ -44,7 +44,7 @@ ASTree *validate_type_id_typespec(ASTree *spec_list, ASTree *type_id) {
     return astree_create_errnode(astree_adopt(spec_list, 1, type_id),
                                  BCC_TERR_TYPEID_NOT_FOUND, 2, spec_list,
                                  type_id);
-  } else if (!type_is_typedef(symval->type)) {
+  } else if (!(symval->flags & SYMFLAG_TYPEDEF)) {
     return astree_create_errnode(astree_adopt(spec_list, 1, type_id),
                                  BCC_TERR_EXPECTED_TYPEID, 2, spec_list,
                                  type_id);
@@ -298,7 +298,6 @@ ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
       state_get_symbol(state, identifier, identifier_len, &exists);
   unsigned int symbol_flags = get_link_and_store(declarator->type);
   if (type_is_incomplete(declarator->type)) symbol_flags |= SYMFLAG_INCOMPLETE;
-  if (declarator->symbol == TOK_TYPE_NAME) symbol_flags |= SYMFLAG_TYPENAME;
 
   if (is_redeclaration) {
     if (!linkage_valid(symbol_flags, exists->flags)) {
@@ -374,9 +373,7 @@ ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
     symbol->flags = symbol_flags;
     symbol->type = declarator->type;
     state_insert_symbol(state, identifier, identifier_len, symbol);
-    /* typedefs and type names are not lvalues */
-    if (!(symbol->flags & (SYMFLAG_TYPEDEF | SYMFLAG_TYPENAME)))
-      declarator->attributes |= ATTR_EXPR_LVAL;
+    if (symbol_is_lvalue(symbol)) declarator->attributes |= ATTR_EXPR_LVAL;
     return declarator;
   }
 }
