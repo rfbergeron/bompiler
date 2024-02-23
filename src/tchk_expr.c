@@ -11,7 +11,7 @@
 #include "yyparse.h"
 
 ASTree *validate_empty_expr(ASTree *empty_expr) {
-  assert(empty_expr != &EMPTY_EXPR && empty_expr->symbol == ';');
+  assert(empty_expr != &EMPTY_EXPR && empty_expr->tok_kind == ';');
   empty_expr->type = (Type *)TYPE_VOID;
   return translate_empty_expr(empty_expr);
 }
@@ -30,27 +30,27 @@ ASTree *validate_stringcon(ASTree *stringcon) {
 
   /* create symbol for string literal; it is more convenient that way */
   /* insert string literal into the symbol table if it's not already there */
-  SymbolValue *symval = NULL;
+  Symbol *symbol = NULL;
   (void)state_get_symbol(state, stringcon_label, strlen(stringcon_label),
-                         &symval);
-  if (symval == NULL) {
-    symval = symbol_value_init(&stringcon->loc, state_get_sequence(state));
-    symval->disp = 0;
-    symval->flags = SYMFLAG_LINK_INT | SYMFLAG_STORE_STAT | SYMFLAG_DEFINED;
-    symval->static_id = static_id;
+                         &symbol);
+  if (symbol == NULL) {
+    symbol = symbol_init(&stringcon->loc, state_get_sequence(state));
+    symbol->disp = 0;
+    symbol->flags = SYMFLAG_LINK_INT | SYMFLAG_STORE_STAT | SYMFLAG_DEFINED;
+    symbol->static_id = static_id;
 
     /* subtract 2 for quotes, add one for terminating nul */
-    symval->type = type_init_array(strlen(stringcon->lexinfo) - 2 + 1, 0);
+    symbol->type = type_init_array(strlen(stringcon->lexinfo) - 2 + 1, 0);
 
     Type *char_type =
         type_init_base(SPEC_FLAG_CHAR | QUAL_FLAG_CONST | STOR_FLAG_STATIC);
 
-    (void)type_append(symval->type, char_type, 0);
+    (void)type_append(symbol->type, char_type, 0);
     state_insert_symbol(state, stringcon_label, strlen(stringcon_label),
-                        symval);
+                        symbol);
   }
 
-  stringcon->type = symval->type;
+  stringcon->type = symbol->type;
   return evaluate_stringcon(stringcon);
 }
 
@@ -58,12 +58,12 @@ ASTree *validate_ident(ASTree *ident) {
   PFDBG0('t', "Attempting to assign a type");
   const char *id_str = ident->lexinfo;
   size_t id_str_len = strlen(id_str);
-  SymbolValue *symval = NULL;
-  (void)state_get_symbol(state, id_str, id_str_len, &symval);
-  if (symval) {
+  Symbol *symbol = NULL;
+  (void)state_get_symbol(state, id_str, id_str_len, &symbol);
+  if (symbol) {
     PFDBG1('t', "Assigning %s a symbol", id_str);
-    ident->type = symval->type;
-    if (symbol_is_lvalue(symval)) ident->attributes |= ATTR_EXPR_LVAL;
+    ident->type = symbol->type;
+    if (symbol_is_lvalue(symbol)) ident->attributes |= ATTR_EXPR_LVAL;
     return evaluate_ident(ident);
   } else {
     return astree_create_errnode(ident, BCC_TERR_SYM_NOT_FOUND, 1, ident);
@@ -71,7 +71,7 @@ ASTree *validate_ident(ASTree *ident) {
 }
 
 ASTree *finalize_call(ASTree *call) {
-  if (call->symbol == TOK_TYPE_ERROR) {
+  if (call->tok_kind == TOK_TYPE_ERROR) {
     return call;
   }
   ASTree *function = astree_get(call, 0);
@@ -93,7 +93,7 @@ ASTree *finalize_call(ASTree *call) {
 }
 
 ASTree *validate_arg(ASTree *call, ASTree *arg) {
-  if (call->symbol == TOK_TYPE_ERROR || arg->symbol == TOK_TYPE_ERROR)
+  if (call->tok_kind == TOK_TYPE_ERROR || arg->tok_kind == TOK_TYPE_ERROR)
     return astree_propogate_errnode(call, arg);
   /* functon subtree is the first child of the call node */
   ASTree *function = astree_get(call, 0);
@@ -126,7 +126,7 @@ ASTree *validate_arg(ASTree *call, ASTree *arg) {
 }
 
 ASTree *validate_call(ASTree *expr, ASTree *call) {
-  if (call->symbol == TOK_TYPE_ERROR || expr->symbol == TOK_TYPE_ERROR)
+  if (call->tok_kind == TOK_TYPE_ERROR || expr->tok_kind == TOK_TYPE_ERROR)
     return astree_propogate_errnode(call, expr);
   else if (!type_is_function_pointer(expr->type))
     return astree_create_errnode(astree_adopt(call, 1, expr),
@@ -146,7 +146,7 @@ ASTree *validate_call(ASTree *expr, ASTree *call) {
 }
 
 ASTree *validate_va_start(ASTree *va_start_, ASTree *expr, ASTree *ident) {
-  if (expr->symbol == TOK_TYPE_ERROR)
+  if (expr->tok_kind == TOK_TYPE_ERROR)
     return astree_propogate_errnode_v(va_start_, 2, expr, ident);
 
   if (!types_assignable(TYPE_VA_LIST_POINTER, expr->type,
@@ -159,7 +159,7 @@ ASTree *validate_va_start(ASTree *va_start_, ASTree *expr, ASTree *ident) {
 }
 
 ASTree *validate_va_end(ASTree *va_end_, ASTree *expr) {
-  if (expr->symbol == TOK_TYPE_ERROR)
+  if (expr->tok_kind == TOK_TYPE_ERROR)
     return astree_propogate_errnode(va_end_, expr);
 
   if (!types_assignable(TYPE_VA_LIST_POINTER, expr->type,
@@ -172,7 +172,7 @@ ASTree *validate_va_end(ASTree *va_end_, ASTree *expr) {
 }
 
 ASTree *validate_va_arg(ASTree *va_arg_, ASTree *expr, ASTree *type_name) {
-  if (expr->symbol == TOK_TYPE_ERROR || type_name->symbol == TOK_TYPE_ERROR)
+  if (expr->tok_kind == TOK_TYPE_ERROR || type_name->tok_kind == TOK_TYPE_ERROR)
     return astree_propogate_errnode_v(va_arg_, 2, expr, type_name);
 
   Type *arg_type = astree_get(type_name, 1)->type;
@@ -192,9 +192,9 @@ ASTree *validate_va_arg(ASTree *va_arg_, ASTree *expr, ASTree *type_name) {
 
 ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
                              ASTree *true_expr, ASTree *false_expr) {
-  if (condition->symbol == TOK_TYPE_ERROR ||
-      true_expr->symbol == TOK_TYPE_ERROR ||
-      false_expr->symbol == TOK_TYPE_ERROR) {
+  if (condition->tok_kind == TOK_TYPE_ERROR ||
+      true_expr->tok_kind == TOK_TYPE_ERROR ||
+      false_expr->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(qmark, 3, condition, true_expr,
                                       false_expr);
   } else if (!type_is_scalar(condition->type)) {
@@ -255,7 +255,7 @@ ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
 }
 
 ASTree *validate_comma(ASTree *comma, ASTree *left, ASTree *right) {
-  if (left->symbol == TOK_TYPE_ERROR || right->symbol == TOK_TYPE_ERROR) {
+  if (left->tok_kind == TOK_TYPE_ERROR || right->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(comma, 2, left, right);
   }
 
@@ -265,9 +265,9 @@ ASTree *validate_comma(ASTree *comma, ASTree *left, ASTree *right) {
 
 /* TODO(Robert): allow casting void to void */
 ASTree *validate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
-  if (declaration->symbol == TOK_TYPE_ERROR) {
+  if (declaration->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(cast, 2, declaration, expr);
-  } else if (expr->symbol == TOK_TYPE_ERROR) {
+  } else if (expr->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(cast, 2, declaration, expr);
   }
 
@@ -312,11 +312,11 @@ static int addition_type(Type **out, Type *left_type, Type *right_type) {
 }
 
 ASTree *validate_addition(ASTree *operator, ASTree * left, ASTree *right) {
-  if (left->symbol == TOK_TYPE_ERROR || right->symbol == TOK_TYPE_ERROR) {
+  if (left->tok_kind == TOK_TYPE_ERROR || right->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(operator, 2, left, right);
   }
 
-  int status = operator->symbol == '-'
+  int status = operator->tok_kind == '-'
                    ? subtraction_type(&operator->type, left->type, right->type)
                    : addition_type(&operator->type, left->type, right->type);
 
@@ -330,7 +330,7 @@ ASTree *validate_addition(ASTree *operator, ASTree * left, ASTree *right) {
 }
 
 ASTree *validate_logical(ASTree *operator, ASTree * left, ASTree *right) {
-  if (left->symbol == TOK_TYPE_ERROR || right->symbol == TOK_TYPE_ERROR) {
+  if (left->tok_kind == TOK_TYPE_ERROR || right->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(operator, 2, left, right);
   }
 
@@ -345,7 +345,7 @@ ASTree *validate_logical(ASTree *operator, ASTree * left, ASTree *right) {
 }
 
 ASTree *validate_relational(ASTree *operator, ASTree * left, ASTree *right) {
-  if (left->symbol == TOK_TYPE_ERROR || right->symbol == TOK_TYPE_ERROR) {
+  if (left->tok_kind == TOK_TYPE_ERROR || right->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(operator, 2, left, right);
   }
 
@@ -369,7 +369,7 @@ ASTree *validate_relational(ASTree *operator, ASTree * left, ASTree *right) {
 }
 
 ASTree *validate_equality(ASTree *operator, ASTree * left, ASTree *right) {
-  if (left->symbol == TOK_TYPE_ERROR || right->symbol == TOK_TYPE_ERROR) {
+  if (left->tok_kind == TOK_TYPE_ERROR || right->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(operator, 2, left, right);
   }
 
@@ -400,7 +400,7 @@ ASTree *validate_equality(ASTree *operator, ASTree * left, ASTree *right) {
 }
 
 ASTree *validate_multiply(ASTree *operator, ASTree * left, ASTree *right) {
-  if (left->symbol == TOK_TYPE_ERROR || right->symbol == TOK_TYPE_ERROR) {
+  if (left->tok_kind == TOK_TYPE_ERROR || right->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(operator, 2, left, right);
   }
   if (type_is_arithmetic(left->type) && type_is_arithmetic(right->type)) {
@@ -414,7 +414,7 @@ ASTree *validate_multiply(ASTree *operator, ASTree * left, ASTree *right) {
 }
 
 ASTree *validate_shift(ASTree *operator, ASTree * left, ASTree *right) {
-  if (left->symbol == TOK_TYPE_ERROR || right->symbol == TOK_TYPE_ERROR) {
+  if (left->tok_kind == TOK_TYPE_ERROR || right->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(operator, 2, left, right);
   }
   if (type_is_integral(left->type) && type_is_integral(right->type)) {
@@ -428,7 +428,7 @@ ASTree *validate_shift(ASTree *operator, ASTree * left, ASTree *right) {
 }
 
 ASTree *validate_bitwise(ASTree *operator, ASTree * left, ASTree *right) {
-  if (left->symbol == TOK_TYPE_ERROR || right->symbol == TOK_TYPE_ERROR) {
+  if (left->tok_kind == TOK_TYPE_ERROR || right->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(operator, 2, left, right);
   }
   if (type_is_integral(left->type) && type_is_integral(right->type)) {
@@ -442,7 +442,7 @@ ASTree *validate_bitwise(ASTree *operator, ASTree * left, ASTree *right) {
 }
 
 ASTree *validate_increment(ASTree *operator, ASTree * operand) {
-  if (operand->symbol == TOK_TYPE_ERROR) {
+  if (operand->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(operator, operand);
   } else if (!(operand->attributes & ATTR_EXPR_LVAL)) {
     return astree_create_errnode(astree_adopt(operator, 1, operand),
@@ -452,14 +452,16 @@ ASTree *validate_increment(ASTree *operator, ASTree * operand) {
   if (type_is_pointer(operand->type)) {
     operator->type = operand->type;
     maybe_load_cexpr(operand, NULL);
-    return operator->symbol == TOK_POST_INC || operator->symbol == TOK_POST_DEC
+    return operator->tok_kind == TOK_POST_INC || operator->tok_kind ==
+               TOK_POST_DEC
                ? translate_post_inc_dec(operator, operand)
                : translate_inc_dec(operator, operand);
   } else if (type_is_arithmetic(operand->type)) {
     operator->type =
         type_arithmetic_conversions(operand->type, (Type *)TYPE_INT);
     maybe_load_cexpr(operand, NULL);
-    return operator->symbol == TOK_POST_INC || operator->symbol == TOK_POST_DEC
+    return operator->tok_kind == TOK_POST_INC || operator->tok_kind ==
+               TOK_POST_DEC
                ? translate_post_inc_dec(operator, operand)
                : translate_inc_dec(operator, operand);
   } else {
@@ -470,7 +472,7 @@ ASTree *validate_increment(ASTree *operator, ASTree * operand) {
 }
 
 static ASTree *validate_not(ASTree *operator, ASTree * operand) {
-  if (operand->symbol == TOK_TYPE_ERROR) {
+  if (operand->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(operator, operand);
   }
 
@@ -484,7 +486,7 @@ static ASTree *validate_not(ASTree *operator, ASTree * operand) {
 }
 
 static ASTree *validate_complement(ASTree *operator, ASTree * operand) {
-  if (operand->symbol == TOK_TYPE_ERROR) {
+  if (operand->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(operator, operand);
   }
 
@@ -500,7 +502,7 @@ static ASTree *validate_complement(ASTree *operator, ASTree * operand) {
 }
 
 static ASTree *validate_negation(ASTree *operator, ASTree * operand) {
-  if (operand->symbol == TOK_TYPE_ERROR) {
+  if (operand->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(operator, operand);
   }
 
@@ -516,7 +518,7 @@ static ASTree *validate_negation(ASTree *operator, ASTree * operand) {
 }
 
 static ASTree *validate_indirection(ASTree *indirection, ASTree *operand) {
-  if (operand->symbol == TOK_TYPE_ERROR) {
+  if (operand->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(indirection, operand);
   }
 
@@ -534,7 +536,7 @@ static ASTree *validate_indirection(ASTree *indirection, ASTree *operand) {
 }
 
 static ASTree *validate_addrof(ASTree *addrof, ASTree *operand) {
-  if (operand->symbol == TOK_TYPE_ERROR)
+  if (operand->tok_kind == TOK_TYPE_ERROR)
     return astree_propogate_errnode(addrof, operand);
   if (!(operand->attributes & ATTR_EXPR_LVAL))
     return astree_create_errnode(astree_adopt(addrof, 1, operand),
@@ -546,7 +548,7 @@ static ASTree *validate_addrof(ASTree *addrof, ASTree *operand) {
 }
 
 ASTree *validate_unary(ASTree *unary, ASTree *operand) {
-  switch (unary->symbol) {
+  switch (unary->tok_kind) {
     case '!':
       return validate_not(unary, operand);
     case '~':
@@ -564,33 +566,33 @@ ASTree *validate_unary(ASTree *unary, ASTree *operand) {
   }
 }
 
-ASTree *validate_sizeof(ASTree *sizeof_, ASTree *type_node) {
+ASTree *validate_sizeof(ASTree *sizeof_, ASTree *type_name) {
   Type *type;
-  if (type_node->symbol == TOK_TYPE_ERROR) {
-    return astree_propogate_errnode(sizeof_, type_node);
-  } else if (type_node->symbol == TOK_DECLARATION) {
-    type = astree_get(type_node, 1)->type;
+  if (type_name->tok_kind == TOK_TYPE_ERROR) {
+    return astree_propogate_errnode(sizeof_, type_name);
+  } else if (type_name->tok_kind == TOK_DECLARATION) {
+    type = astree_get(type_name, 1)->type;
     if (type_is_function(type)) /* TODO(Robert): better error message */
-      return astree_create_errnode(astree_adopt(sizeof_, 1, type_node),
+      return astree_create_errnode(astree_adopt(sizeof_, 1, type_name),
                                    BCC_TERR_INCOMPATIBLE_TYPES, 3, sizeof_,
                                    type, type);
   } else {
-    type = type_node->type;
+    type = type_name->type;
   }
 
   if (type_is_incomplete(type)) {
-    return astree_create_errnode(astree_adopt(sizeof_, 1, type_node),
+    return astree_create_errnode(astree_adopt(sizeof_, 1, type_name),
                                  BCC_TERR_INCOMPLETE_TYPE, 2, sizeof_, type);
   }
 
   sizeof_->type = (Type *)TYPE_UNSIGNED_LONG;
-  return evaluate_unop(sizeof_, type_node);
+  return evaluate_unop(sizeof_, type_name);
 }
 
 ASTree *validate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
-  if (pointer->symbol == TOK_TYPE_ERROR)
+  if (pointer->tok_kind == TOK_TYPE_ERROR)
     return astree_propogate_errnode_v(subscript, 2, pointer, index);
-  else if (index->symbol == TOK_TYPE_ERROR)
+  else if (index->tok_kind == TOK_TYPE_ERROR)
     return astree_propogate_errnode_v(subscript, 2, pointer, index);
 
   if (!type_is_pointer(pointer->type)) {
@@ -610,11 +612,11 @@ ASTree *validate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
 }
 
 ASTree *validate_reference(ASTree *reference, ASTree *struct_, ASTree *member) {
-  if (struct_->symbol == TOK_TYPE_ERROR)
+  if (struct_->tok_kind == TOK_TYPE_ERROR)
     return astree_propogate_errnode_v(reference, 2, struct_, member);
 
   Type *tag_type;
-  if (reference->symbol == TOK_ARROW) {
+  if (reference->tok_kind == TOK_ARROW) {
     if (!type_is_struct_pointer(struct_->type) &&
         !type_is_union_pointer(struct_->type))
       return astree_create_errnode(astree_adopt(reference, 2, struct_, member),
@@ -629,7 +631,7 @@ ASTree *validate_reference(ASTree *reference, ASTree *struct_, ASTree *member) {
     tag_type = struct_->type;
   }
 
-  SymbolValue *member_symbol = type_member_name(tag_type, member->lexinfo);
+  Symbol *member_symbol = type_member_name(tag_type, member->lexinfo);
 
   if (member_symbol == NULL) {
     return astree_create_errnode(astree_adopt(reference, 2, struct_, member),
@@ -643,7 +645,7 @@ ASTree *validate_reference(ASTree *reference, ASTree *struct_, ASTree *member) {
 }
 
 ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src) {
-  if (dest->symbol == TOK_TYPE_ERROR || src->symbol == TOK_TYPE_ERROR)
+  if (dest->tok_kind == TOK_TYPE_ERROR || src->tok_kind == TOK_TYPE_ERROR)
     return astree_propogate_errnode_v(assignment, 2, dest, src);
 
   /* TODO(Robert): check if struct and union members/submembers are
@@ -656,7 +658,7 @@ ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src) {
     return astree_create_errnode(astree_adopt(assignment, 2, dest, src),
                                  BCC_TERR_EXPECTED_LVAL, 2, assignment, dest);
   } else {
-    switch (assignment->symbol) {
+    switch (assignment->tok_kind) {
     incompatible:
       return astree_create_errnode(astree_adopt(assignment, 2, dest, src),
                                    BCC_TERR_INCOMPATIBLE_TYPES, 3, assignment,

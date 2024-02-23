@@ -34,48 +34,46 @@ const char *parser_get_tname(int symbol) {
 }
 
 BCC_YYSTATIC void make_va_list_type(void) {
-  TagValue *builtin_tagval = tag_value_init(TAG_STRUCT);
+  Tag *builtin_tag = tag_init(TAG_STRUCT);
   state_insert_tag(state, VA_LIST_STRUCT_NAME, strlen(VA_LIST_STRUCT_NAME),
-                   builtin_tagval);
-  state_push_table(state, builtin_tagval->data.members.by_name);
-  builtin_tagval->alignment = X64_ALIGNOF_LONG;
-  builtin_tagval->width = 2 * X64_SIZEOF_LONG + 2 * X64_SIZEOF_INT;
-  builtin_tagval->is_defined = 1;
-  LinkedList *member_list = &builtin_tagval->data.members.in_order;
+                   builtin_tag);
+  state_push_table(state, builtin_tag->data.members.by_name);
+  builtin_tag->alignment = X64_ALIGNOF_LONG;
+  builtin_tag->width = 2 * X64_SIZEOF_LONG + 2 * X64_SIZEOF_INT;
+  builtin_tag->is_defined = 1;
+  LinkedList *member_list = &builtin_tag->data.members.in_order;
   size_t i;
   ptrdiff_t displacement;
   for (i = 0, displacement = 0; i < 4; ++i) {
-    SymbolValue *member_symval =
-        symbol_value_init(&LOC_EMPTY, state_get_sequence(state));
-    member_symval->disp = displacement;
+    Symbol *member_symbol = symbol_init(&LOC_EMPTY, state_get_sequence(state));
+    member_symbol->disp = displacement;
     if (i < 2) {
       displacement += X64_SIZEOF_INT;
-      member_symval->type = type_init_base(SPEC_FLAGS_UINT);
+      member_symbol->type = type_init_base(SPEC_FLAGS_UINT);
     } else {
       displacement += X64_SIZEOF_LONG;
-      member_symval->type = type_init_pointer(QUAL_FLAG_NONE);
+      member_symbol->type = type_init_pointer(QUAL_FLAG_NONE);
       Type *void_type = type_init_base(SPEC_FLAG_VOID);
-      member_symval->type = type_append(member_symval->type, void_type, 0);
+      member_symbol->type = type_append(member_symbol->type, void_type, 0);
     }
-    int status = llist_push_back(member_list, member_symval);
+    int status = llist_push_back(member_list, member_symbol);
     if (status) abort();
     const char *symname = VA_LIST_MEMBER_NAMES[i];
-    state_insert_symbol(state, symname, strlen(symname), member_symval);
+    state_insert_symbol(state, symname, strlen(symname), member_symbol);
     if (status) abort();
   }
 
   state_pop_table(state);
-  SymbolValue *builtin_symval =
-      symbol_value_init(&LOC_EMPTY, state_get_sequence(state));
-  builtin_symval->flags = SYMFLAG_TYPEDEF | SYMFLAG_DEFINED;
-  builtin_symval->type = type_init_array(1, 0);
+  Symbol *builtin_symbol = symbol_init(&LOC_EMPTY, state_get_sequence(state));
+  builtin_symbol->flags = SYMFLAG_TYPEDEF | SYMFLAG_DEFINED;
+  builtin_symbol->type = type_init_array(1, 0);
   Type *struct_type =
-      type_init_tag(STOR_FLAG_TYPEDEF, VA_LIST_STRUCT_NAME, builtin_tagval);
-  (void)type_append(builtin_symval->type, struct_type, 0);
+      type_init_tag(STOR_FLAG_TYPEDEF, VA_LIST_STRUCT_NAME, builtin_tag);
+  (void)type_append(builtin_symbol->type, struct_type, 0);
   state_insert_symbol(state, VA_LIST_TYPEDEF_NAME, strlen(VA_LIST_TYPEDEF_NAME),
-                      builtin_symval);
+                      builtin_symbol);
   /* copy type info */
-  Type *va_list_type_temp = type_copy(builtin_symval->type, 1);
+  Type *va_list_type_temp = type_copy(builtin_symbol->type, 1);
   /* convert to pointer and free array */
   TYPE_VA_LIST_POINTER_INTERNAL = type_pointer_conversions(va_list_type_temp);
   va_list_type_temp->array.next = NULL;
@@ -96,7 +94,7 @@ BCC_YYSTATIC ASTree *parser_make_root(void) {
 void parser_init_globals(void) {
   parser_root = parser_make_root();
   PFDBG0('t', "Making symbol table");
-  parser_root->symbol_table = symbol_table_init(TRANS_UNIT_TABLE);
+  parser_root->symbol_table = symbol_table_init(TABLE_TRANS_UNIT);
   state_push_table(state, parser_root->symbol_table);
   make_va_list_type();
 }
@@ -107,7 +105,7 @@ void parser_destroy_globals(void) {
 }
 
 BCC_YYSTATIC ASTree *parser_new_sym(ASTree *tree, int new_symbol) {
-  tree->symbol = new_symbol;
+  tree->tok_kind = new_symbol;
   return tree;
 }
 
@@ -148,30 +146,30 @@ BCC_YYSTATIC ASTree *parser_join_strings(ASTree *joiner) {
   return joiner;
 }
 
-BCC_YYSTATIC ASTree *parser_make_spec_list(ASTree *first_specifier) {
-  ASTree *spec_list =
-      astree_init(TOK_SPEC_LIST, first_specifier->loc, "_spec_list");
-  spec_list->type = type_init_none(0);
-  return validate_typespec(spec_list, first_specifier);
+BCC_YYSTATIC ASTree *parser_make_decl_specs(ASTree *first_specifier) {
+  ASTree *decl_specs =
+      astree_init(TOK_SPEC_LIST, first_specifier->loc, "_decl_specs");
+  decl_specs->type = type_init_none(0);
+  return validate_decl_spec(decl_specs, first_specifier);
 }
 
-BCC_YYSTATIC ASTree *parser_make_declaration(ASTree *spec_list) {
+BCC_YYSTATIC ASTree *parser_make_declaration(ASTree *decl_specs) {
   ASTree *declaration = astree_init(TOK_DECLARATION, LOC_EMPTY, "_declaration");
-  spec_list = validate_typespec_list(spec_list);
-  if (spec_list->symbol == TOK_TYPE_ERROR) {
-    return astree_propogate_errnode(declaration, spec_list);
+  decl_specs = finalize_decl_specs(decl_specs);
+  if (decl_specs->tok_kind == TOK_TYPE_ERROR) {
+    return astree_propogate_errnode(declaration, decl_specs);
   }
-  return astree_adopt(declaration, 1, spec_list);
+  return astree_adopt(declaration, 1, decl_specs);
 }
 
 BCC_YYSTATIC ASTree *parser_make_param_list(ASTree *left_paren,
-                                            ASTree *spec_list,
+                                            ASTree *decl_specs,
                                             ASTree *declarator) {
   /* all error handling done in validate_param */
   ASTree *param_list =
       validate_param_list(parser_new_sym(left_paren, TOK_PARAM_LIST));
   /* create temporary type object on the heap to hold the parameter auxspec */
-  ASTree *declaration = parser_make_declaration(spec_list);
+  ASTree *declaration = parser_make_declaration(decl_specs);
   return validate_param(param_list, declaration, declarator);
 }
 
@@ -185,10 +183,10 @@ BCC_YYSTATIC ASTree *parser_make_type_name(void) {
   return astree_init(TOK_TYPE_NAME, lexer_get_loc(), "_type_name");
 }
 
-BCC_YYSTATIC ASTree *parser_make_cast(ASTree *left_paren, ASTree *spec_list,
+BCC_YYSTATIC ASTree *parser_make_cast(ASTree *left_paren, ASTree *decl_specs,
                                       ASTree *type_name, ASTree *expr) {
   ASTree *cast = parser_new_sym(left_paren, TOK_CAST);
-  ASTree *declaration = parser_make_declaration(spec_list);
+  ASTree *declaration = parser_make_declaration(decl_specs);
   return validate_cast(
       cast, finalize_declaration(declare_symbol(declaration, type_name)), expr);
 }
@@ -211,7 +209,7 @@ BCC_YYSTATIC ASTree *parser_make_attributes_list(void) {
 }
 
 BCC_YYSTATIC ASTree *parse_pretty_function(ASTree *pretty_function) {
-  assert(pretty_function->symbol == TOK_PRTY_FN);
+  assert(pretty_function->tok_kind == TOK_PRTY_FN);
   const char *fn_name = state_get_function_name(state);
   assert(fn_name != NULL);
   /* add 1 for terminating nul and 2 for double quotes */
@@ -232,16 +230,16 @@ BCC_YYSTATIC ASTree *parse_pretty_function(ASTree *pretty_function) {
   return fn_str_node;
 }
 
-BCC_YYSTATIC ASTree *parse_sizeof(ASTree *sizeof_, ASTree *spec_list,
+BCC_YYSTATIC ASTree *parse_sizeof(ASTree *sizeof_, ASTree *decl_specs,
                                   ASTree *declarator) {
-  ASTree *declaration = parser_make_declaration(spec_list);
+  ASTree *declaration = parser_make_declaration(decl_specs);
   return validate_sizeof(
       sizeof_, finalize_declaration(declare_symbol(declaration, declarator)));
 }
 
 BCC_YYSTATIC ASTree *parse_va_arg(ASTree *va_arg_, ASTree *expr,
-                                  ASTree *spec_list, ASTree *declarator) {
-  ASTree *declaration = parser_make_declaration(spec_list);
+                                  ASTree *decl_specs, ASTree *declarator) {
+  ASTree *declaration = parser_make_declaration(decl_specs);
   return validate_va_arg(
       va_arg_, expr,
       finalize_declaration(declare_symbol(declaration, declarator)));

@@ -37,12 +37,12 @@ extern int skip_type_check;
 
 ASTree EMPTY_EXPR = EMPTY_EXPR_VALUE;
 
-ASTree *astree_init(int symbol, const Location location, const char *info) {
+ASTree *astree_init(int tok_kind, const Location location, const char *info) {
   PFDBG2('t', "Initializing new astree node with code: %s, lexinfo: '%s'",
-         parser_get_tname(symbol), info);
+         parser_get_tname(tok_kind), info);
 
   ASTree *tree = malloc(sizeof(ASTree));
-  tree->symbol = symbol;
+  tree->tok_kind = tok_kind;
   tree->lexinfo = string_set_intern(info);
   tree->loc = location;
   tree->type = NULL;
@@ -57,7 +57,7 @@ ASTree *astree_init(int symbol, const Location location, const char *info) {
   tree->symbol_table = NULL;
   tree->constant.integral.signed_value = 0L;
   tree->constant.label = NULL;
-  tree->constant.symval = NULL;
+  tree->constant.symbol = NULL;
   return tree;
 }
 
@@ -65,7 +65,7 @@ void astree_destroy(ASTree *tree) {
   if (tree == NULL || tree == &EMPTY_EXPR) return;
 
   PFDBG2('t', "Freeing an astree with symbol: %s, lexinfo: %s",
-         parser_get_tname(tree->symbol), tree->lexinfo);
+         parser_get_tname(tree->tok_kind), tree->lexinfo);
   if (yydebug) {
     /* print tree contents to stderr */
   }
@@ -75,7 +75,7 @@ void astree_destroy(ASTree *tree) {
    * how the representation of types has changed. make changes as necessary.
    */
   if (!skip_type_check && tree->type != NULL) {
-    switch (tree->symbol) {
+    switch (tree->tok_kind) {
       default:
         break;
       /*
@@ -140,7 +140,7 @@ ASTree *astree_adopt(ASTree *parent, const size_t count, ...) {
    * - the parent's symbol is TOK_TYPE_ERROR
    * - the number of children post adoption is greater than 1
    */
-  assert((parent->symbol != TOK_TYPE_ERROR) ||
+  assert((parent->tok_kind != TOK_TYPE_ERROR) ||
          (astree_count(parent) + count == 1));
   va_list args;
   va_start(args, count);
@@ -150,8 +150,8 @@ ASTree *astree_adopt(ASTree *parent, const size_t count, ...) {
     assert(child != NULL);
     assert((child == &EMPTY_EXPR) ||
            (llist_find(&parent->children, child) == (size_t)-1L));
-    PFDBG2('t', "Tree %s adopts %s", parser_get_tname(parent->symbol),
-           parser_get_tname(child->symbol));
+    PFDBG2('t', "Tree %s adopts %s", parser_get_tname(parent->tok_kind),
+           parser_get_tname(child->tok_kind));
     int status = llist_push_back(&parent->children, child);
     if (status) {
       fprintf(stderr, "ERROR: your data structures library sucks.\n");
@@ -189,7 +189,7 @@ ASTree *astree_create_errnode(ASTree *child, ErrorCode code, size_t info_size,
   CompileError *error = compile_error_init_v(code, info_size, info_ptrs);
   va_end(info_ptrs);
 
-  if (child->symbol == TOK_TYPE_ERROR) {
+  if (child->tok_kind == TOK_TYPE_ERROR) {
     type_append_error(child->type, error);
     return child;
   } else {
@@ -203,10 +203,10 @@ ASTree *astree_create_errnode(ASTree *child, ErrorCode code, size_t info_size,
  * propogate error nodes for more complex tree structures, like enums
  */
 ASTree *astree_propogate_errnode(ASTree *parent, ASTree *child) {
-  if (child->symbol != TOK_TYPE_ERROR) {
+  if (child->tok_kind != TOK_TYPE_ERROR) {
     (void)astree_adopt(UNWRAP(parent), 1, child);
     return parent;
-  } else if (parent->symbol != TOK_TYPE_ERROR) {
+  } else if (parent->tok_kind != TOK_TYPE_ERROR) {
     ASTree *real_child = astree_replace(child, 0, parent);
     (void)astree_adopt(parent, 1, real_child);
     return child;
@@ -274,7 +274,7 @@ int astree_to_string(ASTree *tree, char *buffer) {
    */
   if (tree == NULL) return -1;
 
-  const char *tname = parser_get_tname(tree->symbol);
+  const char *tname = parser_get_tname(tree->tok_kind);
   int characters_printed = location_to_string(&tree->loc, locstr);
   if (characters_printed < 0) return characters_printed;
   characters_printed = attributes_to_string(tree->attributes, attrstr);
@@ -308,7 +308,7 @@ int astree_print_tree(ASTree *tree, FILE *out, int depth) {
   static char indent[LINESIZE], nodestr[LINESIZE];
   /* print out the whole tree */
   PFDBG3('t', "Tree info: token: %s, lexinfo: %s, children: %u",
-         parser_get_tname(tree->symbol), tree->lexinfo,
+         parser_get_tname(tree->tok_kind), tree->lexinfo,
          llist_size(&tree->children));
 
   size_t numspaces = depth * 2;
@@ -341,22 +341,22 @@ static int location_ge(Location *loc1, Location *loc2) {
           loc1->offset >= loc2->offset);
 }
 
-static int compare_symval_pairs(MapPair *pair1, MapPair *pair2) {
-  SymbolValue *symval1 = pair1->value;
-  SymbolValue *symval2 = pair2->value;
-  return location_ge(&symval1->loc, &symval2->loc);
+static int compare_symbol_pairs(MapPair *pair1, MapPair *pair2) {
+  Symbol *symbol1 = pair1->value;
+  Symbol *symbol2 = pair2->value;
+  return location_ge(&symbol1->loc, &symbol2->loc);
 }
 
-static const char *table_type_to_str(TableType type) {
-  switch (type) {
-    case FUNCTION_TABLE:
+static const char *table_type_to_str(TableKind kind) {
+  switch (kind) {
+    case TABLE_FUNCTION:
       return "FUNCTION SCOPE";
-    case BLOCK_TABLE:
+    case TABLE_BLOCK:
       return "BLOCK SCOPE";
-    case MEMBER_TABLE:
+    case TABLE_MEMBER:
       /* currently unused */
       return "MEMBER NAMESPACE";
-    case TRANS_UNIT_TABLE:
+    case TABLE_TRANS_UNIT:
       /* currently unused */
       return "TRANSLATION UNIT SCOPE";
     default:
@@ -366,7 +366,7 @@ static const char *table_type_to_str(TableType type) {
 
 static int print_sym_child_helper(ASTree *tree, FILE *out, int depth) {
   ASTree *block = NULL;
-  switch (tree->symbol) {
+  switch (tree->tok_kind) {
     case TOK_ROOT:
     case TOK_BLOCK:
       block = tree;
@@ -397,16 +397,16 @@ static int print_sym_child_helper(ASTree *tree, FILE *out, int depth) {
       }
       break;
   }
-  if (block != NULL && block->symbol == TOK_BLOCK) {
+  if (block != NULL && block->tok_kind == TOK_BLOCK) {
     static char locstr[LINESIZE];
-    const char *tname = parser_get_tname(tree->symbol);
+    const char *tname = parser_get_tname(tree->tok_kind);
     int characters_printed = location_to_string(&tree->loc, locstr);
     if (characters_printed < 0) return characters_printed;
     if (strlen(tname) > 4) tname += 4;
     int padding_plus_tname = strlen(tname) + depth * 2;
     characters_printed = fprintf(
         out, "%*s \"%s\" {%s} {%s}:\n", padding_plus_tname, tname,
-        tree->lexinfo, locstr, table_type_to_str(block->symbol_table->type));
+        tree->lexinfo, locstr, table_type_to_str(block->symbol_table->kind));
     if (characters_printed < 0) return characters_printed;
     int status = astree_print_symbols(block, out, depth + 1);
     return status < 0 ? status : 0;
@@ -416,32 +416,32 @@ static int print_sym_child_helper(ASTree *tree, FILE *out, int depth) {
 }
 
 static int print_sym_pair_helper(MapPair *pair, FILE *out, int depth) {
-  static char symval_str[LINESIZE];
+  static char symbol_str[LINESIZE];
   const char *symname = pair->key;
   int padding_plus_symname = strlen(symname) + depth * 2;
-  SymbolValue *symval = pair->value;
-  int characters_printed = symbol_value_print(symval, symval_str);
+  Symbol *symbol = pair->value;
+  int characters_printed = symbol_print(symbol, symbol_str);
   if (characters_printed < 0) return characters_printed;
-  return fprintf(out, "%*s: %s\n", padding_plus_symname, symname, symval_str);
+  return fprintf(out, "%*s: %s\n", padding_plus_symname, symname, symbol_str);
 }
 
 int astree_print_symbols(ASTree *block, FILE *out, int depth) {
   int ret = 0;
   Map *primary_namespace = block->symbol_table->primary_namespace;
-  ArrayList symval_pairs;
-  int status = alist_init(&symval_pairs, map_size(primary_namespace));
+  ArrayList symbol_pairs;
+  int status = alist_init(&symbol_pairs, map_size(primary_namespace));
   if (status) abort();
-  status = map_pairs(primary_namespace, &symval_pairs);
+  status = map_pairs(primary_namespace, &symbol_pairs);
   if (status) abort();
-  alist_ssort(&symval_pairs, (BlibComparator)compare_symval_pairs);
+  alist_ssort(&symbol_pairs, (BlibComparator)compare_symbol_pairs);
 
   size_t pair_index = 0, child_index = 0;
-  while (pair_index < alist_size(&symval_pairs) &&
+  while (pair_index < alist_size(&symbol_pairs) &&
          child_index < astree_count(block)) {
-    MapPair *pair = alist_get(&symval_pairs, pair_index);
+    MapPair *pair = alist_get(&symbol_pairs, pair_index);
     ASTree *child = astree_get(block, child_index);
     int characters_printed;
-    if (location_ge(&child->loc, &((SymbolValue *)pair->value)->loc)) {
+    if (location_ge(&child->loc, &((Symbol *)pair->value)->loc)) {
       characters_printed = print_sym_pair_helper(pair, out, depth);
       ++pair_index;
     } else {
@@ -450,8 +450,8 @@ int astree_print_symbols(ASTree *block, FILE *out, int depth) {
     }
     if (characters_printed < 0) goto fail;
   }
-  while (pair_index < alist_size(&symval_pairs)) {
-    MapPair *pair = alist_get(&symval_pairs, pair_index);
+  while (pair_index < alist_size(&symbol_pairs)) {
+    MapPair *pair = alist_get(&symbol_pairs, pair_index);
     int characters_printed = print_sym_pair_helper(pair, out, depth);
     ++pair_index;
     if (characters_printed < 0) goto fail;
@@ -469,9 +469,9 @@ fail:
   fprintf(stderr,
           "ERROR: failed to print symbol table associated with "
           "astree node, symbol: %s, lexinfo: %s\n",
-          parser_get_tname(block->symbol), block->lexinfo);
+          parser_get_tname(block->tok_kind), block->lexinfo);
 cleanup:
-  status = alist_destroy(&symval_pairs, free);
+  status = alist_destroy(&symbol_pairs, free);
   if (status) abort();
   return ret;
 }

@@ -140,7 +140,7 @@ union type {
     TypeCode code;
     unsigned int flags;
     const char *name;
-    struct tag_value *value;
+    struct tag *value;
   } tag;
   struct {
     TypeCode code;
@@ -173,8 +173,7 @@ Type *type_init_pointer(unsigned int qualifiers);
 Type *type_init_array(size_t length, int deduce_length);
 Type *type_init_function(size_t parameters_size, Type **parameters,
                          int is_variadic, int is_old_style);
-Type *type_init_tag(unsigned int flags, const char *tag_name,
-                    struct tag_value *tag_value);
+Type *type_init_tag(unsigned int flags, const char *tag_name, struct tag *tag);
 Type *type_init_base(unsigned int flags);
 Type *type_init_error(CompileError *error);
 
@@ -215,8 +214,8 @@ int type_is_declarator(const Type *type);
 int type_is_none(const Type *type);
 int type_is_incomplete(const Type *type);
 
-struct symbol_value *type_member_name(const Type *type, const char *name);
-struct symbol_value *type_member_index(const Type *type, size_t index);
+struct symbol *type_member_name(const Type *type, const char *name);
+struct symbol *type_member_index(const Type *type, size_t index);
 size_t type_member_count(const Type *type);
 Type *type_param_index(const Type *type, size_t index);
 size_t type_param_count(const Type *type);
@@ -232,7 +231,7 @@ int types_equivalent(const Type *type1, const Type *type2,
 int types_assignable(const Type *dest, const Type *src, int is_const_zero);
 
 Type *type_strip_declarator(const Type *type);
-Type *type_get_declspecs(Type *type);
+Type *type_get_decl_specs(Type *type);
 Type *type_append(Type *dest, Type *src, int copy_src);
 Type *type_copy(const Type *type, int clear_typedef_flag);
 Type *type_common_qualified_pointer(const Type *type1, const Type *type2);

@@ -23,65 +23,67 @@
  * the symbols into the symbol table, and the second to swipe the symbols from
  * the members and put them into an auxspec
  */
-ASTree *validate_tag_typespec(ASTree *spec_list, ASTree *tag) {
-  if (type_add_flags(tag->type, type_get_flags(spec_list->type)))
-    return astree_create_errnode(astree_adopt(spec_list, 1, tag),
-                                 BCC_TERR_INCOMPATIBLE_SPEC, 2, spec_list, tag);
+ASTree *validate_tag_spec(ASTree *decl_specs, ASTree *tag_spec) {
+  if (type_add_flags(tag_spec->type, type_get_flags(decl_specs->type)))
+    return astree_create_errnode(astree_adopt(decl_specs, 1, tag_spec),
+                                 BCC_TERR_INCOMPATIBLE_SPEC, 2, decl_specs,
+                                 tag_spec);
 
-  type_destroy(spec_list->type);
-  spec_list->type = tag->type;
-  tag->type = NULL;
+  type_destroy(decl_specs->type);
+  decl_specs->type = tag_spec->type;
+  tag_spec->type = NULL;
 
-  return astree_adopt(spec_list, 1, tag);
+  return astree_adopt(decl_specs, 1, tag_spec);
 }
 
-ASTree *validate_type_id_typespec(ASTree *spec_list, ASTree *type_id) {
-  const char *type_name = type_id->lexinfo;
+ASTree *validate_typedef_name(ASTree *decl_specs, ASTree *typedef_name) {
+  const char *type_name = typedef_name->lexinfo;
   size_t type_name_len = strlen(type_name);
-  SymbolValue *symval = NULL;
-  state_get_symbol(state, type_name, type_name_len, &symval);
-  if (!symval) {
-    return astree_create_errnode(astree_adopt(spec_list, 1, type_id),
-                                 BCC_TERR_TYPEID_NOT_FOUND, 2, spec_list,
-                                 type_id);
-  } else if (!(symval->flags & SYMFLAG_TYPEDEF)) {
-    return astree_create_errnode(astree_adopt(spec_list, 1, type_id),
-                                 BCC_TERR_EXPECTED_TYPEID, 2, spec_list,
-                                 type_id);
-  } else if (!type_is_none(spec_list->type) ||
-             (type_is_declarator(symval->type) &&
-              !type_is_pointer(symval->type) &&
-              type_is_qualified(spec_list->type))) {
-    return astree_create_errnode(astree_adopt(spec_list, 1, type_id),
-                                 BCC_TERR_INCOMPATIBLE_SPEC, 2, spec_list,
-                                 type_id);
+  Symbol *symbol = NULL;
+  state_get_symbol(state, type_name, type_name_len, &symbol);
+  if (!symbol) {
+    return astree_create_errnode(astree_adopt(decl_specs, 1, typedef_name),
+                                 BCC_TERR_TYPEID_NOT_FOUND, 2, decl_specs,
+                                 typedef_name);
+  } else if (!(symbol->flags & SYMFLAG_TYPEDEF)) {
+    return astree_create_errnode(astree_adopt(decl_specs, 1, typedef_name),
+                                 BCC_TERR_EXPECTED_TYPEID, 2, decl_specs,
+                                 typedef_name);
+  } else if (!type_is_none(decl_specs->type) ||
+             (type_is_declarator(symbol->type) &&
+              !type_is_pointer(symbol->type) &&
+              type_is_qualified(decl_specs->type))) {
+    return astree_create_errnode(astree_adopt(decl_specs, 1, typedef_name),
+                                 BCC_TERR_INCOMPATIBLE_SPEC, 2, decl_specs,
+                                 typedef_name);
   } else {
-    unsigned int old_flags = type_get_flags(spec_list->type);
-    type_destroy(spec_list->type);
-    spec_list->type = type_copy(symval->type, 1);
+    unsigned int old_flags = type_get_flags(decl_specs->type);
+    type_destroy(decl_specs->type);
+    decl_specs->type = type_copy(symbol->type, 1);
 
-    if (type_is_pointer(spec_list->type)) {
+    if (type_is_pointer(decl_specs->type)) {
       /* apply qualifiers to the pointer */
-      int status = type_add_flags(spec_list->type, old_flags & QUAL_FLAG_MASK);
+      int status = type_add_flags(decl_specs->type, old_flags & QUAL_FLAG_MASK);
       if (status)
-        return astree_create_errnode(astree_adopt(spec_list, 1, type_id),
-                                     BCC_TERR_INCOMPATIBLE_SPEC, 2, spec_list,
-                                     type_id);
+        return astree_create_errnode(astree_adopt(decl_specs, 1, typedef_name),
+                                     BCC_TERR_INCOMPATIBLE_SPEC, 2, decl_specs,
+                                     typedef_name);
       old_flags &= ~QUAL_FLAG_MASK;
     }
 
-    int status = type_add_flags(type_get_declspecs(spec_list->type), old_flags);
+    int status =
+        type_add_flags(type_get_decl_specs(decl_specs->type), old_flags);
     if (status)
-      return astree_create_errnode(astree_adopt(spec_list, 1, type_id),
-                                   BCC_TERR_INCOMPATIBLE_SPEC, 2, spec_list,
-                                   type_id);
+      return astree_create_errnode(astree_adopt(decl_specs, 1, typedef_name),
+                                   BCC_TERR_INCOMPATIBLE_SPEC, 2, decl_specs,
+                                   typedef_name);
     else
-      return astree_adopt(spec_list, 1, type_id);
+      return astree_adopt(decl_specs, 1, typedef_name);
   }
 }
 
-static unsigned int type_flag_from_symbol(int symbol) {
-  switch (symbol) {
+static unsigned int type_flag_from_tok_kind(int tok_kind) {
+  switch (tok_kind) {
     case TOK_VOID:
       return SPEC_FLAG_VOID;
     case TOK_CHAR:
@@ -129,41 +131,42 @@ static unsigned int type_flag_from_symbol(int symbol) {
   }
 }
 
-ASTree *validate_typespec(ASTree *spec_list, ASTree *spec) {
-  if (spec_list->symbol == TOK_TYPE_ERROR) {
-    return astree_propogate_errnode(spec_list, spec);
-  } else if (spec->symbol == TOK_TYPE_ERROR) {
-    return astree_propogate_errnode(spec_list, spec);
+ASTree *validate_decl_spec(ASTree *decl_specs, ASTree *decl_spec) {
+  if (decl_specs->tok_kind == TOK_TYPE_ERROR) {
+    return astree_propogate_errnode(decl_specs, decl_spec);
+  } else if (decl_spec->tok_kind == TOK_TYPE_ERROR) {
+    return astree_propogate_errnode(decl_specs, decl_spec);
   }
 
-  assert(spec_list->type != NULL);
-  assert(!type_is_declarator(spec_list->type));
+  assert(decl_specs->type != NULL);
+  assert(!type_is_declarator(decl_specs->type));
 
-  if (spec->symbol == TOK_ATTR_LIST) {
-    astree_destroy(spec);
-    return spec_list;
-  } else if (spec->symbol == TOK_STRUCT || spec->symbol == TOK_UNION ||
-             spec->symbol == TOK_ENUM) {
-    return validate_tag_typespec(spec_list, spec);
-  } else if (spec->symbol == TOK_TYPEDEF_NAME) {
-    return validate_type_id_typespec(spec_list, spec);
-  } else if (type_add_flags(spec_list->type,
-                            type_flag_from_symbol(spec->symbol))) {
-    return astree_create_errnode(astree_adopt(spec_list, 1, spec),
-                                 BCC_TERR_INCOMPATIBLE_SPEC, 2, spec_list,
-                                 spec);
+  if (decl_spec->tok_kind == TOK_ATTR_LIST) {
+    astree_destroy(decl_spec);
+    return decl_specs;
+  } else if (decl_spec->tok_kind == TOK_STRUCT ||
+             decl_spec->tok_kind == TOK_UNION ||
+             decl_spec->tok_kind == TOK_ENUM) {
+    return validate_tag_spec(decl_specs, decl_spec);
+  } else if (decl_spec->tok_kind == TOK_TYPEDEF_NAME) {
+    return validate_typedef_name(decl_specs, decl_spec);
+  } else if (type_add_flags(decl_specs->type,
+                            type_flag_from_tok_kind(decl_spec->tok_kind))) {
+    return astree_create_errnode(astree_adopt(decl_specs, 1, decl_spec),
+                                 BCC_TERR_INCOMPATIBLE_SPEC, 2, decl_specs,
+                                 decl_spec);
   } else {
-    return astree_adopt(spec_list, 1, spec);
+    return astree_adopt(decl_specs, 1, decl_spec);
   }
 }
 
-ASTree *validate_typespec_list(ASTree *spec_list) {
-  if (spec_list->symbol == TOK_TYPE_ERROR) return spec_list;
-  int status = type_normalize(spec_list->type);
+ASTree *finalize_decl_specs(ASTree *decl_specs) {
+  if (decl_specs->tok_kind == TOK_TYPE_ERROR) return decl_specs;
+  int status = type_normalize(decl_specs->type);
   if (status)
-    return astree_create_errnode(spec_list, BCC_TERR_INCOMPLETE_TYPE, 1,
-                                 spec_list);
-  return spec_list;
+    return astree_create_errnode(decl_specs, BCC_TERR_INCOMPLETE_TYPE, 1,
+                                 decl_specs);
+  return decl_specs;
 }
 
 static int location_is_empty(Location *loc) {
@@ -171,7 +174,7 @@ static int location_is_empty(Location *loc) {
 }
 
 static unsigned int get_link_and_store(Type *type) {
-  unsigned int root_flags = type_get_flags(type_get_declspecs(type));
+  unsigned int root_flags = type_get_flags(type_get_decl_specs(type));
   ;
 
   if (root_flags & STOR_FLAG_TYPEDEF) {
@@ -231,7 +234,7 @@ static int is_array_completion(const Type *new_type, const Type *old_type) {
 
 static const char *create_unique_name(ASTree *tree) {
   const char *node_str;
-  switch (tree->symbol) {
+  switch (tree->tok_kind) {
     case TOK_TYPE_NAME:
       node_str = "type_name";
       break;
@@ -246,7 +249,7 @@ static const char *create_unique_name(ASTree *tree) {
       break;
     default:
       fprintf(stderr, "ERROR: unable to create unique name for symbol %s\n",
-              parser_get_tname(tree->symbol));
+              parser_get_tname(tree->tok_kind));
       abort();
   }
 
@@ -276,24 +279,24 @@ ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
   PFDBG1('t', "Making object entry for value %s", declarator->lexinfo);
   if (location_is_empty(&UNWRAP(declaration)->loc))
     UNWRAP(declaration)->loc = UNWRAP(declarator)->loc;
-  if (declaration->symbol == TOK_TYPE_ERROR ||
-      declarator->symbol == TOK_TYPE_ERROR)
+  if (declaration->tok_kind == TOK_TYPE_ERROR ||
+      declarator->tok_kind == TOK_TYPE_ERROR)
     return declarator;
 
-  ASTree *spec_list = astree_get(declaration, 0);
+  ASTree *decl_specs = astree_get(declaration, 0);
   if (declarator->type == NULL) {
-    declarator->type = type_copy(spec_list->type, 0);
+    declarator->type = type_copy(decl_specs->type, 0);
   } else {
-    (void)type_append(declarator->type, spec_list->type, 1);
+    (void)type_append(declarator->type, decl_specs->type, 1);
   }
 
-  if (declarator->symbol == TOK_TYPE_NAME) return declarator;
+  if (declarator->tok_kind == TOK_TYPE_NAME) return declarator;
 
-  const char *identifier = declarator->symbol == TOK_TYPE_NAME
+  const char *identifier = declarator->tok_kind == TOK_TYPE_NAME
                                ? create_unique_name(declarator)
                                : declarator->lexinfo;
   size_t identifier_len = strlen(identifier);
-  SymbolValue *exists = NULL;
+  Symbol *exists = NULL;
   int is_redeclaration =
       state_get_symbol(state, identifier, identifier_len, &exists);
   unsigned int symbol_flags = get_link_and_store(declarator->type);
@@ -362,14 +365,13 @@ ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
   } else if (exists &&
              (symbol_flags & (SYMFLAG_STORE_EXT | SYMFLAG_LINK_EXT)) &&
              types_equivalent(declarator->type, exists->type, 0, 1)) {
-    /* extern symval in block with outer symval declares nothing */
+    /* extern symbol in block with outer symbol declares nothing */
     type_destroy(declarator->type);
     declarator->type = exists->type;
     exists->flags |= SYMFLAG_INHERIT;
     return declarator;
   } else {
-    SymbolValue *symbol =
-        symbol_value_init(&declarator->loc, state_get_sequence(state));
+    Symbol *symbol = symbol_init(&declarator->loc, state_get_sequence(state));
     symbol->flags = symbol_flags;
     symbol->type = declarator->type;
     state_insert_symbol(state, identifier, identifier_len, symbol);
@@ -381,20 +383,20 @@ ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
 ASTree *finalize_declaration(ASTree *declaration) {
   if (declaration == &EMPTY_EXPR) return declaration;
   ASTree *errnode = NULL;
-  if (declaration->symbol == TOK_TYPE_ERROR) {
+  if (declaration->tok_kind == TOK_TYPE_ERROR) {
     errnode = declaration;
     declaration = astree_get(declaration, 0);
   }
 
   /* free type specifier info now that declarators no longer need it */
-  ASTree *spec_list = astree_get(declaration, 0);
-  type_destroy(spec_list->type);
-  spec_list->type = NULL;
+  ASTree *decl_specs = astree_get(declaration, 0);
+  type_destroy(decl_specs->type);
+  decl_specs->type = NULL;
   return errnode != NULL ? errnode : declaration;
 }
 
 ASTree *validate_array_size(ASTree *array, ASTree *expr) {
-  if (expr->symbol == TOK_TYPE_ERROR) {
+  if (expr->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(array, expr);
   }
   if (!type_is_integral(expr->type) ||
@@ -410,7 +412,7 @@ ASTree *validate_array_size(ASTree *array, ASTree *expr) {
 }
 
 ASTree *validate_param_list(ASTree *param_list) {
-  param_list->symbol_table = symbol_table_init(FUNCTION_TABLE);
+  param_list->symbol_table = symbol_table_init(TABLE_FUNCTION);
   state_push_table(state, param_list->symbol_table);
   return param_list;
 }
@@ -431,30 +433,30 @@ static void replace_param_dirdecl(ASTree *declarator) {
 ASTree *validate_param(ASTree *param_list, ASTree *declaration,
                        ASTree *declarator) {
   declarator = validate_declaration(declaration, declarator);
-  if (param_list->symbol == TOK_TYPE_ERROR) {
+  if (param_list->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(
         param_list, astree_propogate_errnode(declaration, declarator));
-  } else if (declaration->symbol == TOK_TYPE_ERROR) {
+  } else if (declaration->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(
         param_list, astree_propogate_errnode(declaration, declarator));
-  } else if (declarator->symbol == TOK_TYPE_ERROR) {
+  } else if (declarator->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(
         param_list, astree_propogate_errnode(declaration, declarator));
   }
 
   if (type_is_function(declarator->type) || type_is_array(declarator->type)) {
     replace_param_dirdecl(declarator);
-    if (declarator->symbol != TOK_TYPE_NAME) {
-      SymbolValue *param_symval;
+    if (declarator->tok_kind != TOK_TYPE_NAME) {
+      Symbol *param_symbol;
       int is_param =
           state_get_symbol(state, declarator->lexinfo,
-                           strlen(declarator->lexinfo), &param_symval);
+                           strlen(declarator->lexinfo), &param_symbol);
 #ifdef NDEBUG
       (void)is_param;
 #endif
-      assert(param_symval != NULL);
+      assert(param_symbol != NULL);
       assert(is_param);
-      param_symval->type = declarator->type;
+      param_symbol->type = declarator->type;
     }
   }
 
@@ -465,7 +467,7 @@ ASTree *validate_param(ASTree *param_list, ASTree *declaration,
 
 ASTree *finalize_param_list(ASTree *param_list, ASTree *ellipsis) {
   if (ellipsis != NULL)
-    param_list->symbol == TOK_TYPE_ERROR
+    param_list->tok_kind == TOK_TYPE_ERROR
         ? (void)astree_propogate_errnode(param_list, ellipsis)
         : (void)astree_adopt(param_list, 1, ellipsis);
   state_pop_table(state);
@@ -484,11 +486,11 @@ ASTree *define_params(ASTree *declarator, ASTree *param_list) {
   Type **parameters;
   if (parameters_size == 0) {
     is_variadic = 1, is_old_style = 1, parameters = NULL;
-  } else if (astree_get(param_list, 0)->symbol == TOK_VOID) {
+  } else if (astree_get(param_list, 0)->tok_kind == TOK_VOID) {
     parameters = NULL, parameters_size = 0;
   } else {
     parameters = malloc(parameters_size * sizeof(Type *));
-    if (astree_get(param_list, parameters_size - 1)->symbol == TOK_ELLIPSIS) {
+    if (astree_get(param_list, parameters_size - 1)->tok_kind == TOK_ELLIPSIS) {
       --parameters_size;
       is_variadic = 1;
     }
@@ -545,19 +547,19 @@ ASTree *define_array(ASTree *declarator, ASTree *array) {
 }
 
 ASTree *define_pointer(ASTree *declarator, ASTree *pointer) {
-  if (declarator->symbol == TOK_TYPE_ERROR)
+  if (declarator->tok_kind == TOK_TYPE_ERROR)
     return astree_propogate_errnode(declarator, pointer);
 
   unsigned int qual_flags = QUAL_FLAG_NONE;
   size_t i;
   for (i = 0; i < astree_count(pointer); ++i) {
     ASTree *qualifier = astree_get(pointer, i);
-    if (qual_flags & type_flag_from_symbol(qualifier->symbol)) {
+    if (qual_flags & type_flag_from_tok_kind(qualifier->tok_kind)) {
       return astree_create_errnode(astree_adopt(declarator, 1, pointer),
                                    BCC_TERR_INCOMPATIBLE_SPEC, 2, declarator,
                                    qualifier);
     } else {
-      qual_flags |= type_flag_from_symbol(qualifier->symbol);
+      qual_flags |= type_flag_from_tok_kind(qualifier->tok_kind);
     }
   }
 
@@ -571,10 +573,10 @@ ASTree *define_pointer(ASTree *declarator, ASTree *pointer) {
 }
 
 ASTree *define_dirdecl(ASTree *declarator, ASTree *dirdecl) {
-  if (declarator->symbol == TOK_TYPE_ERROR)
+  if (declarator->tok_kind == TOK_TYPE_ERROR)
     return astree_propogate_errnode(declarator, dirdecl);
 
-  switch (dirdecl->symbol) {
+  switch (dirdecl->tok_kind) {
     case TOK_ARRAY:
       return define_array(declarator, dirdecl);
     case TOK_PARAM_LIST:
@@ -591,10 +593,10 @@ ASTree *define_symbol(ASTree *decl_list, ASTree *equal_sign,
                       ASTree *initializer) {
   ASTree *declarator =
       astree_remove(UNWRAP(decl_list), astree_count(decl_list) - 1);
-  if (decl_list->symbol == TOK_TYPE_ERROR) {
+  if (decl_list->tok_kind == TOK_TYPE_ERROR) {
     ASTree *errnode = decl_list;
     decl_list = astree_get(errnode, 0);
-    if (initializer->symbol == TOK_TYPE_ERROR) {
+    if (initializer->tok_kind == TOK_TYPE_ERROR) {
       (void)type_merge_errors(errnode->type, initializer->type);
       (void)astree_adopt(decl_list, 1,
                          astree_adopt(equal_sign, 2, declarator,
@@ -606,25 +608,25 @@ ASTree *define_symbol(ASTree *decl_list, ASTree *equal_sign,
                          astree_adopt(equal_sign, 2, declarator, initializer));
       return errnode;
     }
-  } else if (initializer->symbol == TOK_TYPE_ERROR) {
+  } else if (initializer->tok_kind == TOK_TYPE_ERROR) {
     ASTree *errnode = initializer;
     return astree_adopt(errnode, 1,
                         astree_adopt(decl_list, 1,
                                      astree_adopt(equal_sign, 2, declarator,
                                                   astree_remove(errnode, 0))));
   }
-  assert(declarator->symbol == TOK_IDENT);
+  assert(declarator->tok_kind == TOK_IDENT);
 
-  SymbolValue *symval;
+  Symbol *symbol;
   (void)state_get_symbol(state, declarator->lexinfo,
-                         strlen(declarator->lexinfo), &symval);
-  assert(symval != NULL);
-  if (symval->flags & SYMFLAG_DEFINED)
+                         strlen(declarator->lexinfo), &symbol);
+  assert(symbol != NULL);
+  if (symbol->flags & SYMFLAG_DEFINED)
     return astree_create_errnode(
         astree_adopt(decl_list, 1,
                      astree_adopt(equal_sign, 2, declarator, initializer)),
         BCC_TERR_REDEFINITION, 1, declarator);
-  symval->flags |= SYMFLAG_DEFINED;
+  symbol->flags |= SYMFLAG_DEFINED;
   equal_sign->type = declarator->type;
   /* code is emitted by `validate_fnbody_content`, `validate_topdecl`, or
    * `validate_block_content` and type checking is performed in `init.c`
@@ -635,32 +637,32 @@ ASTree *define_symbol(ASTree *decl_list, ASTree *equal_sign,
 
 ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
   declarator = validate_declaration(declaration, declarator);
-  if (declaration->symbol == TOK_TYPE_ERROR) {
+  if (declaration->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(declaration, 2, declarator, body);
-  } else if (declarator->symbol == TOK_TYPE_ERROR) {
+  } else if (declarator->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(declaration, 2, declarator, body);
   }
 
-  SymbolValue *symval;
+  Symbol *symbol;
   int in_current_scope = state_get_symbol(state, declarator->lexinfo,
-                                          strlen(declarator->lexinfo), &symval);
+                                          strlen(declarator->lexinfo), &symbol);
 #ifdef NDEBUG
   (void)in_current_scope;
 #endif
   assert(in_current_scope);
-  assert(symval != NULL);
-  assert(type_is_function(symval->type));
-  if (symval->flags & SYMFLAG_DEFINED)
+  assert(symbol != NULL);
+  assert(type_is_function(symbol->type));
+  if (symbol->flags & SYMFLAG_DEFINED)
     return astree_create_errnode(astree_adopt(declaration, 2, declarator, body),
                                  BCC_TERR_REDEFINITION, 1, declarator);
 
   /* param list should be first child for properly defined functions */
   ASTree *param_list = astree_get(declarator, 0);
-  assert(param_list->symbol == TOK_PARAM_LIST);
+  assert(param_list->tok_kind == TOK_PARAM_LIST);
   size_t i;
   for (i = 0; i < astree_count(param_list); ++i) {
     ASTree *param = astree_get(param_list, i);
-    if (param->symbol == TOK_TYPE_NAME) {
+    if (param->tok_kind == TOK_TYPE_NAME) {
       return astree_create_errnode(
           astree_adopt(declaration, 2, declarator, body),
           BCC_TERR_EXPECTED_DECLARATOR, 2, declarator, param);
@@ -670,15 +672,15 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
   /* treat body like a normal block statement, but move param table to body node
    * and define function before entering body scope */
   if (param_list->symbol_table == NULL) {
-    body->symbol_table = symbol_table_init(FUNCTION_TABLE);
+    body->symbol_table = symbol_table_init(TABLE_FUNCTION);
   } else {
     body->symbol_table = param_list->symbol_table;
     param_list->symbol_table = NULL;
   }
   state_push_table(state, body->symbol_table);
 
-  assert(declarator->symbol == TOK_IDENT);
-  state_set_function(state, declarator->lexinfo, symval);
+  assert(declarator->tok_kind == TOK_IDENT);
+  state_set_function(state, declarator->lexinfo, symbol);
   return begin_translate_fn(declaration, declarator, body);
 }
 
@@ -688,8 +690,8 @@ ASTree *validate_fnbody_content(ASTree *function, ASTree *fnbody_content) {
    * because of the tree structure of function definitions
    */
   ASTree *fnbody = astree_get(UNWRAP(function), 2);
-  if (function->symbol == TOK_TYPE_ERROR) {
-    if (fnbody_content->symbol == TOK_TYPE_ERROR) {
+  if (function->tok_kind == TOK_TYPE_ERROR) {
+    if (fnbody_content->tok_kind == TOK_TYPE_ERROR) {
       (void)astree_adopt(fnbody, 1, astree_remove(fnbody_content, 0));
       (void)type_merge_errors(function->type, fnbody_content->type);
       astree_destroy(fnbody_content);
@@ -698,12 +700,12 @@ ASTree *validate_fnbody_content(ASTree *function, ASTree *fnbody_content) {
       (void)astree_adopt(fnbody, 1, fnbody_content);
       return function;
     }
-  } else if (fnbody_content->symbol == TOK_TYPE_ERROR) {
+  } else if (fnbody_content->tok_kind == TOK_TYPE_ERROR) {
     (void)astree_adopt(fnbody, 1, astree_remove(fnbody_content, 0));
     return astree_adopt(fnbody_content, 1, function);
-  } else if (fnbody_content->symbol == TOK_DECLARATION) {
+  } else if (fnbody_content->tok_kind == TOK_DECLARATION) {
     ASTree *errnode = translate_local_declarations(fnbody, fnbody_content);
-    if (errnode->symbol == TOK_TYPE_ERROR) {
+    if (errnode->tok_kind == TOK_TYPE_ERROR) {
       (void)astree_remove(errnode, 0);
       return astree_adopt(errnode, 1, function);
     } else {
@@ -738,18 +740,18 @@ ASTree *finalize_function(ASTree *function) {
     status = alist_destroy(&label_strs, NULL);
     if (status) abort();
   }
-  SymbolValue *symval = state_get_function(state);
-  symval->flags |= SYMFLAG_DEFINED;
+  Symbol *symbol = state_get_function(state);
+  symbol->flags |= SYMFLAG_DEFINED;
   state_unset_function(state);
   /* do not use finalize_block because it will put the error in an awkward place
    */
   state_pop_table(state);
-  if (ret->symbol == TOK_TYPE_ERROR) return ret;
+  if (ret->tok_kind == TOK_TYPE_ERROR) return ret;
   return end_translate_fn(function);
 }
 
-static TagType tag_from_symbol(int symbol) {
-  switch (symbol) {
+static TagKind tag_from_tok_kind(int tok_kind) {
+  switch (tok_kind) {
     case TOK_STRUCT:
       return TAG_STRUCT;
     case TOK_UNION:
@@ -761,8 +763,8 @@ static TagType tag_from_symbol(int symbol) {
   }
 }
 
-static int error_code_from_symbol(int symbol) {
-  switch (symbol) {
+static int error_code_from_tok_kind(int tok_kind) {
+  switch (tok_kind) {
     case TOK_STRUCT:
       return BCC_TERR_EXPECTED_STRUCT;
     case TOK_UNION:
@@ -774,299 +776,292 @@ static int error_code_from_symbol(int symbol) {
   }
 }
 
-ASTree *validate_unique_tag(ASTree *tag_type_node, ASTree *left_brace) {
-  const char *tag_name = create_unique_name(tag_type_node);
-  const size_t tag_name_len = strlen(tag_name);
-  TagType tag_type = tag_from_symbol(tag_type_node->symbol);
-  TagValue *tag_value = tag_value_init(tag_type);
-  state_insert_tag(state, tag_name, tag_name_len, tag_value);
-  tag_type_node->type =
-      type_init_tag(QUAL_FLAG_NONE | STOR_FLAG_NONE, tag_name, tag_value);
+ASTree *validate_unique_tag(ASTree *tag_spec, ASTree *left_brace) {
+  const char *id_str = create_unique_name(tag_spec);
+  const size_t id_str_len = strlen(id_str);
+  TagKind kind = tag_from_tok_kind(tag_spec->tok_kind);
+  Tag *tag = tag_init(kind);
+  state_insert_tag(state, id_str, id_str_len, tag);
+  tag_spec->type = type_init_tag(QUAL_FLAG_NONE | STOR_FLAG_NONE, id_str, tag);
 
-  if (tag_type == TAG_ENUM) {
+  if (kind == TAG_ENUM) {
     /* remove struct/union member tables from scope stack */
     SymbolTable *top_scope = state_peek_table(state);
-    while (top_scope->type == MEMBER_TABLE) {
-      int status = llist_push_back(
-          &tag_value->data.enumerators.struct_name_spaces, top_scope);
+    while (top_scope->kind == TABLE_MEMBER) {
+      int status =
+          llist_push_back(&tag->data.enumerators.struct_name_spaces, top_scope);
       if (status) abort();
       state_pop_table(state);
       top_scope = state_peek_table(state);
     }
-    tag_value->width = 4;
-    tag_value->alignment = 4;
+    tag->width = 4;
+    tag->alignment = 4;
   } else {
-    state_push_table(state, tag_value->data.members.by_name);
+    state_push_table(state, tag->data.members.by_name);
   }
-  return astree_adopt(tag_type_node, 1, left_brace);
+  return astree_adopt(tag_spec, 1, left_brace);
 }
 
-ASTree *validate_tag_decl(ASTree *tag_type_node, ASTree *tag_name_node) {
-  const char *tag_name = tag_name_node->lexinfo;
-  const size_t tag_name_len = strlen(tag_name);
-  TagValue *exists = NULL;
-  int is_redeclaration = state_get_tag(state, tag_name, tag_name_len, &exists);
-  TagType tag_type = tag_from_symbol(tag_type_node->symbol);
+ASTree *validate_tag_decl(ASTree *tag_spec, ASTree *tag_id) {
+  const char *id_str = tag_id->lexinfo;
+  const size_t id_str_len = strlen(id_str);
+  Tag *exists = NULL;
+  int is_redeclaration = state_get_tag(state, id_str, id_str_len, &exists);
+  TagKind kind = tag_from_tok_kind(tag_spec->tok_kind);
 
   if (exists) {
     if (is_redeclaration) {
-      if (tag_type != exists->tag) {
+      if (kind != exists->kind) {
         return astree_create_errnode(
-            astree_adopt(tag_type_node, 1, tag_name_node),
-            error_code_from_symbol(tag_type_node->symbol), 2, tag_type_node,
-            tag_name_node);
+            astree_adopt(tag_spec, 1, tag_id),
+            error_code_from_tok_kind(tag_spec->tok_kind), 2, tag_spec, tag_id);
       } else {
-        tag_type_node->type =
-            type_init_tag(QUAL_FLAG_NONE | STOR_FLAG_NONE, tag_name, exists);
-        return astree_adopt(tag_type_node, 1, tag_name_node);
+        tag_spec->type =
+            type_init_tag(QUAL_FLAG_NONE | STOR_FLAG_NONE, id_str, exists);
+        return astree_adopt(tag_spec, 1, tag_id);
       }
     } else {
-      TagValue *tag_value;
-      if (tag_type != exists->tag) {
-        tag_value = tag_value_init(tag_type);
-        state_insert_tag(state, tag_name, tag_name_len, tag_value);
+      Tag *tag;
+      if (kind != exists->kind) {
+        tag = tag_init(kind);
+        state_insert_tag(state, id_str, id_str_len, tag);
       } else {
-        tag_value = exists;
+        tag = exists;
       }
 
-      tag_type_node->type =
-          type_init_tag(QUAL_FLAG_NONE | STOR_FLAG_NONE, tag_name, tag_value);
-      return astree_adopt(tag_type_node, 1, tag_name_node);
+      tag_spec->type =
+          type_init_tag(QUAL_FLAG_NONE | STOR_FLAG_NONE, id_str, tag);
+      return astree_adopt(tag_spec, 1, tag_id);
     }
-  } else if (tag_type != TAG_ENUM) {
-    TagValue *tag_value = tag_value_init(tag_type);
-    state_insert_tag(state, tag_name, tag_name_len, tag_value);
-    tag_type_node->type =
-        type_init_tag(QUAL_FLAG_NONE | STOR_FLAG_NONE, tag_name, tag_value);
-    return astree_adopt(tag_type_node, 1, tag_name_node);
+  } else if (kind != TAG_ENUM) {
+    Tag *tag = tag_init(kind);
+    state_insert_tag(state, id_str, id_str_len, tag);
+    tag_spec->type =
+        type_init_tag(QUAL_FLAG_NONE | STOR_FLAG_NONE, id_str, tag);
+    return astree_adopt(tag_spec, 1, tag_id);
   } else {
     /* do not insert enum tag; enum must declare their constants */
-    return astree_create_errnode(astree_adopt(tag_type_node, 1, tag_name_node),
-                                 BCC_TERR_TAG_NOT_FOUND, 1, tag_name_node);
+    return astree_create_errnode(astree_adopt(tag_spec, 1, tag_id),
+                                 BCC_TERR_TAG_NOT_FOUND, 1, tag_id);
   }
 }
 
-ASTree *validate_tag_def(ASTree *tag_type_node, ASTree *tag_name_node,
-                         ASTree *left_brace) {
-  const char *tag_name = tag_name_node->lexinfo;
-  const size_t tag_name_len = strlen(tag_name);
-  TagValue *exists = NULL;
-  int is_redeclaration = state_get_tag(state, tag_name, tag_name_len, &exists);
-  TagType tag_type = tag_from_symbol(tag_type_node->symbol);
+ASTree *validate_tag_def(ASTree *tag_spec, ASTree *tag_id, ASTree *left_brace) {
+  const char *id_str = tag_id->lexinfo;
+  const size_t id_str_len = strlen(id_str);
+  Tag *exists = NULL;
+  int is_redeclaration = state_get_tag(state, id_str, id_str_len, &exists);
+  TagKind kind = tag_from_tok_kind(tag_spec->tok_kind);
 
   if (is_redeclaration && exists->is_defined) {
-    return astree_create_errnode(
-        astree_adopt(tag_type_node, 2, tag_name_node, left_brace),
-        BCC_TERR_REDEFINITION, 1, tag_name_node);
+    return astree_create_errnode(astree_adopt(tag_spec, 2, tag_id, left_brace),
+                                 BCC_TERR_REDEFINITION, 1, tag_id);
   } else {
-    TagValue *tag_value;
+    Tag *tag;
     if (exists && is_redeclaration) {
-      tag_value = exists;
+      tag = exists;
     } else {
-      tag_value = tag_value_init(tag_type);
-      if (tag_value == NULL) abort();
-      state_insert_tag(state, tag_name, tag_name_len, tag_value);
+      tag = tag_init(kind);
+      if (tag == NULL) abort();
+      state_insert_tag(state, id_str, id_str_len, tag);
     }
 
-    tag_type_node->type =
-        type_init_tag(QUAL_FLAG_NONE | STOR_FLAG_NONE, tag_name, tag_value);
+    tag_spec->type =
+        type_init_tag(QUAL_FLAG_NONE | STOR_FLAG_NONE, id_str, tag);
 
-    if (tag_type == TAG_ENUM) {
+    if (kind == TAG_ENUM) {
       /* remove struct/union member tables from scope stack */
       SymbolTable *top_scope = state_peek_table(state);
-      while (top_scope->type == MEMBER_TABLE) {
-        int status = llist_push_back(
-            &tag_value->data.enumerators.struct_name_spaces, top_scope);
+      while (top_scope->kind == TABLE_MEMBER) {
+        int status = llist_push_back(&tag->data.enumerators.struct_name_spaces,
+                                     top_scope);
         if (status) abort();
         state_pop_table(state);
         top_scope = state_peek_table(state);
       }
-      tag_value->width = 4;
-      tag_value->alignment = 4;
+      tag->width = 4;
+      tag->alignment = 4;
     } else {
-      state_push_table(state, tag_value->data.members.by_name);
+      state_push_table(state, tag->data.members.by_name);
     }
-    return astree_adopt(tag_type_node, 2, tag_name_node, left_brace);
+    return astree_adopt(tag_spec, 2, tag_id, left_brace);
   }
 }
 
-ASTree *finalize_tag_def(ASTree *tag) {
+ASTree *finalize_tag_def(ASTree *tag_spec) {
   ASTree *errnode = NULL;
-  if (tag->symbol == TOK_TYPE_ERROR) {
-    errnode = tag;
-    tag = UNWRAP(tag);
+  if (tag_spec->tok_kind == TOK_TYPE_ERROR) {
+    errnode = tag_spec;
+    tag_spec = UNWRAP(tag_spec);
   }
 
-  TagValue *tag_value = tag->type->tag.value;
-  tag_value->is_defined = 1;
+  Tag *tag = tag_spec->type->tag.value;
+  tag->is_defined = 1;
 
-  if (tag_value->tag == TAG_ENUM) {
+  if (tag->kind == TAG_ENUM) {
     /* push struct/union member tables back onto the scope stack */
-    while (!llist_empty(&tag_value->data.enumerators.struct_name_spaces)) {
+    while (!llist_empty(&tag->data.enumerators.struct_name_spaces)) {
       SymbolTable *member_scope =
-          llist_pop_back(&tag_value->data.enumerators.struct_name_spaces);
+          llist_pop_back(&tag->data.enumerators.struct_name_spaces);
       assert(member_scope != NULL);
       state_push_table(state, member_scope);
     }
   } else {
     /* pop member scope from stack */
-    if (state_peek_table(state) == tag_value->data.members.by_name)
+    if (state_peek_table(state) == tag->data.members.by_name)
       state_pop_table(state);
     /* pad aggregate so that it can tile an array */
-    if (tag_value->alignment != 0) {
-      size_t padding =
-          tag_value->alignment - (tag_value->width % tag_value->alignment);
-      if (padding != tag_value->alignment) tag_value->width += padding;
+    if (tag->alignment != 0) {
+      size_t padding = tag->alignment - (tag->width % tag->alignment);
+      if (padding != tag->alignment) tag->width += padding;
     }
   }
-  return errnode == NULL ? tag : errnode;
+  return errnode == NULL ? tag_spec : errnode;
 }
 
-ASTree *define_enumerator(ASTree *enum_, ASTree *ident_node, ASTree *equal_sign,
-                          ASTree *expr) {
-  ASTree *left_brace =
-      astree_get(UNWRAP(enum_), astree_count(UNWRAP(enum_)) == 2 ? 1 : 0);
-  if (enum_->symbol == TOK_TYPE_ERROR) {
-    /* ASTree *real_enum = astree_get(enum_, 0); */
+ASTree *define_enumerator(ASTree *enum_spec, ASTree *enum_id,
+                          ASTree *equal_sign, ASTree *expr) {
+  ASTree *left_brace = astree_get(UNWRAP(enum_spec),
+                                  astree_count(UNWRAP(enum_spec)) == 2 ? 1 : 0);
+  if (enum_spec->tok_kind == TOK_TYPE_ERROR) {
+    /* ASTree *real_enum = astree_get(enum_spec, 0); */
     if (equal_sign != NULL) {
-      astree_adopt(left_brace, 1,
-                   astree_adopt(equal_sign, 2, ident_node, expr));
-      return enum_;
+      astree_adopt(left_brace, 1, astree_adopt(equal_sign, 2, enum_id, expr));
+      return enum_spec;
     } else {
-      astree_adopt(left_brace, 1, ident_node);
-      return enum_;
+      astree_adopt(left_brace, 1, enum_id);
+      return enum_spec;
     }
   }
-  const char *ident = ident_node->lexinfo;
-  const size_t ident_len = strlen(ident);
+  const char *id_str = enum_id->lexinfo;
+  const size_t id_str_len = strlen(id_str);
 
-  SymbolValue *exists = NULL;
-  int is_redefinition = state_get_symbol(state, ident, ident_len, &exists);
+  Symbol *exists = NULL;
+  int is_redefinition = state_get_symbol(state, id_str, id_str_len, &exists);
   if (is_redefinition) {
     if (equal_sign != NULL) {
-      astree_adopt(left_brace, 1,
-                   astree_adopt(equal_sign, 2, ident_node, expr));
-      return astree_create_errnode(enum_, BCC_TERR_REDEFINITION, 1, ident_node);
+      astree_adopt(left_brace, 1, astree_adopt(equal_sign, 2, enum_id, expr));
+      return astree_create_errnode(enum_spec, BCC_TERR_REDEFINITION, 1,
+                                   enum_id);
     } else {
-      astree_adopt(left_brace, 1, ident_node);
-      return astree_create_errnode(enum_, BCC_TERR_REDEFINITION, 1, ident_node);
+      astree_adopt(left_brace, 1, enum_id);
+      return astree_create_errnode(enum_spec, BCC_TERR_REDEFINITION, 1,
+                                   enum_id);
     }
   }
 
-  SymbolValue *symval =
-      symbol_value_init(&ident_node->loc, state_get_sequence(state));
+  Symbol *symbol = symbol_init(&enum_id->loc, state_get_sequence(state));
   /* mark as enumeration consntant */
-  symval->flags |= SYMFLAG_ENUM_CONST;
+  symbol->flags |= SYMFLAG_ENUM_CONST;
   /* copy type info from tag node */
-  symval->type = type_copy(enum_->type, 0);
+  symbol->type = type_copy(enum_spec->type, 0);
 
-  state_insert_symbol(state, ident, ident_len, symval);
-  ident_node->type = symval->type;
+  state_insert_symbol(state, id_str, id_str_len, symbol);
+  enum_id->type = symbol->type;
 
-  TagValue *tagval = symval->type->tag.value;
+  Tag *tag = symbol->type->tag.value;
   if (equal_sign != NULL) {
-    if (expr->symbol == TOK_TYPE_ERROR) {
-      ASTree *errnode = astree_propogate_errnode(
-          astree_adopt(equal_sign, 1, ident_node), expr);
-      return astree_propogate_errnode(enum_, errnode);
+    if (expr->tok_kind == TOK_TYPE_ERROR) {
+      ASTree *errnode =
+          astree_propogate_errnode(astree_adopt(equal_sign, 1, enum_id), expr);
+      return astree_propogate_errnode(enum_spec, errnode);
     }
     if ((expr->attributes & ATTR_MASK_CONST) != ATTR_CONST_INT) {
-      astree_adopt(left_brace, 1,
-                   astree_adopt(equal_sign, 2, ident_node, expr));
-      return astree_create_errnode(enum_, BCC_TERR_EXPECTED_ARITHCONST, 2,
+      astree_adopt(left_brace, 1, astree_adopt(equal_sign, 2, enum_id, expr));
+      return astree_create_errnode(enum_spec, BCC_TERR_EXPECTED_ARITHCONST, 2,
                                    equal_sign, expr);
     }
     int *value = malloc(sizeof(int));
     if (type_is_unsigned(expr->type)) {
-      *value = tagval->data.enumerators.last_value =
+      *value = tag->data.enumerators.last_value =
           expr->constant.integral.unsigned_value;
     } else {
-      *value = tagval->data.enumerators.last_value =
+      *value = tag->data.enumerators.last_value =
           expr->constant.integral.signed_value;
     }
-    int status = map_insert(&tagval->data.enumerators.by_name, (char *)ident,
-                            ident_len, value);
+    int status = map_insert(&tag->data.enumerators.by_name, (char *)id_str,
+                            id_str_len, value);
     if (status) abort();
-    astree_adopt(left_brace, 1, astree_adopt(equal_sign, 2, ident_node, expr));
-    return enum_;
+    astree_adopt(left_brace, 1, astree_adopt(equal_sign, 2, enum_id, expr));
+    return enum_spec;
   } else {
     int *value = malloc(sizeof(int));
-    *value = ++tagval->data.enumerators.last_value;
-    int status = map_insert(&tagval->data.enumerators.by_name, (char *)ident,
-                            ident_len, value);
+    *value = ++tag->data.enumerators.last_value;
+    int status = map_insert(&tag->data.enumerators.by_name, (char *)id_str,
+                            id_str_len, value);
     if (status) abort();
-    astree_adopt(left_brace, 1, ident_node);
-    return enum_;
+    astree_adopt(left_brace, 1, enum_id);
+    return enum_spec;
   }
 }
 
 /* TODO(Robert): report an error when a record with a member of function type
  * is declared and replace the check for function types here with an assert
  */
-ASTree *define_struct_member(ASTree *struct_, ASTree *member) {
+ASTree *define_record_member(ASTree *record_spec, ASTree *member) {
   (void)finalize_declaration(member);
-  ASTree *left_brace =
-      astree_get(UNWRAP(struct_), astree_count(UNWRAP(struct_)) == 2 ? 1 : 0);
-  if (struct_->symbol == TOK_TYPE_ERROR) {
+  ASTree *left_brace = astree_get(
+      UNWRAP(record_spec), astree_count(UNWRAP(record_spec)) == 2 ? 1 : 0);
+  if (record_spec->tok_kind == TOK_TYPE_ERROR) {
     (void)astree_adopt(left_brace, 1, UNWRAP(member));
-    if (member->symbol == TOK_TYPE_ERROR) {
+    if (member->tok_kind == TOK_TYPE_ERROR) {
       ASTree *errnode = member;
       (void)llist_extract(&member->children, 0);
-      (void)type_merge_errors(struct_->type, errnode->type);
+      (void)type_merge_errors(record_spec->type, errnode->type);
       astree_destroy(errnode);
     }
-    return struct_;
-  } else if (member->symbol == TOK_TYPE_ERROR) {
+    return record_spec;
+  } else if (member->tok_kind == TOK_TYPE_ERROR) {
     (void)astree_adopt(left_brace, 1, llist_extract(&member->children, 0));
-    return astree_adopt(member, 1, struct_);
+    return astree_adopt(member, 1, record_spec);
   }
 
-  TagValue *tagval = struct_->type->tag.value;
-  LinkedList *member_list = &tagval->data.members.in_order;
+  Tag *tag = record_spec->type->tag.value;
+  LinkedList *member_list = &tag->data.members.in_order;
   size_t i;
   /* skip first child, which is the typespec list */
   for (i = 1; i < astree_count(member); ++i) {
     ASTree *declarator = astree_get(member, i);
-    SymbolValue *symval;
+    Symbol *symbol;
     int is_member = state_get_symbol(state, declarator->lexinfo,
-                                     strlen(declarator->lexinfo), &symval);
+                                     strlen(declarator->lexinfo), &symbol);
 #ifdef NDEBUG
     (void)is_member;
 #endif
     assert(is_member);
-    assert(symval != NULL);
+    assert(symbol != NULL);
     size_t member_alignment = type_get_alignment(declarator->type);
     size_t member_width = type_get_width(declarator->type);
-    if (tagval->alignment < member_alignment) {
-      tagval->alignment = member_alignment;
+    if (tag->alignment < member_alignment) {
+      tag->alignment = member_alignment;
     }
-    if (tagval->tag == TAG_STRUCT) {
-      size_t padding = member_alignment - (tagval->width % member_alignment);
-      if (padding != member_alignment) tagval->width += padding;
-      symval->disp = tagval->width;
-      tagval->width += member_width;
-    } else if (tagval->width < member_width) {
-      tagval->width = member_width;
+    if (tag->kind == TAG_STRUCT) {
+      size_t padding = member_alignment - (tag->width % member_alignment);
+      if (padding != member_alignment) tag->width += padding;
+      symbol->disp = tag->width;
+      tag->width += member_width;
+    } else if (tag->width < member_width) {
+      tag->width = member_width;
     }
-    llist_push_back(member_list, symval);
+    llist_push_back(member_list, symbol);
   }
   astree_adopt(left_brace, 1, member);
-  return struct_;
+  return record_spec;
 }
 
 ASTree *declare_symbol(ASTree *declaration, ASTree *declarator) {
   ASTree *err_or_decl = validate_declaration(declaration, declarator);
-  if (err_or_decl->symbol == TOK_TYPE_ERROR ||
-      declaration->symbol == TOK_TYPE_ERROR)
+  if (err_or_decl->tok_kind == TOK_TYPE_ERROR ||
+      declaration->tok_kind == TOK_TYPE_ERROR)
     return astree_propogate_errnode(declaration, err_or_decl);
   else
     return astree_adopt(declaration, 1, declarator);
 }
 
 ASTree *validate_topdecl(ASTree *root, ASTree *topdecl) {
-  if (root->symbol == TOK_TYPE_ERROR) {
+  if (root->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(root, topdecl);
-  } else if (topdecl->symbol == TOK_TYPE_ERROR) {
+  } else if (topdecl->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(root, topdecl);
   } else {
     return translate_global_declarations(root, topdecl);

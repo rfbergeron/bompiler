@@ -87,13 +87,12 @@ Type *type_init_function(size_t parameters_size, Type **parameters,
   return type;
 }
 
-Type *type_init_tag(unsigned int flags, const char *tag_name,
-                    TagValue *tag_value) {
+Type *type_init_tag(unsigned int flags, const char *tag_name, Tag *tag) {
   /* flags may not include type specifiers */
   assert(!(flags & SPEC_FLAG_MASK));
-  assert(tag_name != NULL && tag_value != NULL);
+  assert(tag_name != NULL && tag != NULL);
   Type *type = malloc(sizeof(Type));
-  switch (tag_value->tag) {
+  switch (tag->kind) {
     case TAG_STRUCT:
       type->tag.code = TYPE_CODE_STRUCT;
       break;
@@ -108,7 +107,7 @@ Type *type_init_tag(unsigned int flags, const char *tag_name,
   }
   type->tag.flags = flags;
   type->tag.name = tag_name;
-  type->tag.value = tag_value;
+  type->tag.value = tag;
   return type;
 }
 
@@ -521,13 +520,13 @@ int type_is_incomplete(const Type *type) {
   }
 }
 
-SymbolValue *type_member_name(const Type *type, const char *name) {
+Symbol *type_member_name(const Type *type, const char *name) {
   assert(type_is_union(type) || type_is_struct(type));
   return symbol_table_get(type->tag.value->data.members.by_name, name,
                           strlen(name));
 }
 
-SymbolValue *type_member_index(const Type *type, size_t index) {
+Symbol *type_member_index(const Type *type, size_t index) {
   assert(type_is_union(type) || type_is_struct(type));
   return llist_get(&type->tag.value->data.members.in_order, index);
 }
@@ -836,7 +835,7 @@ Type *type_strip_declarator(const Type *type) {
   }
 }
 
-Type *type_get_declspecs(Type *type) {
+Type *type_get_decl_specs(Type *type) {
   assert(type != NULL);
   while (type_is_declarator(type)) type = type_strip_declarator(type);
   assert(type != NULL);
@@ -1084,7 +1083,7 @@ int type_add_flags(Type *type, unsigned int flags) {
  * type defaulted to `int`
  */
 int type_normalize(Type *type) {
-  type = type_get_declspecs(type);
+  type = type_get_decl_specs(type);
 
   if (type->any.code == TYPE_CODE_NONE)
     return -1;

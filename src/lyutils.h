@@ -48,16 +48,16 @@ void lexer_advance();
 void lexer_newline();
 void lexer_bad_char(unsigned char bad);
 void lexer_include();
-int lexer_token(int symbol);
+int lexer_token(int tok_kind);
 int lexer_ident(void);
-int lexer_iteration(int symbol);
+int lexer_iteration(int tok_kind);
 int lexer_switch(void);
 int lexer_case(void);
 int lexer_default(void);
 int lexer_break(void);
 int lexer_continue(void);
 int lexer_if(void);
-int lexer_bad_token(int symbol);
+int lexer_bad_token(int tok_kind);
 void lexer_fatal_error(const char *msg);
 void lexer_error(const char *msg);
 void lexer_dump_filenames(FILE *out);
@@ -65,7 +65,7 @@ void lexer_init_globals();
 void lexer_free_globals();
 
 int location_to_string(const Location *loc, char *buf);
-const char *parser_get_tname(int symbol);
+const char *parser_get_tname(int tok_kind);
 void parser_init_globals(void);
 void parser_destroy_globals(void);
 

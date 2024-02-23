@@ -285,7 +285,7 @@ skip_diagnostics:
 skip_asm:
 
 cleanup:
-  if (parser_root->symbol == TOK_TYPE_ERROR) {
+  if (parser_root->tok_kind == TOK_TYPE_ERROR) {
     int status = print_errors(parser_root->type, errfile);
     if (status) {
       warnx("Failed to print program errors.");

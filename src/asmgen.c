@@ -335,8 +335,8 @@ void static_zero_pad(size_t count, ListIter *where) {
   if (status) abort();
 }
 
-static Opcode opcode_from_operator(int symbol, const Type *type) {
-  switch (symbol) {
+static Opcode opcode_from_operator(int tok_kind, const Type *type) {
+  switch (tok_kind) {
     case TOK_NEG:
       return OP_NEG;
     case TOK_POST_INC:
@@ -451,7 +451,7 @@ static ptrdiff_t assign_stack_space(const Type *type) {
   return -window_size;
 }
 
-static void assign_static_space(const char *ident, SymbolValue *symval) {
+static void assign_static_space(const char *ident, Symbol *symbol) {
   size_t *static_count = map_get(static_locals, (void *)ident, strlen(ident));
   if (!static_count) {
     static_count = calloc(1, sizeof(size_t));
@@ -459,7 +459,7 @@ static void assign_static_space(const char *ident, SymbolValue *symval) {
         map_insert(static_locals, (void *)ident, strlen(ident), static_count);
     if (status) abort();
   }
-  symval->static_id = *static_count++;
+  symbol->static_id = *static_count++;
 }
 
 /* NOTE: on x64, most operations that write to the lower 32 bits of a
@@ -670,19 +670,19 @@ void maybe_load_cexpr(ASTree *expr, ListIter *where) {
 
 ASTree *translate_ident(ASTree *ident) {
   Instruction *lea_instr = instr_init(OP_LEA);
-  SymbolValue *symval = NULL;
-  state_get_symbol(state, ident->lexinfo, strlen(ident->lexinfo), &symval);
-  assert(symval != NULL);
+  Symbol *symbol = NULL;
+  state_get_symbol(state, ident->lexinfo, strlen(ident->lexinfo), &symbol);
+  assert(symbol != NULL);
 
-  if (symval->flags & SYMFLAG_STORE_STAT) {
-    if (symval->flags & SYMFLAG_LINK_NONE) {
+  if (symbol->flags & SYMFLAG_STORE_STAT) {
+    if (symbol->flags & SYMFLAG_LINK_NONE) {
       set_op_pic(&lea_instr->src, NO_DISP,
-                 mk_static_label(ident->lexinfo, symval->static_id));
+                 mk_static_label(ident->lexinfo, symbol->static_id));
     } else {
       set_op_pic(&lea_instr->src, NO_DISP, ident->lexinfo);
     }
   } else {
-    set_op_ind(&lea_instr->src, symval->disp, RBP_VREG);
+    set_op_ind(&lea_instr->src, symbol->disp, RBP_VREG);
   }
   set_op_reg(&lea_instr->dest, REG_QWORD, next_vreg());
   lea_instr->persist_flags |= PERSIST_DEST_CLEAR;
@@ -757,7 +757,7 @@ ASTree *translate_logical(ASTree *operator, ASTree * left, ASTree *right) {
   scalar_conversions(left, left->type);
   Instruction *left_instr = liter_get(left->last_instr);
 
-  const char *skip_label = operator->symbol == TOK_AND
+  const char *skip_label = operator->tok_kind == TOK_AND
                                ? mk_false_label(next_branch())
                                : mk_true_label(next_branch());
   Instruction *test_left_instr = instr_init(OP_TEST);
@@ -765,7 +765,7 @@ ASTree *translate_logical(ASTree *operator, ASTree * left, ASTree *right) {
   test_left_instr->persist_flags |= PERSIST_DEST_SET;
 
   Instruction *jmp_left_instr =
-      instr_init(opcode_from_operator(operator->symbol, operator->type));
+      instr_init(opcode_from_operator(operator->tok_kind, operator->type));
   set_op_dir(&jmp_left_instr->dest, skip_label);
 
   int status = liter_push_back(left->last_instr, NULL, 2, test_left_instr,
@@ -817,7 +817,7 @@ ASTree *translate_comparison(ASTree *operator, ASTree * left, ASTree *right) {
   cmp_instr->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_SET;
 
   Instruction *setcc_instr =
-      instr_init(opcode_from_operator(operator->symbol, common_type));
+      instr_init(opcode_from_operator(operator->tok_kind, common_type));
   set_op_reg(&setcc_instr->dest, REG_BYTE, next_vreg());
 
   Instruction *movz_instr = instr_init(OP_MOVZ);
@@ -905,7 +905,7 @@ ASTree *translate_reference(ASTree *reference, ASTree *struct_,
                             ASTree *member) {
   PFDBG0('g', "Translating reference operator");
   Type *record_type;
-  if (reference->symbol == TOK_ARROW) {
+  if (reference->tok_kind == TOK_ARROW) {
     scalar_conversions(struct_, struct_->type);
     record_type = type_strip_declarator(struct_->type);
   } else {
@@ -913,7 +913,7 @@ ASTree *translate_reference(ASTree *reference, ASTree *struct_,
   }
 
   Instruction *struct_instr = liter_get(struct_->last_instr);
-  SymbolValue *member_symbol = type_member_name(record_type, member->lexinfo);
+  Symbol *member_symbol = type_member_name(record_type, member->lexinfo);
   assert(member_symbol);
 
   Instruction *lea_instr = instr_init(OP_LEA);
@@ -943,7 +943,7 @@ ASTree *translate_post_inc_dec(ASTree *post_inc_dec, ASTree *operand) {
   set_op_reg(&mov_instr->dest, type_get_width(post_inc_dec->type), next_vreg());
 
   Instruction *inc_dec_instr = instr_init(
-      opcode_from_operator(post_inc_dec->symbol, post_inc_dec->type));
+      opcode_from_operator(post_inc_dec->tok_kind, post_inc_dec->type));
   inc_dec_instr->dest = operand_instr->dest;
 
   Instruction *mov_instr_2 = instr_init(OP_MOV);
@@ -974,7 +974,7 @@ ASTree *translate_inc_dec(ASTree *inc_dec, ASTree *operand) {
   Instruction *operand_instr = liter_get(operand->last_instr);
 
   Instruction *inc_dec_instr =
-      instr_init(opcode_from_operator(inc_dec->symbol, inc_dec->type));
+      instr_init(opcode_from_operator(inc_dec->tok_kind, inc_dec->type));
   inc_dec_instr->dest = operand_instr->dest;
 
   Instruction *mov_instr = instr_init(OP_MOV);
@@ -1000,7 +1000,7 @@ ASTree *translate_unop(ASTree *operator, ASTree * operand) {
   Instruction *operand_instr = liter_get(operand->last_instr);
 
   Instruction *operator_instr =
-      instr_init(opcode_from_operator(operator->symbol, operator->type));
+      instr_init(opcode_from_operator(operator->tok_kind, operator->type));
   operator_instr->dest = operand_instr->dest;
   operator_instr->persist_flags |= PERSIST_DEST_SET | PERSIST_DEST_CLEAR;
 
@@ -1055,7 +1055,7 @@ ASTree *translate_addition(ASTree *operator, ASTree * left, ASTree *right) {
   Instruction *right_instr = liter_get(right->last_instr);
 
   Instruction *operator_instr =
-      instr_init(opcode_from_operator(operator->symbol, operator->type));
+      instr_init(opcode_from_operator(operator->tok_kind, operator->type));
   operator_instr->dest = right_instr->dest;
   operator_instr->src = left_instr->dest;
   operator_instr->persist_flags |=
@@ -1123,7 +1123,7 @@ ASTree *translate_multiplication(ASTree *operator, ASTree * left,
   mov_rax_instr->persist_flags |= PERSIST_SRC_SET;
 
   Instruction *operator_instr =
-      instr_init(opcode_from_operator(operator->symbol, operator->type));
+      instr_init(opcode_from_operator(operator->tok_kind, operator->type));
   operator_instr->dest = right_instr->dest;
   operator_instr->persist_flags |= PERSIST_DEST_SET;
 
@@ -1133,7 +1133,7 @@ ASTree *translate_multiplication(ASTree *operator, ASTree * left,
   Instruction *mov_instr = instr_init(OP_MOV);
   /* mov from vreg representing rax/rdx to new vreg */
   set_op_reg(&mov_instr->src, type_get_width(operator->type),
-                              operator->symbol == '%' ? RDX_VREG : RAX_VREG);
+                              operator->tok_kind == '%' ? RDX_VREG : RAX_VREG);
   set_op_reg(&mov_instr->dest, type_get_width(operator->type), next_vreg());
 
   /* restore rax and rdx */
@@ -1164,7 +1164,7 @@ ASTree *translate_binop(ASTree *operator, ASTree * left, ASTree *right) {
   Instruction *right_instr = liter_get(right->last_instr);
 
   Instruction *operator_instr =
-      instr_init(opcode_from_operator(operator->symbol, operator->type));
+      instr_init(opcode_from_operator(operator->tok_kind, operator->type));
   operator_instr->dest = right_instr->dest;
   operator_instr->src = left_instr->dest;
   operator_instr->persist_flags |=
@@ -1188,7 +1188,7 @@ ASTree *translate_conditional(ASTree *qmark, ASTree *condition,
   test_instr->dest = test_instr->src = condition_instr->dest;
   test_instr->persist_flags |= PERSIST_DEST_SET;
   Instruction *jmp_false_instr =
-      instr_init(opcode_from_operator(qmark->symbol, qmark->type));
+      instr_init(opcode_from_operator(qmark->tok_kind, qmark->type));
   set_op_dir(&jmp_false_instr->dest, mk_false_label(current_branch));
   int status = liter_push_back(condition->last_instr, NULL, 2, test_instr,
                                jmp_false_instr);
@@ -1281,7 +1281,7 @@ static void assign_add(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   Instruction *rvalue_instr = liter_get(rvalue->last_instr);
 
   Instruction *assignment_instr =
-      instr_init(opcode_from_operator(assignment->symbol, assignment->type));
+      instr_init(opcode_from_operator(assignment->tok_kind, assignment->type));
   set_op_ind(&assignment_instr->dest, NO_DISP, lvalue_instr->dest.reg.num);
   assignment_instr->src = rvalue_instr->dest;
   assignment_instr->persist_flags |= PERSIST_SRC_SET;
@@ -1340,7 +1340,7 @@ static void assign_mul(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   mov_rax_instr->persist_flags |= PERSIST_SRC_SET;
 
   Instruction *operator_instr =
-      instr_init(opcode_from_operator(assignment->symbol, common_type));
+      instr_init(opcode_from_operator(assignment->tok_kind, common_type));
   operator_instr->dest = rvalue_instr->dest;
   operator_instr->persist_flags |= PERSIST_DEST_SET;
 
@@ -1350,13 +1350,13 @@ static void assign_mul(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   Instruction *store_instr = instr_init(OP_MOV);
   set_op_ind(&store_instr->dest, NO_DISP, lvalue_instr->dest.reg.num);
   set_op_reg(&store_instr->src, type_get_width(lvalue->type),
-             assignment->symbol == TOK_REMEQ ? RDX_VREG : RAX_VREG);
+             assignment->tok_kind == TOK_REMEQ ? RDX_VREG : RAX_VREG);
   store_instr->persist_flags |= PERSIST_DEST_SET;
 
   Instruction *mov_instr = instr_init(OP_MOV);
   /* mov from vreg representing rax/rdx to new vreg and truncate */
   set_op_reg(&mov_instr->src, type_get_width(lvalue->type),
-             assignment->symbol == TOK_REMEQ ? RDX_VREG : RAX_VREG);
+             assignment->tok_kind == TOK_REMEQ ? RDX_VREG : RAX_VREG);
   set_op_reg(&mov_instr->dest, type_get_width(lvalue->type), next_vreg());
 
   /* restore rax and rdx */
@@ -1384,7 +1384,7 @@ static void assign_scalar(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   Instruction *rvalue_instr = liter_get(rvalue->last_instr);
 
   Instruction *assignment_instr =
-      instr_init(opcode_from_operator(assignment->symbol, assignment->type));
+      instr_init(opcode_from_operator(assignment->tok_kind, assignment->type));
   set_op_ind(&assignment_instr->dest, NO_DISP, lvalue_instr->dest.reg.num);
   assignment_instr->src = rvalue_instr->dest;
   assignment_instr->persist_flags |= PERSIST_DEST_SET | PERSIST_SRC_SET;
@@ -1406,12 +1406,12 @@ ASTree *translate_assignment(ASTree *assignment, ASTree *lvalue,
   PFDBG0('g', "Translating assignment");
   if (type_is_union(assignment->type) || type_is_struct(assignment->type)) {
     assign_aggregate(assignment, lvalue, rvalue);
-  } else if (assignment->symbol == TOK_ADDEQ ||
-             assignment->symbol == TOK_SUBEQ) {
+  } else if (assignment->tok_kind == TOK_ADDEQ ||
+             assignment->tok_kind == TOK_SUBEQ) {
     assign_add(assignment, lvalue, rvalue);
-  } else if (assignment->symbol == TOK_MULEQ ||
-             assignment->symbol == TOK_DIVEQ ||
-             assignment->symbol == TOK_REMEQ) {
+  } else if (assignment->tok_kind == TOK_MULEQ ||
+             assignment->tok_kind == TOK_DIVEQ ||
+             assignment->tok_kind == TOK_REMEQ) {
     assign_mul(assignment, lvalue, rvalue);
   } else {
     assign_scalar(assignment, lvalue, rvalue);
@@ -1896,30 +1896,30 @@ static void translate_params(ASTree *declarator) {
   param_stack_disp = PROLOGUE_EIGHTBYTES * X64_SIZEOF_LONG;
   size_t i, param_count = astree_count(fn_dirdecl);
   if (param_count > 0 && type_is_variadic_function(fn_type)) --param_count;
-  if (param_count != 0 && astree_get(fn_dirdecl, 0)->symbol != TOK_VOID) {
+  if (param_count != 0 && astree_get(fn_dirdecl, 0)->tok_kind != TOK_VOID) {
     for (i = 0; i < param_count; ++i) {
       ASTree *param = astree_get(fn_dirdecl, i);
       ASTree *param_decl = astree_get(param, 1);
-      SymbolValue *param_symval = NULL;
+      Symbol *param_symbol = NULL;
       int in_current_scope =
           state_get_symbol(state, param_decl->lexinfo,
-                           strlen(param_decl->lexinfo), &param_symval);
+                           strlen(param_decl->lexinfo), &param_symbol);
 #ifdef NDEBUG
       (void)in_current_scope;
 #endif
-      assert(in_current_scope && param_symval);
-      size_t param_symval_eightbytes = type_get_eightbytes(param_symval->type);
-      if (param_symval_eightbytes <= 2 &&
-          param_reg_index + param_symval_eightbytes <= PARAM_REG_COUNT) {
-        param_symval->disp = assign_stack_space(param_symval->type);
+      assert(in_current_scope && param_symbol);
+      size_t param_symbol_eightbytes = type_get_eightbytes(param_symbol->type);
+      if (param_symbol_eightbytes <= 2 &&
+          param_reg_index + param_symbol_eightbytes <= PARAM_REG_COUNT) {
+        param_symbol->disp = assign_stack_space(param_symbol->type);
         ListIter *temp = llist_iter_last(instructions);
-        bulk_rtom(RBP_VREG, param_symval->disp, PARAM_REGS + param_reg_index,
-                  param_symval->type, temp);
-        param_reg_index += param_symval_eightbytes;
+        bulk_rtom(RBP_VREG, param_symbol->disp, PARAM_REGS + param_reg_index,
+                  param_symbol->type, temp);
+        param_reg_index += param_symbol_eightbytes;
         free(temp);
       } else {
-        param_symval->disp = param_stack_disp;
-        param_stack_disp += param_symval_eightbytes * X64_SIZEOF_LONG;
+        param_symbol->disp = param_stack_disp;
+        param_stack_disp += param_symbol_eightbytes * X64_SIZEOF_LONG;
       }
     }
   }
@@ -2117,7 +2117,7 @@ ASTree *translate_for(ASTree *for_, ASTree *initializer, ASTree *condition,
    * added after the condition in reverse order
    */
   /* add dummy reinitializer if necessary */
-  if (reinitializer->symbol == ';') {
+  if (reinitializer->tok_kind == ';') {
     assert(reinitializer->first_instr == NULL &&
            reinitializer->last_instr == NULL && reinitializer != &EMPTY_EXPR);
     Instruction *nop_instr = instr_init(OP_NOP);
@@ -2135,7 +2135,7 @@ ASTree *translate_for(ASTree *for_, ASTree *initializer, ASTree *condition,
   if (status) abort();
 
   /* emit loop exit jump if condition is not empty */
-  if (condition->symbol != ';') {
+  if (condition->tok_kind != ';') {
     scalar_conversions(condition, condition->type);
     Instruction *condition_instr = liter_get(condition->last_instr);
     Instruction *test_instr = instr_init(OP_TEST);
@@ -2265,8 +2265,8 @@ ASTree *translate_block(ASTree *block) {
 static void return_scalar(ASTree *ret, ASTree *expr) {
   ret->first_instr = liter_copy(expr->first_instr);
   if (ret->first_instr == NULL) abort();
-  SymbolValue *function_symval = state_get_function(state);
-  const Type *function_type = function_symval->type;
+  Symbol *function_symbol = state_get_function(state);
+  const Type *function_type = function_symbol->type;
   /* strip function */
   Type *return_type = type_strip_declarator(function_type);
   scalar_conversions(expr, return_type);
@@ -2617,15 +2617,15 @@ ASTree *translate_auto_literal_init(const Type *arr_type, ptrdiff_t arr_disp,
   return literal;
 }
 
-int translate_static_prelude(ASTree *declarator, SymbolValue *symval,
+int translate_static_prelude(ASTree *declarator, Symbol *symbol,
                              ListIter *where, int is_initialized) {
   const char *identifier =
-      symval->flags & SYMFLAG_LINK_NONE
-          ? mk_static_label(declarator->lexinfo, symval->static_id)
+      symbol->flags & SYMFLAG_LINK_NONE
+          ? mk_static_label(declarator->lexinfo, symbol->static_id)
           : declarator->lexinfo;
 
   Instruction *section_instr;
-  if (type_is_const(symval->type)) {
+  if (type_is_const(symbol->type)) {
     section_instr = instr_init(OP_SECTION);
     set_op_dir(&section_instr->dest, ".rodata");
   } else if (is_initialized) {
@@ -2649,7 +2649,7 @@ int translate_static_prelude(ASTree *declarator, SymbolValue *symval,
   /* this call to `liter_push_back` should mutate `where` in-place, since the
    * output parameter points to the input parameter
    */
-  if (symval->flags & SYMFLAG_LINK_EXT) {
+  if (symbol->flags & SYMFLAG_LINK_EXT) {
     Instruction *globl_instr = instr_init(OP_GLOBL);
     set_op_dir(&globl_instr->dest, declarator->lexinfo);
 
@@ -2666,21 +2666,21 @@ static ASTree *translate_static_local_init(ASTree *declaration,
                                            ASTree *declarator,
                                            ASTree *initializer) {
   (void)assignment;
-  SymbolValue *symval = NULL;
+  Symbol *symbol = NULL;
   (void)state_get_symbol(state, (char *)declarator->lexinfo,
-                         strlen(declarator->lexinfo), &symval);
-  assign_static_space(declarator->lexinfo, symval);
+                         strlen(declarator->lexinfo), &symbol);
+  assign_static_space(declarator->lexinfo, symbol);
   ListIter *temp = liter_copy(before_definition);
-  ASTree *errnode = traverse_initializer(declarator->type, symval->disp,
+  ASTree *errnode = traverse_initializer(declarator->type, symbol->disp,
                                          initializer, before_definition);
-  if (errnode->symbol == TOK_TYPE_ERROR) {
+  if (errnode->tok_kind == TOK_TYPE_ERROR) {
     free(temp);
     (void)astree_remove(errnode, 0);
     return astree_adopt(errnode, 1, declaration);
   }
 
   /* wait to do this so that deduced array sizes are set */
-  int status = translate_static_prelude(declarator, symval, temp, 1);
+  int status = translate_static_prelude(declarator, symbol, temp, 1);
   if (status) abort();
   free(temp);
 
@@ -2701,14 +2701,14 @@ static ASTree *translate_static_local_init(ASTree *declaration,
 static ASTree *translate_auto_local_init(ASTree *declaration,
                                          ASTree *assignment, ASTree *declarator,
                                          ASTree *initializer) {
-  SymbolValue *symval = NULL;
+  Symbol *symbol = NULL;
   (void)state_get_symbol(state, (char *)declarator->lexinfo,
-                         strlen(declarator->lexinfo), &symval);
-  symval->disp = assign_stack_space(symval->type);
+                         strlen(declarator->lexinfo), &symbol);
+  symbol->disp = assign_stack_space(symbol->type);
   maybe_load_cexpr(initializer, NULL);
 
   Instruction *lea_instr = instr_init(OP_LEA);
-  set_op_ind(&lea_instr->src, symval->disp, RBP_VREG);
+  set_op_ind(&lea_instr->src, symbol->disp, RBP_VREG);
   set_op_reg(&lea_instr->dest, REG_QWORD, next_vreg());
   lea_instr->persist_flags |= PERSIST_DEST_CLEAR;
 
@@ -2733,30 +2733,30 @@ static ASTree *translate_auto_local_init(ASTree *declaration,
 static ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
                                     ASTree *declarator, ASTree *initializer) {
   PFDBG0('g', "Translating local initialization");
-  SymbolValue *symval = NULL;
+  Symbol *symbol = NULL;
   int in_current_scope = state_get_symbol(state, (char *)declarator->lexinfo,
-                                          strlen(declarator->lexinfo), &symval);
+                                          strlen(declarator->lexinfo), &symbol);
 #ifdef NDEBUG
   (void)in_current_scope;
 #endif
-  assert(in_current_scope && symval);
+  assert(in_current_scope && symbol);
 
-  if (symval->flags & SYMFLAG_STORE_STAT) {
+  if (symbol->flags & SYMFLAG_STORE_STAT) {
     return translate_static_local_init(declaration, assignment, declarator,
                                        initializer);
-  } else if (initializer->symbol != TOK_INIT_LIST &&
-             initializer->symbol != TOK_STRINGCON &&
+  } else if (initializer->tok_kind != TOK_INIT_LIST &&
+             initializer->tok_kind != TOK_STRINGCON &&
              (initializer->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT) {
     return translate_auto_local_init(declaration, assignment, declarator,
                                      initializer);
   } else {
-    symval->disp = assign_stack_space(symval->type);
+    symbol->disp = assign_stack_space(symbol->type);
     free(declaration->last_instr);
     declaration->last_instr = llist_iter_last(instructions);
     if (declaration->last_instr == NULL) abort();
     ASTree *errnode = traverse_initializer(
-        declarator->type, symval->disp, initializer, declaration->last_instr);
-    if (errnode->symbol == TOK_TYPE_ERROR) {
+        declarator->type, symbol->disp, initializer, declaration->last_instr);
+    if (errnode->tok_kind == TOK_TYPE_ERROR) {
       (void)astree_remove(errnode, 0);
       return astree_adopt(errnode, 1, declaration);
     }
@@ -2781,25 +2781,25 @@ static ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
     if (declaration->last_instr == NULL) abort();
   }
 
-  SymbolValue *symval = NULL;
+  Symbol *symbol = NULL;
   int in_current_scope = state_get_symbol(state, (char *)declarator->lexinfo,
-                                          strlen(declarator->lexinfo), &symval);
+                                          strlen(declarator->lexinfo), &symbol);
 #ifdef NDEBUG
   (void)in_current_scope;
 #endif
-  assert(symval && in_current_scope);
+  assert(symbol && in_current_scope);
 
-  if (declarator->symbol == TOK_TYPE_NAME ||
-      (symval->flags & SYMFLAG_INHERIT) || (symval->flags & SYMFLAG_TYPEDEF) ||
-      (symval->flags & SYMFLAG_STORE_EXT)) {
+  if (declarator->tok_kind == TOK_TYPE_NAME ||
+      (symbol->flags & SYMFLAG_INHERIT) || (symbol->flags & SYMFLAG_TYPEDEF) ||
+      (symbol->flags & SYMFLAG_STORE_EXT)) {
     return declaration;
-  } else if (symval->flags & SYMFLAG_STORE_STAT) {
-    assign_static_space(declarator->lexinfo, symval);
+  } else if (symbol->flags & SYMFLAG_STORE_STAT) {
+    assign_static_space(declarator->lexinfo, symbol);
     int status =
-        translate_static_prelude(declarator, symval, before_definition, 0);
+        translate_static_prelude(declarator, symbol, before_definition, 0);
     if (status) abort();
-  } else if (symval->flags & SYMFLAG_STORE_AUTO) {
-    symval->disp = assign_stack_space(symval->type);
+  } else if (symbol->flags & SYMFLAG_STORE_AUTO) {
+    symbol->disp = assign_stack_space(symbol->type);
   }
 
   return declaration;
@@ -2810,14 +2810,14 @@ ASTree *translate_local_declarations(ASTree *block, ASTree *declarations) {
   size_t i, decl_count = astree_count(declarations);
   for (i = 1; i < decl_count; ++i) {
     ASTree *declaration = astree_get(declarations, i);
-    if (declaration->symbol == TOK_IDENT) {
+    if (declaration->tok_kind == TOK_IDENT) {
       (void)translate_local_decl(declarations, declaration);
-    } else if (declaration->symbol == '=') {
+    } else if (declaration->tok_kind == '=') {
       ASTree *declarator = astree_get(declaration, 0),
              *initializer = astree_get(declaration, 1),
              *errnode = translate_local_init(declarations, declaration,
                                              declarator, initializer);
-      if (errnode->symbol == TOK_TYPE_ERROR) {
+      if (errnode->tok_kind == TOK_TYPE_ERROR) {
         (void)astree_remove(errnode, 0);
         return astree_adopt(errnode, 1, astree_adopt(block, 1, declarations));
       }
@@ -2831,13 +2831,13 @@ ASTree *translate_local_declarations(ASTree *block, ASTree *declarations) {
 static ASTree *translate_global_init(ASTree *declaration, ASTree *declarator,
                                      ASTree *initializer) {
   PFDBG0('g', "Translating global initialization");
-  SymbolValue *symval = NULL;
+  Symbol *symbol = NULL;
   int in_current_scope = state_get_symbol(state, (char *)declarator->lexinfo,
-                                          strlen(declarator->lexinfo), &symval);
+                                          strlen(declarator->lexinfo), &symbol);
 #ifdef NDEBUG
   (void)in_current_scope;
 #endif
-  assert(in_current_scope && symval);
+  assert(in_current_scope && symbol);
 
   free(before_definition);
   before_definition = llist_iter_last(instructions);
@@ -2846,13 +2846,13 @@ static ASTree *translate_global_init(ASTree *declaration, ASTree *declarator,
   ASTree *errnode = traverse_initializer(declarator->type, NO_DISP, initializer,
                                          before_definition);
   /* wait to do this so that deduced array sizes are set */
-  int status = translate_static_prelude(declarator, symval, temp, 1);
+  int status = translate_static_prelude(declarator, symbol, temp, 1);
   free(temp);
   if (status) abort();
   free(before_definition);
   before_definition = llist_iter_last(instructions);
   if (before_definition == NULL) abort();
-  if (errnode->symbol == TOK_TYPE_ERROR) {
+  if (errnode->tok_kind == TOK_TYPE_ERROR) {
     (void)astree_remove(errnode, 0);
     return astree_adopt(errnode, 1, declaration);
   } else {
@@ -2862,21 +2862,21 @@ static ASTree *translate_global_init(ASTree *declaration, ASTree *declarator,
 
 static ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
   PFDBG0('g', "Translating global declaration");
-  assert(declarator->symbol == TOK_IDENT);
-  SymbolValue *symval = NULL;
+  assert(declarator->tok_kind == TOK_IDENT);
+  Symbol *symbol = NULL;
   int in_current_scope = state_get_symbol(state, (char *)declarator->lexinfo,
-                                          strlen(declarator->lexinfo), &symval);
+                                          strlen(declarator->lexinfo), &symbol);
 #ifdef NDEBUG
   (void)in_current_scope;
 #endif
-  assert(in_current_scope && symval);
+  assert(in_current_scope && symbol);
 
-  if ((symval->flags & SYMFLAG_STORE_EXT) ||
+  if ((symbol->flags & SYMFLAG_STORE_EXT) ||
       type_is_function(declarator->type)) {
     return declaration;
-  } else if (symval->flags & SYMFLAG_STORE_STAT) {
+  } else if (symbol->flags & SYMFLAG_STORE_STAT) {
     ListIter *temp = llist_iter_last(instructions);
-    int status = translate_static_prelude(declarator, symval, temp, 0);
+    int status = translate_static_prelude(declarator, symbol, temp, 0);
     free(temp);
     if (status) abort();
     Instruction *zero_instr = instr_init(OP_ZERO);
@@ -2884,7 +2884,7 @@ static ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
                IMM_UNSIGNED);
     status = llist_push_back(instructions, zero_instr);
     if (status) abort();
-  } else if (!(symval->flags & SYMFLAG_TYPEDEF)) {
+  } else if (!(symbol->flags & SYMFLAG_TYPEDEF)) {
     abort();
   }
 
@@ -2896,11 +2896,11 @@ static ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
 
 ASTree *translate_global_declarations(ASTree *root, ASTree *declarations) {
   if (astree_count(declarations) == 3 &&
-      astree_get(declarations, 2)->symbol == TOK_BLOCK)
+      astree_get(declarations, 2)->tok_kind == TOK_BLOCK)
     /* function defnition; no further instructions to emit */
     return astree_adopt(root, 1, declarations);
   else if (astree_count(declarations) == 2 &&
-           astree_get(declarations, 1)->symbol == TOK_TYPE_NAME)
+           astree_get(declarations, 1)->tok_kind == TOK_TYPE_NAME)
     /* declares nothing; emit no instructions */
     return astree_adopt(root, 1, declarations);
 
@@ -2908,14 +2908,14 @@ ASTree *translate_global_declarations(ASTree *root, ASTree *declarations) {
   size_t i, decl_count = astree_count(declarations);
   for (i = 1; i < decl_count; ++i) {
     ASTree *declaration = astree_get(declarations, i);
-    if (declaration->symbol == TOK_IDENT) {
+    if (declaration->tok_kind == TOK_IDENT) {
       (void)translate_global_decl(declarations, declaration);
-    } else if (declaration->symbol == '=') {
+    } else if (declaration->tok_kind == '=') {
       ASTree *declarator = astree_get(declaration, 0),
              *initializer = astree_get(declaration, 1),
              *errnode =
                  translate_global_init(declarations, declarator, initializer);
-      if (errnode->symbol == TOK_TYPE_ERROR) {
+      if (errnode->tok_kind == TOK_TYPE_ERROR) {
         (void)astree_remove(errnode, 0);
         return astree_adopt(errnode, 1, astree_adopt(root, 1, declarations));
       }
@@ -2936,11 +2936,11 @@ ASTree *begin_translate_fn(ASTree *declaration, ASTree *declarator,
   if (status) abort();
   declaration->first_instr = llist_iter_last(instructions);
   if (declaration->first_instr == NULL) abort();
-  SymbolValue *symval = NULL;
+  Symbol *symbol = NULL;
   state_get_symbol(state, declarator->lexinfo, strlen(declarator->lexinfo),
-                   &symval);
-  assert(symval != NULL);
-  if (symval->flags & SYMFLAG_LINK_EXT) {
+                   &symbol);
+  assert(symbol != NULL);
+  if (symbol->flags & SYMFLAG_LINK_EXT) {
     Instruction *globl_instr = instr_init(OP_GLOBL);
     set_op_dir(&globl_instr->dest, declarator->lexinfo);
     status = llist_push_back(instructions, globl_instr);
@@ -3066,11 +3066,11 @@ void asmgen_init_globals(const char *filename) {
       map_init(generated_text, DEFAULT_MAP_SIZE, NULL, free, strncmp_wrapper);
   if (status) abort();
 
-  static TagValue tag_va_spill_region = {X64_SIZEOF_LONG * PARAM_REG_COUNT,
-                                         X64_ALIGNOF_LONG,
-                                         {{NULL, BLIB_LLIST_EMPTY}},
-                                         TAG_STRUCT,
-                                         1};
+  static Tag tag_va_spill_region = {X64_SIZEOF_LONG * PARAM_REG_COUNT,
+                                    X64_ALIGNOF_LONG,
+                                    {{NULL, BLIB_LLIST_EMPTY}},
+                                    TAG_STRUCT,
+                                    1};
   static Type type_va_spill_region = {{TYPE_CODE_STRUCT, 0}};
   type_va_spill_region.tag.value = &tag_va_spill_region;
   TYPE_VA_SPILL_REGION = &type_va_spill_region;

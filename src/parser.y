@@ -17,21 +17,21 @@
   static ASTree *parser_new_sym(ASTree * tree, int new_symbol);
   static ASTree *parser_make_joiner(ASTree * stringcon);
   static ASTree *parser_join_strings(ASTree * joiner);
-  static ASTree *parser_make_spec_list(ASTree * first_specifier);
-  static ASTree *parser_make_declaration(ASTree * spec_list);
-  static ASTree *parser_make_param_list(ASTree * left_paren, ASTree * spec_list,
-                                        ASTree * declarator);
+  static ASTree *parser_make_decl_specs(ASTree * first_specifier);
+  static ASTree *parser_make_declaration(ASTree * decl_specs);
+  static ASTree *parser_make_param_list(
+      ASTree * left_paren, ASTree * decl_specs, ASTree * declarator);
   static ASTree *parser_make_type_name(void);
-  static ASTree *parser_make_cast(ASTree * left_paren, ASTree * spec_list,
+  static ASTree *parser_make_cast(ASTree * left_paren, ASTree * decl_specs,
                                   ASTree * type_name, ASTree * expr);
   static ASTree *parser_make_label(ASTree * ident);
   static ASTree *parser_make_auto_conv(ASTree * tree, int convert_arrays);
   static ASTree *parser_make_attributes_list(void);
   static ASTree *parse_pretty_function(ASTree * pretty_function);
-  static ASTree *parse_sizeof(ASTree * sizeof_, ASTree * spec_list,
+  static ASTree *parse_sizeof(ASTree * sizeof_, ASTree * decl_specs,
                               ASTree * declarator);
   static ASTree *parse_va_arg(ASTree * va_arg_, ASTree * expr,
-                              ASTree * spec_list, ASTree * declarator);
+                              ASTree * decl_specs, ASTree * declarator);
   static void parser_cleanup(size_t count, ...);
   /* clang-format off */
 %}
@@ -106,25 +106,25 @@ topdecl             : declarations ';'                                  { $$ = b
                     | function_def '}'                                  { $$ = bcc_yyval = finalize_function($1); parser_cleanup(1, $2); }
                     | ';'                                               { $$ = bcc_yyval = &EMPTY_EXPR; astree_destroy($1); }
                     ;
-function_def        : typespec_list declarator '{'                      { $$ = bcc_yyval = define_function(parser_make_declaration($1), $2, parser_new_sym($3, TOK_BLOCK)); }
+function_def        : decl_specs declarator '{'                         { $$ = bcc_yyval = define_function(parser_make_declaration($1), $2, parser_new_sym($3, TOK_BLOCK)); }
                     | function_def stmt                                 { $$ = bcc_yyval = validate_fnbody_content($1, $2); }
                     | function_def declarations ';'                     { $$ = bcc_yyval = validate_fnbody_content($1, finalize_declaration($2)); parser_cleanup(1, $3); }
                     ;
-declarations        : typespec_list                                     { $$ = bcc_yyval = declare_symbol(parser_make_declaration($1), parser_make_type_name()); }
+declarations        : decl_specs                                        { $$ = bcc_yyval = declare_symbol(parser_make_declaration($1), parser_make_type_name()); }
                     | declaration_list                                  { $$ = bcc_yyval = $1; }
                     | definition                                        { $$ = bcc_yyval = $1; }
                     ;
-declaration_list    : typespec_list declarator                          { $$ = bcc_yyval = declare_symbol(parser_make_declaration($1), $2); }
+declaration_list    : decl_specs declarator                             { $$ = bcc_yyval = declare_symbol(parser_make_declaration($1), $2); }
                     | declaration_list ',' declarator                   { $$ = bcc_yyval = declare_symbol($1, $3); parser_cleanup(1, $2); }
                     | definition ',' declarator                         { $$ = bcc_yyval = declare_symbol($1, $3); parser_cleanup(1, $2); }
                     ;
 definition          : declaration_list '=' initializer                  { $$ = bcc_yyval = define_symbol($1, $2, $3); }
                     ;
-typespec_list       : typespec_list typespec                            { $$ = bcc_yyval = validate_typespec($1, $2); } /* validate_typespec */
-                    | typespec                                          { $$ = bcc_yyval = parser_make_spec_list($1); } /* make_spec_list, validate_typespec */
-                    | attr_spec_list                                    { $$ = bcc_yyval = parser_make_spec_list($1); } /* validate typespec frees attributes */
+decl_specs          : decl_specs decl_spec                              { $$ = bcc_yyval = validate_decl_spec($1, $2); } /* validate_decl_spec */
+                    | decl_spec                                         { $$ = bcc_yyval = parser_make_decl_specs($1); } /* make_spec_list, validate_decl_spec */
+                    | attr_spec_list                                    { $$ = bcc_yyval = parser_make_decl_specs($1); } /* validate decl_spec frees attributes */
                     ;
-typespec            : TOK_LONG                                          { $$ = bcc_yyval = $1; }
+decl_spec           : TOK_LONG                                          { $$ = bcc_yyval = $1; }
                     | TOK_SIGNED                                        { $$ = bcc_yyval = $1; }
                     | TOK_UNSIGNED                                      { $$ = bcc_yyval = $1; }
                     | TOK_SHORT                                         { $$ = bcc_yyval = $1; }
@@ -150,15 +150,15 @@ struct_spec         : struct_def '}'                                    { $$ = b
                     ;
 struct_def          : struct_or_union any_ident '{'                     { $$ = bcc_yyval = validate_tag_def($1, $2, $3); }
                     | struct_or_union '{'                               { $$ = bcc_yyval = validate_unique_tag($1, $2); }
-                    | struct_def struct_decl ';'                        { $$ = bcc_yyval = define_struct_member($1, $2); parser_cleanup(1, $3); } /* define struct member */
+                    | struct_def struct_decl ';'                        { $$ = bcc_yyval = define_record_member($1, $2); parser_cleanup(1, $3); } /* define struct member */
                     ;
 struct_or_union     : TOK_STRUCT                                        { $$ = bcc_yyval = $1; }
                     | TOK_UNION                                         { $$ = bcc_yyval = $1; }
                     ;
 struct_decl         : struct_decl ',' declarator                        { $$ = bcc_yyval = declare_symbol($1, $3); astree_destroy($2); } /* define struct member */
                     | struct_decl ',' abs_declarator                    { $$ = bcc_yyval = declare_symbol($1, $3); astree_destroy($2); } /* define struct member */
-                    | typespec_list declarator                          { $$ = bcc_yyval = declare_symbol(parser_make_declaration($1), $2); } /* define struct member */
-                    | typespec_list abs_declarator                      { $$ = bcc_yyval = declare_symbol(parser_make_declaration($1), $2); } /* define struct member */
+                    | decl_specs declarator                             { $$ = bcc_yyval = declare_symbol(parser_make_declaration($1), $2); } /* define struct member */
+                    | decl_specs abs_declarator                         { $$ = bcc_yyval = declare_symbol(parser_make_declaration($1), $2); } /* define struct member */
                     ;
 enum_spec           : enum_def '}'                                      { $$ = bcc_yyval = finalize_tag_def($1); parser_cleanup(1, $2); } /* create tag and iterate over enums */
                     | enum_def ',' '}'                                  { $$ = bcc_yyval = finalize_tag_def($1); parser_cleanup(2, $2, $3); } /* create tag and iterate over enums */
@@ -193,7 +193,7 @@ attr_fn             : TOK_IDENT '(' TOK_IDENT                           { $$ = b
                     | attr_fn ',' TOK_INTCON                            { $$ = bcc_yyval = astree_adopt($1, 1, $3); parser_cleanup(1, $2); }
                     | attr_fn ',' TOK_STRINGCON                         { $$ = bcc_yyval = astree_adopt($1, 1, $3); parser_cleanup(1, $2); }
                     ;
-initializer         : assign_expr                                       { $$ = bcc_yyval = $1->symbol == TOK_STRINGCON ? $1 : parser_make_auto_conv($1, 1); } /* do nothing */
+initializer         : assign_expr                                       { $$ = bcc_yyval = $1->tok_kind == TOK_STRINGCON ? $1 : parser_make_auto_conv($1, 1); } /* do nothing */
                     | init_list '}'                                     { $$ = bcc_yyval = $1; astree_destroy($2); } /* do nothing */
                     | init_list ',' '}'                                 { $$ = bcc_yyval = $1; astree_destroy($2); astree_destroy($3); } /* do nothing */
                     ;
@@ -225,10 +225,10 @@ fn_direct_decl      : param_list ')'                                    { $$ = b
                     | '(' ')'                                           { $$ = bcc_yyval = parser_new_sym($1, TOK_PARAM_LIST); parser_cleanup(1, $2); }
                     | '(' TOK_VOID ')'                                  { $$ = bcc_yyval = astree_adopt(parser_new_sym($1, TOK_PARAM_LIST), 1, $2); parser_cleanup(1, $3); }
                     ;
-param_list          : '(' typespec_list declarator                      { $$ = bcc_yyval = parser_make_param_list($1, $2, $3); } /* create param table; define_param */
-                    | '(' typespec_list abs_declarator                  { $$ = bcc_yyval = parser_make_param_list($1, $2, $3); } /* create param table; define_param */
-                    | param_list ',' typespec_list declarator           { $$ = bcc_yyval = validate_param($1, parser_make_declaration($3), $4); astree_destroy($2); } /* define_param */
-                    | param_list ',' typespec_list abs_declarator       { $$ = bcc_yyval = validate_param($1, parser_make_declaration($3), $4); astree_destroy($2); } /* define_param */
+param_list          : '(' decl_specs declarator                         { $$ = bcc_yyval = parser_make_param_list($1, $2, $3); } /* create param table; define_param */
+                    | '(' decl_specs abs_declarator                     { $$ = bcc_yyval = parser_make_param_list($1, $2, $3); } /* create param table; define_param */
+                    | param_list ',' decl_specs declarator              { $$ = bcc_yyval = validate_param($1, parser_make_declaration($3), $4); astree_destroy($2); } /* define_param */
+                    | param_list ',' decl_specs abs_declarator          { $$ = bcc_yyval = validate_param($1, parser_make_declaration($3), $4); astree_destroy($2); } /* define_param */
                     ;
 block               : block_content '}'                                 { $$ = bcc_yyval = finalize_block($1); astree_destroy($2); }
                     ;
@@ -316,7 +316,7 @@ binary_expr         : binary_expr '+' binary_expr                       { $$ = b
                     | binary_expr TOK_SHL binary_expr                   { $$ = bcc_yyval = validate_shift($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
                     | cast_expr                                         { $$ = bcc_yyval = $1; }
                     ;
-cast_expr           : '(' typespec_list abs_declarator')' unary_expr    { $$ = bcc_yyval = parser_make_cast($1, $2, $3, parser_make_auto_conv($5, 1)); parser_cleanup(1, $4); }
+cast_expr           : '(' decl_specs abs_declarator')' unary_expr       { $$ = bcc_yyval = parser_make_cast($1, $2, $3, parser_make_auto_conv($5, 1)); parser_cleanup(1, $4); }
                     | unary_expr                                        { $$ = bcc_yyval = $1; }
                     ;
 unary_expr          : postfix_expr                                      { $$ = bcc_yyval = $1; }
@@ -325,7 +325,7 @@ unary_expr          : postfix_expr                                      { $$ = b
                     | unary_op cast_expr                                { $$ = bcc_yyval = validate_unary($1, parser_make_auto_conv($2, 1)); }
                     | '&' cast_expr                                     { $$ = bcc_yyval = validate_unary(parser_new_sym($1, TOK_ADDROF), $2); }
                     | TOK_SIZEOF unary_expr                             { $$ = bcc_yyval = validate_sizeof($1, parser_make_auto_conv($2, 0)); }
-                    | TOK_SIZEOF '(' typespec_list abs_declarator')'    { $$ = bcc_yyval = parse_sizeof($1, $3, $4); parser_cleanup(2, $2, $5); }
+                    | TOK_SIZEOF '(' decl_specs abs_declarator')'       { $$ = bcc_yyval = parse_sizeof($1, $3, $4); parser_cleanup(2, $2, $5); }
                     ;
 unary_op            : '!'                                               { $$ = bcc_yyval = $1; }
                     | '~'                                               { $$ = bcc_yyval = $1; }
@@ -339,7 +339,7 @@ postfix_expr        : primary_expr                                      { $$ = b
                     | call                                              { $$ = bcc_yyval = $1; }
                     | TOK_VA_START '(' expr ',' TOK_IDENT ')'           { $$ = bcc_yyval = validate_va_start($1, parser_make_auto_conv($3, 1), $5); parser_cleanup(3, $2, $4, $6); }
                     | TOK_VA_END '(' expr ')'                           { $$ = bcc_yyval = validate_va_end($1, parser_make_auto_conv($3, 1)); parser_cleanup(2, $2, $4); }
-                    | TOK_VA_ARG '(' expr ',' typespec_list abs_declarator ')'   { $$ = bcc_yyval = parse_va_arg($1, parser_make_auto_conv($3, 1), $5, $6); parser_cleanup(3, $2, $4, $7); }
+                    | TOK_VA_ARG '(' expr ',' decl_specs abs_declarator ')'   { $$ = bcc_yyval = parse_va_arg($1, parser_make_auto_conv($3, 1), $5, $6); parser_cleanup(3, $2, $4, $7); }
                     | postfix_expr '[' expr ']'                         { $$ = bcc_yyval = validate_subscript(parser_new_sym($2, TOK_SUBSCRIPT), parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); parser_cleanup(1, $4); }
                     | postfix_expr '.' any_ident                        { $$ = bcc_yyval = validate_reference($2, parser_make_auto_conv($1, 0), $3); }
                     | postfix_expr TOK_ARROW any_ident                  { $$ = bcc_yyval = validate_reference($2, parser_make_auto_conv($1, 1), $3); }
