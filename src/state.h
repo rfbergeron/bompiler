@@ -20,7 +20,7 @@ typedef struct compiler_state {
   SizetStack break_stack;
   SizetStack continue_stack;
   LinkedList switch_stack;
-  SymbolValue *enclosing_function;
+  Symbol *enclosing_function;
   const char *enclosing_function_name;
   size_t jump_id_count;
 } CompilerState;
@@ -33,14 +33,14 @@ void state_push_table(CompilerState *state, SymbolTable *table);
 void state_pop_table(CompilerState *state);
 SymbolTable *state_peek_table(CompilerState *state);
 int state_get_symbol(CompilerState *state, const char *ident,
-                     const size_t ident_len, SymbolValue **out);
+                     const size_t ident_len, Symbol **out);
 void state_insert_symbol(CompilerState *state, const char *ident,
-                         const size_t ident_len, SymbolValue *symval);
+                         const size_t ident_len, Symbol *symbol);
 size_t state_get_sequence(CompilerState *state);
 int state_get_tag(CompilerState *state, const char *ident,
-                  const size_t ident_len, TagValue **out);
+                  const size_t ident_len, Tag **out);
 void state_insert_tag(CompilerState *state, const char *ident,
-                      const size_t ident_len, TagValue *tagval);
+                      const size_t ident_len, Tag *tag);
 LabelValue *state_get_label(CompilerState *state, const char *ident,
                             const size_t ident_len);
 void state_insert_label(CompilerState *state, const char *ident,
@@ -64,8 +64,8 @@ void state_push_break_id(CompilerState *state, size_t id);
 void state_push_continue_id(CompilerState *state, size_t id);
 void state_dec_jump_id_count(CompilerState *state);
 void state_set_function(CompilerState *state, const char *function_name,
-                        SymbolValue *function_symval);
-SymbolValue *state_get_function(CompilerState *state);
+                        Symbol *function_symbol);
+Symbol *state_get_function(CompilerState *state);
 const char *state_get_function_name(CompilerState *state);
 void state_unset_function(CompilerState *state);
 

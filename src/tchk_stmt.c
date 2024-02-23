@@ -8,10 +8,10 @@
 #include "yyparse.h"
 
 ASTree *validate_return(ASTree *ret, ASTree *expr) {
-  if (expr->symbol == TOK_TYPE_ERROR)
+  if (expr->tok_kind == TOK_TYPE_ERROR)
     return astree_propogate_errnode(ret, expr);
-  SymbolValue *symval = state_get_function(state);
-  Type *return_type = type_strip_declarator(symval->type);
+  Symbol *symbol = state_get_function(state);
+  Type *return_type = type_strip_declarator(symbol->type);
 
   if (expr != &EMPTY_EXPR) {
     if (types_assignable(return_type, expr->type, astree_is_const_zero(expr))) {
@@ -22,7 +22,7 @@ ASTree *validate_return(ASTree *ret, ASTree *expr) {
     } else {
       return astree_create_errnode(astree_adopt(ret, 1, expr),
                                    BCC_TERR_INCOMPATIBLE_TYPES, 3, ret,
-                                   &symval->type, expr->type);
+                                   &symbol->type, expr->type);
     }
   } else if (type_is_void(return_type)) {
     maybe_load_cexpr(expr, NULL);
@@ -35,11 +35,11 @@ ASTree *validate_return(ASTree *ret, ASTree *expr) {
 
 ASTree *validate_ifelse(ASTree *ifelse, ASTree *condition, ASTree *if_body,
                         ASTree *else_body) {
-  if (condition->symbol == TOK_TYPE_ERROR) {
+  if (condition->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(ifelse, 3, condition, if_body, else_body);
-  } else if (if_body->symbol == TOK_TYPE_ERROR) {
+  } else if (if_body->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(ifelse, 3, condition, if_body, else_body);
-  } else if (else_body->symbol == TOK_TYPE_ERROR) {
+  } else if (else_body->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(ifelse, 3, condition, if_body, else_body);
   }
 
@@ -54,9 +54,9 @@ ASTree *validate_ifelse(ASTree *ifelse, ASTree *condition, ASTree *if_body,
 }
 
 ASTree *validate_switch(ASTree *switch_, ASTree *expr, ASTree *stmt) {
-  if (expr->symbol == TOK_TYPE_ERROR) {
+  if (expr->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(switch_, 2, expr, stmt);
-  } else if (stmt->symbol == TOK_TYPE_ERROR) {
+  } else if (stmt->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(switch_, 2, expr, stmt);
   }
 
@@ -78,9 +78,9 @@ ASTree *validate_while(ASTree *while_, ASTree *condition, ASTree *stmt) {
   /* TODO(Robert): safely process flow control statements before checking error
    * codes so that more things are cleaned up in the event of an error.
    */
-  if (condition->symbol == TOK_TYPE_ERROR) {
+  if (condition->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(while_, 2, condition, stmt);
-  } else if (stmt->symbol == TOK_TYPE_ERROR) {
+  } else if (stmt->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(while_, 2, condition, stmt);
   }
 
@@ -95,9 +95,9 @@ ASTree *validate_while(ASTree *while_, ASTree *condition, ASTree *stmt) {
 }
 
 ASTree *validate_do(ASTree *do_, ASTree *stmt, ASTree *condition) {
-  if (condition->symbol == TOK_TYPE_ERROR) {
+  if (condition->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(do_, 2, stmt, condition);
-  } else if (stmt->symbol == TOK_TYPE_ERROR) {
+  } else if (stmt->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(do_, 2, stmt, condition);
   }
 
@@ -112,14 +112,15 @@ ASTree *validate_do(ASTree *do_, ASTree *stmt, ASTree *condition) {
 
 ASTree *validate_for(ASTree *for_, ASTree *init_expr, ASTree *pre_iter_expr,
                      ASTree *reinit_expr, ASTree *body) {
-  if (init_expr->symbol == TOK_TYPE_ERROR ||
-      pre_iter_expr->symbol == TOK_TYPE_ERROR ||
-      reinit_expr->symbol == TOK_TYPE_ERROR || body->symbol == TOK_TYPE_ERROR) {
+  if (init_expr->tok_kind == TOK_TYPE_ERROR ||
+      pre_iter_expr->tok_kind == TOK_TYPE_ERROR ||
+      reinit_expr->tok_kind == TOK_TYPE_ERROR ||
+      body->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(for_, 4, init_expr, pre_iter_expr,
                                       reinit_expr, body);
   }
 
-  if (pre_iter_expr->symbol != ';') {
+  if (pre_iter_expr->tok_kind != ';') {
     if (!type_is_scalar(pre_iter_expr->type)) {
       return astree_create_errnode(
           astree_adopt(for_, 4, init_expr, pre_iter_expr, reinit_expr, body),
@@ -134,7 +135,7 @@ ASTree *validate_for(ASTree *for_, ASTree *init_expr, ASTree *pre_iter_expr,
 }
 
 ASTree *validate_label(ASTree *label, ASTree *ident_node, ASTree *stmt) {
-  if (stmt->symbol == TOK_TYPE_ERROR) {
+  if (stmt->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(astree_adopt(label, 1, ident_node), stmt);
   }
 
@@ -160,9 +161,9 @@ ASTree *validate_label(ASTree *label, ASTree *ident_node, ASTree *stmt) {
 }
 
 ASTree *validate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
-  if (expr->symbol == TOK_TYPE_ERROR) {
+  if (expr->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(case_, 2, expr, stmt);
-  } else if (stmt->symbol == TOK_TYPE_ERROR) {
+  } else if (stmt->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode_v(case_, 2, expr, stmt);
   }
 
@@ -182,7 +183,7 @@ ASTree *validate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
 }
 
 ASTree *validate_default(ASTree *default_, ASTree *stmt) {
-  if (stmt->symbol == TOK_TYPE_ERROR) {
+  if (stmt->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(default_, stmt);
   }
 
@@ -229,17 +230,17 @@ ASTree *validate_break(ASTree *break_) {
 }
 
 ASTree *validate_block(ASTree *block) {
-  block->symbol_table = symbol_table_init(BLOCK_TABLE);
+  block->symbol_table = symbol_table_init(TABLE_BLOCK);
   state_push_table(state, block->symbol_table);
   return block;
 }
 
 ASTree *validate_block_content(ASTree *block, ASTree *block_content) {
-  if (block->symbol == TOK_TYPE_ERROR) {
+  if (block->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(block, block_content);
-  } else if (block_content->symbol == TOK_TYPE_ERROR) {
+  } else if (block_content->tok_kind == TOK_TYPE_ERROR) {
     return astree_propogate_errnode(block, block_content);
-  } else if (block_content->symbol == TOK_DECLARATION) {
+  } else if (block_content->tok_kind == TOK_DECLARATION) {
     return translate_local_declarations(block, block_content);
   } else {
     return astree_adopt(block, 1, block_content);

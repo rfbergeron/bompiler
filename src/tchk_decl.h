@@ -3,8 +3,8 @@
 
 #include "astree.h"
 
-ASTree *validate_typespec(ASTree *spec_list, ASTree *type);
-ASTree *validate_typespec_list(ASTree *spec_list);
+ASTree *validate_decl_spec(ASTree *decl_specs, ASTree *decl_spec);
+ASTree *finalize_decl_specs(ASTree *decl_specs);
 ASTree *finalize_declaration(ASTree *declaration);
 ASTree *validate_array_size(ASTree *array, ASTree *expr);
 ASTree *validate_param_list(ASTree *param_list);
@@ -20,14 +20,13 @@ ASTree *define_symbol(ASTree *decl_list, ASTree *equal_sign,
 ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body);
 ASTree *validate_fnbody_content(ASTree *function, ASTree *fnbody_content);
 ASTree *finalize_function(ASTree *function);
-ASTree *validate_unique_tag(ASTree *tag_type_node, ASTree *left_brace);
-ASTree *validate_tag_decl(ASTree *tag_type_node, ASTree *tag_name_node);
-ASTree *validate_tag_def(ASTree *tag_type_node, ASTree *tag_name_node,
-                         ASTree *left_brace);
-ASTree *finalize_tag_def(ASTree *tag);
-ASTree *define_enumerator(ASTree *enum_, ASTree *ident_node, ASTree *equal_sign,
+ASTree *validate_unique_tag(ASTree *tag_spec, ASTree *left_brace);
+ASTree *validate_tag_decl(ASTree *tag_spec, ASTree *ident);
+ASTree *validate_tag_def(ASTree *tag_spec, ASTree *ident, ASTree *left_brace);
+ASTree *finalize_tag_def(ASTree *tag_spec);
+ASTree *define_enumerator(ASTree *enum_spec, ASTree *ident, ASTree *equal_sign,
                           ASTree *expr);
-ASTree *define_struct_member(ASTree *struct_, ASTree *member);
+ASTree *define_record_member(ASTree *record_spec, ASTree *member);
 ASTree *declare_symbol(ASTree *declaration, ASTree *declarator);
 ASTree *validate_topdecl(ASTree *root, ASTree *topdecl);
 #endif

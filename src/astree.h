@@ -32,14 +32,14 @@ typedef struct astree {
       unsigned long unsigned_value;
     } integral;
     const char *label;
-    SymbolValue *symval;
+    Symbol *symbol;
   } constant;
   Location loc; /* source location */
   size_t jump_id;
   size_t case_id;
   size_t spill_eightbytes;
   LinkedList children;     /* children of this n-way node */
-  int symbol;              /* token code */
+  int tok_kind;            /* token code */
   unsigned int attributes; /* node-specific attributes */
 } ASTree;
 
@@ -49,10 +49,10 @@ typedef struct astree {
         0UL, 0UL, BLIB_LLIST_EMPTY, ';', ATTR_NONE                         \
   }
 #define UNWRAP(node) \
-  (node->symbol == TOK_TYPE_ERROR ? astree_get(node, 0) : node)
+  (node->tok_kind == TOK_TYPE_ERROR ? astree_get(node, 0) : node)
 extern ASTree EMPTY_EXPR;
 
-ASTree *astree_init(int symbol, const Location location, const char *lexinfo);
+ASTree *astree_init(int tok_kind, const Location location, const char *lexinfo);
 void astree_destroy(ASTree *tree);
 ASTree *astree_adopt(ASTree *parent, const size_t count, ...);
 ASTree *astree_replace(ASTree *parent, const size_t index, ASTree *child);

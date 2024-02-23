@@ -105,38 +105,39 @@ void lexer_include() {
   }
 }
 
-int lexer_token(int symbol) {
-  PFDBG2('l', "Found token with code: %p, length: %p", symbol, yyleng);
-  yylval = astree_init(symbol, lexer_loc, yytext);
+int lexer_token(int tok_kind) {
+  PFDBG2('l', "Found token with code: %p, length: %p", tok_kind, yyleng);
+  yylval = astree_init(tok_kind, lexer_loc, yytext);
   fprintf(tokfile, "%2lu  %3lu.%3lu %3d %-13s %s\n", yylval->loc.filenr,
-          yylval->loc.linenr, yylval->loc.offset, yylval->symbol,
-          parser_get_tname(yylval->symbol), yylval->lexinfo);
+          yylval->loc.linenr, yylval->loc.offset, yylval->tok_kind,
+          parser_get_tname(yylval->tok_kind), yylval->lexinfo);
   /* fprintf (tokfile, "%p: [%p]->%s, length: %u\n", symbol, yytext, yytext,
    * yyleng);
    */
-  return symbol;
+  return tok_kind;
 }
 
 int lexer_ident(void) {
   PFDBG1('l', "Determining appropriate token type for identifier %s", yytext);
-  SymbolValue *symval = NULL;
-  (void)state_get_symbol(state, yytext, yyleng, &symval);
-  if (symval == NULL || !(symval->flags & SYMFLAG_TYPEDEF) ||
-      (bcc_yyval->symbol == TOK_SPEC_LIST && !type_is_none(bcc_yyval->type))) {
+  Symbol *symbol = NULL;
+  (void)state_get_symbol(state, yytext, yyleng, &symbol);
+  if (symbol == NULL || !(symbol->flags & SYMFLAG_TYPEDEF) ||
+      (bcc_yyval->tok_kind == TOK_SPEC_LIST &&
+       !type_is_none(bcc_yyval->type))) {
     return lexer_token(TOK_IDENT);
   } else {
     return lexer_token(TOK_TYPEDEF_NAME);
   }
 }
 
-int lexer_iteration(int symbol) {
-  (void)lexer_token(symbol);
+int lexer_iteration(int tok_kind) {
+  (void)lexer_token(tok_kind);
   size_t id = state_next_jump_id(state);
   PFDBG2('l', "Using id %lu for iteration token %s", id, yytext);
   yylval->jump_id = id;
   state_push_break_id(state, id);
   state_push_continue_id(state, id);
-  return symbol;
+  return tok_kind;
 }
 
 int lexer_switch(void) {
@@ -191,11 +192,11 @@ int lexer_if(void) {
   return TOK_IF;
 }
 
-int lexer_bad_token(int symbol) {
+int lexer_bad_token(int tok_kind) {
   char buffer[1024];
   sprintf(buffer, "Invalid token (%s)\n", yytext);
   lexer_error(buffer);
-  return lexer_token(symbol);
+  return lexer_token(tok_kind);
 }
 
 void lexer_fatal_error(const char *msg) { errx(1, "%s", msg); }

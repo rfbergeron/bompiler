@@ -324,33 +324,33 @@ ASTree *evaluate_stringcon(ASTree *stringcon) {
   stringcon->constant.label = stringcon_label;
   stringcon->constant.integral.signed_value = 0;
   (void)state_get_symbol(state, stringcon_label, strlen(stringcon_label),
-                         &stringcon->constant.symval);
-  assert(stringcon->constant.symval != NULL);
+                         &stringcon->constant.symbol);
+  assert(stringcon->constant.symbol != NULL);
   return stringcon;
 }
 
 ASTree *evaluate_ident(ASTree *ident) {
   const char *id_str = ident->lexinfo;
   size_t id_str_len = strlen(id_str);
-  SymbolValue *symval = NULL;
-  (void)state_get_symbol(state, id_str, id_str_len, &symval);
-  if (symval->flags & (SYMFLAG_STORE_EXT | SYMFLAG_STORE_STAT)) {
+  Symbol *symbol = NULL;
+  (void)state_get_symbol(state, id_str, id_str_len, &symbol);
+  if (symbol->flags & (SYMFLAG_STORE_EXT | SYMFLAG_STORE_STAT)) {
     ident->attributes |= ATTR_CONST_MAYBE;
-    ident->constant.symval = symval;
+    ident->constant.symbol = symbol;
     ident->constant.integral.signed_value = 0;
-    if (type_is_function(symval->type))
+    if (type_is_function(symbol->type))
       ident->constant.label = mk_fnptr_text(ident->lexinfo);
-    else if (symval->flags & SYMFLAG_LINK_NONE)
+    else if (symbol->flags & SYMFLAG_LINK_NONE)
       ident->constant.label =
-          mk_static_label(ident->lexinfo, symval->static_id);
+          mk_static_label(ident->lexinfo, symbol->static_id);
     else
       ident->constant.label = ident->lexinfo;
     return ident;
-  } else if (symval->flags & SYMFLAG_ENUM_CONST) {
+  } else if (symbol->flags & SYMFLAG_ENUM_CONST) {
     ident->attributes |= ATTR_CONST_INT;
-    TagValue *tag_value = ident->type->tag.value;
-    int *value = map_get(&tag_value->data.enumerators.by_name,
-                         (char *)ident->lexinfo, strlen(ident->lexinfo));
+    Tag *tag = ident->type->tag.value;
+    int *value = map_get(&tag->data.enumerators.by_name, (char *)ident->lexinfo,
+                         strlen(ident->lexinfo));
     ident->constant.integral.signed_value = *value;
     return ident;
   } else {
@@ -462,7 +462,7 @@ ASTree *evaluate_subtraction(ASTree *subtraction, ASTree *left, ASTree *right) {
                                    right->attributes & ATTR_MASK_CONST);
     if (left->constant.label != right->constant.label) {
       subtraction->constant.label = left->constant.label;
-      subtraction->constant.symval = left->constant.symval;
+      subtraction->constant.symbol = left->constant.symbol;
     }
     if (type_is_unsigned(subtraction->type)) {
       BINARY_EVAL(-, subtraction->constant.integral.unsigned_value,
@@ -481,7 +481,7 @@ ASTree *evaluate_shift(ASTree *shift, ASTree *left, ASTree *right) {
       left->constant.label == NULL && right->constant.label == NULL) {
     shift->attributes |= MIN(left->attributes & ATTR_MASK_CONST,
                              right->attributes & ATTR_MASK_CONST);
-    if (shift->symbol == TOK_SHL) {
+    if (shift->tok_kind == TOK_SHL) {
       if (type_is_unsigned(shift->type)) {
         SHIFT_EVAL(<<, shift, left, right);
       } else {
@@ -514,7 +514,7 @@ ASTree *evaluate_relational(ASTree *relational, ASTree *left, ASTree *right) {
   relational->attributes |= MIN(left->attributes & ATTR_MASK_CONST,
                                 right->attributes & ATTR_MASK_CONST);
 
-  switch (relational->symbol) {
+  switch (relational->tok_kind) {
     case '<':
       COMPARATOR_EVAL(<, relational, left, right);
       break;
@@ -549,8 +549,8 @@ ASTree *evaluate_equality(ASTree *equality, ASTree *left, ASTree *right) {
                               right->attributes & ATTR_MASK_CONST);
 
   if (left->constant.label != right->constant.label) {
-    equality->constant.integral.signed_value = equality->symbol == TOK_NE;
-  } else if (equality->symbol == TOK_NE) {
+    equality->constant.integral.signed_value = equality->tok_kind == TOK_NE;
+  } else if (equality->tok_kind == TOK_NE) {
     COMPARATOR_EVAL(!=, equality, left, right);
   } else {
     COMPARATOR_EVAL(==, equality, left, right);
@@ -570,7 +570,7 @@ ASTree *evaluate_logical(ASTree *logical, ASTree *left, ASTree *right) {
   logical->attributes |= MIN(left->attributes & ATTR_MASK_CONST,
                              right->attributes & ATTR_MASK_CONST);
   logical->constant.integral.signed_value =
-      logical->symbol == TOK_OR
+      logical->tok_kind == TOK_OR
           ? (left->constant.label != NULL ||
              left->constant.integral.unsigned_value != 0 ||
              right->constant.label != NULL ||
@@ -648,7 +648,7 @@ ASTree *evaluate_conditional(ASTree *qmark, ASTree *condition,
   return astree_adopt(qmark, 3, condition, true_expr, false_expr);
 }
 
-/* TODO(Robert): determine if `constant.symval` should actually be
+/* TODO(Robert): determine if `constant.symbol` should actually be
  * propogated by this function. currently, we do it because the register
  * allocator expects a symbol to be there for pic mode operands. this may
  * not even be necessary at all since pic mode operands use no registers
@@ -683,8 +683,8 @@ ASTree *evaluate_addrof(ASTree *addrof, ASTree *operand) {
   }
 }
 
-/* TODO(Robert): determine if `constant.symval` should be set to the
- * symval of the member being referenced. also, in the case of a constant
+/* TODO(Robert): determine if `constant.symbol` should be set to the
+ * symbol of the member being referenced. also, in the case of a constant
  * address being used between multiple functions, find a way to clear the
  * liveness info for all symbols before determining liveness.
  */
@@ -693,15 +693,15 @@ ASTree *evaluate_reference(ASTree *reference, ASTree *struct_, ASTree *member) {
     maybe_load_cexpr(struct_, NULL);
     return translate_reference(reference, struct_, member);
   } else {
-    Type *tag_type = reference->symbol == TOK_ARROW
+    Type *tag_type = reference->tok_kind == TOK_ARROW
                          ? type_strip_declarator(struct_->type)
                          : struct_->type;
 
-    SymbolValue *symval = type_member_name(tag_type, member->lexinfo);
-    assert(symval);
-    reference->constant.symval = symval;
+    Symbol *symbol = type_member_name(tag_type, member->lexinfo);
+    assert(symbol);
+    reference->constant.symbol = symbol;
     reference->constant.integral.signed_value =
-        struct_->constant.integral.signed_value + symval->disp;
+        struct_->constant.integral.signed_value + symbol->disp;
     reference->constant.label = struct_->constant.label;
     reference->attributes |= ATTR_CONST_MAYBE;
 
@@ -725,7 +725,7 @@ ASTree *evaluate_comma(ASTree *comma, ASTree *left, ASTree *right) {
 }
 
 ASTree *evaluate_binop(ASTree *operator, ASTree * left, ASTree *right) {
-  switch (operator->symbol) {
+  switch (operator->tok_kind) {
     BINOP_CASE('&', &, translate_binop);
     BINOP_CASE('|', |, translate_binop);
     BINOP_CASE('^', ^, translate_binop);
@@ -755,13 +755,13 @@ ASTree *evaluate_binop(ASTree *operator, ASTree * left, ASTree *right) {
       fprintf(stderr,
               "FATAL: attempted to evaluate constant expression with "
               "unknown binary operation %s\n",
-              parser_get_tname(operator->symbol));
+              parser_get_tname(operator->tok_kind));
       abort();
   }
 }
 
 ASTree *evaluate_unop(ASTree *operator, ASTree * operand) {
-  switch (operator->symbol) {
+  switch (operator->tok_kind) {
     UNOP_CASE(TOK_NEG, -, translate_unop);
     UNOP_CASE('~', ~, translate_unop);
     /* treat like a cast */
@@ -782,14 +782,14 @@ ASTree *evaluate_unop(ASTree *operator, ASTree * operand) {
     case TOK_SIZEOF:
       operator->attributes |= ATTR_CONST_INT;
       operator->constant.integral.unsigned_value = type_get_width(
-          operand->symbol == TOK_DECLARATION ? astree_get(operand, 1)->type
-                                             : operand->type);
+          operand->tok_kind == TOK_DECLARATION ? astree_get(operand, 1)->type
+                                               : operand->type);
       return translate_sizeof(operator, operand);
     default:
       fprintf(stderr,
               "FATAL: attempted to evaluate constant expression with "
               "unknown unary operation %s\n",
-              parser_get_tname(operator->symbol));
+              parser_get_tname(operator->tok_kind));
       abort();
   }
 }

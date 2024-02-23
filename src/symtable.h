@@ -8,19 +8,19 @@
 
 #define DEFAULT_MAP_SIZE 100
 
-typedef enum table_type {
-  TRANS_UNIT_TABLE,
-  BLOCK_TABLE,
-  MEMBER_TABLE,
-  FUNCTION_TABLE
-} TableType;
+typedef enum table_kind {
+  TABLE_TRANS_UNIT,
+  TABLE_BLOCK,
+  TABLE_MEMBER,
+  TABLE_FUNCTION
+} TableKind;
 
 typedef struct symbol_table {
   Map *primary_namespace;
   Map *tag_namespace;
   Map *label_namespace;
   LinkedList *control_stack;
-  TableType type;
+  TableKind kind;
 } SymbolTable;
 
 typedef enum symbol_flag {
@@ -46,7 +46,7 @@ typedef enum symbol_flag {
 /* TODO(Robert): replace loc with a pointer since it makes more sense for it to
  * point to the location stored in an ASTree node
  */
-typedef struct symbol_value {
+typedef struct symbol {
   size_t sequence;    /* used to order declarations in a given block */
   Location loc;       /* declaration location */
   Type *type;         /* type of symbol */
@@ -54,12 +54,12 @@ typedef struct symbol_value {
   ptrdiff_t disp;     /* displacement on stack/in struct */
   size_t static_id;   /* unique id for static local variables */
   struct instruction_data *next_use; /* liveness info for allocator */
-} SymbolValue;
+} Symbol;
 
-typedef enum tag_type { TAG_STRUCT = 0, TAG_UNION, TAG_ENUM } TagType;
+typedef enum tag_kind { TAG_STRUCT = 0, TAG_UNION, TAG_ENUM } TagKind;
 
 /* TODO(Robert): make this a tagged union */
-typedef struct tag_value {
+typedef struct tag {
   size_t width;     /* struct/enum width */
   size_t alignment; /* struct/enum alignment */
   union {
@@ -73,9 +73,9 @@ typedef struct tag_value {
       int last_value;                /* value of last enum constant */
     } enumerators;
   } data;
-  TagType tag;    /* indicates struct, union or enum tag */
+  TagKind kind;   /* indicates struct, union or enum tag */
   int is_defined; /* used to identify forward declarations */
-} TagValue;
+} Tag;
 
 typedef enum control_type {
   CTRL_BREAK,
@@ -96,27 +96,27 @@ typedef struct label_value {
   int is_defined;
 } LabelValue;
 
-/* SymbolValue functions */
-SymbolValue *symbol_value_init(const Location *loc, size_t sequence);
-void symbol_value_destroy(SymbolValue *symbol_value);
-int symbol_value_print(const SymbolValue *symbol, char *buffer);
-int symbol_is_lvalue(const SymbolValue *symbol);
+/* Symbol functions */
+Symbol *symbol_init(const Location *loc, size_t sequence);
+void symbol_destroy(Symbol *symbol);
+int symbol_print(const Symbol *symbol, char *buffer);
+int symbol_is_lvalue(const Symbol *symbol);
 
-/* TagValue functions */
-TagValue *tag_value_init(TagType tag);
-void tag_value_destroy(TagValue *tagval);
+/* Tag functions */
+Tag *tag_init(TagKind kind);
+void tag_destroy(Tag *tag);
 
 /* symbol table functions */
-SymbolTable *symbol_table_init(TableType type);
+SymbolTable *symbol_table_init(TableKind type);
 void symbol_table_destroy(SymbolTable *table);
 void symbol_table_insert(SymbolTable *table, const char *ident,
-                         const size_t ident_len, SymbolValue *symval);
-SymbolValue *symbol_table_get(SymbolTable *table, const char *ident,
-                              const size_t ident_len);
+                         const size_t ident_len, Symbol *symbol);
+Symbol *symbol_table_get(SymbolTable *table, const char *ident,
+                         const size_t ident_len);
 void symbol_table_insert_tag(SymbolTable *table, const char *ident,
-                             const size_t ident_len, TagValue *tagval);
-TagValue *symbol_table_get_tag(SymbolTable *table, const char *ident,
-                               const size_t ident_len);
+                             const size_t ident_len, Tag *tag);
+Tag *symbol_table_get_tag(SymbolTable *table, const char *ident,
+                          const size_t ident_len);
 void symbol_table_insert_label(SymbolTable *table, const char *ident,
                                const size_t ident_len, LabelValue *labval);
 LabelValue *symbol_table_get_label(SymbolTable *table, const char *ident,

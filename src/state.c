@@ -47,14 +47,14 @@ SymbolTable *state_peek_table(CompilerState *state) {
 }
 
 int state_get_symbol(CompilerState *state, const char *ident,
-                     const size_t ident_len, SymbolValue **out) {
+                     const size_t ident_len, Symbol **out) {
   size_t i;
   for (i = 0; i < llist_size(&state->table_stack); ++i) {
     SymbolTable *current = llist_get(&state->table_stack, i);
     /* TODO(Robert): rewrite symbol table functions */
-    SymbolValue *symval = symbol_table_get(current, ident, ident_len);
-    if (symval != NULL) {
-      *out = symval;
+    Symbol *symbol = symbol_table_get(current, ident, ident_len);
+    if (symbol != NULL) {
+      *out = symbol;
       break;
     }
   }
@@ -69,11 +69,11 @@ int state_get_symbol(CompilerState *state, const char *ident,
 }
 
 void state_insert_symbol(CompilerState *state, const char *ident,
-                         const size_t ident_len, SymbolValue *symval) {
+                         const size_t ident_len, Symbol *symbol) {
   SymbolTable *top_scope = llist_front(&state->table_stack);
   /* TODO(Robert): rewrite symbol table functions */
   assert(symbol_table_get(top_scope, ident, ident_len) == NULL);
-  symbol_table_insert(top_scope, ident, ident_len, symval);
+  symbol_table_insert(top_scope, ident, ident_len, symbol);
 }
 
 size_t state_get_sequence(CompilerState *state) {
@@ -81,7 +81,7 @@ size_t state_get_sequence(CompilerState *state) {
 }
 
 int state_get_tag(CompilerState *state, const char *ident,
-                  const size_t ident_len, TagValue **out) {
+                  const size_t ident_len, Tag **out) {
   *out = NULL;
   size_t i;
   for (i = 0; i < llist_size(&state->table_stack); ++i) {
@@ -97,7 +97,7 @@ int state_get_tag(CompilerState *state, const char *ident,
 }
 
 void state_insert_tag(CompilerState *state, const char *ident,
-                      const size_t ident_len, TagValue *tagval) {
+                      const size_t ident_len, Tag *tag) {
   SymbolTable *top_scope = NULL;
   size_t i;
   for (i = 0; i < llist_size(&state->table_stack); ++i) {
@@ -107,7 +107,7 @@ void state_insert_tag(CompilerState *state, const char *ident,
 
   assert(top_scope->tag_namespace != NULL);
   assert(symbol_table_get_tag(top_scope, ident, ident_len) == NULL);
-  symbol_table_insert_tag(top_scope, ident, ident_len, tagval);
+  symbol_table_insert_tag(top_scope, ident, ident_len, tag);
 }
 
 LabelValue *state_get_label(CompilerState *state, const char *ident,
@@ -246,10 +246,10 @@ void state_push_continue_id(CompilerState *state, size_t id) {
 void state_dec_jump_id_count(CompilerState *state) { --state->jump_id_count; }
 
 void state_set_function(CompilerState *state, const char *function_name,
-                        SymbolValue *function_symval) {
+                        Symbol *function_symbol) {
   assert(state->enclosing_function == NULL &&
          state->enclosing_function_name == NULL);
-  state->enclosing_function = function_symval;
+  state->enclosing_function = function_symbol;
   state->enclosing_function_name = function_name;
 }
 
@@ -257,7 +257,7 @@ const char *state_get_function_name(CompilerState *state) {
   return state->enclosing_function_name;
 }
 
-SymbolValue *state_get_function(CompilerState *state) {
+Symbol *state_get_function(CompilerState *state) {
   return state->enclosing_function;
 }
 

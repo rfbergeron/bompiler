@@ -15,8 +15,8 @@ static ASTree *init_agg_member(Type *member_type, ptrdiff_t disp,
                                ListIter *where);
 
 static ASTree *set_init_list_iterators(ASTree *init_list, ListIter *where) {
-  if (init_list->symbol == TOK_TYPE_ERROR) return init_list;
-  if (init_list->symbol == TOK_INIT_LIST) {
+  if (init_list->tok_kind == TOK_TYPE_ERROR) return init_list;
+  if (init_list->tok_kind == TOK_INIT_LIST) {
     init_list->first_instr = liter_copy(astree_get(init_list, 0)->first_instr);
     if (init_list->first_instr == NULL) abort();
     init_list->last_instr = liter_copy(where);
@@ -27,19 +27,19 @@ static ASTree *set_init_list_iterators(ASTree *init_list, ListIter *where) {
 
 static ASTree *init_scalar(const Type *type, ptrdiff_t disp,
                            ASTree *initializer, ListIter *where) {
-  if (initializer->symbol == TOK_TYPE_ERROR) {
+  if (initializer->tok_kind == TOK_TYPE_ERROR) {
     return initializer;
-  } else if (initializer->symbol == TOK_INIT_LIST) {
+  } else if (initializer->tok_kind == TOK_INIT_LIST) {
     ASTree *real_initializer = astree_get(initializer, 0);
     ASTree *errnode = init_scalar(type, disp, real_initializer, where);
-    if (errnode->symbol == TOK_TYPE_ERROR) {
+    if (errnode->tok_kind == TOK_TYPE_ERROR) {
       (void)astree_remove(errnode, 0);
       return astree_adopt(errnode, 1, initializer);
     } else {
       return set_init_list_iterators(initializer, where);
     }
   } else if (((type_is_char_array(type) || type_is_pointer(type)) &&
-              initializer->symbol == TOK_STRINGCON) ||
+              initializer->tok_kind == TOK_STRINGCON) ||
              types_assignable(type, initializer->type,
                               astree_is_const_zero(initializer))) {
     if (disp >= 0) {
@@ -96,7 +96,7 @@ ASTree *init_array(Type *arr_type, ptrdiff_t arr_disp, ASTree *init_list,
     ptrdiff_t elem_disp = arr_disp + (elem_index * elem_width);
     ASTree *errnode =
         init_agg_member(elem_type, elem_disp, init_list, init_index, where);
-    if (errnode->symbol == TOK_TYPE_ERROR) {
+    if (errnode->tok_kind == TOK_TYPE_ERROR) {
       (void)astree_remove(errnode, 0);
       return astree_adopt(errnode, 1, init_list);
     }
@@ -125,11 +125,11 @@ ASTree *init_array(Type *arr_type, ptrdiff_t arr_disp, ASTree *init_list,
 
 ASTree *init_union(const Type *union_type, ptrdiff_t union_disp,
                    ASTree *init_list, size_t *init_index, ListIter *where) {
-  SymbolValue *member_symval = type_member_index(union_type, 0);
-  Type *member_type = member_symval->type;
+  Symbol *member_symbol = type_member_index(union_type, 0);
+  Type *member_type = member_symbol->type;
   ASTree *errnode =
       init_agg_member(member_type, union_disp, init_list, init_index, where);
-  if (errnode->symbol == TOK_TYPE_ERROR) {
+  if (errnode->tok_kind == TOK_TYPE_ERROR) {
     (void)astree_remove(errnode, 0);
     return astree_adopt(errnode, 1, init_list);
   }
@@ -146,15 +146,15 @@ ASTree *init_struct(const Type *struct_type, ptrdiff_t struct_disp,
   size_t member_index = 0;
   for (; member_index < member_count && *init_index < init_count;
        ++member_index) {
-    SymbolValue *member_symval = type_member_index(struct_type, member_index);
-    Type *member_type = member_symval->type;
+    Symbol *member_symbol = type_member_index(struct_type, member_index);
+    Type *member_type = member_symbol->type;
     size_t member_padding = type_get_padding(member_type, bytes_initialized);
-    ptrdiff_t member_disp = struct_disp + member_symval->disp;
+    ptrdiff_t member_disp = struct_disp + member_symbol->disp;
     if (member_disp >= 0 && member_padding > 0)
       static_zero_pad(member_padding, where);
     ASTree *errnode =
         init_agg_member(member_type, member_disp, init_list, init_index, where);
-    if (errnode->symbol == TOK_TYPE_ERROR) {
+    if (errnode->tok_kind == TOK_TYPE_ERROR) {
       (void)astree_remove(errnode, 0);
       return astree_adopt(errnode, 1, init_list);
     }
@@ -183,7 +183,7 @@ static ASTree *init_agg_member(Type *member_type, ptrdiff_t disp,
                                ListIter *where) {
   ASTree *initializer = astree_get(init_list, *init_index);
   ASTree *errnode;
-  if (initializer->symbol != TOK_INIT_LIST &&
+  if (initializer->tok_kind != TOK_INIT_LIST &&
       (initializer->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT) {
     return astree_create_errnode(init_list, BCC_TERR_EXPECTED_CONST, 1,
                                  initializer);
@@ -191,10 +191,10 @@ static ASTree *init_agg_member(Type *member_type, ptrdiff_t disp,
     ++*init_index;
     errnode = init_scalar(member_type, disp, initializer, where);
   } else if (type_is_char_array(member_type) &&
-             initializer->symbol == TOK_STRINGCON) {
+             initializer->tok_kind == TOK_STRINGCON) {
     ++*init_index;
     errnode = init_literal(member_type, disp, initializer, where);
-  } else if (initializer->symbol == TOK_INIT_LIST) {
+  } else if (initializer->tok_kind == TOK_INIT_LIST) {
     ++*init_index;
     errnode = traverse_initializer(member_type, disp, initializer, where);
   } else if (type_is_array(member_type)) {
@@ -208,9 +208,9 @@ static ASTree *init_agg_member(Type *member_type, ptrdiff_t disp,
                                  initializer, member_type, initializer->type);
   }
 
-  if (errnode->symbol == TOK_TYPE_ERROR &&
-      (type_is_scalar(member_type) || initializer->symbol == TOK_INIT_LIST ||
-       initializer->symbol == TOK_STRINGCON)) {
+  if (errnode->tok_kind == TOK_TYPE_ERROR &&
+      (type_is_scalar(member_type) || initializer->tok_kind == TOK_INIT_LIST ||
+       initializer->tok_kind == TOK_STRINGCON)) {
     /* make errnode parent of init list, not the initializer */
     assert(astree_get(errnode, 0) == initializer);
     (void)astree_remove(errnode, 0);
@@ -224,17 +224,18 @@ ASTree *traverse_initializer(Type *type, ptrdiff_t disp, ASTree *initializer,
                              ListIter *where) {
   if (type_is_scalar(type)) {
     return init_scalar(type, disp, initializer, where);
-  } else if (type_is_char_array(type) && initializer->symbol == TOK_STRINGCON) {
+  } else if (type_is_char_array(type) &&
+             initializer->tok_kind == TOK_STRINGCON) {
     return init_literal(type, disp, initializer, where);
-  } else if (type_is_array(type) && initializer->symbol == TOK_INIT_LIST) {
+  } else if (type_is_array(type) && initializer->tok_kind == TOK_INIT_LIST) {
     size_t dummy_index = 0;
     return set_init_list_iterators(
         init_array(type, disp, initializer, &dummy_index, where), where);
-  } else if (type_is_struct(type) && initializer->symbol == TOK_INIT_LIST) {
+  } else if (type_is_struct(type) && initializer->tok_kind == TOK_INIT_LIST) {
     size_t dummy_index = 0;
     return set_init_list_iterators(
         init_struct(type, disp, initializer, &dummy_index, where), where);
-  } else if (type_is_union(type) && initializer->symbol == TOK_INIT_LIST) {
+  } else if (type_is_union(type) && initializer->tok_kind == TOK_INIT_LIST) {
     size_t dummy_index = 0;
     return set_init_list_iterators(
         init_union(type, disp, initializer, &dummy_index, where), where);
