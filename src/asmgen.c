@@ -2463,10 +2463,22 @@ ASTree *translate_static_scalar_init(const Type *type, ASTree *initializer,
   }
   int status = liter_push_back(where, &where, 1, instr);
   if (status) abort();
-  initializer->first_instr = liter_copy(where);
-  if (initializer->first_instr == NULL) abort();
-  initializer->last_instr = liter_copy(where);
-  if (initializer->last_instr == NULL) abort();
+
+  if (state_get_function(state) != NULL) {
+    Instruction *nop_instr = instr_init(OP_NOP);
+    status = llist_push_back(instructions, nop_instr);
+    if (status) abort();
+    initializer->first_instr = llist_iter_last(instructions);
+    if (initializer->first_instr == NULL) abort();
+    initializer->last_instr = liter_copy(initializer->first_instr);
+    if (initializer->last_instr == NULL) abort();
+  } else {
+    initializer->first_instr = liter_copy(where);
+    if (initializer->first_instr == NULL) abort();
+    initializer->last_instr = liter_copy(where);
+    if (initializer->last_instr == NULL) abort();
+  }
+
   return initializer;
 }
 
@@ -2505,6 +2517,18 @@ ASTree *translate_auto_scalar_init(const Type *type, ptrdiff_t disp,
 ASTree *translate_static_literal_init(const Type *arr_type, ASTree *literal,
                                       ListIter *where) {
   assert(literal->first_instr == NULL && literal->last_instr == NULL);
+
+  if (state_get_function(state) != NULL) {
+    Instruction *nop_instr = instr_init(OP_NOP);
+    int status = llist_push_back(instructions, nop_instr);
+    if (status) abort();
+    literal->first_instr = llist_iter_last(instructions);
+    assert(literal->first_instr != NULL);
+    literal->last_instr = liter_copy(literal->first_instr);
+    assert(literal->last_instr != NULL);
+  }
+
+  /* TODO(Robert): use a map here. this is ugly. */
   size_t i;
   for (i = 0; i < literals_size; ++i) {
     if (literals[i].label == literal->constant.label) {
@@ -2517,50 +2541,30 @@ ASTree *translate_static_literal_init(const Type *arr_type, ASTree *literal,
         set_op_dir(&asciz_instr->dest, str);
         int status = liter_push_back(where, &where, 1, asciz_instr);
         if (status) abort();
-        literal->first_instr = liter_copy(where);
-        if (literal->first_instr == NULL) abort();
-        literal->last_instr = liter_copy(where);
-        if (literal->last_instr == NULL) abort();
+
+        if (state_get_function(state) == NULL) {
+          literal->first_instr = liter_copy(where);
+          assert(literal->first_instr != NULL);
+          literal->last_instr = liter_copy(where);
+          assert(literal->last_instr != NULL);
+        }
         return literal;
       } else if (literal_length <= arr_width) {
         Instruction *ascii_instr = instr_init(OP_ASCII);
         set_op_dir(&ascii_instr->dest, str);
         int status = liter_push_back(where, &where, 1, ascii_instr);
         if (status) abort();
-        literal->first_instr = liter_copy(where);
-        if (literal->first_instr == NULL) abort();
-
         size_t zero_count = arr_width - literal_length;
         if (zero_count > 0) static_zero_pad(zero_count, where);
-        literal->last_instr = liter_copy(where);
-        if (literal->last_instr == NULL) abort();
+        if (state_get_function(state) == NULL) {
+          literal->first_instr = liter_copy(where);
+          assert(literal->first_instr != NULL);
+          literal->last_instr = liter_copy(where);
+          assert(literal->last_instr != NULL);
+        }
         return literal;
       } else {
-        size_t partial_len = arr_width + 2;
-        char *partial_str = malloc(partial_len + 1);
-        partial_str[partial_len] = '\0';
-        partial_str[partial_len - 1] = '\"';
-        memcpy(partial_str, str, arr_width + 1);
-
-        char *existing = map_get(generated_text, partial_str, partial_len);
-        if (existing) {
-          free(partial_str);
-          partial_str = existing;
-        } else {
-          int status =
-              map_insert(generated_text, partial_str, partial_len, partial_str);
-          if (status) abort();
-        }
-
-        Instruction *ascii_instr = instr_init(OP_ASCII);
-        set_op_dir(&ascii_instr->dest, partial_str);
-        int status = liter_push_back(where, &where, 1, ascii_instr);
-        if (status) abort();
-        literal->first_instr = liter_copy(where);
-        if (literal->first_instr == NULL) abort();
-        literal->last_instr = liter_copy(where);
-        if (literal->last_instr == NULL) abort();
-        return literal;
+        abort();
       }
     }
   }
@@ -2675,16 +2679,15 @@ static ASTree *translate_static_local_init(ASTree *declaration,
   if (status) abort();
   free(temp);
 
-  if (declaration->first_instr == NULL) {
-    assert(declaration->last_instr == NULL);
-    Instruction *nop_instr = instr_init(OP_NOP);
-    int status = llist_push_back(instructions, nop_instr);
-    if (status) abort();
-    declaration->first_instr = llist_iter_last(instructions);
-    if (declaration->first_instr == NULL) abort();
-    declaration->last_instr = llist_iter_last(instructions);
-    if (declaration->last_instr == NULL) abort();
-  }
+  assert(declarator->first_instr == NULL && declarator->last_instr == NULL);
+  assert(assignment->first_instr == NULL && assignment->last_instr == NULL);
+  assert(initializer->first_instr != NULL && initializer->last_instr != NULL);
+
+  assignment->first_instr = liter_copy(initializer->first_instr);
+  if (assignment->first_instr == NULL) abort();
+  assignment->last_instr = liter_copy(initializer->last_instr);
+  if (assignment->last_instr == NULL) abort();
+
   return declaration;
 }
 
@@ -2711,13 +2714,9 @@ static ASTree *translate_auto_local_init(ASTree *declaration,
   if (status) abort();
   declarator->last_instr = liter_copy(declarator->first_instr);
   if (declarator->last_instr == NULL) abort();
+
   (void)translate_assignment(assignment, declarator, initializer);
-  if (declaration->first_instr == NULL)
-    declaration->first_instr = liter_copy(declarator->first_instr);
-  if (declaration->first_instr == NULL) abort();
-  free(declaration->last_instr);
-  declaration->last_instr = liter_copy(assignment->last_instr);
-  if (declaration->last_instr == NULL) abort();
+
   return declaration;
 }
 
@@ -2742,35 +2741,38 @@ static ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
                                      initializer);
   } else {
     symbol->disp = assign_stack_space(symbol->type);
-    free(declaration->last_instr);
-    declaration->last_instr = llist_iter_last(instructions);
-    if (declaration->last_instr == NULL) abort();
-    ASTree *errnode = traverse_initializer(
-        declarator->type, symbol->disp, initializer, declaration->last_instr);
+
+    ListIter *temp = llist_iter_last(instructions);
+    ASTree *errnode =
+        traverse_initializer(declarator->type, symbol->disp, initializer, temp);
+    free(temp);
+
     if (errnode->tok_kind == TOK_TYPE_ERROR) {
       (void)astree_remove(errnode, 0);
       return astree_adopt(errnode, 1, declaration);
-    }
-
-    if (declaration->first_instr == NULL) {
-      declaration->first_instr = liter_copy(initializer->first_instr);
-      if (declaration->first_instr == NULL) abort();
+    } else {
+      assert(declarator->first_instr == NULL && declarator->last_instr == NULL);
+      assert(initializer->first_instr != NULL &&
+             initializer->last_instr != NULL);
+      assignment->first_instr = liter_copy(initializer->first_instr);
+      assert(assignment->first_instr != NULL);
+      assignment->last_instr = liter_copy(initializer->last_instr);
+      assert(assignment->last_instr != NULL);
+      return declaration;
     }
   }
-  return declaration;
 }
 
 static ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
   PFDBG0('g', "Translating local declaration");
-  if (declaration->first_instr == NULL) {
-    Instruction *nop_instr = instr_init(OP_NOP);
-    int status = llist_push_back(instructions, nop_instr);
-    if (status) abort();
-    declaration->first_instr = llist_iter_last(instructions);
-    if (declaration->first_instr == NULL) abort();
-    declaration->last_instr = llist_iter_last(instructions);
-    if (declaration->last_instr == NULL) abort();
-  }
+  assert(declarator->first_instr == NULL && declarator->last_instr == NULL);
+  Instruction *nop_instr = instr_init(OP_NOP);
+  int status = llist_push_back(instructions, nop_instr);
+  if (status) abort();
+  declarator->first_instr = llist_iter_last(instructions);
+  if (declarator->first_instr == NULL) abort();
+  declarator->last_instr = llist_iter_last(instructions);
+  if (declarator->last_instr == NULL) abort();
 
   Symbol *symbol = NULL;
   int in_current_scope = state_get_symbol(state, (char *)declarator->lexinfo,
@@ -2816,6 +2818,13 @@ ASTree *translate_local_declarations(ASTree *block, ASTree *declarations) {
       abort();
     }
   }
+
+  declarations->first_instr =
+      liter_copy(astree_get(declarations, 1)->first_instr);
+  assert(declarations->first_instr != NULL);
+  declarations->last_instr =
+      liter_copy(astree_get(declarations, decl_count - 1)->last_instr);
+  assert(declarations->last_instr != NULL);
   return astree_adopt(block, 1, declarations);
 }
 
