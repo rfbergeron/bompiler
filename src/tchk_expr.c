@@ -11,7 +11,7 @@
 #include "yyparse.h"
 
 ASTree *validate_empty_expr(ASTree *empty_expr) {
-  assert(empty_expr != &EMPTY_EXPR && empty_expr->tok_kind == ';');
+  assert(empty_expr->tok_kind == TOK_EMPTY);
   empty_expr->type = (Type *)TYPE_VOID;
   return translate_empty_expr(empty_expr);
 }

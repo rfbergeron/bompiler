@@ -35,8 +35,6 @@ static const char attr_map[][16] = {"LVAL", "DEFAULT", "CONST", "INITIALIZER",
 
 extern int skip_type_check;
 
-ASTree EMPTY_EXPR = EMPTY_EXPR_VALUE;
-
 ASTree *astree_init(int tok_kind, const Location location, const char *info) {
   PFDBG2('t', "Initializing new astree node with code: %s, lexinfo: '%s'",
          parser_get_tname(tok_kind), info);
@@ -62,7 +60,7 @@ ASTree *astree_init(int tok_kind, const Location location, const char *info) {
 }
 
 void astree_destroy(ASTree *tree) {
-  if (tree == NULL || tree == &EMPTY_EXPR) return;
+  if (tree == NULL) return;
 
   PFDBG2('t', "Freeing an astree with symbol: %s, lexinfo: %s",
          parser_get_tname(tree->tok_kind), tree->lexinfo);
@@ -148,8 +146,7 @@ ASTree *astree_adopt(ASTree *parent, const size_t count, ...) {
   for (i = 0; i < count; ++i) {
     ASTree *child = va_arg(args, ASTree *);
     assert(child != NULL);
-    assert((child == &EMPTY_EXPR) ||
-           (llist_find(&parent->children, child) == (size_t)-1L));
+    assert(llist_find(&parent->children, child) == (size_t)-1L);
     PFDBG2('t', "Tree %s adopts %s", parser_get_tname(parent->tok_kind),
            parser_get_tname(child->tok_kind));
     int status = llist_push_back(&parent->children, child);
