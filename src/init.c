@@ -4,24 +4,30 @@
 #include "assert.h"
 #include "tchk_decl.h"
 
+#define MIN(x, y) ((y) < (x) ? (y) : (x))
+
 /* TODO(Robert): perform type checking for all initializers here. this should
  * be as simple as adding a call to `types_assignable` in `init_scalar`
  */
 /* TODO(Robert): do not allow string literals or initializer lists to exceed
  * capacity for fixed size arrays, either here or in tchk_decl.c
  */
+/* TODO(Robert): check for excess initializers in init lists */
+/* TODO(Robert): We need a way to determine if braces have been elided from an
+ * initializer. This is necessary for trying to determine if too many
+ * initializers have been provided.
+ */
 static ASTree *init_agg_member(Type *member_type, ptrdiff_t disp,
                                ASTree *init_list, size_t *init_index,
                                ListIter *where);
 
-static ASTree *set_init_list_iterators(ASTree *init_list, ListIter *where) {
-  if (init_list->tok_kind == TOK_TYPE_ERROR) return init_list;
-  if (init_list->tok_kind == TOK_INIT_LIST) {
-    init_list->first_instr = liter_copy(astree_get(init_list, 0)->first_instr);
-    if (init_list->first_instr == NULL) abort();
-    init_list->last_instr = liter_copy(where);
-    if (init_list->last_instr == NULL) abort();
-  }
+static ASTree *set_init_list_iterators(ASTree *init_list) {
+  assert(init_list->tok_kind == TOK_INIT_LIST);
+  init_list->first_instr = liter_copy(astree_get(init_list, 0)->first_instr);
+  if (init_list->first_instr == NULL) abort();
+  init_list->last_instr = liter_copy(
+      astree_get(init_list, astree_count(init_list) - 1)->last_instr);
+  if (init_list->last_instr == NULL) abort();
   return init_list;
 }
 
@@ -35,8 +41,11 @@ static ASTree *init_scalar(const Type *type, ptrdiff_t disp,
     if (errnode->tok_kind == TOK_TYPE_ERROR) {
       (void)astree_remove(errnode, 0);
       return astree_adopt(errnode, 1, initializer);
+    } else if (astree_count(initializer) > 1) {
+      return astree_create_errnode(initializer, BCC_TERR_EXCESS_INITIALIZERS, 1,
+                                   initializer);
     } else {
-      return set_init_list_iterators(initializer, where);
+      return set_init_list_iterators(initializer);
     }
   } else if (((type_is_char_array(type) || type_is_pointer(type)) &&
               initializer->tok_kind == TOK_STRINGCON) ||
@@ -81,18 +90,12 @@ static ASTree *init_literal(Type *arr_type, ptrdiff_t arr_disp, ASTree *literal,
 ASTree *init_array(Type *arr_type, ptrdiff_t arr_disp, ASTree *init_list,
                    size_t *init_index, ListIter *where) {
   Type *elem_type = type_strip_declarator(arr_type);
-  size_t elem_width = type_get_width(elem_type),
-         elem_count = type_member_count(arr_type),
-         init_count = astree_count(init_list), elem_index;
+  size_t elem_width = type_get_width(elem_type);
+  size_t elem_index;
+  size_t init_count =
+      MIN(type_member_count(arr_type), astree_count(init_list) - *init_index);
 
-  if (!type_is_deduced_array(arr_type) && elem_count < init_count)
-    return astree_create_errnode(init_list, BCC_TERR_EXCESS_INITIALIZERS, 1,
-                                 init_list);
-
-  for (elem_index = 0;
-       (elem_index < elem_count || type_is_deduced_array(arr_type)) &&
-       *init_index < init_count;
-       ++elem_index) {
+  for (elem_index = 0; elem_index < init_count; ++elem_index) {
     ptrdiff_t elem_disp = arr_disp + (elem_index * elem_width);
     ASTree *errnode =
         init_agg_member(elem_type, elem_disp, init_list, init_index, where);
@@ -102,24 +105,28 @@ ASTree *init_array(Type *arr_type, ptrdiff_t arr_disp, ASTree *init_list,
     }
   }
 
-  size_t zero_count = (elem_count - elem_index) * type_get_width(elem_type);
-  if (type_is_deduced_array(arr_type)) {
-    arr_type->array.length = elem_index;
-  } else if (zero_count > 0) {
-    if (arr_disp >= 0) {
-      static_zero_pad(zero_count, where);
-    } else {
-      int status = liter_advance(where, 1);
-      if (status) abort();
-      ListIter *temp = liter_prev(where, 1);
-      if (temp == NULL) abort();
-      bulk_mzero(RBP_VREG, arr_disp, type_get_width(arr_type) - zero_count,
-                 arr_type, temp);
-      free(temp);
-      status = liter_advance(where, -1);
-      if (status) abort();
-    }
+  if (type_member_count(arr_type) <= init_count) {
+    return init_list;
+  } else if (type_is_deduced_array(arr_type)) {
+    arr_type->array.length = init_count;
+  } else if (arr_disp >= 0) {
+    size_t zero_count =
+        (type_member_count(arr_type) - init_count) * type_get_width(elem_type);
+    static_zero_pad(zero_count, where);
+  } else {
+    size_t zero_count =
+        (type_member_count(arr_type) - init_count) * type_get_width(elem_type);
+    int status = liter_advance(where, 1);
+    if (status) abort();
+    ListIter *temp = liter_prev(where, 1);
+    if (temp == NULL) abort();
+    bulk_mzero(RBP_VREG, arr_disp, type_get_width(arr_type) - zero_count,
+               arr_type, temp);
+    free(temp);
+    status = liter_advance(where, -1);
+    if (status) abort();
   }
+
   return init_list;
 }
 
@@ -140,12 +147,12 @@ ASTree *init_union(const Type *union_type, ptrdiff_t union_disp,
 
 ASTree *init_struct(const Type *struct_type, ptrdiff_t struct_disp,
                     ASTree *init_list, size_t *init_index, ListIter *where) {
-  size_t member_count = type_member_count(struct_type);
-  size_t init_count = astree_count(init_list);
+  size_t init_count = MIN(type_member_count(struct_type),
+                          astree_count(init_list) - *init_index);
   size_t bytes_initialized = 0;
-  size_t member_index = 0;
-  for (; member_index < member_count && *init_index < init_count;
-       ++member_index) {
+  size_t member_index;
+
+  for (member_index = 0; member_index < init_count; ++member_index) {
     Symbol *member_symbol = type_member_index(struct_type, member_index);
     Type *member_type = member_symbol->type;
     size_t member_padding = type_get_padding(member_type, bytes_initialized);
@@ -160,21 +167,23 @@ ASTree *init_struct(const Type *struct_type, ptrdiff_t struct_disp,
     }
     bytes_initialized += member_padding + type_get_width(member_type);
   }
-  size_t struct_width = type_get_width(struct_type);
-  if (bytes_initialized < struct_width) {
-    if (struct_disp >= 0) {
-      static_zero_pad(struct_width - bytes_initialized, where);
-    } else {
-      int status = liter_advance(where, 1);
-      if (status) abort();
-      ListIter *temp = liter_prev(where, 1);
-      if (temp == NULL) abort();
-      bulk_mzero(RBP_VREG, struct_disp, bytes_initialized, struct_type, temp);
-      free(temp);
-      status = liter_advance(where, -1);
-      if (status) abort();
-    }
+
+  assert(bytes_initialized <= type_get_width(struct_type));
+  if (bytes_initialized == type_get_width(struct_type)) {
+    return init_list;
+  } else if (struct_disp >= 0) {
+    static_zero_pad(type_get_width(struct_type) - bytes_initialized, where);
+  } else {
+    int status = liter_advance(where, 1);
+    if (status) abort();
+    ListIter *temp = liter_prev(where, 1);
+    if (temp == NULL) abort();
+    bulk_mzero(RBP_VREG, struct_disp, bytes_initialized, struct_type, temp);
+    free(temp);
+    status = liter_advance(where, -1);
+    if (status) abort();
   }
+
   return init_list;
 }
 
@@ -228,17 +237,38 @@ ASTree *traverse_initializer(Type *type, ptrdiff_t disp, ASTree *initializer,
              initializer->tok_kind == TOK_STRINGCON) {
     return init_literal(type, disp, initializer, where);
   } else if (type_is_array(type) && initializer->tok_kind == TOK_INIT_LIST) {
-    size_t dummy_index = 0;
-    return set_init_list_iterators(
-        init_array(type, disp, initializer, &dummy_index, where), where);
+    size_t init_index = 0;
+    ASTree *errnode = init_array(type, disp, initializer, &init_index, where);
+    if (errnode->tok_kind == TOK_TYPE_ERROR) {
+      return errnode;
+    } else if (init_index < astree_count(initializer)) {
+      return astree_create_errnode(initializer, BCC_TERR_EXCESS_INITIALIZERS, 1,
+                                   initializer);
+    } else {
+      return set_init_list_iterators(initializer);
+    }
   } else if (type_is_struct(type) && initializer->tok_kind == TOK_INIT_LIST) {
-    size_t dummy_index = 0;
-    return set_init_list_iterators(
-        init_struct(type, disp, initializer, &dummy_index, where), where);
+    size_t init_index = 0;
+    ASTree *errnode = init_struct(type, disp, initializer, &init_index, where);
+    if (errnode->tok_kind == TOK_TYPE_ERROR) {
+      return errnode;
+    } else if (init_index < astree_count(initializer)) {
+      return astree_create_errnode(initializer, BCC_TERR_EXCESS_INITIALIZERS, 1,
+                                   initializer);
+    } else {
+      return set_init_list_iterators(initializer);
+    }
   } else if (type_is_union(type) && initializer->tok_kind == TOK_INIT_LIST) {
-    size_t dummy_index = 0;
-    return set_init_list_iterators(
-        init_union(type, disp, initializer, &dummy_index, where), where);
+    size_t init_index = 0;
+    ASTree *errnode = init_union(type, disp, initializer, &init_index, where);
+    if (errnode->tok_kind == TOK_TYPE_ERROR) {
+      return errnode;
+    } else if (init_index < astree_count(initializer)) {
+      return astree_create_errnode(initializer, BCC_TERR_EXCESS_INITIALIZERS, 1,
+                                   initializer);
+    } else {
+      return set_init_list_iterators(initializer);
+    }
   } else {
     return astree_create_errnode(initializer, BCC_TERR_INCOMPATIBLE_TYPES, 3,
                                  initializer, type, initializer->type);

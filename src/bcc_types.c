@@ -3,6 +3,7 @@
 #include "assert.h"
 #include "badllist.h"
 #include "badmap.h"
+#include "stdint.h"
 #include "stdio.h"
 #include "stdlib.h"
 #include "string.h"
@@ -539,7 +540,10 @@ size_t type_member_count(const Type *type) {
     case TYPE_CODE_STRUCT:
       return llist_size(&type->tag.value->data.members.in_order);
     case TYPE_CODE_ARRAY:
-      return type->array.length;
+      if (type->array.deduce_length && type->array.length == 0)
+        return SIZE_MAX;
+      else
+        return type->array.length;
     default:
       abort();
   }
@@ -690,10 +694,8 @@ size_t type_get_eightbytes(const Type *type) {
 
 size_t type_get_padding(const Type *type, size_t to_pad) {
   assert(!type_is_incomplete(type));
-  size_t width =
-      type_is_array(type) ? type_elem_width(type) : type_get_width(type);
-  size_t remainder = to_pad % width;
-  return remainder == 0 ? remainder : width - remainder;
+  size_t alignment = type_get_alignment(type);
+  return to_pad % alignment == 0 ? 0 : alignment - (to_pad % alignment);
 }
 
 unsigned int type_get_flags(const Type *type) {
