@@ -13,7 +13,8 @@
 #include "tchk_expr.h"
 #include "tchk_stmt.h"
 
-  static ASTree *parser_make_root();
+  static ASTree *parser_make_root(void);
+  static ASTree *parser_make_empty(const Location loc);
   static ASTree *parser_new_sym(ASTree * tree, int new_symbol);
   static ASTree *parser_make_joiner(ASTree * stringcon);
   static ASTree *parser_join_strings(ASTree * joiner);
@@ -56,7 +57,7 @@
 /* tokens constructed by checker */
 %token TOK_TYPE_ERROR TOK_AUTO_CONV TOK_AUTO_PROM
 /* tokens constructed by parser */
-%token TOK_DECLARATION TOK_ROOT TOK_TYPE_NAME TOK_SPEC_LIST TOK_ATTR_LIST
+%token TOK_DECLARATION TOK_ROOT TOK_TYPE_NAME TOK_SPEC_LIST TOK_ATTR_LIST TOK_EMPTY
 /* tokens assigned to exsting nodes */
 %token TOK_POS TOK_NEG TOK_POST_INC TOK_POST_DEC TOK_INDIRECTION TOK_ADDROF TOK_CALL TOK_SUBSCRIPT
 %token TOK_BLOCK TOK_ARRAY TOK_CAST TOK_POINTER TOK_LABEL TOK_INIT_LIST TOK_PARAM_LIST
@@ -104,7 +105,6 @@ program             : %empty                                            { parser
                     ;
 topdecl             : declarations ';'                                  { $$ = bcc_yyval = $1; astree_destroy($2); }
                     | function_def '}'                                  { $$ = bcc_yyval = finalize_function($1); parser_cleanup(1, $2); }
-                    | ';'                                               { $$ = bcc_yyval = &EMPTY_EXPR; astree_destroy($1); }
                     ;
 function_def        : decl_specs declarator '{'                         { $$ = bcc_yyval = define_function(parser_make_declaration($1), $2, parser_new_sym($3, TOK_BLOCK)); }
                     | function_def stmt                                 { $$ = bcc_yyval = validate_fnbody_content($1, $2); }
@@ -250,13 +250,13 @@ stmt                : block                                             { $$ = b
                     | stmt_expr                                         { $$ = bcc_yyval = $1; }
                     ;
 stmt_expr           : expr ';'                                          { $$ = bcc_yyval = parser_make_auto_conv($1, 1); astree_destroy($2); }
-                    | ';'                                               { $$ = bcc_yyval = validate_empty_expr($1); }
+                    | ';'                                               { $$ = bcc_yyval = parser_make_empty($1->loc); astree_destroy($1); }
                     ;
 labelled_stmt       : any_ident ':' stmt                                { $$ = bcc_yyval = validate_label(parser_make_label($1), $1, $3); parser_cleanup(1, $2); }
                     | TOK_DEFAULT ':' stmt                              { $$ = bcc_yyval = validate_default($1, $3); parser_cleanup(1, $2); }
                     | TOK_CASE cond_expr   ':' stmt                     { $$ = bcc_yyval = validate_case($1, $2, $4); parser_cleanup(1, $3); }
                     ;
-for                 : TOK_FOR '(' stmt_expr stmt_expr ')' stmt          { $$ = bcc_yyval = validate_for($1, $3, $4, parser_new_sym($5, ';'), $6); parser_cleanup(1, $2); }
+for                 : TOK_FOR '(' stmt_expr stmt_expr ')' stmt          { $$ = bcc_yyval = validate_for($1, $3, $4, parser_make_empty($5->loc), $6); parser_cleanup(2, $2, $5); }
                     | TOK_FOR '(' stmt_expr stmt_expr expr ')' stmt     { $$ = bcc_yyval = validate_for($1, $3, $4, $5, $7); parser_cleanup(2, $2, $6); }
                     ;
 dowhile             : TOK_DO stmt TOK_WHILE '(' expr ')' ';'            { $$ = bcc_yyval = validate_do($1, $2, parser_make_auto_conv($5, 1)); parser_cleanup (4, $3, $4, $6, $7); }
@@ -264,14 +264,15 @@ dowhile             : TOK_DO stmt TOK_WHILE '(' expr ')' ';'            { $$ = b
 while               : TOK_WHILE '(' expr ')' stmt                       { $$ = bcc_yyval = validate_while($1, parser_make_auto_conv($3, 1), $5); parser_cleanup (2, $2, $4); }
                     ;
 ifelse              : TOK_IF '(' expr ')' stmt TOK_ELSE stmt            { $$ = bcc_yyval = validate_ifelse($1, parser_make_auto_conv($3, 1), $5, $7); parser_cleanup (3, $2, $4, $6); }
-                    | TOK_IF '(' expr ')' stmt %prec TOK_ELSE           { $$ = bcc_yyval = validate_ifelse($1, parser_make_auto_conv($3, 1), $5, &EMPTY_EXPR); parser_cleanup (2, $2, $4); }
+                    | TOK_IF '(' expr ')' stmt %prec TOK_ELSE           { $$ = bcc_yyval = validate_ifelse($1, parser_make_auto_conv($3, 1), $5, parser_make_empty(lexer_get_loc()));
+                                                                          parser_cleanup (2, $2, $4); }
                     ;
 switch              : TOK_SWITCH '(' switch_expr ')' stmt               { $$ = bcc_yyval = validate_switch($1, $3, $5); parser_cleanup(2, $2, $4); }
                     ;
 switch_expr         : expr                                              { $$ = bcc_yyval = validate_switch_expr($1); }
                     ;
 return              : TOK_RETURN expr ';'                               { $$ = bcc_yyval = validate_return($1, parser_make_auto_conv($2, 1)); parser_cleanup (1, $3); }
-                    | TOK_RETURN ';'                                    { $$ = bcc_yyval = validate_return($1, &EMPTY_EXPR); parser_cleanup (1, $2); }
+                    | TOK_RETURN ';'                                    { $$ = bcc_yyval = validate_return($1, parser_make_empty($2->loc)); parser_cleanup (1, $2); }
                     ;
 expr                : assign_expr                                       { $$ = bcc_yyval = $1; }
                     | TOK_EXTNSN assign_expr                            { $$ = bcc_yyval = $2; parser_cleanup(1, $1); }

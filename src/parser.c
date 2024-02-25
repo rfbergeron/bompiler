@@ -91,6 +91,10 @@ BCC_YYSTATIC ASTree *parser_make_root(void) {
   return astree_init(TOK_ROOT, root_loc, "_root");
 }
 
+BCC_YYSTATIC ASTree *parser_make_empty(const Location loc) {
+  return validate_empty_expr(astree_init(TOK_EMPTY, loc, "__empty"));
+}
+
 void parser_init_globals(void) {
   parser_root = parser_make_root();
   PFDBG0('t', "Making symbol table");

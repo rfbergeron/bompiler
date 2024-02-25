@@ -43,14 +43,8 @@ typedef struct astree {
   unsigned int attributes; /* node-specific attributes */
 } ASTree;
 
-#define EMPTY_EXPR_VALUE                                                   \
-  {                                                                        \
-    NULL, ";", NULL, NULL, NULL, {{0L}, NULL, NULL}, LOC_EMPTY_VALUE, 0UL, \
-        0UL, 0UL, BLIB_LLIST_EMPTY, ';', ATTR_NONE                         \
-  }
 #define UNWRAP(node) \
   (node->tok_kind == TOK_TYPE_ERROR ? astree_get(node, 0) : node)
-extern ASTree EMPTY_EXPR;
 
 ASTree *astree_init(int tok_kind, const Location location, const char *lexinfo);
 void astree_destroy(ASTree *tree);

@@ -13,7 +13,7 @@ ASTree *validate_return(ASTree *ret, ASTree *expr) {
   Symbol *symbol = state_get_function(state);
   Type *return_type = type_strip_declarator(symbol->type);
 
-  if (expr != &EMPTY_EXPR) {
+  if (expr->tok_kind != TOK_EMPTY) {
     if (types_assignable(return_type, expr->type, astree_is_const_zero(expr))) {
       maybe_load_cexpr(expr, NULL);
       return translate_return(ret, expr);
@@ -120,7 +120,7 @@ ASTree *validate_for(ASTree *for_, ASTree *init_expr, ASTree *pre_iter_expr,
                                       reinit_expr, body);
   }
 
-  if (pre_iter_expr->tok_kind != ';') {
+  if (pre_iter_expr->tok_kind != TOK_EMPTY) {
     if (!type_is_scalar(pre_iter_expr->type)) {
       return astree_create_errnode(
           astree_adopt(for_, 4, init_expr, pre_iter_expr, reinit_expr, body),

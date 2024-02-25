@@ -1952,7 +1952,7 @@ ASTree *translate_ifelse(ASTree *ifelse, ASTree *condition, ASTree *if_body,
 
   Instruction *end_label = instr_init(OP_NONE);
   end_label->label = mk_end_label(ifelse->jump_id);
-  if (else_body != &EMPTY_EXPR) {
+  if (else_body->tok_kind != TOK_EMPTY) {
     Instruction *else_label = instr_init(OP_NONE);
     else_label->label = mk_stmt_label(ifelse->jump_id);
     int status = liter_push_front(else_body->first_instr, NULL, 1, else_label);
@@ -2116,17 +2116,8 @@ ASTree *translate_for(ASTree *for_, ASTree *initializer, ASTree *condition,
   /* because of the way `liter_push_back` works, new instructions should be
    * added after the condition in reverse order
    */
-  /* add dummy reinitializer if necessary */
-  if (reinitializer->tok_kind == ';') {
-    assert(reinitializer->first_instr == NULL &&
-           reinitializer->last_instr == NULL && reinitializer != &EMPTY_EXPR);
-    Instruction *nop_instr = instr_init(OP_NOP);
-    int status = liter_push_back(condition->last_instr,
-                                 &reinitializer->first_instr, 1, nop_instr);
-    if (status) abort();
-    reinitializer->last_instr = liter_copy(reinitializer->first_instr);
-    if (reinitializer->last_instr == NULL) abort();
-  }
+  assert(reinitializer->first_instr != NULL &&
+         reinitializer->last_instr != NULL);
 
   /* add unconditional jump to function body, skipping reinitializer */
   Instruction *body_jmp_instr = instr_init(OP_JMP);
@@ -2135,7 +2126,7 @@ ASTree *translate_for(ASTree *for_, ASTree *initializer, ASTree *condition,
   if (status) abort();
 
   /* emit loop exit jump if condition is not empty */
-  if (condition->tok_kind != ';') {
+  if (condition->tok_kind != TOK_EMPTY) {
     scalar_conversions(condition, condition->type);
     Instruction *condition_instr = liter_get(condition->last_instr);
     Instruction *test_instr = instr_init(OP_TEST);
@@ -2334,7 +2325,7 @@ static void return_void(ASTree *ret) {
 
 ASTree *translate_return(ASTree *ret, ASTree *expr) {
   PFDBG0('g', "Translating return statement");
-  if (expr == &EMPTY_EXPR || type_is_void(expr->type)) {
+  if (type_is_void(expr->type)) {
     return_void(ret);
   } else if (type_is_union(expr->type) || type_is_struct(expr->type)) {
     return_aggregate(ret, expr);

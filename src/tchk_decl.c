@@ -381,7 +381,6 @@ ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
 }
 
 ASTree *finalize_declaration(ASTree *declaration) {
-  if (declaration == &EMPTY_EXPR) return declaration;
   ASTree *errnode = NULL;
   if (declaration->tok_kind == TOK_TYPE_ERROR) {
     errnode = declaration;
