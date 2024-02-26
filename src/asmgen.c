@@ -674,8 +674,8 @@ ASTree *translate_ident(ASTree *ident) {
   state_get_symbol(state, ident->lexinfo, strlen(ident->lexinfo), &symbol);
   assert(symbol != NULL);
 
-  if (symbol->flags & SYMFLAG_STORE_STAT) {
-    if (symbol->flags & SYMFLAG_LINK_NONE) {
+  if (symbol->storage == STORE_STAT) {
+    if (symbol->linkage == LINK_NONE) {
       set_op_pic(&lea_instr->src, NO_DISP,
                  mk_static_label(ident->lexinfo, symbol->static_id));
     } else {
@@ -2615,7 +2615,7 @@ ASTree *translate_auto_literal_init(const Type *arr_type, ptrdiff_t arr_disp,
 int translate_static_prelude(ASTree *declarator, Symbol *symbol,
                              ListIter *where, int is_initialized) {
   const char *identifier =
-      symbol->flags & SYMFLAG_LINK_NONE
+      symbol->linkage == LINK_NONE
           ? mk_static_label(declarator->lexinfo, symbol->static_id)
           : declarator->lexinfo;
 
@@ -2644,7 +2644,7 @@ int translate_static_prelude(ASTree *declarator, Symbol *symbol,
   /* this call to `liter_push_back` should mutate `where` in-place, since the
    * output parameter points to the input parameter
    */
-  if (symbol->flags & SYMFLAG_LINK_EXT) {
+  if (symbol->linkage == LINK_EXT) {
     Instruction *globl_instr = instr_init(OP_GLOBL);
     set_op_dir(&globl_instr->dest, declarator->lexinfo);
 
@@ -2731,7 +2731,7 @@ static ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
 #endif
   assert(in_current_scope && symbol);
 
-  if (symbol->flags & SYMFLAG_STORE_STAT) {
+  if (symbol->storage == STORE_STAT) {
     return translate_static_local_init(declaration, assignment, declarator,
                                        initializer);
   } else if (initializer->tok_kind != TOK_INIT_LIST &&
@@ -2782,16 +2782,15 @@ static ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
 #endif
   assert(symbol && in_current_scope);
 
-  if (declarator->tok_kind == TOK_TYPE_NAME ||
-      (symbol->flags & SYMFLAG_INHERIT) || (symbol->flags & SYMFLAG_TYPEDEF) ||
-      (symbol->flags & SYMFLAG_STORE_EXT)) {
+  if (declarator->tok_kind == TOK_TYPE_NAME || symbol->linkage == LINK_EXT ||
+      symbol->linkage == LINK_INHERIT || symbol->linkage == LINK_TYPEDEF) {
     return declaration;
-  } else if (symbol->flags & SYMFLAG_STORE_STAT) {
+  } else if (symbol->storage == STORE_STAT) {
     assign_static_space(declarator->lexinfo, symbol);
     int status =
         translate_static_prelude(declarator, symbol, before_definition, 0);
     if (status) abort();
-  } else if (symbol->flags & SYMFLAG_STORE_AUTO) {
+  } else if (symbol->storage == STORE_AUTO) {
     symbol->disp = assign_stack_space(symbol->type);
   }
 
@@ -2871,10 +2870,9 @@ static ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
 #endif
   assert(in_current_scope && symbol);
 
-  if ((symbol->flags & SYMFLAG_STORE_EXT) ||
-      type_is_function(declarator->type)) {
+  if (symbol->storage == STORE_EXT || type_is_function(declarator->type)) {
     return declaration;
-  } else if (symbol->flags & SYMFLAG_STORE_STAT) {
+  } else if (symbol->storage == STORE_STAT) {
     ListIter *temp = llist_iter_last(instructions);
     int status = translate_static_prelude(declarator, symbol, temp, 0);
     free(temp);
@@ -2884,7 +2882,7 @@ static ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
                IMM_UNSIGNED);
     status = llist_push_back(instructions, zero_instr);
     if (status) abort();
-  } else if (!(symbol->flags & SYMFLAG_TYPEDEF)) {
+  } else if (symbol->storage != STORE_TYPEDEF) {
     abort();
   }
 
@@ -2940,7 +2938,7 @@ ASTree *begin_translate_fn(ASTree *declaration, ASTree *declarator,
   state_get_symbol(state, declarator->lexinfo, strlen(declarator->lexinfo),
                    &symbol);
   assert(symbol != NULL);
-  if (symbol->flags & SYMFLAG_LINK_EXT) {
+  if (symbol->linkage == LINK_EXT) {
     Instruction *globl_instr = instr_init(OP_GLOBL);
     set_op_dir(&globl_instr->dest, declarator->lexinfo);
     status = llist_push_back(instructions, globl_instr);

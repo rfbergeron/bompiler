@@ -45,7 +45,7 @@ BCC_YYSTATIC void make_va_list_type(void) {
   size_t i;
   ptrdiff_t displacement;
   for (i = 0, displacement = 0; i < 4; ++i) {
-    Symbol *member_symbol = symbol_init(&LOC_EMPTY, state_get_sequence(state));
+    Symbol *member_symbol = symbol_init(&LOC_EMPTY);
     member_symbol->disp = displacement;
     if (i < 2) {
       displacement += X64_SIZEOF_INT;
@@ -64,8 +64,10 @@ BCC_YYSTATIC void make_va_list_type(void) {
   }
 
   state_pop_table(state);
-  Symbol *builtin_symbol = symbol_init(&LOC_EMPTY, state_get_sequence(state));
-  builtin_symbol->flags = SYMFLAG_TYPEDEF | SYMFLAG_DEFINED;
+  Symbol *builtin_symbol = symbol_init(&LOC_EMPTY);
+  builtin_symbol->storage = STORE_TYPEDEF;
+  builtin_symbol->linkage = LINK_TYPEDEF;
+  builtin_symbol->defined = 1;
   builtin_symbol->type = type_init_array(1, 0);
   Type *struct_type =
       type_init_tag(STOR_FLAG_TYPEDEF, VA_LIST_STRUCT_NAME, builtin_tag);

@@ -59,16 +59,16 @@ void destroy_unique_name(const char *str) {
 /*
  * Symbol functions
  */
-Symbol *symbol_init(const Location *loc, size_t sequence) {
-  Symbol *ret = malloc(sizeof(*ret));
-  ret->type = NULL;
-  ret->loc = *loc;
-  ret->sequence = sequence;
-  ret->flags = SYMFLAG_NONE;
-  ret->disp = 0;
-  ret->static_id = 0;
-  ret->next_use = NULL;
-  return ret;
+Symbol *symbol_init(const Location *loc) {
+  Symbol *symbol = malloc(sizeof(*symbol));
+  symbol->loc = loc;
+  symbol->type = NULL;
+  symbol->linkage = LINK_NONE;
+  symbol->storage = STORE_AUTO;
+  symbol->disp = 0;
+  symbol->static_id = 0;
+  symbol->defined = 0;
+  return symbol;
 }
 
 void symbol_destroy(Symbol *symbol) {
@@ -83,41 +83,24 @@ void symbol_destroy(Symbol *symbol) {
 
 #ifndef UNIT_TESTING
 int symbol_print(const Symbol *symbol, char *buffer) {
+  static const char *LINKAGE_STRINGS[] = {"NONE",       "EXTERNAL", "INTERNAL",
+                                          "INHERIT",    "MEMBER",   "TYPEDEF",
+                                          "ENUM_CONST", "INVALID"};
+  static const char *STORAGE_STRINGS[] = {"AUTO",       "EXTERNAL", "STATIC",
+                                          "INHERIT",    "MEMBER",   "TYPEDEF",
+                                          "ENUM_CONST", "INVALID"};
   static char locstr[LINESIZE], typestr[LINESIZE];
   if (!symbol || !buffer) {
     fprintf(stderr, "ERROR: invalid arguments to symbol_print\n");
     return -1;
   }
-  location_to_string(&symbol->loc, locstr);
+
+  location_to_string(symbol->loc, locstr);
   type_to_str(symbol->type, typestr);
   size_t sym_width = type_get_width(symbol->type);
   size_t sym_align = type_get_alignment(symbol->type);
-  const char *link_str;
-  if (symbol->flags & SYMFLAG_TYPENAME)
-    link_str = "TYPENAME";
-  else if (symbol->flags & SYMFLAG_TYPEDEF)
-    link_str = "TYPEDEF";
-  else if (symbol->flags & SYMFLAG_LINK_EXT)
-    link_str = "EXTERNAL";
-  else if (symbol->flags & SYMFLAG_LINK_INT)
-    link_str = "INTERNAL";
-  else if (symbol->flags & SYMFLAG_LINK_NONE)
-    link_str = "NONE";
-  else
-    link_str = "UNSPECIFIED";
-  const char *stor_str;
-  if (symbol->flags & SYMFLAG_TYPENAME)
-    stor_str = "TYPENAME";
-  else if (symbol->flags & SYMFLAG_TYPEDEF)
-    stor_str = "TYPEDEF";
-  else if (symbol->flags & SYMFLAG_STORE_EXT)
-    stor_str = "EXTERNAL";
-  else if (symbol->flags & SYMFLAG_STORE_STAT)
-    stor_str = "STATIC";
-  else if (symbol->flags & SYMFLAG_STORE_AUTO)
-    stor_str = "AUTO";
-  else
-    stor_str = "UNSPECIFIED";
+  const char *link_str = LINKAGE_STRINGS[symbol->linkage];
+  const char *stor_str = STORAGE_STRINGS[symbol->storage];
 
   if (symbol->disp < 0) {
     return sprintf(buffer,
@@ -125,8 +108,7 @@ int symbol_print(const Symbol *symbol, char *buffer) {
                    "{DISPLACEMENT: %li}",
                    locstr, typestr, sym_width, sym_align, link_str, stor_str,
                    symbol->disp);
-  } else if ((symbol->flags & (SYMFLAGS_LINK | SYMFLAGS_STORE)) ==
-             (SYMFLAG_LINK_NONE | SYMFLAG_STORE_STAT)) {
+  } else if (symbol->linkage == LINK_NONE && symbol->storage == STORE_STAT) {
     return sprintf(buffer,
                    "{%s} {%s} {WIDTH: %lu, ALIGN: %lu} {LINK: %s, STORE: %s} "
                    "{STATIC ID: %lu}",
@@ -141,8 +123,8 @@ int symbol_print(const Symbol *symbol, char *buffer) {
 #endif
 
 int symbol_is_lvalue(const Symbol *symbol) {
-  return type_is_object(symbol->type) && !(symbol->flags & SYMFLAG_TYPEDEF) &&
-         !(symbol->flags & SYMFLAG_ENUM_CONST);
+  return type_is_object(symbol->type) && symbol->linkage < LINK_TYPEDEF &&
+         symbol->storage < STORE_TYPEDEF;
 }
 
 /*

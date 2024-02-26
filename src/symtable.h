@@ -23,37 +23,36 @@ typedef struct symbol_table {
   TableKind kind;
 } SymbolTable;
 
-typedef enum symbol_flag {
-  SYMFLAG_NONE = 0,
-  SYMFLAG_DEFINED = 1 << 0,
-  SYMFLAG_ENUM_CONST = 1 << 1,
-  SYMFLAG_INCOMPLETE = 1 << 2,
-  SYMFLAG_DECL_EXT = 1 << 3,
-  SYMFLAG_LINK_NONE = 1 << 4,
-  SYMFLAG_LINK_EXT = 1 << 5,
-  SYMFLAG_LINK_INT = 1 << 6,
-  SYMFLAG_STORE_AUTO = 1 << 7,
-  SYMFLAG_STORE_EXT = 1 << 8,
-  SYMFLAG_STORE_STAT = 1 << 9,
-  SYMFLAG_INHERIT = 1 << 10,
-  SYMFLAG_TYPEDEF = 1 << 11,
-  SYMFLAG_TYPENAME = 1 << 12,
-  SYMFLAG_OLD_FN = 1 << 13,
-  SYMFLAGS_STORE = SYMFLAG_STORE_EXT | SYMFLAG_STORE_AUTO | SYMFLAG_STORE_STAT,
-  SYMFLAGS_LINK = SYMFLAG_LINK_NONE | SYMFLAG_LINK_EXT | SYMFLAG_LINK_INT
-} SymbolFlag;
+typedef enum linkage {
+  LINK_NONE,
+  LINK_EXT,
+  LINK_INT,
+  LINK_INHERIT,
+  LINK_MEMBER,
+  LINK_TYPEDEF,
+  LINK_ENUM_CONST,
+  LINK_INVALID
+} Linkage;
 
-/* TODO(Robert): replace loc with a pointer since it makes more sense for it to
- * point to the location stored in an ASTree node
- */
+typedef enum storage_class {
+  STORE_AUTO,
+  STORE_EXT,
+  STORE_STAT,
+  STORE_INHERIT,
+  STORE_MEMBER,
+  STORE_TYPEDEF,
+  STORE_ENUM_CONST,
+  STORE_INVALID
+} StorageClass;
+
 typedef struct symbol {
-  size_t sequence;    /* used to order declarations in a given block */
-  Location loc;       /* declaration location */
-  Type *type;         /* type of symbol */
-  unsigned int flags; /* flags, as enumerated above */
-  ptrdiff_t disp;     /* displacement on stack/in struct */
-  size_t static_id;   /* unique id for static local variables */
-  struct instruction_data *next_use; /* liveness info for allocator */
+  const Location *loc;
+  Type *type;
+  StorageClass storage;
+  Linkage linkage;
+  ptrdiff_t disp;
+  size_t static_id;
+  int defined;
 } Symbol;
 
 typedef enum tag_kind { TAG_STRUCT = 0, TAG_UNION, TAG_ENUM } TagKind;
@@ -97,7 +96,7 @@ typedef struct label_value {
 } LabelValue;
 
 /* Symbol functions */
-Symbol *symbol_init(const Location *loc, size_t sequence);
+Symbol *symbol_init(const Location *loc);
 void symbol_destroy(Symbol *symbol);
 int symbol_print(const Symbol *symbol, char *buffer);
 int symbol_is_lvalue(const Symbol *symbol);

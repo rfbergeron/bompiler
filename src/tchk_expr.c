@@ -34,9 +34,11 @@ ASTree *validate_stringcon(ASTree *stringcon) {
   (void)state_get_symbol(state, stringcon_label, strlen(stringcon_label),
                          &symbol);
   if (symbol == NULL) {
-    symbol = symbol_init(&stringcon->loc, state_get_sequence(state));
+    symbol = symbol_init(&stringcon->loc);
     symbol->disp = 0;
-    symbol->flags = SYMFLAG_LINK_INT | SYMFLAG_STORE_STAT | SYMFLAG_DEFINED;
+    symbol->linkage = LINK_INT;
+    symbol->storage = STORE_STAT;
+    symbol->defined = 1;
     symbol->static_id = static_id;
 
     /* subtract 2 for quotes, add one for terminating nul */
