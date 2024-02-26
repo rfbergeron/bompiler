@@ -331,7 +331,7 @@ int astree_print_tree(ASTree *tree, FILE *out, int depth) {
   return 0;
 }
 
-static int location_ge(Location *loc1, Location *loc2) {
+static int location_ge(const Location *loc1, const Location *loc2) {
   return loc1->filenr > loc2->filenr ||
          (loc1->filenr == loc2->filenr && loc1->linenr > loc2->linenr) ||
          (loc1->filenr == loc2->filenr && loc1->linenr == loc2->linenr &&
@@ -341,7 +341,7 @@ static int location_ge(Location *loc1, Location *loc2) {
 static int compare_symbol_pairs(MapPair *pair1, MapPair *pair2) {
   Symbol *symbol1 = pair1->value;
   Symbol *symbol2 = pair2->value;
-  return location_ge(&symbol1->loc, &symbol2->loc);
+  return location_ge(symbol1->loc, symbol2->loc);
 }
 
 static const char *table_type_to_str(TableKind kind) {
@@ -438,7 +438,7 @@ int astree_print_symbols(ASTree *block, FILE *out, int depth) {
     MapPair *pair = alist_get(&symbol_pairs, pair_index);
     ASTree *child = astree_get(block, child_index);
     int characters_printed;
-    if (location_ge(&child->loc, &((Symbol *)pair->value)->loc)) {
+    if (location_ge(&child->loc, ((Symbol *)pair->value)->loc)) {
       characters_printed = print_sym_pair_helper(pair, out, depth);
       ++pair_index;
     } else {

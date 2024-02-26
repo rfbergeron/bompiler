@@ -334,19 +334,19 @@ ASTree *evaluate_ident(ASTree *ident) {
   size_t id_str_len = strlen(id_str);
   Symbol *symbol = NULL;
   (void)state_get_symbol(state, id_str, id_str_len, &symbol);
-  if (symbol->flags & (SYMFLAG_STORE_EXT | SYMFLAG_STORE_STAT)) {
+  if (symbol->storage == STORE_EXT || symbol->storage == STORE_STAT) {
     ident->attributes |= ATTR_CONST_MAYBE;
     ident->constant.symbol = symbol;
     ident->constant.integral.signed_value = 0;
     if (type_is_function(symbol->type))
       ident->constant.label = mk_fnptr_text(ident->lexinfo);
-    else if (symbol->flags & SYMFLAG_LINK_NONE)
+    else if (symbol->linkage == LINK_NONE)
       ident->constant.label =
           mk_static_label(ident->lexinfo, symbol->static_id);
     else
       ident->constant.label = ident->lexinfo;
     return ident;
-  } else if (symbol->flags & SYMFLAG_ENUM_CONST) {
+  } else if (symbol->storage == STORE_ENUM_CONST) {
     ident->attributes |= ATTR_CONST_INT;
     Tag *tag = ident->type->tag.value;
     int *value = map_get(&tag->data.enumerators.by_name, (char *)ident->lexinfo,

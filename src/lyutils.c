@@ -121,7 +121,7 @@ int lexer_ident(void) {
   PFDBG1('l', "Determining appropriate token type for identifier %s", yytext);
   Symbol *symbol = NULL;
   (void)state_get_symbol(state, yytext, yyleng, &symbol);
-  if (symbol == NULL || !(symbol->flags & SYMFLAG_TYPEDEF) ||
+  if (symbol == NULL || symbol->storage != STORE_TYPEDEF ||
       (bcc_yyval->tok_kind == TOK_SPEC_LIST &&
        !type_is_none(bcc_yyval->type))) {
     return lexer_token(TOK_IDENT);
