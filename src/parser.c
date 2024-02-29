@@ -67,7 +67,7 @@ BCC_YYSTATIC void make_va_list_type(void) {
   Symbol *builtin_symbol = symbol_init(&LOC_EMPTY);
   builtin_symbol->storage = STORE_TYPEDEF;
   builtin_symbol->linkage = LINK_TYPEDEF;
-  builtin_symbol->defined = 1;
+  builtin_symbol->info = SYM_DEFINED;
   builtin_symbol->type = type_init_array(1, 0);
   Type *struct_type =
       type_init_tag(STOR_FLAG_TYPEDEF, VA_LIST_STRUCT_NAME, builtin_tag);

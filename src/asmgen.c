@@ -2782,8 +2782,9 @@ static ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
 #endif
   assert(symbol && in_current_scope);
 
-  if (declarator->tok_kind == TOK_TYPE_NAME || symbol->linkage == LINK_EXT ||
-      symbol->linkage == LINK_INHERIT || symbol->linkage == LINK_TYPEDEF) {
+  if (type_is_function(declarator->type) || symbol->info == SYM_INHERITOR ||
+      declarator->tok_kind == TOK_TYPE_NAME || symbol->linkage == LINK_EXT ||
+      symbol->linkage == LINK_TYPEDEF) {
     return declaration;
   } else if (symbol->storage == STORE_STAT) {
     assign_static_space(declarator->lexinfo, symbol);
@@ -2938,6 +2939,7 @@ ASTree *begin_translate_fn(ASTree *declaration, ASTree *declarator,
   state_get_symbol(state, declarator->lexinfo, strlen(declarator->lexinfo),
                    &symbol);
   assert(symbol != NULL);
+  assert(symbol->info != SYM_HIDDEN);
   if (symbol->linkage == LINK_EXT) {
     Instruction *globl_instr = instr_init(OP_GLOBL);
     set_op_dir(&globl_instr->dest, declarator->lexinfo);

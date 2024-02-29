@@ -67,7 +67,7 @@ Symbol *symbol_init(const Location *loc) {
   symbol->storage = STORE_AUTO;
   symbol->disp = 0;
   symbol->static_id = 0;
-  symbol->defined = 0;
+  symbol->info = SYM_NONE;
   return symbol;
 }
 
@@ -75,7 +75,8 @@ void symbol_destroy(Symbol *symbol) {
   PFDBG0('t', "freeing symbol");
   if (symbol == NULL) return;
 
-  type_destroy(symbol->type);
+  /* type information owned by outer symbol */
+  if (symbol->info != SYM_INHERITOR) type_destroy(symbol->type);
   free(symbol);
 
   PFDBG0('t', "done");
@@ -83,12 +84,12 @@ void symbol_destroy(Symbol *symbol) {
 
 #ifndef UNIT_TESTING
 int symbol_print(const Symbol *symbol, char *buffer) {
-  static const char *LINKAGE_STRINGS[] = {"NONE",       "EXTERNAL", "INTERNAL",
-                                          "INHERIT",    "MEMBER",   "TYPEDEF",
-                                          "ENUM_CONST", "INVALID"};
-  static const char *STORAGE_STRINGS[] = {"AUTO",       "EXTERNAL", "STATIC",
-                                          "INHERIT",    "MEMBER",   "TYPEDEF",
-                                          "ENUM_CONST", "INVALID"};
+  static const char *LINKAGE_STRINGS[] = {"NONE",   "EXTERNAL", "INTERNAL",
+                                          "MEMBER", "TYPEDEF",  "ENUM_CONST"};
+  static const char *STORAGE_STRINGS[] = {"AUTO",   "EXTERNAL", "STATIC",
+                                          "MEMBER", "TYPEDEF",  "ENUM_CONST"};
+  static const char *INFO_STRINGS[] = {"UNDEFINED", "DEFINED", "INHERITOR",
+                                       "HIDDEN"};
   static char locstr[LINESIZE], typestr[LINESIZE];
   if (!symbol || !buffer) {
     fprintf(stderr, "ERROR: invalid arguments to symbol_print\n");
@@ -105,19 +106,21 @@ int symbol_print(const Symbol *symbol, char *buffer) {
   if (symbol->disp < 0) {
     return sprintf(buffer,
                    "{%s} {%s} {WIDTH: %lu, ALIGN: %lu} {LINK: %s, STORE: %s} "
-                   "{DISPLACEMENT: %li}",
+                   "{INFO: %s} {DISPLACEMENT: %li}",
                    locstr, typestr, sym_width, sym_align, link_str, stor_str,
-                   symbol->disp);
+                   INFO_STRINGS[symbol->info], symbol->disp);
   } else if (symbol->linkage == LINK_NONE && symbol->storage == STORE_STAT) {
     return sprintf(buffer,
                    "{%s} {%s} {WIDTH: %lu, ALIGN: %lu} {LINK: %s, STORE: %s} "
-                   "{STATIC ID: %lu}",
+                   "{INFO: %s} {STATIC ID: %lu}",
                    locstr, typestr, sym_width, sym_align, link_str, stor_str,
-                   symbol->static_id);
+                   INFO_STRINGS[symbol->info], symbol->static_id);
   } else {
     return sprintf(buffer,
-                   "{%s} {%s} {WIDTH: %lu, ALIGN: %lu} {LINK: %s, STORE: %s}",
-                   locstr, typestr, sym_width, sym_align, link_str, stor_str);
+                   "{%s} {%s} {WIDTH: %lu, ALIGN: %lu} {LINK: %s, STORE: %s} "
+                   "{INFO: %s}",
+                   locstr, typestr, sym_width, sym_align, link_str, stor_str,
+                   INFO_STRINGS[symbol->info]);
   }
 }
 #endif
@@ -240,6 +243,7 @@ SymbolTable *symbol_table_init(TableKind kind) {
       if (status) abort();
       /* fallthrough */
     case TABLE_TRANS_UNIT:
+      /* fallthrough */
     case TABLE_BLOCK:
       table->tag_namespace = malloc(sizeof(Map));
       status = map_init(table->tag_namespace, DEFAULT_MAP_SIZE,
@@ -269,6 +273,7 @@ void symbol_table_destroy(SymbolTable *table) {
       free(table->label_namespace);
       /* fallthrough */
     case TABLE_TRANS_UNIT:
+      /* fallthrough */
     case TABLE_BLOCK:
       status = map_destroy(table->tag_namespace);
       if (status) abort();

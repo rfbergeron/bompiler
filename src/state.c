@@ -55,17 +55,12 @@ int state_get_symbol(CompilerState *state, const char *ident,
     Symbol *symbol = symbol_table_get(current, ident, ident_len);
     if (symbol != NULL) {
       *out = symbol;
-      break;
+      return i == 0;
     }
   }
 
-  if (i >= llist_size(&state->table_stack)) {
-    /* set out to NULL if symbol could not be found */
-    *out = NULL;
-  }
-
-  /* return whether or not symbol is in current scope */
-  return i == 0;
+  *out = NULL;
+  return 0;
 }
 
 void state_insert_symbol(CompilerState *state, const char *ident,
@@ -74,6 +69,56 @@ void state_insert_symbol(CompilerState *state, const char *ident,
   /* TODO(Robert): rewrite symbol table functions */
   assert(symbol_table_get(top_scope, ident, ident_len) == NULL);
   symbol_table_insert(top_scope, ident, ident_len, symbol);
+}
+
+/* as a quirk of the way symbols declared with the `extern` keyword at block
+ * scope are handled, while changes to the type information in the form of
+ * array completions and function prototypes will be reflected across all
+ * symbols, changes to the storage class will not be. if a symbol which
+ * previously had external storage class is later declared with static storage
+ * class, this change will not be reflected in previously declared symbols.
+ */
+int state_inheritance_valid(CompilerState *state, const char *ident,
+                            const size_t ident_len, Symbol *symbol) {
+  assert(llist_size(&state->table_stack) > 1);
+  Symbol *benefactor;
+  size_t i;
+  for (i = 0; i < llist_size(&state->table_stack); ++i) {
+    SymbolTable *current = llist_get(&state->table_stack, i);
+    /* TODO(Robert): rewrite symbol table functions */
+    benefactor = symbol_table_get(current, ident, ident_len);
+    if (benefactor != NULL &&
+        (types_equivalent(benefactor->type, symbol->type, 0, 1) ||
+         type_complete_array(benefactor->type, symbol->type) ||
+         type_prototype_function(benefactor->type, symbol->type))) {
+      type_destroy(symbol->type);
+      symbol->type = benefactor->type;
+      symbol->linkage = benefactor->linkage;
+      symbol->storage = benefactor->storage;
+      assert(symbol->info == SYM_NONE);
+      symbol->info = SYM_INHERITOR;
+      return 1;
+    }
+  }
+
+  if (benefactor == NULL) {
+    /* create hidden benefactor for symbol to inherit from */
+    benefactor = symbol_init(symbol->loc);
+    benefactor->type = symbol->type;
+    benefactor->linkage = LINK_EXT;
+    benefactor->storage = STORE_EXT;
+    benefactor->info = SYM_HIDDEN;
+    symbol_table_insert(llist_back(&state->table_stack), ident, ident_len,
+                        benefactor);
+
+    symbol->linkage = LINK_EXT;
+    symbol->storage = STORE_EXT;
+    assert(symbol->info == SYM_NONE);
+    symbol->info = SYM_INHERITOR;
+    return 1;
+  } else {
+    return 0;
+  }
 }
 
 size_t state_get_sequence(CompilerState *state) {

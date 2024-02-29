@@ -27,23 +27,26 @@ typedef enum linkage {
   LINK_NONE,
   LINK_EXT,
   LINK_INT,
-  LINK_INHERIT,
   LINK_MEMBER,
   LINK_TYPEDEF,
-  LINK_ENUM_CONST,
-  LINK_INVALID
+  LINK_ENUM_CONST
 } Linkage;
 
 typedef enum storage_class {
   STORE_AUTO,
   STORE_EXT,
   STORE_STAT,
-  STORE_INHERIT,
   STORE_MEMBER,
   STORE_TYPEDEF,
-  STORE_ENUM_CONST,
-  STORE_INVALID
+  STORE_ENUM_CONST
 } StorageClass;
+
+typedef enum symbol_info {
+  SYM_NONE,
+  SYM_DEFINED,
+  SYM_INHERITOR,
+  SYM_HIDDEN
+} SymbolInfo;
 
 typedef struct symbol {
   const Location *loc;
@@ -52,7 +55,7 @@ typedef struct symbol {
   Linkage linkage;
   ptrdiff_t disp;
   size_t static_id;
-  int defined;
+  SymbolInfo info;
 } Symbol;
 
 typedef enum tag_kind { TAG_STRUCT = 0, TAG_UNION, TAG_ENUM } TagKind;

@@ -36,6 +36,8 @@ int state_get_symbol(CompilerState *state, const char *ident,
                      const size_t ident_len, Symbol **out);
 void state_insert_symbol(CompilerState *state, const char *ident,
                          const size_t ident_len, Symbol *symbol);
+int state_inheritance_valid(CompilerState *state, const char *ident,
+                            const size_t ident_len, Symbol *symbol);
 size_t state_get_sequence(CompilerState *state);
 int state_get_tag(CompilerState *state, const char *ident,
                   const size_t ident_len, Tag **out);
