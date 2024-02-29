@@ -43,7 +43,6 @@ static const char CASE_FMT[] = ".LS%luC%lu";
 static const char FALL_FMT[] = ".LS%luF%lu";
 static const char STR_FMT[] = ".LSTR%lu";
 static const char FN_SIZE_FMT[] = ".-%s";
-static const char FN_PTR_FMT[] = "%s@GOTPCREL";
 static const size_t PROLOGUE_EIGHTBYTES = 8;
 static const ptrdiff_t FP_OFFSET = 304;
 static const ptrdiff_t GP_OFFSET_MAX = 48;
@@ -131,11 +130,6 @@ const char *mk_static_label(const char *name, size_t unique_id) {
   sprintf(temp, "%lu", unique_id);
   size_t label_len = strlen(name) + strlen(temp) + sizeof(STATIC_FMT) - 5;
   return deduplicate_text(label_len, STATIC_FMT, name, unique_id);
-}
-
-const char *mk_fnptr_text(const char *name) {
-  size_t text_len = strlen(name) + sizeof(FN_PTR_FMT) - 2;
-  return deduplicate_text(text_len, FN_PTR_FMT, name);
 }
 
 const char *mk_fallthru_label(size_t switch_id, size_t case_id) {

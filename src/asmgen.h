@@ -7,7 +7,6 @@
 #include "lyutils.h"
 
 const char *mk_static_label(const char *name, size_t unique_id);
-const char *mk_fnptr_text(const char *name);
 void maybe_load_cexpr(ASTree *expr, ListIter *where);
 size_t asmgen_literal_label(const char *literal, const char **out);
 void bulk_mzero(size_t dest_memreg, ptrdiff_t dest_disp, size_t skip_bytes,
