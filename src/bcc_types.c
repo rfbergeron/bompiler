@@ -1171,3 +1171,66 @@ Type *type_arithmetic_conversions(Type *type1, Type *type2) {
     return (Type *)TYPE_INT;
   }
 }
+
+int type_complete_array(Type *old_type, Type *new_type) {
+  if (!(type_is_array(old_type) && type_is_array(new_type))) {
+    return 0;
+  } else if (!types_equivalent(type_strip_declarator(old_type),
+                               type_strip_declarator(new_type), 0, 1)) {
+    return 0;
+  } else if (!old_type->array.deduce_length && !new_type->array.deduce_length) {
+    /* neither array has deduced length and this function should only be called
+     * when the types are not equivalent, so they must have differing lengths,
+     * which indicates a semantic error
+     */
+    return 0;
+  } else if (old_type->array.length != 0 && new_type->array.length != 0 &&
+             old_type->array.length != new_type->array.length) {
+    /* at least one type has deduced length, both the length of both arrays is
+     * known and differs, which indicates a semantic error
+     */
+    return 0;
+  } else {
+    /* give old type a length if the new type has one */
+    if (old_type->array.length < new_type->array.length) {
+      old_type->array.length = new_type->array.length;
+      old_type->array.deduce_length = new_type->array.deduce_length;
+    }
+    return 1;
+  }
+}
+
+int type_prototype_function(Type *old_type, Type *new_type) {
+  if (!(type_is_function(old_type) && type_is_function(new_type))) {
+    return 0;
+  } else if (!types_equivalent(type_strip_declarator(old_type),
+                               type_strip_declarator(new_type), 0, 1)) {
+    return 0;
+  } else if (!type_is_prototyped_function(new_type)) {
+    /* new function type has no prototype; nothing to do here */
+    return 1;
+  } else if (type_is_prototyped_function(old_type)) {
+    /* both functions have a prototype; this function should only be called
+     * when it has been determined that the types are not equivalent, so at
+     * this point it is definitely a semantic error
+     */
+    return 0;
+  } else {
+    /* existing type may have already been used elsewhere so we have to replace
+     * its contents in-place; all this means is moving some parameter info from
+     * the new type to the old one
+     */
+    old_type->function.parameters = new_type->function.parameters;
+    old_type->function.parameters_size = new_type->function.parameters_size;
+    old_type->function.is_variadic = new_type->function.is_variadic;
+    old_type->function.is_old_style = new_type->function.is_old_style;
+    /* make old definition look like an old style declaration for the type
+     * checker's sake
+     */
+    new_type->function.parameters = NULL;
+    new_type->function.parameters_size = 0;
+    new_type->function.is_old_style = 1;
+    new_type->function.is_variadic = 1;
+    return 1;
+  }
+}

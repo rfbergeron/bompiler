@@ -173,87 +173,87 @@ static int location_is_empty(Location *loc) {
   return loc->filenr == 0 && loc->linenr == 0 && loc->offset == 0;
 }
 
-static Linkage determine_linkage(Type *type, int has_outer_symbol) {
+static int set_symbol_qualifiers(const char *ident, size_t ident_len,
+                                 Symbol *symbol) {
   const SymbolTable *top_scope = state_peek_table(state);
-  unsigned int decl_flags = type_get_flags(type_get_decl_specs(type));
+  unsigned int decl_flags = type_get_flags(type_get_decl_specs(symbol->type));
 
   if (top_scope->kind == TABLE_MEMBER) {
-    return LINK_MEMBER;
+    if ((decl_flags & STOR_FLAG_MASK) != STOR_FLAG_NONE) {
+      return -1;
+    } else {
+      symbol->linkage = LINK_MEMBER;
+      symbol->storage = STORE_MEMBER;
+      return 0;
+    }
   } else if (top_scope->kind == TABLE_TRANS_UNIT) {
     switch (decl_flags & STOR_FLAG_MASK) {
       case STOR_FLAG_AUTO:
         /* fallthrough */
       case STOR_FLAG_REGISTER:
-        return LINK_INVALID;
+        return -1;
       case STOR_FLAG_EXTERN:
-        /* fallthrough */
+        symbol->linkage = LINK_EXT;
+        symbol->storage = STORE_EXT;
+        return 0;
       case STOR_FLAG_NONE:
-        return LINK_EXT;
+        symbol->linkage = LINK_EXT;
+        if (type_is_function(symbol->type))
+          symbol->storage = STORE_EXT;
+        else
+          symbol->storage = STORE_STAT;
+        return 0;
       case STOR_FLAG_STATIC:
-        return LINK_INT;
+        symbol->linkage = LINK_INT;
+        symbol->storage = STORE_STAT;
+        return 0;
       case STOR_FLAG_TYPEDEF:
-        return LINK_TYPEDEF;
+        symbol->linkage = LINK_TYPEDEF;
+        symbol->storage = STORE_TYPEDEF;
+        return 0;
       default:
         abort();
     }
   } else {
     switch (decl_flags & STOR_FLAG_MASK) {
-      case STOR_FLAG_NONE:
-        return type_is_function(type) ? LINK_EXT : LINK_NONE;
-        /* fallthrough */
-      case STOR_FLAG_STATIC:
-        /* fallthrough */
+      int heritable;
       case STOR_FLAG_AUTO:
         /* fallthrough */
       case STOR_FLAG_REGISTER:
-        return type_is_function(type) ? LINK_INVALID : LINK_NONE;
-      case STOR_FLAG_EXTERN:
-        return has_outer_symbol ? LINK_INHERIT : LINK_EXT;
-      case STOR_FLAG_TYPEDEF:
-        return LINK_TYPEDEF;
-      default:
-        abort();
-    }
-  }
-}
-
-static StorageClass determine_storage(Type *type, int has_outer_symbol) {
-  const SymbolTable *top_scope = state_peek_table(state);
-  unsigned int decl_flags = type_get_flags(type_get_decl_specs(type));
-
-  if (top_scope->kind == TABLE_MEMBER) {
-    return STORE_MEMBER;
-  } else if (top_scope->kind == TABLE_TRANS_UNIT) {
-    switch (decl_flags & STOR_FLAG_MASK) {
-      case STOR_FLAG_AUTO:
-        /* fallthrough */
-      case STOR_FLAG_REGISTER:
-        return STORE_INVALID;
-      case STOR_FLAG_EXTERN:
-        return STORE_EXT;
+        if (type_is_function(symbol->type)) {
+          return -1;
+        } else {
+          symbol->linkage = LINK_NONE;
+          symbol->storage = STORE_AUTO;
+          return 0;
+        }
       case STOR_FLAG_STATIC:
-        /* fallthrough */
+        if (type_is_function(symbol->type)) {
+          return -1;
+        } else {
+          symbol->linkage = LINK_NONE;
+          symbol->storage = STORE_STAT;
+          return 0;
+        }
       case STOR_FLAG_NONE:
-        return STORE_STAT;
-      case STOR_FLAG_TYPEDEF:
-        return STORE_TYPEDEF;
-      default:
-        abort();
-    }
-  } else {
-    switch (decl_flags & STOR_FLAG_MASK) {
-      case STOR_FLAG_NONE:
-        return type_is_function(type) ? STORE_EXT : STORE_AUTO;
-      case STOR_FLAG_REGISTER:
+        if (!type_is_function(symbol->type)) {
+          symbol->linkage = LINK_NONE;
+          symbol->storage = STORE_AUTO;
+          return 0;
+        }
         /* fallthrough */
-      case STOR_FLAG_AUTO:
-        return type_is_function(type) ? STORE_INVALID : STORE_AUTO;
-      case STOR_FLAG_STATIC:
-        return type_is_function(type) ? STORE_INVALID : STORE_STAT;
       case STOR_FLAG_EXTERN:
-        return has_outer_symbol ? STORE_INHERIT : STORE_EXT;
+        heritable = state_inheritance_valid(state, ident, ident_len, symbol);
+        if (heritable) {
+          /* call above should set linkage and storage class */
+          return 0;
+        } else {
+          return -1;
+        }
       case STOR_FLAG_TYPEDEF:
-        return STORE_TYPEDEF;
+        symbol->linkage = LINK_TYPEDEF;
+        symbol->storage = STORE_TYPEDEF;
+        return 0;
       default:
         abort();
     }
@@ -262,8 +262,6 @@ static StorageClass determine_storage(Type *type, int has_outer_symbol) {
 
 static int linkage_valid(const Symbol *existing, Linkage linkage) {
   assert(existing != NULL);
-  assert(existing->linkage != LINK_INVALID);
-  assert(linkage != LINK_INVALID);
   if (existing->linkage == LINK_TYPEDEF || linkage == LINK_TYPEDEF) {
     /* typedef redefinition */
     return 0;
@@ -271,20 +269,14 @@ static int linkage_valid(const Symbol *existing, Linkage linkage) {
              linkage == LINK_ENUM_CONST) {
     /* enumeration constant redefinition */
     return 0;
-  } else if (existing->linkage == LINK_MEMBER && linkage == LINK_MEMBER) {
+  } else if (existing->linkage == LINK_MEMBER || linkage == LINK_MEMBER) {
     /* record member redeclaration */
     return 0;
-  } else if (existing->linkage == LINK_INHERIT || linkage == LINK_INHERIT) {
-    /* extern symbol at block scope; other symbol must also inherit linkage and
-     * storage class from an outer scope or must have external linkage
-     */
-    return existing->linkage == linkage || existing->linkage == LINK_EXT ||
-           linkage == LINK_EXT;
   } else if (existing->linkage == LINK_NONE || linkage == LINK_NONE) {
     /* redeclaration of symbol at block scope */
     return 0;
   } else if (existing->linkage == LINK_EXT && linkage == LINK_EXT) {
-    /* multiple external declarations are allowed */
+    /* multiple declarations of a symbol are allowed with the same linkage */
     return 1;
   } else if (existing->linkage != LINK_INT) {
     /* declaration of symbol with internal linkage after previous declaration
@@ -292,25 +284,15 @@ static int linkage_valid(const Symbol *existing, Linkage linkage) {
      */
     return 0;
   } else if (linkage == LINK_INT || linkage == LINK_EXT) {
-    /* multiple external declarations are allowed */
+    /* multiple declarations of a symbol are allowed with the same linkage,
+     * and a symbol initially declared with internal linkage may subsequently
+     * be declared with external linkage, though the linkage will not change
+     */
     return 1;
   } else {
     /* everything else; not sure if this is necessary */
     return 0;
   }
-}
-
-static int is_array_completion(const Type *new_type, const Type *old_type) {
-  if (!type_is_array(new_type) || !type_is_array(old_type))
-    return 0;
-  else if (!new_type->array.deduce_length && !old_type->array.deduce_length)
-    return 0;
-  else if (new_type->array.length != 0 && old_type->array.length != 0)
-    return 0;
-
-  Type *new_elem_type = type_strip_declarator(new_type);
-  Type *old_elem_type = type_strip_declarator(old_type);
-  return types_equivalent(new_elem_type, old_elem_type, 0, 1);
 }
 
 static const char *create_unique_name(ASTree *tree) {
@@ -380,84 +362,34 @@ ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
   Symbol *exists = NULL;
   int is_redeclaration =
       state_get_symbol(state, identifier, identifier_len, &exists);
-  int exists_equivalent =
-      exists == NULL ? 0
-                     : types_equivalent(declarator->type, exists->type, 0, 1);
-  Linkage linkage = determine_linkage(declarator->type,
-                                      !is_redeclaration && exists_equivalent);
+  Symbol *symbol = symbol_init(&declarator->loc);
+  symbol->type = declarator->type;
 
-  if (linkage == LINK_INVALID) {
+  if (set_symbol_qualifiers(identifier, identifier_len, symbol)) {
     /* TODO(Robert): create a proper error for invalid linkage */
     return astree_create_errnode(declarator, BCC_TERR_FAILURE, 0);
-  } else if (is_redeclaration) {
-    if (!linkage_valid(exists, linkage)) {
-      return astree_create_errnode(declarator, BCC_TERR_REDEFINITION, 1,
-                                   declarator);
-    } else if (types_equivalent(declarator->type, exists->type, 0, 1)) {
-      type_destroy(declarator->type);
-      declarator->type = exists->type;
-      return declarator;
-    } else if (is_array_completion(declarator->type, exists->type)) {
-      if (exists->type->array.length == 0 &&
-          declarator->type->array.length != 0) {
-        /* replace type information in place since it may have been used */
-        /* TODO(Robert): add a function `type_replace` or similar that replaces
-         * type information in place
-         */
-        exists->type->array.deduce_length =
-            declarator->type->array.deduce_length;
-        exists->type->array.length = declarator->type->array.length;
-      }
-      type_destroy(declarator->type);
-      declarator->type = exists->type;
-      return declarator;
-    } else if (type_is_function(exists->type) &&
-               type_is_function(declarator->type)) {
-      Type *exists_ret_type = type_strip_declarator(exists->type);
-      Type *declarator_ret_type = type_strip_declarator(declarator->type);
-      if (type_is_prototyped_function(exists->type) &&
-          type_is_prototyped_function(declarator->type)) {
-        if (types_equivalent(exists->type, declarator->type, 0, 1)) {
-          type_destroy(declarator->type);
-          declarator->type = exists->type;
-          return declarator;
-        } else {
-          return astree_create_errnode(declarator, BCC_TERR_REDEFINITION, 1,
-                                       declarator);
-        }
-      } else if (types_equivalent(exists_ret_type, declarator_ret_type, 0, 1)) {
-        if (!type_is_prototyped_function(exists->type)) {
-          /* give existing symbol a prototype; the existing type info may have
-           * already been used elsewhere so we need to replace the contents
-           * of the type info in place
-           */
-          assert(exists->type->function.parameters == NULL);
-          *(exists->type) = *(declarator->type);
-          exists->type->function.next = exists_ret_type;
-          exists->type->function.is_old_style = 1;
-          declarator->type->function.parameters = NULL;
-        }
-
-        type_destroy(declarator->type);
-        declarator->type = exists->type;
-        return declarator;
-      } else {
-        return astree_create_errnode(declarator, BCC_TERR_REDEFINITION, 1,
-                                     declarator);
-      }
-    } else {
-      return astree_create_errnode(declarator, BCC_TERR_REDEFINITION, 1,
-                                   declarator);
-    }
-  } else {
-    Symbol *symbol = symbol_init(&declarator->loc);
-    symbol->type = declarator->type;
-    symbol->linkage = linkage;
-    symbol->storage = determine_storage(declarator->type,
-                                        !is_redeclaration && exists_equivalent);
-    assert(symbol->storage != STORE_INVALID);
+  } else if (!is_redeclaration) {
     state_insert_symbol(state, identifier, identifier_len, symbol);
     if (symbol_is_lvalue(symbol)) declarator->attributes |= ATTR_EXPR_LVAL;
+    /* reassign type information in case it was replaced */
+    if (symbol->info == SYM_INHERITOR) declarator->type = symbol->type;
+    return declarator;
+  } else if (!linkage_valid(exists, symbol->linkage) ||
+             !(types_equivalent(exists->type, declarator->type, 0, 1) ||
+               type_complete_array(exists->type, declarator->type) ||
+               type_prototype_function(exists->type, declarator->type))) {
+    symbol->type = NULL;
+    symbol_destroy(symbol);
+    return astree_create_errnode(declarator, BCC_TERR_REDEFINITION, 1,
+                                 declarator);
+  } else {
+    if (exists->info == SYM_HIDDEN) {
+      assert(exists->linkage == LINK_EXT && symbol->linkage == LINK_EXT);
+      exists->storage = symbol->storage;
+      exists->info = SYM_NONE;
+    }
+    symbol_destroy(symbol);
+    declarator->type = exists->type;
     return declarator;
   }
 }
@@ -536,6 +468,8 @@ ASTree *validate_param(ASTree *param_list, ASTree *declaration,
       (void)is_param;
 #endif
       assert(param_symbol != NULL);
+      assert(param_symbol->linkage == LINK_NONE);
+      assert(param_symbol->storage == STORE_AUTO);
       assert(is_param);
       param_symbol->type = declarator->type;
     }
@@ -702,13 +636,14 @@ ASTree *define_symbol(ASTree *decl_list, ASTree *equal_sign,
   (void)state_get_symbol(state, declarator->lexinfo,
                          strlen(declarator->lexinfo), &symbol);
   assert(symbol != NULL);
-  if (symbol->defined)
+  assert(symbol->type = declarator->type);
+  if (symbol->info == SYM_DEFINED)
     return astree_create_errnode(
         astree_adopt(decl_list, 1,
                      astree_adopt(equal_sign, 2, declarator, initializer)),
         BCC_TERR_REDEFINITION, 1, declarator);
-  symbol->defined = 1;
-  ;
+  assert(symbol->info == SYM_NONE);
+  symbol->info = SYM_DEFINED;
   equal_sign->type = declarator->type;
   /* code is emitted by `validate_fnbody_content`, `validate_topdecl`, or
    * `validate_block_content` and type checking is performed in `init.c`
@@ -734,9 +669,13 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
   assert(in_current_scope);
   assert(symbol != NULL);
   assert(type_is_function(symbol->type));
-  if (symbol->defined)
+  assert(symbol->type == declarator->type);
+  if (symbol->info == SYM_DEFINED)
     return astree_create_errnode(astree_adopt(declaration, 2, declarator, body),
                                  BCC_TERR_REDEFINITION, 1, declarator);
+  symbol->storage = STORE_STAT;
+  assert(symbol->info != SYM_INHERITOR);
+  symbol->info = SYM_NONE;
 
   /* param list should be first child for properly defined functions */
   ASTree *param_list = astree_get(declarator, 0);
@@ -823,7 +762,8 @@ ASTree *finalize_function(ASTree *function) {
     if (status) abort();
   }
   Symbol *symbol = state_get_function(state);
-  symbol->defined = 1;
+  assert(symbol->info == SYM_NONE);
+  symbol->info = SYM_DEFINED;
   state_unset_function(state);
   /* do not use finalize_block because it will put the error in an awkward place
    */
@@ -1036,7 +976,7 @@ ASTree *define_enumerator(ASTree *enum_spec, ASTree *enum_id,
   /* mark as enumeration consntant */
   symbol->linkage = LINK_ENUM_CONST;
   symbol->storage = STORE_ENUM_CONST;
-  symbol->defined = 1;
+  symbol->info = SYM_DEFINED;
   /* copy type info from tag node */
   symbol->type = type_copy(enum_spec->type, 0);
 

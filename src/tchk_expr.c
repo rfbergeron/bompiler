@@ -38,7 +38,7 @@ ASTree *validate_stringcon(ASTree *stringcon) {
     symbol->disp = 0;
     symbol->linkage = LINK_INT;
     symbol->storage = STORE_STAT;
-    symbol->defined = 1;
+    symbol->info = SYM_DEFINED;
     symbol->static_id = static_id;
 
     /* subtract 2 for quotes, add one for terminating nul */
@@ -62,7 +62,7 @@ ASTree *validate_ident(ASTree *ident) {
   size_t id_str_len = strlen(id_str);
   Symbol *symbol = NULL;
   (void)state_get_symbol(state, id_str, id_str_len, &symbol);
-  if (symbol) {
+  if (symbol != NULL && symbol->info != SYM_HIDDEN) {
     PFDBG1('t', "Assigning %s a symbol", id_str);
     ident->type = symbol->type;
     if (symbol_is_lvalue(symbol)) ident->attributes |= ATTR_EXPR_LVAL;
