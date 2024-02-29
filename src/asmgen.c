@@ -1585,7 +1585,7 @@ ASTree *translate_call(ASTree *call) {
     set_op_imm(&sub_instr->src, 0, IMM_UNSIGNED);
   }
 
-  if (type_is_variadic_function(fn_pointer->type)) {
+  if (type_is_variadic_function(type_strip_declarator(fn_pointer->type))) {
     Instruction *zero_eax_instr = instr_init(OP_MOV);
     set_op_imm(&zero_eax_instr->src, 0, IMM_UNSIGNED);
     set_op_reg(&zero_eax_instr->dest, REG_DWORD, RAX_VREG);
