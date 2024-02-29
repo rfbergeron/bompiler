@@ -338,9 +338,7 @@ ASTree *evaluate_ident(ASTree *ident) {
     ident->attributes |= ATTR_CONST_MAYBE;
     ident->constant.symbol = symbol;
     ident->constant.integral.signed_value = 0;
-    if (type_is_function(symbol->type))
-      ident->constant.label = mk_fnptr_text(ident->lexinfo);
-    else if (symbol->linkage == LINK_NONE)
+    if (symbol->linkage == LINK_NONE)
       ident->constant.label =
           mk_static_label(ident->lexinfo, symbol->static_id);
     else
