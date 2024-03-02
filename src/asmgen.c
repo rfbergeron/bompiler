@@ -812,8 +812,9 @@ ASTree *translate_comparison(ASTree *operator, ASTree * left, ASTree *right) {
   Instruction *right_instr = liter_get(right->last_instr);
 
   Instruction *cmp_instr = instr_init(OP_CMP);
-  cmp_instr->dest = right_instr->dest;
-  cmp_instr->src = left_instr->dest;
+  /* reverse operands; looks weird in AT&T syntax but is correct */
+  cmp_instr->dest = left_instr->dest;
+  cmp_instr->src = right_instr->dest;
   cmp_instr->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_SET;
 
   Instruction *setcc_instr =
@@ -1056,8 +1057,9 @@ ASTree *translate_addition(ASTree *operator, ASTree * left, ASTree *right) {
 
   Instruction *operator_instr =
       instr_init(opcode_from_operator(operator->tok_kind, operator->type));
-  operator_instr->dest = right_instr->dest;
-  operator_instr->src = left_instr->dest;
+  /* reverse operands; looks weird in AT&T syntax but is correct */
+  operator_instr->dest = left_instr->dest;
+  operator_instr->src = right_instr->dest;
   operator_instr->persist_flags |=
       PERSIST_SRC_SET | PERSIST_DEST_SET | PERSIST_DEST_CLEAR;
 
@@ -1165,8 +1167,9 @@ ASTree *translate_binop(ASTree *operator, ASTree * left, ASTree *right) {
 
   Instruction *operator_instr =
       instr_init(opcode_from_operator(operator->tok_kind, operator->type));
-  operator_instr->dest = right_instr->dest;
-  operator_instr->src = left_instr->dest;
+  /* reverse operands; looks weird in AT&T syntax but is correct */
+  operator_instr->dest = left_instr->dest;
+  operator_instr->src = right_instr->dest;
   operator_instr->persist_flags |=
       PERSIST_SRC_SET | PERSIST_DEST_SET | PERSIST_DEST_CLEAR;
 
@@ -1755,13 +1758,14 @@ static void helper_va_arg_reg_param(ASTree *va_arg_, ASTree *expr,
 
   /* jump if arg cannot fit into the save area */
   Instruction *cmp_gp_offset_instr = instr_init(OP_CMP);
-  cmp_gp_offset_instr->src = load_gp_offset_instr->dest;
+  /* reverse operands; looks weird in AT&T syntax but is correct */
+  cmp_gp_offset_instr->dest = load_gp_offset_instr->dest;
   /* if arg takes up two eightbytes, offset can't be >= 40 */
   if (eightbytes == 2)
-    set_op_imm(&cmp_gp_offset_instr->dest, GP_OFFSET_MAX - X64_SIZEOF_LONG,
+    set_op_imm(&cmp_gp_offset_instr->src, GP_OFFSET_MAX - X64_SIZEOF_LONG,
                IMM_SIGNED);
   else
-    set_op_imm(&cmp_gp_offset_instr->dest, GP_OFFSET_MAX, IMM_SIGNED);
+    set_op_imm(&cmp_gp_offset_instr->src, GP_OFFSET_MAX, IMM_SIGNED);
 
   Instruction *jmp_ge_instr = instr_init(OP_JGE);
   set_op_dir(&jmp_ge_instr->dest, mk_true_label(current_branch));
