@@ -14,12 +14,13 @@
 static struct reg_desc {
   size_t vreg_num;
   Instruction *next_use;
-} *reg_descs[16];
+} *reg_descs[REAL_REG_COUNT];
 typedef struct reg_desc RegDesc;
-static size_t reg_descs_sizes[16];
-static size_t reg_descs_caps[16];
-/* location of 24-byte region for contents of unspilled registers */
-static const ptrdiff_t unspill_region = -40;
+static size_t reg_descs_sizes[REAL_REG_COUNT];
+static size_t reg_descs_caps[REAL_REG_COUNT];
+/* locations of 8-byte region for contents of unspilled registers */
+extern const ptrdiff_t UNSPILL_REGIONS[];
+extern const size_t UNSPILL_REGIONS_SIZE;
 extern ptrdiff_t window_size;
 
 static ptrdiff_t *vreg_descs;
@@ -282,25 +283,24 @@ static void select_reg(ListIter *where, size_t *vreg_num, size_t vreg_width,
   } else {
     /* choose unspill reg */
     size_t unspill_reg = REAL_REG_COUNT, i;
-    ptrdiff_t unspill_disp = 0;
+    size_t unspill_index = 0;
     for (i = 0; i < VOLATILE_REG_COUNT; ++i) {
       if ((*used_volatile & 1 << VOLATILE_REGS[i]) == 0) {
         size_t j;
         for (j = 0; j < sizeof(unsigned short) * CHAR_BIT; ++j)
-          if ((*used_volatile & 1 << j) != 0) unspill_disp += 8;
-        assert(unspill_disp <= 16);
+          if ((*used_volatile & 1 << j) != 0) ++unspill_index;
         *used_volatile |= 1 << VOLATILE_REGS[i];
         unspill_reg = VOLATILE_REGS[i];
         break;
       }
     }
 
-    assert(unspill_disp <= 16);
+    assert(unspill_index < UNSPILL_REGIONS_SIZE);
     assert(unspill_reg != REAL_REG_COUNT);
     /* save contents of unspill reg */
     Instruction *store_unspill_instr = instr_init(OP_MOV);
     set_op_reg(&store_unspill_instr->src, REG_QWORD, unspill_reg);
-    set_op_ind(&store_unspill_instr->dest, unspill_region + unspill_disp,
+    set_op_ind(&store_unspill_instr->dest, UNSPILL_REGIONS[unspill_index],
                RBP_VREG);
     /* load spilled vreg into unspill reg */
     Instruction *load_spill_instr = instr_init(OP_MOV);
@@ -315,7 +315,7 @@ static void select_reg(ListIter *where, size_t *vreg_num, size_t vreg_width,
     set_op_ind(&store_spill_instr->dest, location, RBP_VREG);
     /* load original value back into unspill register */
     Instruction *load_unspill_instr = instr_init(OP_MOV);
-    set_op_ind(&load_unspill_instr->src, unspill_region + unspill_disp,
+    set_op_ind(&load_unspill_instr->src, UNSPILL_REGIONS[unspill_index],
                RBP_VREG);
     set_op_reg(&load_unspill_instr->dest, REG_QWORD, unspill_reg);
     status =
@@ -415,13 +415,14 @@ static void src_thunk_in_fn(ListIter *where, Instruction *instr,
     assert((size_t)volatile_index < VOLATILE_REG_COUNT);
     if (instr->dest.all.mode == MODE_REGISTER) {
       /* change operand to indirect mode if argument is passed in register */
-      set_op_ind(&instr->src, volatile_index * 8, RSP_VREG);
+      set_op_ind(&instr->src, volatile_index * X64_SIZEOF_LONG, RSP_VREG);
     } else {
       /* otherwise, use rax to move to another stack location and mark it as
        * clobbered
        */
       Instruction *unspill_instr = instr_init(OP_MOV);
-      set_op_ind(&unspill_instr->src, volatile_index * 8, RSP_VREG);
+      set_op_ind(&unspill_instr->src, volatile_index * X64_SIZEOF_LONG,
+                 RSP_VREG);
       set_op_reg(&unspill_instr->dest, instr->src.reg.width, 0);
       int status = liter_push_front(where, NULL, 1, unspill_instr);
       if (status) abort();
@@ -470,7 +471,7 @@ static void dest_thunk_in_fn(ListIter *where, Instruction *instr,
            VOLATILE_REGS[volatile_index] != (size_t)location)
       ++volatile_index;
     assert((size_t)volatile_index < VOLATILE_REG_COUNT);
-    set_op_ind(&instr->dest, volatile_index * 8, RSP_VREG);
+    set_op_ind(&instr->dest, volatile_index * X64_SIZEOF_LONG, RSP_VREG);
     /* remember to set next use information */
     reg_descs[location][reg_descs_sizes[location] - 1].next_use =
         instr->src.reg.next_use;
@@ -496,17 +497,19 @@ static void select_regs(ListIter *where) {
     in_function = 0;
   } else if (instr->opcode == OP_PUSH &&
              instr->dest.all.mode == MODE_REGISTER &&
-             instr->dest.reg.num == 11) {
+             instr->dest.reg.num == R11_VREG) {
     in_function = 1;
     regs_clobbered = 0;
   }
 }
 
 void allocate_regs(ListIter *first, ListIter *last) {
+  static const size_t INIT_VREG_DESCS_CAP = 8;
   size_t i;
-  for (i = 0; i < 16; ++i) {
+  for (i = 0; i < REAL_REG_COUNT; ++i) {
+    static const size_t INIT_REG_DESCS_CAP = 2;
     reg_descs_sizes[i] = 0;
-    reg_descs_caps[i] = 2;
+    reg_descs_caps[i] = INIT_REG_DESCS_CAP;
     reg_descs[i] = malloc(sizeof(**reg_descs) * reg_descs_caps[i]);
   }
   /* dummy entries for rsp and rbp since those aren't really general purpose */
@@ -517,7 +520,7 @@ void allocate_regs(ListIter *first, ListIter *last) {
   reg_descs[RBP_VREG][1].vreg_num = SIZE_MAX;
   reg_descs[RBP_VREG][1].next_use = liter_get(first);
   vreg_descs_size = 0;
-  vreg_descs_cap = 8;
+  vreg_descs_cap = INIT_VREG_DESCS_CAP;
   vreg_descs = malloc(sizeof(ptrdiff_t) * vreg_descs_cap);
   ListIter *current = liter_copy(first);
 
@@ -537,6 +540,6 @@ void allocate_regs(ListIter *first, ListIter *last) {
   }
 
   free(current);
-  for (i = 0; i < 16; ++i) free(reg_descs[i]);
+  for (i = 0; i < REAL_REG_COUNT; ++i) free(reg_descs[i]);
   free(vreg_descs);
 }
