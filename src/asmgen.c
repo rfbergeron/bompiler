@@ -1408,7 +1408,7 @@ static void assign_add(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
 static void assign_scalar(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   Instruction *lvalue_instr = liter_get(lvalue->last_instr);
 
-  scalar_conversions(rvalue, lvalue->type);
+  scalar_conversions(rvalue, assignment->type);
   Instruction *rvalue_instr = liter_get(rvalue->last_instr);
 
   Instruction *assignment_instr =
@@ -1417,14 +1417,15 @@ static void assign_scalar(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   assignment_instr->src = rvalue_instr->dest;
   assignment_instr->persist_flags |= PERSIST_DEST_SET | PERSIST_SRC_SET;
 
-  Instruction *dummy_instr = instr_init(OP_MOV);
-  dummy_instr->src = dummy_instr->dest = rvalue_instr->dest;
-  dummy_instr->persist_flags |= PERSIST_DEST_CLEAR;
+  Instruction *load_instr = instr_init(OP_MOV);
+  load_instr->src = assignment_instr->dest;
+  set_op_reg(&load_instr->dest, type_get_width(assignment->type), next_vreg());
+  load_instr->persist_flags |= PERSIST_DEST_CLEAR;
 
   assignment->first_instr = liter_copy(lvalue->first_instr);
   if (assignment->first_instr == NULL) abort();
   int status = liter_push_back(rvalue->last_instr, &assignment->last_instr, 2,
-                               assignment_instr, dummy_instr);
+                               assignment_instr, load_instr);
   if (status) abort();
 }
 
