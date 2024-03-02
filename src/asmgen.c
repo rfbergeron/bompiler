@@ -51,10 +51,16 @@ static const ptrdiff_t FP_OFFSET_MEMBER_DISP = X64_SIZEOF_INT;
 static const ptrdiff_t OVERFLOW_ARG_AREA_MEMBER_DISP = 2 * X64_SIZEOF_INT;
 static const ptrdiff_t REG_SAVE_AREA_MEMBER_DISP =
     2 * X64_SIZEOF_INT + X64_SIZEOF_LONG;
+/* reserve offset -8 for function call return values, offset -16 for hidden
+ * parameter storage, and offsets -40, -32 and -24 for the first, second and
+ * third register unspill regions, repsectively
+ */
 static const ptrdiff_t RETURN_VAL_DISP = -8;
 static const ptrdiff_t HIDDEN_PARAM_DISP = -16;
-/* reserve 8 bytes each for hidden param, plus another 24 bytes for unspill */
 static const ptrdiff_t INIT_WINDOW_SIZE = 40;
+/* locations of 8-byte regions for contents of unspilled registers */
+const ptrdiff_t UNSPILL_REGIONS[] = {-40, -32, -24};
+const size_t UNSPILL_REGIONS_SIZE = ARRAY_ELEM_COUNT(UNSPILL_REGIONS);
 static ptrdiff_t reg_save_area_disp;
 static size_t arg_reg_index;
 static ptrdiff_t arg_stack_disp;
