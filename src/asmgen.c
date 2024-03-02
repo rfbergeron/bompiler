@@ -1087,8 +1087,10 @@ ASTree *translate_addition(ASTree *operator, ASTree * left, ASTree *right) {
   return astree_adopt(operator, 2, left, right);
 }
 
-/* DIV/IDIV: divide ax by operand; quotient -> ax; remainder -> dx except
- * when the operand is al, in which case upper bits -> ah
+/* DIV/IDIV: divide dx:ax by operand; quotient -> ax; remainder -> dx except
+ * when the operand is 8 bits, in which case divide ax by operand;
+ * quotient->al; remainder->ah
+ *
  * MUL/IMUL: multipy ax by operand; lower bits -> ax; upper bits -> dx except
  * when the operand is al, in which case upper bits -> ah
  *
@@ -1096,64 +1098,152 @@ ASTree *translate_addition(ASTree *operator, ASTree * left, ASTree *right) {
  * lets us reuse the whole procedure to emit it
  *
  * because of integral promotion, the operands should be at least 32 bits, and
- * we don't need to worry about the case where the remainder is in ah
+ * we don't need to worry about the case where al is extended into ax rather
+ * than al:dl and the remainder is in ah
  */
-ASTree *translate_multiplication(ASTree *operator, ASTree * left,
-                                 ASTree *right) {
-  PFDBG0('g', "Translating binary operation");
-  scalar_conversions(left, operator->type);
-  Instruction *left_instr = liter_get(left->last_instr);
+/* We need to use a 3rd register to hold the right operand in case it was
+ * originally held in rax or rdx, in which case it would be clobbered when
+ * moving the left operand into rax or when rax is sign- or zero-extended into
+ * rdx. Fortunately, the virtual register for the right operand should not be
+ * used after this operation, so its contents aren't important afterwards.
+ * Attempting to do so will only trip up the register allocator.
+ */
+static void multiply_helper(ASTree *operator, ASTree * left, ASTree *right) {
+  Type *common_type;
+  Instruction *lvalue_instr, *left_instr;
+  if (operator->tok_kind == TOK_MULEQ ||
+      operator->tok_kind == TOK_DIVEQ ||
+      operator->tok_kind == TOK_REMEQ) {
+    lvalue_instr = liter_get(left->last_instr);
+    assert(lvalue_instr->dest.all.mode == MODE_REGISTER);
+    assert(lvalue_instr->dest.reg.width == REG_QWORD);
+    common_type = type_arithmetic_conversions(left->type, right->type);
+    scalar_conversions(left, common_type);
+    left_instr = liter_get(left->last_instr);
+  } else {
+    lvalue_instr = NULL;
+    common_type = operator->type;
+    scalar_conversions(left, common_type);
+    left_instr = liter_get(left->last_instr);
+  }
 
-  scalar_conversions(right, operator->type);
+  assert(type_get_width(common_type) >= 4);
+
+  scalar_conversions(right, common_type);
   Instruction *right_instr = liter_get(right->last_instr);
 
-  /* unconditionally save rax and rdx so that we don't need to worry about
-   * their values changing implicitly when performing register allocation.
-   */
-  Instruction *push_rdx_instr = instr_init(OP_PUSH);
-  set_op_reg(&push_rdx_instr->dest, REG_QWORD, RDX_VREG);
+  /* save registers whose values may or may not be clobbered */
   Instruction *push_rax_instr = instr_init(OP_PUSH);
   set_op_reg(&push_rax_instr->dest, REG_QWORD, RAX_VREG);
+  Instruction *push_rdx_instr = instr_init(OP_PUSH);
+  set_op_reg(&push_rdx_instr->dest, REG_QWORD, RDX_VREG);
+  Instruction *push_r10_instr = instr_init(OP_PUSH);
+  set_op_reg(&push_r10_instr->dest, REG_QWORD, R10_VREG);
+  Instruction *push_right_instr = instr_init(OP_PUSH);
+  set_op_reg(&push_right_instr->dest, REG_QWORD, right_instr->dest.reg.num);
+  push_right_instr->persist_flags |= PERSIST_DEST_SET;
 
-  Instruction *zero_rdx_instr = instr_init(OP_MOV);
-  set_op_reg(&zero_rdx_instr->dest, type_get_width(operator->type), RDX_VREG);
-  set_op_imm(&zero_rdx_instr->src, 0, IMM_UNSIGNED);
+  /* spill lvalue location to 3rd unspill region, if applicable */
+  Instruction *spill_lvalue_instr;
+  if (lvalue_instr == NULL) {
+    spill_lvalue_instr = instr_init(OP_NOP);
+  } else {
+    spill_lvalue_instr = instr_init(OP_MOV);
+    spill_lvalue_instr->src = lvalue_instr->dest;
+    set_op_ind(&spill_lvalue_instr->dest, UNSPILL_REGIONS[2], RBP_VREG);
+  }
 
+  /* mov left operand into rax as implicit destination operand */
   Instruction *mov_rax_instr = instr_init(OP_MOV);
-  set_op_reg(&mov_rax_instr->dest, type_get_width(operator->type), RAX_VREG);
+  set_op_reg(&mov_rax_instr->dest, type_get_width(common_type), RAX_VREG);
   mov_rax_instr->src = left_instr->dest;
   mov_rax_instr->persist_flags |= PERSIST_SRC_SET;
 
-  Instruction *operator_instr =
-      instr_init(opcode_from_operator(operator->tok_kind, operator->type));
-  operator_instr->dest = right_instr->dest;
-  operator_instr->persist_flags |= PERSIST_DEST_SET;
+  /* extend rax into rdx to be double its width for division */
+  Opcode opcode = opcode_from_operator(operator->tok_kind, common_type);
+  Instruction *extend_instr;
+  if (opcode != OP_DIV && opcode != OP_IDIV) {
+    extend_instr = instr_init(OP_NOP);
+  } else if (type_is_signed(common_type)) {
+    extend_instr = type_get_width(common_type) == 8 ? instr_init(OP_CQO)
+                                                    : instr_init(OP_CDQ);
+  } else {
+    extend_instr = instr_init(OP_MOV);
+    set_op_imm(&extend_instr->src, 0, IMM_UNSIGNED);
+    set_op_reg(&extend_instr->dest, type_get_width(common_type), RDX_VREG);
+  }
 
-  operator->first_instr = liter_copy(left->first_instr);
-  if (operator->first_instr == NULL) abort();
+  /* pop right operand into r10 */
+  Instruction *pop_right_instr = instr_init(OP_POP);
+  set_op_reg(&pop_right_instr->dest, REG_QWORD, R10_VREG);
 
-  Instruction *mov_instr = instr_init(OP_MOV);
-  /* mov from vreg representing rax/rdx to new vreg */
-  set_op_reg(&mov_instr->src, type_get_width(operator->type),
-                              operator->tok_kind == '%' ? RDX_VREG : RAX_VREG);
-  set_op_reg(&mov_instr->dest, type_get_width(operator->type), next_vreg());
+  /* perform operation with right operand in r10 */
+  Instruction *operator_instr = instr_init(opcode);
+  set_op_reg(&operator_instr->dest, type_get_width(common_type), R10_VREG);
 
-  /* restore rax and rdx */
-  Instruction *pop_rax_instr = instr_init(OP_POP);
-  set_op_reg(&pop_rax_instr->dest, REG_QWORD, RAX_VREG);
+  /* if this is a compound assignment operator, store result in lvalue
+   * location; otherwise, store in 3rd unspill register, which should not be
+   * used by any subsequent instructions. if it is a compound assignment
+   * operator, we also need to unspill the register containing the lvalue
+   * location; we can use r10 since we are done with the right operand.
+   */
+  Instruction *unspill_lvalue_instr, *assign_instr;
+  if (lvalue_instr == NULL) {
+    unspill_lvalue_instr = instr_init(OP_NOP);
+    assign_instr = instr_init(OP_NOP);
+  } else {
+    unspill_lvalue_instr = instr_init(OP_MOV);
+    set_op_ind(&unspill_lvalue_instr->src, UNSPILL_REGIONS[2], RBP_VREG);
+    set_op_reg(&unspill_lvalue_instr->dest, REG_QWORD, R10_VREG);
+
+    assign_instr = instr_init(OP_MOV);
+    set_op_reg(&assign_instr->src,
+               type_get_width(left->type),
+               operator->tok_kind == TOK_REMEQ ? RDX_VREG : RAX_VREG);
+    set_op_ind(&assign_instr->dest, NO_DISP, R10_VREG);
+  }
+
+  Instruction *store_instr = instr_init(OP_MOV);
+  if (operator->tok_kind == '%' || operator->tok_kind == TOK_REMEQ)
+    set_op_reg(&store_instr->src, type_get_width(common_type), RDX_VREG);
+  else
+    set_op_reg(&store_instr->src, type_get_width(common_type), RAX_VREG);
+  set_op_ind(&store_instr->dest, UNSPILL_REGIONS[2], RBP_VREG);
+
+  /* restore clobbered registers */
+  Instruction *pop_r10_instr = instr_init(OP_POP);
+  set_op_reg(&pop_r10_instr->dest, REG_QWORD, R10_VREG);
   Instruction *pop_rdx_instr = instr_init(OP_POP);
   set_op_reg(&pop_rdx_instr->dest, REG_QWORD, RDX_VREG);
+  Instruction *pop_rax_instr = instr_init(OP_POP);
+  set_op_reg(&pop_rax_instr->dest, REG_QWORD, RAX_VREG);
 
-  /* dummy mov */
-  Instruction *dummy_instr = instr_init(OP_MOV);
-  dummy_instr->dest = dummy_instr->src = mov_instr->dest;
-  dummy_instr->persist_flags |= PERSIST_DEST_CLEAR;
+  /* load result into a fresh vreg */
+  Instruction *load_instr = instr_init(OP_MOV);
+  load_instr->src = store_instr->dest;
+  if (lvalue_instr == NULL)
+    set_op_reg(&load_instr->dest, type_get_width(common_type), next_vreg());
+  else
+    set_op_reg(&load_instr->dest, type_get_width(left->type), next_vreg());
+  load_instr->persist_flags |= PERSIST_DEST_CLEAR;
 
-  int status = liter_push_back(right->last_instr, &operator->last_instr, 9,
-                               push_rdx_instr, push_rax_instr, zero_rdx_instr,
-                               mov_rax_instr, operator_instr, mov_instr,
-                               pop_rax_instr, pop_rdx_instr, dummy_instr);
-  if (status) abort();
+  operator->first_instr = liter_copy(left->first_instr);
+  assert(operator->first_instr != NULL);
+
+  int status = liter_push_back(
+      right->last_instr, &operator->last_instr, 16, push_rax_instr,
+      push_rdx_instr, push_r10_instr, push_right_instr, spill_lvalue_instr,
+      mov_rax_instr, extend_instr, pop_right_instr, operator_instr,
+      unspill_lvalue_instr, assign_instr, store_instr, pop_r10_instr,
+      pop_rdx_instr, pop_rax_instr, load_instr);
+  assert(!status);
+  assert(operator->last_instr != NULL);
+}
+
+ASTree *translate_multiplication(ASTree *operator, ASTree * left,
+                                 ASTree *right) {
+  PFDBG0('g', "Translating binary operation");
+  multiply_helper(operator, left, right);
   return astree_adopt(operator, 2, left, right);
 }
 
@@ -1315,71 +1405,6 @@ static void assign_add(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   }
 }
 
-static void assign_mul(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
-  Type *common_type = type_arithmetic_conversions(lvalue->type, rvalue->type);
-
-  Instruction *lvalue_instr = liter_get(lvalue->last_instr);
-  scalar_conversions(lvalue, common_type);
-  Instruction *left_instr = liter_get(lvalue->last_instr);
-
-  scalar_conversions(rvalue, common_type);
-  Instruction *rvalue_instr = liter_get(rvalue->last_instr);
-
-  /* unconditionally save rax and rdx so that we don't need to worry about
-   * their values changing implicitly when performing register allocation.
-   */
-  Instruction *push_rdx_instr = instr_init(OP_PUSH);
-  set_op_reg(&push_rdx_instr->dest, REG_QWORD, RDX_VREG);
-  Instruction *push_rax_instr = instr_init(OP_PUSH);
-  set_op_reg(&push_rax_instr->dest, REG_QWORD, RAX_VREG);
-
-  Instruction *zero_rdx_instr = instr_init(OP_MOV);
-  set_op_reg(&zero_rdx_instr->dest, type_get_width(common_type), RDX_VREG);
-  set_op_imm(&zero_rdx_instr->src, 0, IMM_UNSIGNED);
-
-  Instruction *mov_rax_instr = instr_init(OP_MOV);
-  set_op_reg(&mov_rax_instr->dest, type_get_width(common_type), RAX_VREG);
-  mov_rax_instr->src = left_instr->dest;
-  mov_rax_instr->persist_flags |= PERSIST_SRC_SET;
-
-  Instruction *operator_instr =
-      instr_init(opcode_from_operator(assignment->tok_kind, common_type));
-  operator_instr->dest = rvalue_instr->dest;
-  operator_instr->persist_flags |= PERSIST_DEST_SET;
-
-  assignment->first_instr = liter_copy(lvalue->first_instr);
-  if (assignment->first_instr == NULL) abort();
-
-  Instruction *store_instr = instr_init(OP_MOV);
-  set_op_ind(&store_instr->dest, NO_DISP, lvalue_instr->dest.reg.num);
-  set_op_reg(&store_instr->src, type_get_width(lvalue->type),
-             assignment->tok_kind == TOK_REMEQ ? RDX_VREG : RAX_VREG);
-  store_instr->persist_flags |= PERSIST_DEST_SET;
-
-  Instruction *mov_instr = instr_init(OP_MOV);
-  /* mov from vreg representing rax/rdx to new vreg and truncate */
-  set_op_reg(&mov_instr->src, type_get_width(lvalue->type),
-             assignment->tok_kind == TOK_REMEQ ? RDX_VREG : RAX_VREG);
-  set_op_reg(&mov_instr->dest, type_get_width(lvalue->type), next_vreg());
-
-  /* restore rax and rdx */
-  Instruction *pop_rax_instr = instr_init(OP_POP);
-  set_op_reg(&pop_rax_instr->dest, REG_QWORD, RAX_VREG);
-  Instruction *pop_rdx_instr = instr_init(OP_POP);
-  set_op_reg(&pop_rdx_instr->dest, REG_QWORD, RDX_VREG);
-
-  /* dummy mov */
-  Instruction *dummy_instr = instr_init(OP_MOV);
-  dummy_instr->dest = dummy_instr->src = mov_instr->dest;
-  dummy_instr->persist_flags |= PERSIST_DEST_CLEAR;
-
-  int status = liter_push_back(
-      rvalue->last_instr, &assignment->last_instr, 10, push_rdx_instr,
-      push_rax_instr, zero_rdx_instr, mov_rax_instr, operator_instr,
-      store_instr, mov_instr, pop_rax_instr, pop_rdx_instr, dummy_instr);
-  if (status) abort();
-}
-
 static void assign_scalar(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   Instruction *lvalue_instr = liter_get(lvalue->last_instr);
 
@@ -1415,7 +1440,7 @@ ASTree *translate_assignment(ASTree *assignment, ASTree *lvalue,
   } else if (assignment->tok_kind == TOK_MULEQ ||
              assignment->tok_kind == TOK_DIVEQ ||
              assignment->tok_kind == TOK_REMEQ) {
-    assign_mul(assignment, lvalue, rvalue);
+    multiply_helper(assignment, lvalue, rvalue);
   } else {
     assign_scalar(assignment, lvalue, rvalue);
   }
@@ -1606,8 +1631,8 @@ ASTree *translate_call(ASTree *call) {
   assert(fn_pointer_instr->dest.all.mode == MODE_INDIRECT);
   Instruction *load_fn_instr = instr_init(OP_MOV);
   load_fn_instr->src = fn_pointer_instr->dest;
-  /* use r10 or r11 since those are never used for args */
-  set_op_reg(&load_fn_instr->dest, type_get_width(fn_pointer->type), R11_VREG);
+  /* use r10 since it is never used for args */
+  set_op_reg(&load_fn_instr->dest, type_get_width(fn_pointer->type), R10_VREG);
   Instruction *call_instr = instr_init(OP_CALL);
   call_instr->dest = load_fn_instr->dest;
   status = llist_push_back(instructions, load_fn_instr);
