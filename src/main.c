@@ -62,7 +62,6 @@ static size_t cpp_args_cap = 1;
 static size_t cpp_args_size =
     sizeof(CPP_BUILTIN_ARGS) / sizeof(*CPP_BUILTIN_ARGS);
 
-int skip_type_check = 0;
 int skip_asm = 0;
 int skip_allocator = 0;
 int skip_liveness = 0;
@@ -108,9 +107,11 @@ void scan_options(int argc, char **argv) {
         PFDBG0('c', "bison debug output enabled");
         yydebug = 1;
         break;
+      /*
       case 'c':
         skip_type_check = 1;
         break;
+      */
       case 'a':
         skip_asm = 1;
         break;
@@ -266,6 +267,7 @@ int main(int argc, char **argv) {
   string_set_init_globals();
   lexer_init_globals();
   state = state_init();
+  astree_init_globals();
   asmgen_init_globals(srcname);
 
   status = yyparse();
@@ -291,6 +293,7 @@ cleanup:
       warnx("Failed to print program errors.");
     }
   }
+
   PFDBG0('m', "Execution finished; wrapping up.");
 
   /* restore stdin */
@@ -306,9 +309,11 @@ cleanup:
   fclose(errfile);
 
   destroy_cpp_args();
+  PFDBG0('m', "syntax tree cleanup");
+  astree_destroy_globals();
   PFDBG0('m', "global state cleanup");
   state_destroy(state);
-  PFDBG0('m', "syntax tree cleanup");
+  PFDBG0('m', "parser cleanup");
   parser_destroy_globals();
   PFDBG0('m', "assembly generator cleanup");
   asmgen_free_globals();

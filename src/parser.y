@@ -43,8 +43,6 @@
 %token-table
 %verbose
 
-%destructor { astree_destroy($$); } <>
-%destructor { ; } program
 %printer {
   static char nodestr[1024];
   astree_to_string($$, nodestr);
@@ -70,6 +68,7 @@
 %token TOK_ARROW TOK_SIZEOF TOK_EQ TOK_NE TOK_LE TOK_GE TOK_SHL TOK_SHR TOK_AND TOK_OR TOK_INC TOK_DEC
 %token TOK_SUBEQ TOK_ADDEQ TOK_MULEQ TOK_DIVEQ TOK_REMEQ TOK_ANDEQ TOK_OREQ TOK_XOREQ TOK_SHREQ TOK_SHLEQ
 %token TOK_IDENT TOK_INTCON TOK_CHARCON TOK_STRINGCON TOK_TYPEDEF_NAME
+%token TOK_LEX_ERROR
 
 /* precedence of TOK_ELSE doesn't matter because it doesn't co-occur with operators, but it does need to be right-associative */
 %right TOK_ELSE
@@ -100,8 +99,6 @@
 %%
 program             : %empty                                            { parser_init_globals(); $$ = bcc_yyval = parser_root; }
                     | program topdecl                                   { $$ = bcc_yyval = parser_root = validate_topdecl($1, finalize_declaration($2)); }
-                    | program error '}'                                 { $$ = bcc_yyval = $1; astree_destroy($3); }
-                    | program error ';'                                 { $$ = bcc_yyval = $1; astree_destroy($3); }
                     ;
 topdecl             : declarations ';'                                  { $$ = bcc_yyval = $1; astree_destroy($2); }
                     | function_def '}'                                  { $$ = bcc_yyval = finalize_function($1); parser_cleanup(1, $2); }

@@ -4,7 +4,6 @@
 #include "yyparse.h"
 
 #define YY_USER_ACTION  { lexer_advance(); }
-#define YY_FATAL_ERROR(msg) { lexer_fatal_error (msg); }
 
 %}
 
@@ -140,7 +139,7 @@ NOTSTRING       (\"[^"]*)
 {NOTNUMBER}     { return lexer_bad_token (TOK_INTCON); }
 {NOTCHAR}       { return lexer_bad_token (TOK_CHARCON); }
 {NOTSTRING}     { return lexer_bad_token (TOK_STRINGCON); }
-.               { lexer_bad_char (*yytext); }
+.               { return lexer_bad_char (*yytext); }
 
 %%
 
