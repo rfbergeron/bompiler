@@ -33,13 +33,46 @@ static const char attr_map[][16] = {"LVAL", "DEFAULT", "CONST", "INITIALIZER",
                                     "ADDRESS"};
 #endif
 
-extern int skip_type_check;
+/* extern int skip_type_check; */
+
+/* TODO(Robert): this is bad and slower than it needs to be. */
+static ASTree **purgatory;
+static size_t purgatory_cap = 16;
+
+static void exit_purgatory(const ASTree *tree) {
+  size_t i;
+  for (i = 0; i < purgatory_cap; ++i)
+    if (purgatory[i] == tree) purgatory[i] = NULL;
+}
+
+void astree_init_globals(void) {
+  purgatory = calloc(purgatory_cap, sizeof(*purgatory));
+}
+
+void astree_destroy_globals(void) {
+  size_t i;
+  /* iterate in reverse so that root is destroyed last */
+  for (i = 1; i <= purgatory_cap; ++i)
+    if (purgatory[purgatory_cap - i] != NULL)
+      astree_destroy(purgatory[purgatory_cap - i]);
+  free(purgatory);
+}
 
 ASTree *astree_init(int tok_kind, const Location location, const char *info) {
   PFDBG2('t', "Initializing new astree node with code: %s, lexinfo: '%s'",
          parser_get_tname(tok_kind), info);
 
-  ASTree *tree = malloc(sizeof(ASTree));
+  size_t i;
+  for (i = 0; i < purgatory_cap; ++i)
+    if (purgatory[i] == NULL) break;
+
+  if (i == purgatory_cap) {
+    purgatory = realloc(purgatory, (purgatory_cap <<= 1) * sizeof(*purgatory));
+    size_t j;
+    for (j = i; j < purgatory_cap; ++j) purgatory[j] = NULL;
+  }
+
+  ASTree *tree = purgatory[i] = malloc(sizeof(ASTree));
   tree->tok_kind = tok_kind;
   tree->lexinfo = string_set_intern(info);
   tree->loc = location;
@@ -64,46 +97,28 @@ void astree_destroy(ASTree *tree) {
 
   PFDBG2('t', "Freeing an astree with symbol: %s, lexinfo: %s",
          parser_get_tname(tree->tok_kind), tree->lexinfo);
-  if (yydebug) {
-    /* print tree contents to stderr */
-  }
 
   /* free one-off TypeSpec objects */
-  /* TODO(Robert): Type: this is obviously not good enough any more because of
-   * how the representation of types has changed. make changes as necessary.
-   */
-  if (!skip_type_check && tree->type != NULL) {
+  if (/*!skip_type_check && */ tree->type != NULL) {
     switch (tree->tok_kind) {
       default:
         break;
-      /*
-      size_t i;
-      int owns_type;
-      default:
-        for (i = 0, owns_type = 1; i < llist_size(&tree->children) && owns_type;
-             ++i) {
-          ASTree *child = llist_get(&tree->children, i);
-          if (tree->type == child->type) owns_type = 0;
-        }
-        if (owns_type) type_destroy(tree->type);
-        break;
-      */
-      case TOK_INTCON:
+      case TOK_STRUCT:
         /* fallthrough */
-      case TOK_CHARCON:
+      case TOK_UNION:
         /* fallthrough */
-      case TOK_SUBSCRIPT:
+      case TOK_ENUM:
         /* fallthrough */
-      case TOK_INDIRECTION:
-        /* fallthrough */
-      case TOK_CALL:
+      case TOK_SPEC_LIST:
+        free(tree->type);
         break;
       case '?':
-        if (!type_is_pointer(tree->type)) break;
+        if (tree->type == NULL || !type_is_pointer(tree->type)) break;
         /* fallthrough */
       case TOK_AUTO_CONV:
         /* fallthrough */
       case TOK_ADDROF:
+        if (tree->type == NULL) break;
         assert(type_is_pointer(tree->type));
         tree->type->pointer.next = NULL;
         /* fallthrough */
@@ -129,6 +144,7 @@ void astree_destroy(ASTree *tree) {
   free(tree->first_instr);
   free(tree->last_instr);
 
+  exit_purgatory(tree);
   free(tree);
 }
 
@@ -157,6 +173,7 @@ ASTree *astree_adopt(ASTree *parent, const size_t count, ...) {
     /* propogate size of spill area for nested calls */
     if (parent->spill_eightbytes < child->spill_eightbytes)
       parent->spill_eightbytes = child->spill_eightbytes;
+    exit_purgatory(child);
   }
   va_end(args);
   return parent;

@@ -46,6 +46,8 @@ typedef struct astree {
 #define UNWRAP(node) \
   (node->tok_kind == TOK_TYPE_ERROR ? astree_get(node, 0) : node)
 
+void astree_init_globals(void);
+void astree_destroy_globals(void);
 ASTree *astree_init(int tok_kind, const Location location, const char *lexinfo);
 void astree_destroy(ASTree *tree);
 ASTree *astree_adopt(ASTree *parent, const size_t count, ...);

@@ -107,7 +107,6 @@ void parser_init_globals(void) {
 
 void parser_destroy_globals(void) {
   type_destroy(TYPE_VA_LIST_POINTER_INTERNAL);
-  astree_destroy(parser_root);
 }
 
 BCC_YYSTATIC ASTree *parser_new_sym(ASTree *tree, int new_symbol) {

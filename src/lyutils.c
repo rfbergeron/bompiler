@@ -17,7 +17,7 @@
 extern FILE *tokfile;
 size_t lexer_last_yyleng;
 Location lexer_loc = {0, 1, 0, 0};
-int lexer_interactive = 0;
+int lexer_interactive;
 ASTree *parser_root;
 ASTree *bcc_yyval;
 struct llist lexer_filenames;
@@ -27,9 +27,15 @@ struct {
   size_t size;
 } lexer_include_linenrs = {NULL, 0, 10};
 const Location LOC_EMPTY = LOC_EMPTY_VALUE;
+static char error_buffer[1024];
 
-/* internal functions */
-void push_linenr(size_t linenr) {
+static int lexer_print_error(const char *message) {
+  assert(llist_size(&lexer_filenames) != 0);
+  return fprintf(stderr, "%s:%lu.%lu: %s\n", lexer_filename(lexer_loc.filenr),
+                 lexer_loc.linenr, lexer_loc.offset, message);
+}
+
+static void push_linenr(size_t linenr) {
   if (lexer_include_linenrs.count >= lexer_include_linenrs.size) {
     lexer_include_linenrs.size *= 2;
     lexer_include_linenrs.data =
@@ -39,7 +45,6 @@ void push_linenr(size_t linenr) {
   lexer_include_linenrs.data[lexer_include_linenrs.count++] = linenr;
 }
 
-/* external functions */
 size_t lexer_get_filenr() { return lexer_loc.filenr; }
 
 Location lexer_get_loc(void) { return lexer_loc; }
@@ -76,16 +81,15 @@ void lexer_newline() {
   lexer_loc.offset = 0;
 }
 
-void lexer_bad_char(unsigned char bad) {
-  char buffer[1024];
-
+int lexer_bad_char(char bad) {
   if (isgraph(bad))
-    sprintf(buffer, "Invalid source character (%s)\n", &bad);
+    (void)sprintf(error_buffer, "Invalid source character (%c)\n", bad);
   else
-    sprintf(buffer, "Invalid source character (\\%3u)\n",
-            ((unsigned int)bad) & 0xFF);
+    (void)sprintf(error_buffer, "Invalid source character (%#.2x)\n",
+                  ((unsigned int)bad) & 0xff);
 
-  lexer_error(buffer);
+  (void)lexer_print_error(error_buffer);
+  return TOK_LEX_ERROR;
 }
 
 void lexer_include() {
@@ -193,18 +197,10 @@ int lexer_if(void) {
 }
 
 int lexer_bad_token(int tok_kind) {
-  char buffer[1024];
-  sprintf(buffer, "Invalid token (%s)\n", yytext);
-  lexer_error(buffer);
-  return lexer_token(tok_kind);
-}
-
-void lexer_fatal_error(const char *msg) { errx(1, "%s", msg); }
-
-void lexer_error(const char *message) {
-  assert(llist_size(&lexer_filenames) != 0);
-  fprintf(stderr, "%s:%lu.%lu: %s\n", lexer_filename(lexer_loc.filenr),
-          lexer_loc.linenr, lexer_loc.offset, message);
+  (void)sprintf(error_buffer, "Invalid token %s (%s)\n",
+                parser_get_tname(tok_kind), yytext);
+  (void)lexer_print_error(error_buffer);
+  return lexer_token(TOK_LEX_ERROR);
 }
 
 void lexer_dump_filenames(FILE *out) {
@@ -227,7 +223,7 @@ void lexer_free_globals() {
   llist_destroy(&lexer_filenames);
 }
 
-void yyerror(const char *message) { lexer_error(message); }
+void yyerror(const char *message) { lexer_print_error(message); }
 
 int location_to_string(const Location *loc, char *buf) {
   return sprintf(buf, "%lu, %lu, %lu, %lu", loc->filenr, loc->linenr,
