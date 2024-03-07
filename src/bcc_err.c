@@ -402,3 +402,14 @@ int print_errors(const Type *type, FILE *out) {
   }
   return 0;
 }
+
+static char type_buffer[1024];
+
+int semerr_const_too_large(const char *intstr, const Type *type) {
+  semantic_error = 1;
+  int len = type_to_str(type, type_buffer);
+  assert((size_t)len < sizeof(type_buffer) / sizeof(type_buffer[0]));
+
+  return fprintf(stderr, "Constant value %s too large for type `%s`\n", intstr,
+                 type_buffer);
+}

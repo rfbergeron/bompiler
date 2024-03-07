@@ -65,4 +65,5 @@ CompileError *compile_error_init_v(ErrorCode code, size_t info_size,
                                    va_list info_ptrs);
 void compile_error_destroy(CompileError *error);
 int print_errors(const union type *type, FILE *out);
+int semerr_const_too_large(const char *intstr, const union type *type);
 #endif
