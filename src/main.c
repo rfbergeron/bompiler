@@ -66,6 +66,7 @@ int skip_asm = 0;
 int skip_allocator = 0;
 int skip_liveness = 0;
 int skip_diagnostics = 0;
+int semantic_error = 0;
 int stdin_tmp_fileno;
 
 void destroy_cpp_args(void) {

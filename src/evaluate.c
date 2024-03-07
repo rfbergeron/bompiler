@@ -212,11 +212,12 @@ ASTree *evaluate_intcon(ASTree *intcon) {
   errno = 0;
   char *endptr = NULL;
   unsigned long value = strtoul(intcon->lexinfo, &endptr, 0);
-  if (errno == ERANGE) {
-    return astree_create_errnode(intcon, BCC_TERR_CONST_TOO_LARGE, 1, intcon);
-  } else if (errno == EINVAL || endptr == intcon->lexinfo) {
+  if (errno == EINVAL || endptr == intcon->lexinfo) {
     /* no characters parsed; lexer should make this impossible... */
     abort();
+  } else if (errno == ERANGE) {
+    (void)semerr_const_too_large(intcon->lexinfo, TYPE_UNSIGNED_LONG);
+    return intcon;
   }
 
   int is_signed = 1, is_long = 0;
@@ -266,8 +267,18 @@ ASTree *evaluate_charcon(ASTree *charcon) {
   char escaped_char = charcon->lexinfo[2];
   if (escaped_char == 'x') {
     /* hex number */
+    errno = 0;
+    char *endptr = NULL;
     charcon->constant.integral.signed_value =
-        (char)strtol(&charcon->lexinfo[3], NULL, 16);
+        (char)strtol(&charcon->lexinfo[3], &endptr, 16);
+    if (errno == EINVAL || endptr == &charcon->lexinfo[3]) {
+      /* no characters parsed; lexer should make this impossible... */
+      abort();
+    } else if (errno == ERANGE ||
+               charcon->constant.integral.signed_value > CHAR_MAX) {
+      (void)semerr_const_too_large(charcon->lexinfo, TYPE_CHAR);
+      return charcon;
+    }
   } else if (isdigit(escaped_char)) {
     /* octal number */
     charcon->constant.integral.signed_value =
