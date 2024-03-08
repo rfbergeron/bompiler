@@ -404,12 +404,73 @@ int print_errors(const Type *type, FILE *out) {
 }
 
 static char type_buffer[1024];
+static char ast_buffer[1024];
 
-int semerr_const_too_large(const char *intstr, const Type *type) {
+int semerr_const_too_large(const ASTree *constant, const Type *type) {
   semantic_error = 1;
-  int len = type_to_str(type, type_buffer);
-  assert((size_t)len < sizeof(type_buffer) / sizeof(type_buffer[0]));
+  int type_len = type_to_str(type, type_buffer);
+  assert(type_len >= 0);
+  assert((size_t)type_len < sizeof(type_buffer) / sizeof(type_buffer[0]));
 
-  return fprintf(stderr, "Constant value %s too large for type `%s`\n", intstr,
-                 type_buffer);
+  return fprintf(stderr,
+                 "%s:%lu.%lu: Constant value `%s` too large for type `%s`\n",
+                 lexer_filename(constant->loc.filenr), constant->loc.linenr,
+                 constant->loc.offset, constant->lexinfo, type_buffer);
+#ifdef NDEBUG
+  (void)type_len;
+#endif
+}
+
+int semerr_excess_init(const ASTree *initializer, const Type *type) {
+  semantic_error = 1;
+  int ast_len = astree_to_string(initializer, ast_buffer);
+  assert(ast_len >= 0);
+  assert((size_t)ast_len < sizeof(ast_buffer) / sizeof(ast_buffer[0]));
+  int type_len = type_to_str(type, type_buffer);
+  assert(type_len >= 0);
+  assert((size_t)type_len < sizeof(type_buffer) / sizeof(type_buffer[0]));
+
+  return fprintf(
+      stderr,
+      "%s:%lu.%lu: initializer {%s} has excess elements for type `%s`\n",
+      lexer_filename(initializer->loc.filenr), initializer->loc.linenr,
+      initializer->loc.offset, ast_buffer, type_buffer);
+#ifdef NDEBUG
+  (void)ast_len;
+  (void)type_len;
+#endif
+}
+
+int semerr_expected_init(const ASTree *initializer) {
+  semantic_error = 1;
+  int ast_len = astree_to_string(initializer, ast_buffer);
+  assert(ast_len >= 0);
+  assert((size_t)ast_len < sizeof(ast_buffer) / sizeof(ast_buffer[0]));
+
+  return fprintf(
+      stderr, "%s:%lu.%lu: initializer {%s} is not an initializer constant\n",
+      lexer_filename(initializer->loc.filenr), initializer->loc.linenr,
+      initializer->loc.offset, ast_buffer);
+#ifdef NDEBUG
+  (void)ast_len;
+#endif
+}
+
+int semerr_compat_init(const ASTree *initializer, const Type *type) {
+  semantic_error = 1;
+  int ast_len = astree_to_string(initializer, ast_buffer);
+  assert(ast_len >= 0);
+  assert((size_t)ast_len < sizeof(ast_buffer) / sizeof(ast_buffer[0]));
+  int dest_type_len = type_to_str(type, type_buffer);
+  assert(dest_type_len >= 0);
+  assert((size_t)dest_type_len < sizeof(type_buffer) / sizeof(type_buffer[0]));
+
+  return fprintf(
+      stderr, "%s:%lu.%lu: initializer {%s} is incompatible with type `%s`\n",
+      lexer_filename(initializer->loc.filenr), initializer->loc.linenr,
+      initializer->loc.offset, ast_buffer, type_buffer);
+#ifdef NDEBUG
+  (void)ast_len;
+  (void)dest_type_len;
+#endif
 }

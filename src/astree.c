@@ -281,7 +281,7 @@ static int attributes_to_string(const unsigned int attributes, char *buf) {
   return 0;
 }
 
-int astree_to_string(ASTree *tree, char *buffer) {
+int astree_to_string(const ASTree *tree, char *buffer) {
   static char locstr[LINESIZE], attrstr[LINESIZE], typestr[LINESIZE];
   /* print token name, lexinfo in quotes, the location, block number,
    * attributes, and the typeid if this is a struct
