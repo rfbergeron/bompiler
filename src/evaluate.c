@@ -216,7 +216,7 @@ ASTree *evaluate_intcon(ASTree *intcon) {
     /* no characters parsed; lexer should make this impossible... */
     abort();
   } else if (errno == ERANGE) {
-    (void)semerr_const_too_large(intcon->lexinfo, TYPE_UNSIGNED_LONG);
+    (void)semerr_const_too_large(intcon, TYPE_UNSIGNED_LONG);
     return intcon;
   }
 
@@ -276,7 +276,7 @@ ASTree *evaluate_charcon(ASTree *charcon) {
       abort();
     } else if (errno == ERANGE ||
                charcon->constant.integral.signed_value > CHAR_MAX) {
-      (void)semerr_const_too_large(charcon->lexinfo, TYPE_CHAR);
+      (void)semerr_const_too_large(charcon, TYPE_CHAR);
       return charcon;
     }
   } else if (isdigit(escaped_char)) {

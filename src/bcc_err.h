@@ -59,11 +59,17 @@ struct compile_error {
 
 /* forward declare type to prevent circular dependency */
 union type;
+struct astree;
 
 CompileError *compile_error_init(ErrorCode code, size_t info_size, ...);
 CompileError *compile_error_init_v(ErrorCode code, size_t info_size,
                                    va_list info_ptrs);
 void compile_error_destroy(CompileError *error);
 int print_errors(const union type *type, FILE *out);
-int semerr_const_too_large(const char *intstr, const union type *type);
+int semerr_const_too_large(const struct astree *constant,
+                           const union type *type);
+int semerr_excess_init(const struct astree *initializer,
+                       const union type *type);
+int semerr_expected_init(const struct astree *initializer);
+int semerr_compat_init(const struct astree *init, const union type *dest);
 #endif
