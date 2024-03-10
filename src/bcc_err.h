@@ -60,6 +60,8 @@ struct compile_error {
 /* forward declare type to prevent circular dependency */
 union type;
 struct astree;
+struct tag;
+struct symbol;
 
 CompileError *compile_error_init(ErrorCode code, size_t info_size, ...);
 CompileError *compile_error_init_v(ErrorCode code, size_t info_size,
@@ -72,4 +74,30 @@ int semerr_excess_init(const struct astree *initializer,
                        const union type *type);
 int semerr_expected_init(const struct astree *initializer);
 int semerr_compat_init(const struct astree *init, const union type *dest);
+int semerr_incompatible_spec(const struct astree *decl_specs,
+                             const struct astree *decl_spec);
+int semerr_symbol_not_found(const struct astree *identifier);
+int semerr_expected_typedef_name(const struct astree *identifier,
+                                 const struct symbol *symbol);
+int semerr_invalid_type(const struct astree *tree);
+int semerr_incomplete_type(const struct astree *tree);
+int semerr_invalid_linkage(const struct astree *declarator,
+                           const struct symbol *symbol);
+int semerr_incompatible_linkage(const struct astree *declarator,
+                                const struct symbol *old_symbol,
+                                const struct symbol *new_symbol);
+int semerr_redefine_symbol(const struct astree *declarator,
+                           const struct symbol *symbol);
+int semerr_invalid_arr_size(const struct astree *array,
+                            const struct astree *expr);
+int semerr_expected_ident(const struct astree *function,
+                          const struct astree *param);
+int semerr_label_not_found(const struct astree *label);
+int semerr_redefine_tag(const struct astree *tag_spec,
+                        const struct astree *tag_id,
+                        const struct tag *existing);
+int semerr_enum_not_found(const struct astree *enum_spec,
+                          const struct astree *enum_id);
+int semerr_expected_const(const struct astree *where,
+                          const struct astree *expr);
 #endif

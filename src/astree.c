@@ -99,35 +99,33 @@ void astree_destroy(ASTree *tree) {
          parser_get_tname(tree->tok_kind), tree->lexinfo);
 
   /* free one-off TypeSpec objects */
-  if (/*!skip_type_check && */ tree->type != NULL) {
-    switch (tree->tok_kind) {
-      default:
-        break;
-      case TOK_STRUCT:
-        /* fallthrough */
-      case TOK_UNION:
-        /* fallthrough */
-      case TOK_ENUM:
-        /* fallthrough */
-      case TOK_SPEC_LIST:
-        free(tree->type);
-        break;
-      case '?':
-        if (tree->type == NULL || !type_is_pointer(tree->type)) break;
-        /* fallthrough */
-      case TOK_AUTO_CONV:
-        /* fallthrough */
-      case TOK_ADDROF:
-        if (tree->type == NULL) break;
-        assert(type_is_pointer(tree->type));
-        tree->type->pointer.next = NULL;
-        /* fallthrough */
-      case TOK_TYPE_NAME:
-        /* fallthrough */
-      case TOK_TYPE_ERROR:
-        type_destroy(tree->type);
-        break;
-    }
+  switch (tree->tok_kind) {
+    default:
+      break;
+    case TOK_STRUCT:
+      /* fallthrough */
+    case TOK_UNION:
+      /* fallthrough */
+    case TOK_ENUM:
+      /* fallthrough */
+    case TOK_SPEC_LIST:
+      free(tree->type);
+      break;
+    case '?':
+      if (tree->type == NULL || !type_is_pointer(tree->type)) break;
+      /* fallthrough */
+    case TOK_AUTO_CONV:
+      /* fallthrough */
+    case TOK_ADDROF:
+      if (tree->type == NULL) break;
+      assert(type_is_pointer(tree->type));
+      tree->type->pointer.next = NULL;
+      /* fallthrough */
+    case TOK_TYPE_NAME:
+      /* fallthrough */
+    case TOK_TYPE_ERROR:
+      type_destroy(tree->type);
+      break;
   }
 
   /* llist should handle destruction of children */
