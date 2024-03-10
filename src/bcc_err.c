@@ -16,6 +16,16 @@
     chars_written = expr;                        \
     if (chars_written < 0) return chars_written; \
   } while (0)
+#ifdef NDEBUG
+#define CHECK_PRINTF(expr, max_len) ((void)(chars_written = (expr)))
+#else
+#define CHECK_TO_STR(expr, max_len)  \
+  do {                               \
+    chars_written = (expr);          \
+    assert(chars_written >= 0);      \
+    assert(chars_written < max_len); \
+  } while (0)
+#endif
 
 CompileError *compile_error_init(ErrorCode code, size_t info_size, ...) {
   CompileError *error = malloc(sizeof(CompileError));
@@ -403,74 +413,213 @@ int print_errors(const Type *type, FILE *out) {
   return 0;
 }
 
-static char type_buffer[1024];
-static char ast_buffer[1024];
+#define BUFFER_SIZE 1024
+static char type_buffer[BUFFER_SIZE];
+static char ast_buffer1[BUFFER_SIZE];
+static char ast_buffer2[BUFFER_SIZE];
+static char old_sym_buffer[BUFFER_SIZE];
+static char new_sym_buffer[BUFFER_SIZE];
+static char tag_buffer[BUFFER_SIZE];
 
 int semerr_const_too_large(const ASTree *constant, const Type *type) {
   semantic_error = 1;
-  int type_len = type_to_str(type, type_buffer);
-  assert(type_len >= 0);
-  assert((size_t)type_len < sizeof(type_buffer) / sizeof(type_buffer[0]));
-
+  int chars_written;
+  CHECK_TO_STR(type_to_str(type, type_buffer), BUFFER_SIZE);
   return fprintf(stderr,
                  "%s:%lu.%lu: Constant value `%s` too large for type `%s`\n",
                  lexer_filename(constant->loc.filenr), constant->loc.linenr,
                  constant->loc.offset, constant->lexinfo, type_buffer);
-#ifdef NDEBUG
-  (void)type_len;
-#endif
 }
 
 int semerr_excess_init(const ASTree *initializer, const Type *type) {
   semantic_error = 1;
-  int ast_len = astree_to_string(initializer, ast_buffer);
-  assert(ast_len >= 0);
-  assert((size_t)ast_len < sizeof(ast_buffer) / sizeof(ast_buffer[0]));
-  int type_len = type_to_str(type, type_buffer);
-  assert(type_len >= 0);
-  assert((size_t)type_len < sizeof(type_buffer) / sizeof(type_buffer[0]));
-
+  int chars_written;
+  CHECK_TO_STR(astree_to_string(initializer, ast_buffer1), BUFFER_SIZE);
+  CHECK_TO_STR(type_to_str(type, type_buffer), BUFFER_SIZE);
   return fprintf(
       stderr,
       "%s:%lu.%lu: initializer {%s} has excess elements for type `%s`\n",
       lexer_filename(initializer->loc.filenr), initializer->loc.linenr,
-      initializer->loc.offset, ast_buffer, type_buffer);
-#ifdef NDEBUG
-  (void)ast_len;
-  (void)type_len;
-#endif
+      initializer->loc.offset, ast_buffer1, type_buffer);
 }
 
 int semerr_expected_init(const ASTree *initializer) {
   semantic_error = 1;
-  int ast_len = astree_to_string(initializer, ast_buffer);
-  assert(ast_len >= 0);
-  assert((size_t)ast_len < sizeof(ast_buffer) / sizeof(ast_buffer[0]));
-
+  int chars_written;
+  CHECK_TO_STR(astree_to_string(initializer, ast_buffer1), BUFFER_SIZE);
   return fprintf(
       stderr, "%s:%lu.%lu: initializer {%s} is not an initializer constant\n",
       lexer_filename(initializer->loc.filenr), initializer->loc.linenr,
-      initializer->loc.offset, ast_buffer);
-#ifdef NDEBUG
-  (void)ast_len;
-#endif
+      initializer->loc.offset, ast_buffer1);
 }
 
 int semerr_compat_init(const ASTree *initializer, const Type *type) {
   semantic_error = 1;
-  int ast_len = astree_to_string(initializer, ast_buffer);
-  assert(ast_len >= 0);
-  assert((size_t)ast_len < sizeof(ast_buffer) / sizeof(ast_buffer[0]));
-  int dest_type_len = type_to_str(type, type_buffer);
-  assert(dest_type_len >= 0);
-  assert((size_t)dest_type_len < sizeof(type_buffer) / sizeof(type_buffer[0]));
-
+  int chars_written;
+  CHECK_TO_STR(astree_to_string(initializer, ast_buffer1), BUFFER_SIZE);
+  CHECK_TO_STR(type_to_str(type, type_buffer), BUFFER_SIZE);
   return fprintf(
       stderr, "%s:%lu.%lu: initializer {%s} is incompatible with type `%s`\n",
       lexer_filename(initializer->loc.filenr), initializer->loc.linenr,
-      initializer->loc.offset, ast_buffer, type_buffer);
-#ifdef NDEBUG
-  (void)ast_len;
-  (void)dest_type_len;
-#endif
+      initializer->loc.offset, ast_buffer1, type_buffer);
+}
+
+int semerr_incompatible_spec(const ASTree *decl_specs,
+                             const ASTree *decl_spec) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(type_to_str(decl_specs->type, type_buffer), BUFFER_SIZE);
+  CHECK_TO_STR(astree_to_string(decl_spec, ast_buffer1), BUFFER_SIZE);
+  return fprintf(
+      stderr,
+      "%s:%lu.%lu: declaration specifier {%s} incompatible with type `%s`\n",
+      lexer_filename(decl_specs->loc.filenr), decl_specs->loc.linenr,
+      decl_specs->loc.offset, ast_buffer1, type_buffer);
+}
+
+int semerr_symbol_not_found(const ASTree *identifier) {
+  semantic_error = 1;
+  return fprintf(stderr, "%s:%lu.%lu: unable to resolve symbol `%s`\n",
+                 lexer_filename(identifier->loc.filenr), identifier->loc.linenr,
+                 identifier->loc.offset, identifier->lexinfo);
+}
+
+int semerr_expected_typedef_name(const ASTree *identifier,
+                                 const Symbol *symbol) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(symbol_print(symbol, old_sym_buffer), BUFFER_SIZE);
+  return fprintf(stderr,
+                 "%s:%lu.%lu: expected identifier `%s` to be a typedef name; "
+                 "existing symbol: {%s}\n",
+                 lexer_filename(identifier->loc.filenr), identifier->loc.linenr,
+                 identifier->loc.offset, identifier->lexinfo, old_sym_buffer);
+}
+
+int semerr_invalid_type(const ASTree *tree) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(type_to_str(tree->type, type_buffer), BUFFER_SIZE);
+  return fprintf(stderr, "%s:%lu.%lu: invalid type `%s`\n",
+                 lexer_filename(tree->loc.filenr), tree->loc.linenr,
+                 tree->loc.offset, type_buffer);
+}
+
+int semerr_incomplete_type(const ASTree *expr) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(astree_to_string(expr, ast_buffer1), BUFFER_SIZE);
+  return fprintf(stderr, "%s:%lu.%lu: expression {%s} has incomplete type\n",
+                 lexer_filename(expr->loc.filenr), expr->loc.linenr,
+                 expr->loc.offset, ast_buffer1);
+}
+
+int semerr_invalid_linkage(const ASTree *declarator, const Symbol *symbol) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(symbol_print(symbol, new_sym_buffer), BUFFER_SIZE);
+  return fprintf(stderr, "%s:%lu.%lu: symbol {%s} has invalid linkage\n",
+                 lexer_filename(declarator->loc.filenr), declarator->loc.linenr,
+                 declarator->loc.offset, new_sym_buffer);
+}
+
+int semerr_incompatible_linkage(const ASTree *declarator,
+                                const Symbol *old_symbol,
+                                const Symbol *new_symbol) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(symbol_print(new_symbol, new_sym_buffer), BUFFER_SIZE);
+  CHECK_TO_STR(symbol_print(old_symbol, old_sym_buffer), BUFFER_SIZE);
+  return fprintf(stderr,
+                 "%s:%lu.%lu: incompatible linkage for symbol `%s`; old "
+                 "symbol: {%s}; new symbol: {%s}\n",
+                 lexer_filename(declarator->loc.filenr), declarator->loc.linenr,
+                 declarator->loc.offset, declarator->lexinfo, old_sym_buffer,
+                 new_sym_buffer);
+}
+
+int semerr_redefine_symbol(const ASTree *declarator, const Symbol *symbol) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(symbol_print(symbol, old_sym_buffer), BUFFER_SIZE);
+  return fprintf(
+      stderr,
+      "%s:%lu.%lu: redefinition of symbol `%s`; previous definition: {%s}\n",
+      lexer_filename(declarator->loc.filenr), declarator->loc.linenr,
+      declarator->loc.offset, declarator->lexinfo, old_sym_buffer);
+}
+
+int semerr_invalid_arr_size(const ASTree *array, const ASTree *expr) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(astree_to_string(array, ast_buffer1), BUFFER_SIZE);
+  CHECK_TO_STR(astree_to_string(expr, ast_buffer2), BUFFER_SIZE);
+  return fprintf(stderr, "%s:%lu.%lu: invalid size {%s} for array {%s}\n",
+                 lexer_filename(expr->loc.filenr), expr->loc.linenr,
+                 expr->loc.offset, ast_buffer2, ast_buffer1);
+}
+
+int semerr_expected_ident(const ASTree *function, const ASTree *param) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(astree_to_string(param, ast_buffer1), BUFFER_SIZE);
+  return fprintf(stderr,
+                 "%s:%lu.%lu: in definition of function `%s`: expected "
+                 "identifier for param {%s}\n",
+                 lexer_filename(param->loc.filenr), param->loc.linenr,
+                 param->loc.offset, function->lexinfo, ast_buffer1);
+}
+
+int semerr_label_not_found(const ASTree *label) {
+  semantic_error = 1;
+  return fprintf(stderr, "%s:%lu.%lu: unable to resolve label `%s`\n",
+                 lexer_filename(label->loc.filenr), label->loc.linenr,
+                 label->loc.offset, label->lexinfo);
+}
+
+int semerr_redefine_tag(const ASTree *tag_spec, const ASTree *tag_id,
+                        const Tag *existing) {
+  semantic_error = 1;
+  const char *tag_kind_str;
+  switch (tag_spec->tok_kind) {
+    case TOK_STRUCT:
+      tag_kind_str = "struct";
+      break;
+    case TOK_UNION:
+      tag_kind_str = "union";
+      break;
+    case TOK_ENUM:
+      tag_kind_str = "enum";
+      break;
+    default:
+      abort();
+  }
+
+  /* TODO(Robert): remove `size` parameter from `tag_print` */
+  (void)tag_print(existing, tag_buffer, BUFFER_SIZE);
+
+  return fprintf(
+      stderr,
+      "%s:%lu.%lu: redefinition of tag `%s` as %s; previous definition: {%s}\n",
+      lexer_filename(tag_spec->loc.filenr), tag_spec->loc.linenr,
+      tag_spec->loc.offset, tag_id->lexinfo, tag_kind_str, tag_buffer);
+}
+
+int semerr_enum_not_found(const ASTree *enum_spec, const ASTree *enum_id) {
+  semantic_error = 1;
+  return fprintf(stderr, "%s:%lu.%lu: enum type `%s` not found\n",
+                 lexer_filename(enum_spec->loc.filenr), enum_spec->loc.linenr,
+                 enum_spec->loc.offset, enum_id->lexinfo);
+}
+
+int semerr_expected_const(const ASTree *where, const ASTree *expr) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(astree_to_string(where, ast_buffer1), BUFFER_SIZE);
+  CHECK_TO_STR(astree_to_string(expr, ast_buffer2), BUFFER_SIZE);
+  return fprintf(
+      stderr,
+      "%s:%lu.%lu: node {%s} expected constant expression at node {%s}\n",
+      lexer_filename(expr->loc.filenr), expr->loc.linenr, expr->loc.offset,
+      ast_buffer1, ast_buffer2);
 }

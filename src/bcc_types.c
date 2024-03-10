@@ -1123,6 +1123,42 @@ int type_normalize(Type *type) {
   }
 }
 
+int type_validate(const Type *type) {
+  if (type_is_void(type) && !(type->base.flags & STOR_FLAG_TYPEDEF)) return 1;
+
+  while (type != NULL) {
+    switch (type->any.code) {
+      case TYPE_CODE_BASE:
+        /* fallthrough */
+      case TYPE_CODE_STRUCT:
+        /* fallthrough */
+      case TYPE_CODE_UNION:
+        /* fallthrough */
+      case TYPE_CODE_ENUM:
+        return 0;
+      case TYPE_CODE_POINTER:
+        type = type_strip_declarator(type);
+        continue;
+      case TYPE_CODE_ARRAY:
+        type = type_strip_declarator(type);
+        if (type == NULL || type_is_incomplete(type) || type_is_function(type))
+          return 1;
+        continue;
+      case TYPE_CODE_FUNCTION:
+        type = type_strip_declarator(type);
+        if (type == NULL || type_is_array(type) || type_is_function(type))
+          return 1;
+        continue;
+      case TYPE_CODE_NONE:
+        return 1;
+      default:
+        abort();
+    }
+  }
+
+  return 1;
+}
+
 /*
  * Performs automatic conversions from function and array types to pointer
  * types. Replaces old type with appropriately converted type. Can safely be

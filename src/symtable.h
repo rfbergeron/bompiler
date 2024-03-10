@@ -107,6 +107,7 @@ int symbol_is_lvalue(const Symbol *symbol);
 /* Tag functions */
 Tag *tag_init(TagKind kind);
 void tag_destroy(Tag *tag);
+int tag_print(const Tag *tag, char *buffer, size_t size);
 
 /* symbol table functions */
 SymbolTable *symbol_table_init(TableKind type);

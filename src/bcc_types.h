@@ -239,6 +239,7 @@ Type *type_merge_errors(Type *dest, Type *src);
 void type_append_error(Type *type, CompileError *error);
 int type_add_flags(Type *type, unsigned int flags);
 int type_normalize(Type *type);
+int type_validate(const Type *type);
 Type *type_pointer_conversions(Type *type);
 Type *type_arithmetic_conversions(Type *type1, Type *type2);
 int type_complete_array(Type *type1, Type *type2);
