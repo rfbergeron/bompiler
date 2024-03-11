@@ -100,4 +100,15 @@ int semerr_enum_not_found(const struct astree *enum_spec,
                           const struct astree *enum_id);
 int semerr_expected_const(const struct astree *where,
                           const struct astree *expr);
+int semerr_incompatible_types(const struct astree *where,
+                              const union type *dest, const union type *src);
+int semerr_expected_retval(const struct astree *ret, const union type *type);
+int semerr_expected_scalar(const struct astree *where, const union type *type);
+int semerr_expected_integral(const struct astree *where,
+                             const union type *type);
+int semerr_redefine_label(const struct astree *identifier,
+                          const struct astree *old_label);
+int semerr_unexpected_stmt(const struct astree *stmt);
+int semerr_expected_intconst(const struct astree *where,
+                             const struct astree *expr);
 #endif
