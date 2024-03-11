@@ -2696,13 +2696,8 @@ static ASTree *translate_static_local_init(ASTree *declaration,
                          strlen(declarator->lexinfo), &symbol);
   assign_static_space(declarator->lexinfo, symbol);
   ListIter *temp = liter_copy(before_definition);
-  ASTree *errnode = traverse_initializer(declarator->type, symbol->disp,
-                                         initializer, before_definition);
-  if (errnode->tok_kind == TOK_TYPE_ERROR) {
-    free(temp);
-    (void)astree_remove(errnode, 0);
-    return astree_adopt(errnode, 1, declaration);
-  }
+  (void)traverse_initializer(declarator->type, symbol->disp, initializer,
+                             before_definition);
 
   /* wait to do this so that deduced array sizes are set */
   int status = translate_static_prelude(declarator, symbol, temp, 1);
@@ -2773,23 +2768,17 @@ static ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
     symbol->disp = assign_stack_space(symbol->type);
 
     ListIter *temp = llist_iter_last(instructions);
-    ASTree *errnode =
-        traverse_initializer(declarator->type, symbol->disp, initializer, temp);
+    (void)traverse_initializer(declarator->type, symbol->disp, initializer,
+                               temp);
     free(temp);
 
-    if (errnode->tok_kind == TOK_TYPE_ERROR) {
-      (void)astree_remove(errnode, 0);
-      return astree_adopt(errnode, 1, declaration);
-    } else {
-      assert(declarator->first_instr == NULL && declarator->last_instr == NULL);
-      assert(initializer->first_instr != NULL &&
-             initializer->last_instr != NULL);
-      assignment->first_instr = liter_copy(initializer->first_instr);
-      assert(assignment->first_instr != NULL);
-      assignment->last_instr = liter_copy(initializer->last_instr);
-      assert(assignment->last_instr != NULL);
-      return declaration;
-    }
+    assert(declarator->first_instr == NULL && declarator->last_instr == NULL);
+    assert(initializer->first_instr != NULL && initializer->last_instr != NULL);
+    assignment->first_instr = liter_copy(initializer->first_instr);
+    assert(assignment->first_instr != NULL);
+    assignment->last_instr = liter_copy(initializer->last_instr);
+    assert(assignment->last_instr != NULL);
+    return declaration;
   }
 }
 
@@ -2873,8 +2862,8 @@ static ASTree *translate_global_init(ASTree *declaration, ASTree *declarator,
   before_definition = llist_iter_last(instructions);
   ListIter *temp = liter_copy(before_definition);
 
-  ASTree *errnode = traverse_initializer(declarator->type, NO_DISP, initializer,
-                                         before_definition);
+  (void)traverse_initializer(declarator->type, NO_DISP, initializer,
+                             before_definition);
   /* wait to do this so that deduced array sizes are set */
   int status = translate_static_prelude(declarator, symbol, temp, 1);
   free(temp);
@@ -2882,12 +2871,7 @@ static ASTree *translate_global_init(ASTree *declaration, ASTree *declarator,
   free(before_definition);
   before_definition = llist_iter_last(instructions);
   if (before_definition == NULL) abort();
-  if (errnode->tok_kind == TOK_TYPE_ERROR) {
-    (void)astree_remove(errnode, 0);
-    return astree_adopt(errnode, 1, declaration);
-  } else {
-    return declaration;
-  }
+  return declaration;
 }
 
 static ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
