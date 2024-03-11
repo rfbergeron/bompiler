@@ -186,7 +186,7 @@ ASTree *astree_replace(ASTree *parent, const size_t index, ASTree *child) {
   return old_child;
 }
 
-ASTree *astree_get(ASTree *parent, const size_t index) {
+ASTree *astree_get(const ASTree *parent, const size_t index) {
   return llist_get(&parent->children, index);
 }
 
@@ -252,7 +252,9 @@ ASTree *astree_propogate_errnode_a(ASTree *parent, size_t count,
   return parent;
 }
 
-size_t astree_count(ASTree *parent) { return llist_size(&parent->children); }
+size_t astree_count(const ASTree *parent) {
+  return llist_size(&parent->children);
+}
 
 int astree_is_const_zero(const ASTree *tree) {
   return (tree->attributes & ATTR_MASK_CONST) >= ATTR_CONST_INIT &&

@@ -80,7 +80,7 @@ int semerr_symbol_not_found(const struct astree *identifier);
 int semerr_expected_typedef_name(const struct astree *identifier,
                                  const struct symbol *symbol);
 int semerr_invalid_type(const struct astree *tree);
-int semerr_incomplete_type(const struct astree *tree);
+int semerr_incomplete_type(const struct astree *where, const union type *type);
 int semerr_invalid_linkage(const struct astree *declarator,
                            const struct symbol *symbol);
 int semerr_incompatible_linkage(const struct astree *declarator,
@@ -111,4 +111,19 @@ int semerr_redefine_label(const struct astree *identifier,
 int semerr_unexpected_stmt(const struct astree *stmt);
 int semerr_expected_intconst(const struct astree *where,
                              const struct astree *expr);
+int semerr_insufficient_args(const struct astree *call);
+int semerr_excess_args(const struct astree *call, const struct astree *arg);
+int semerr_expected_fn_ptr(const struct astree *call, const union type *type);
+int semerr_expected_arithmetic(const struct astree *where,
+                               const union type *type);
+int semerr_expected_lvalue(const struct astree *where,
+                           const struct astree *offender);
+int semerr_expected_pointer(const struct astree *where, const union type *type);
+int semerr_sizeof_fn(const struct astree *sizeof_, const union type *type);
+int semerr_sizeof_incomplete(const struct astree *sizeof_,
+                             const union type *type);
+int semerr_expected_record_ptr(const struct astree *where,
+                               const union type *type);
+int semerr_expected_record(const struct astree *where, const union type *type);
+int semerr_not_assignable(const struct astree *where, const union type *type);
 #endif

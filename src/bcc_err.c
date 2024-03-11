@@ -506,13 +506,13 @@ int semerr_invalid_type(const ASTree *tree) {
                  tree->loc.offset, type_buffer1);
 }
 
-int semerr_incomplete_type(const ASTree *expr) {
+int semerr_incomplete_type(const ASTree *where, const Type *type) {
   semantic_error = 1;
   int chars_written;
-  CHECK_TO_STR(astree_to_string(expr, ast_buffer1), BUFFER_SIZE);
-  return fprintf(stderr, "%s:%lu.%lu: expression {%s} has incomplete type\n",
-                 lexer_filename(expr->loc.filenr), expr->loc.linenr,
-                 expr->loc.offset, ast_buffer1);
+  CHECK_TO_STR(type_to_str(type, type_buffer1), BUFFER_SIZE);
+  return fprintf(stderr, "%s:%lu.%lu: unexpected incomplete type `%s`\n",
+                 lexer_filename(where->loc.filenr), where->loc.linenr,
+                 where->loc.offset, type_buffer1);
 }
 
 int semerr_invalid_linkage(const ASTree *declarator, const Symbol *symbol) {
@@ -688,8 +688,125 @@ int semerr_expected_intconst(const ASTree *where, const ASTree *expr) {
   semantic_error = 1;
   int chars_written;
   CHECK_TO_STR(astree_to_string(expr, ast_buffer1), BUFFER_SIZE);
+  return fprintf(
+      stderr,
+      "%s:%lu.%lu: expected expression {%s} to be an integral constant\n",
+      lexer_filename(where->loc.filenr), where->loc.linenr, where->loc.offset,
+      ast_buffer1);
+}
+
+int semerr_insufficient_args(const ASTree *call) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(type_to_str(astree_get(call, 0)->type, type_buffer1),
+               BUFFER_SIZE);
   return fprintf(stderr,
-                 "%s:%lu.%lu: expected {%s} to be an integral constant\n",
+                 "%s:%lu.%lu: insufficient arguments for call to function with "
+                 "type `%s`\n",
+                 lexer_filename(call->loc.filenr), call->loc.linenr,
+                 call->loc.offset, type_buffer1);
+}
+
+int semerr_excess_args(const ASTree *call, const ASTree *arg) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(type_to_str(astree_get(call, 0)->type, type_buffer1),
+               BUFFER_SIZE);
+  CHECK_TO_STR(astree_to_string(arg, ast_buffer1), BUFFER_SIZE);
+  return fprintf(
+      stderr,
+      "%s:%lu.%lu: excess argument {%s} for call to function with type `%s`\n",
+      lexer_filename(arg->loc.filenr), arg->loc.linenr, arg->loc.offset,
+      ast_buffer1, type_buffer1);
+}
+
+int semerr_expected_fn_ptr(const ASTree *call, const Type *type) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(type_to_str(type, type_buffer1), BUFFER_SIZE);
+  return fprintf(stderr,
+                 "%s:%lu.%lu: expected function designator but found "
+                 "expression with type `%s`\n",
+                 lexer_filename(call->loc.filenr), call->loc.linenr,
+                 call->loc.offset, type_buffer1);
+}
+
+int semerr_expected_arithmetic(const ASTree *where, const Type *type) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(type_to_str(type, type_buffer1), BUFFER_SIZE);
+  return fprintf(stderr,
+                 "%s:%lu.%lu: expected arithmetic type but found type `%s`\n",
+                 lexer_filename(where->loc.filenr), where->loc.linenr,
+                 where->loc.offset, type_buffer1);
+}
+
+int semerr_expected_lvalue(const ASTree *where, const ASTree *offender) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(astree_to_string(offender, ast_buffer1), BUFFER_SIZE);
+  return fprintf(stderr, "%s:%lu.%lu: expression {%s} must be an lvalue\n",
                  lexer_filename(where->loc.filenr), where->loc.linenr,
                  where->loc.offset, ast_buffer1);
+}
+
+int semerr_expected_pointer(const ASTree *where, const Type *type) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(type_to_str(type, type_buffer1), BUFFER_SIZE);
+  return fprintf(
+      stderr, "%s:%lu.%lu: expected pointer type but instead found type `%s`\n",
+      lexer_filename(where->loc.filenr), where->loc.linenr, where->loc.offset,
+      type_buffer1);
+}
+
+int semerr_sizeof_fn(const ASTree *sizeof_, const Type *type) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(type_to_str(type, type_buffer1), BUFFER_SIZE);
+  return fprintf(stderr,
+                 "%s:%lu.%lu: attempted to take size of function type `%s`\n",
+                 lexer_filename(sizeof_->loc.filenr), sizeof_->loc.linenr,
+                 sizeof_->loc.offset, type_buffer1);
+}
+
+int semerr_sizeof_incomplete(const ASTree *sizeof_, const Type *type) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(type_to_str(type, type_buffer1), BUFFER_SIZE);
+  return fprintf(stderr,
+                 "%s:%lu.%lu: attempted to take size of incomplete type `%s`\n",
+                 lexer_filename(sizeof_->loc.filenr), sizeof_->loc.linenr,
+                 sizeof_->loc.offset, type_buffer1);
+}
+
+int semerr_expected_record_ptr(const ASTree *where, const Type *type) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(type_to_str(type, type_buffer1), BUFFER_SIZE);
+  return fprintf(stderr,
+                 "%s:%lu.%lu: expected pointer to struct or union type but "
+                 "instead found type `%s`\n",
+                 lexer_filename(where->loc.filenr), where->loc.linenr,
+                 where->loc.offset, type_buffer1);
+}
+
+int semerr_expected_record(const ASTree *where, const Type *type) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(type_to_str(type, type_buffer1), BUFFER_SIZE);
+  return fprintf(
+      stderr,
+      "%s:%lu.%lu: expected struct or union type but instead found type `%s`\n",
+      lexer_filename(where->loc.filenr), where->loc.linenr, where->loc.offset,
+      type_buffer1);
+}
+
+int semerr_not_assignable(const ASTree *where, const Type *type) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(type_to_str(type, type_buffer1), BUFFER_SIZE);
+  return fprintf(stderr, "%s:%lu.%lu: type `%s` is not assignable\n",
+                 lexer_filename(where->loc.filenr), where->loc.linenr,
+                 where->loc.offset, type_buffer1);
 }
