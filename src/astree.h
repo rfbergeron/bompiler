@@ -52,7 +52,7 @@ ASTree *astree_init(int tok_kind, const Location location, const char *lexinfo);
 void astree_destroy(ASTree *tree);
 ASTree *astree_adopt(ASTree *parent, const size_t count, ...);
 ASTree *astree_replace(ASTree *parent, const size_t index, ASTree *child);
-ASTree *astree_get(ASTree *parent, const size_t index);
+ASTree *astree_get(const ASTree *parent, const size_t index);
 ASTree *astree_remove(ASTree *parent, const size_t index);
 ASTree *astree_create_errnode(ASTree *child, ErrorCode code, size_t info_count,
                               ...);
@@ -60,7 +60,7 @@ ASTree *astree_propogate_errnode(ASTree *parent, ASTree *child);
 ASTree *astree_propogate_errnode_v(ASTree *parent, size_t count, ...);
 ASTree *astree_propogate_errnode_a(ASTree *parent, size_t count,
                                    ASTree **children);
-size_t astree_count(ASTree *parent);
+size_t astree_count(const ASTree *parent);
 int astree_is_const_zero(const ASTree *tree);
 int astree_to_string(const ASTree *astree, char *buffer);
 int astree_print_tree(ASTree *tree, FILE *out, int depth);
