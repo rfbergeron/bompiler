@@ -414,7 +414,8 @@ int print_errors(const Type *type, FILE *out) {
 }
 
 #define BUFFER_SIZE 1024
-static char type_buffer[BUFFER_SIZE];
+static char type_buffer1[BUFFER_SIZE];
+static char type_buffer2[BUFFER_SIZE];
 static char ast_buffer1[BUFFER_SIZE];
 static char ast_buffer2[BUFFER_SIZE];
 static char old_sym_buffer[BUFFER_SIZE];
@@ -424,23 +425,23 @@ static char tag_buffer[BUFFER_SIZE];
 int semerr_const_too_large(const ASTree *constant, const Type *type) {
   semantic_error = 1;
   int chars_written;
-  CHECK_TO_STR(type_to_str(type, type_buffer), BUFFER_SIZE);
+  CHECK_TO_STR(type_to_str(type, type_buffer1), BUFFER_SIZE);
   return fprintf(stderr,
                  "%s:%lu.%lu: Constant value `%s` too large for type `%s`\n",
                  lexer_filename(constant->loc.filenr), constant->loc.linenr,
-                 constant->loc.offset, constant->lexinfo, type_buffer);
+                 constant->loc.offset, constant->lexinfo, type_buffer1);
 }
 
 int semerr_excess_init(const ASTree *initializer, const Type *type) {
   semantic_error = 1;
   int chars_written;
   CHECK_TO_STR(astree_to_string(initializer, ast_buffer1), BUFFER_SIZE);
-  CHECK_TO_STR(type_to_str(type, type_buffer), BUFFER_SIZE);
+  CHECK_TO_STR(type_to_str(type, type_buffer1), BUFFER_SIZE);
   return fprintf(
       stderr,
       "%s:%lu.%lu: initializer {%s} has excess elements for type `%s`\n",
       lexer_filename(initializer->loc.filenr), initializer->loc.linenr,
-      initializer->loc.offset, ast_buffer1, type_buffer);
+      initializer->loc.offset, ast_buffer1, type_buffer1);
 }
 
 int semerr_expected_init(const ASTree *initializer) {
@@ -457,24 +458,24 @@ int semerr_compat_init(const ASTree *initializer, const Type *type) {
   semantic_error = 1;
   int chars_written;
   CHECK_TO_STR(astree_to_string(initializer, ast_buffer1), BUFFER_SIZE);
-  CHECK_TO_STR(type_to_str(type, type_buffer), BUFFER_SIZE);
+  CHECK_TO_STR(type_to_str(type, type_buffer1), BUFFER_SIZE);
   return fprintf(
       stderr, "%s:%lu.%lu: initializer {%s} is incompatible with type `%s`\n",
       lexer_filename(initializer->loc.filenr), initializer->loc.linenr,
-      initializer->loc.offset, ast_buffer1, type_buffer);
+      initializer->loc.offset, ast_buffer1, type_buffer1);
 }
 
 int semerr_incompatible_spec(const ASTree *decl_specs,
                              const ASTree *decl_spec) {
   semantic_error = 1;
   int chars_written;
-  CHECK_TO_STR(type_to_str(decl_specs->type, type_buffer), BUFFER_SIZE);
+  CHECK_TO_STR(type_to_str(decl_specs->type, type_buffer1), BUFFER_SIZE);
   CHECK_TO_STR(astree_to_string(decl_spec, ast_buffer1), BUFFER_SIZE);
   return fprintf(
       stderr,
       "%s:%lu.%lu: declaration specifier {%s} incompatible with type `%s`\n",
       lexer_filename(decl_specs->loc.filenr), decl_specs->loc.linenr,
-      decl_specs->loc.offset, ast_buffer1, type_buffer);
+      decl_specs->loc.offset, ast_buffer1, type_buffer1);
 }
 
 int semerr_symbol_not_found(const ASTree *identifier) {
@@ -499,10 +500,10 @@ int semerr_expected_typedef_name(const ASTree *identifier,
 int semerr_invalid_type(const ASTree *tree) {
   semantic_error = 1;
   int chars_written;
-  CHECK_TO_STR(type_to_str(tree->type, type_buffer), BUFFER_SIZE);
+  CHECK_TO_STR(type_to_str(tree->type, type_buffer1), BUFFER_SIZE);
   return fprintf(stderr, "%s:%lu.%lu: invalid type `%s`\n",
                  lexer_filename(tree->loc.filenr), tree->loc.linenr,
-                 tree->loc.offset, type_buffer);
+                 tree->loc.offset, type_buffer1);
 }
 
 int semerr_incomplete_type(const ASTree *expr) {
@@ -622,4 +623,73 @@ int semerr_expected_const(const ASTree *where, const ASTree *expr) {
       "%s:%lu.%lu: node {%s} expected constant expression at node {%s}\n",
       lexer_filename(expr->loc.filenr), expr->loc.linenr, expr->loc.offset,
       ast_buffer1, ast_buffer2);
+}
+
+int semerr_incompatible_types(const ASTree *where, const Type *dest,
+                              const Type *src) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(type_to_str(dest, type_buffer1), BUFFER_SIZE);
+  CHECK_TO_STR(type_to_str(src, type_buffer2), BUFFER_SIZE);
+  return fprintf(stderr, "%s:%lu.%lu: type `%s` incompatible with type `%s`\n",
+                 lexer_filename(where->loc.filenr), where->loc.linenr,
+                 where->loc.offset, type_buffer2, type_buffer1);
+}
+
+int semerr_expected_retval(const ASTree *ret, const Type *type) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(type_to_str(type, type_buffer1), BUFFER_SIZE);
+  return fprintf(stderr, "%s:%lu.%lu: expected return value of type `%s`\n",
+                 lexer_filename(ret->loc.filenr), ret->loc.linenr,
+                 ret->loc.offset, type_buffer1);
+}
+
+int semerr_expected_scalar(const ASTree *where, const Type *type) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(type_to_str(type, type_buffer1), BUFFER_SIZE);
+  return fprintf(
+      stderr, "%s:%lu.%lu: expected scalar type but instead found type `%s`\n",
+      lexer_filename(where->loc.filenr), where->loc.linenr, where->loc.offset,
+      type_buffer1);
+}
+
+int semerr_expected_integral(const ASTree *where, const Type *type) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(type_to_str(type, type_buffer1), BUFFER_SIZE);
+  return fprintf(
+      stderr,
+      "%s:%lu.%lu: expected integral type but instead found type `%s`\n",
+      lexer_filename(where->loc.filenr), where->loc.linenr, where->loc.offset,
+      type_buffer1);
+}
+
+int semerr_redefine_label(const ASTree *identifier, const ASTree *old_label) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(astree_to_string(old_label, ast_buffer1), BUFFER_SIZE);
+  return fprintf(
+      stderr,
+      "%s:%lu.%lu: redefinition of label `%s`; previous definition: {%s}\n",
+      lexer_filename(identifier->loc.filenr), identifier->loc.linenr,
+      identifier->loc.offset, identifier->lexinfo, ast_buffer1);
+}
+
+int semerr_unexpected_stmt(const ASTree *stmt) {
+  semantic_error = 1;
+  return fprintf(stderr, "%s:%lu.%lu: unexpected %s statement\n",
+                 lexer_filename(stmt->loc.filenr), stmt->loc.linenr,
+                 stmt->loc.offset, stmt->lexinfo);
+}
+
+int semerr_expected_intconst(const ASTree *where, const ASTree *expr) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(astree_to_string(expr, ast_buffer1), BUFFER_SIZE);
+  return fprintf(stderr,
+                 "%s:%lu.%lu: expected {%s} to be an integral constant\n",
+                 lexer_filename(where->loc.filenr), where->loc.linenr,
+                 where->loc.offset, ast_buffer1);
 }
