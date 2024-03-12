@@ -57,14 +57,14 @@ static int init_scalar(const Type *type, ptrdiff_t disp, ASTree *initializer,
     if (disp < 0) where->node = initializer->last_instr->node;
     return 1;
   } else if (disp < 0) {
-    (void)translate_auto_scalar_init(type, disp, initializer, where);
+    translate_auto_scalar_init(type, disp, initializer, where);
     return 0;
   } else if ((initializer->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT) {
     (void)semerr_expected_init(initializer);
     (void)translate_empty_expr(initializer);
     return 1;
   } else {
-    (void)translate_static_scalar_init(type, initializer, where);
+    translate_static_scalar_init(type, initializer, where);
     return 0;
   }
 }
@@ -87,9 +87,9 @@ static int init_literal(Type *arr_type, ptrdiff_t arr_disp, ASTree *literal,
   }
 
   if (arr_disp >= 0) {
-    (void)translate_static_literal_init(arr_type, literal, where);
+    translate_static_literal_init(arr_type, literal, where);
   } else {
-    (void)translate_auto_literal_init(arr_type, arr_disp, literal, where);
+    translate_auto_literal_init(arr_type, arr_disp, literal, where);
   }
 
   return 0;

@@ -2462,8 +2462,8 @@ ASTree *translate_default(ASTree *default_, ASTree *stmt) {
   return astree_adopt(default_, 1, stmt);
 }
 
-ASTree *translate_static_scalar_init(const Type *type, ASTree *initializer,
-                                     ListIter *where) {
+void translate_static_scalar_init(const Type *type, ASTree *initializer,
+                                  ListIter *where) {
   assert(initializer->first_instr == NULL && initializer->last_instr == NULL);
   Opcode directive;
   switch (type_get_width(type)) {
@@ -2508,12 +2508,10 @@ ASTree *translate_static_scalar_init(const Type *type, ASTree *initializer,
     initializer->last_instr = liter_copy(where);
     if (initializer->last_instr == NULL) abort();
   }
-
-  return initializer;
 }
 
-ASTree *translate_auto_scalar_init(const Type *type, ptrdiff_t disp,
-                                   ASTree *initializer, ListIter *where) {
+void translate_auto_scalar_init(const Type *type, ptrdiff_t disp,
+                                ASTree *initializer, ListIter *where) {
   assert(initializer->first_instr == NULL && initializer->last_instr == NULL);
   assert((initializer->attributes & ATTR_MASK_CONST) >= ATTR_CONST_INIT);
   Instruction *load_instr;
@@ -2541,11 +2539,10 @@ ASTree *translate_auto_scalar_init(const Type *type, ptrdiff_t disp,
   if (initializer->first_instr == NULL) abort();
   initializer->last_instr = liter_copy(where);
   if (initializer->last_instr == NULL) abort();
-  return initializer;
 }
 
-ASTree *translate_static_literal_init(const Type *arr_type, ASTree *literal,
-                                      ListIter *where) {
+void translate_static_literal_init(const Type *arr_type, ASTree *literal,
+                                   ListIter *where) {
   assert(literal->first_instr == NULL && literal->last_instr == NULL);
 
   if (state_get_function(state) != NULL) {
@@ -2578,7 +2575,7 @@ ASTree *translate_static_literal_init(const Type *arr_type, ASTree *literal,
           literal->last_instr = liter_copy(where);
           assert(literal->last_instr != NULL);
         }
-        return literal;
+        return;
       } else if (literal_length <= arr_width) {
         Instruction *ascii_instr = instr_init(OP_ASCII);
         set_op_dir(&ascii_instr->dest, str);
@@ -2592,7 +2589,7 @@ ASTree *translate_static_literal_init(const Type *arr_type, ASTree *literal,
           literal->last_instr = liter_copy(where);
           assert(literal->last_instr != NULL);
         }
-        return literal;
+        return;
       } else {
         abort();
       }
@@ -2602,8 +2599,8 @@ ASTree *translate_static_literal_init(const Type *arr_type, ASTree *literal,
   abort();
 }
 
-ASTree *translate_auto_literal_init(const Type *arr_type, ptrdiff_t arr_disp,
-                                    ASTree *literal, ListIter *where) {
+void translate_auto_literal_init(const Type *arr_type, ptrdiff_t arr_disp,
+                                 ASTree *literal, ListIter *where) {
   assert(literal->first_instr == NULL && literal->last_instr == NULL);
   Instruction *literal_lea_instr = instr_init(OP_LEA);
   set_op_pic(&literal_lea_instr->src, literal->constant.integral.signed_value,
@@ -2639,7 +2636,6 @@ ASTree *translate_auto_literal_init(const Type *arr_type, ptrdiff_t arr_disp,
   if (status) abort();
   literal->last_instr = liter_copy(where);
   if (literal->last_instr == NULL) abort();
-  return literal;
 }
 
 int translate_static_prelude(ASTree *declarator, Symbol *symbol,
@@ -2686,10 +2682,8 @@ int translate_static_prelude(ASTree *declarator, Symbol *symbol,
   }
 }
 
-static ASTree *translate_static_local_init(ASTree *declaration,
-                                           ASTree *assignment,
-                                           ASTree *declarator,
-                                           ASTree *initializer) {
+static void translate_static_local_init(ASTree *assignment, ASTree *declarator,
+                                        ASTree *initializer) {
   (void)assignment;
   Symbol *symbol = NULL;
   (void)state_get_symbol(state, (char *)declarator->lexinfo,
@@ -2712,14 +2706,11 @@ static ASTree *translate_static_local_init(ASTree *declaration,
   if (assignment->first_instr == NULL) abort();
   assignment->last_instr = liter_copy(initializer->last_instr);
   if (assignment->last_instr == NULL) abort();
-
-  return declaration;
 }
 
 /* TODO(Robert): merge with `translate_auto_scalar_init` */
-static ASTree *translate_auto_local_init(ASTree *declaration,
-                                         ASTree *assignment, ASTree *declarator,
-                                         ASTree *initializer) {
+static void translate_auto_local_init(ASTree *assignment, ASTree *declarator,
+                                      ASTree *initializer) {
   Symbol *symbol = NULL;
   (void)state_get_symbol(state, (char *)declarator->lexinfo,
                          strlen(declarator->lexinfo), &symbol);
@@ -2741,8 +2732,6 @@ static ASTree *translate_auto_local_init(ASTree *declaration,
   if (declarator->last_instr == NULL) abort();
 
   (void)translate_assignment(assignment, declarator, initializer);
-
-  return declaration;
 }
 
 static ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
@@ -2757,13 +2746,13 @@ static ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
   assert(in_current_scope && symbol);
 
   if (symbol->storage == STORE_STAT) {
-    return translate_static_local_init(declaration, assignment, declarator,
-                                       initializer);
+    translate_static_local_init(assignment, declarator, initializer);
+    return declaration;
   } else if (initializer->tok_kind != TOK_INIT_LIST &&
              initializer->tok_kind != TOK_STRINGCON &&
              (initializer->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT) {
-    return translate_auto_local_init(declaration, assignment, declarator,
-                                     initializer);
+    translate_auto_local_init(assignment, declarator, initializer);
+    return declaration;
   } else {
     symbol->disp = assign_stack_space(symbol->type);
 
@@ -2826,13 +2815,8 @@ ASTree *translate_local_declarations(ASTree *block, ASTree *declarations) {
       (void)translate_local_decl(declarations, declaration);
     } else if (declaration->tok_kind == '=') {
       ASTree *declarator = astree_get(declaration, 0),
-             *initializer = astree_get(declaration, 1),
-             *errnode = translate_local_init(declarations, declaration,
-                                             declarator, initializer);
-      if (errnode->tok_kind == TOK_TYPE_ERROR) {
-        (void)astree_remove(errnode, 0);
-        return astree_adopt(errnode, 1, astree_adopt(block, 1, declarations));
-      }
+             *initializer = astree_get(declaration, 1);
+      translate_local_init(declarations, declaration, declarator, initializer);
     } else {
       abort();
     }
@@ -2925,13 +2909,8 @@ ASTree *translate_global_declarations(ASTree *root, ASTree *declarations) {
       (void)translate_global_decl(declarations, declaration);
     } else if (declaration->tok_kind == '=') {
       ASTree *declarator = astree_get(declaration, 0),
-             *initializer = astree_get(declaration, 1),
-             *errnode =
-                 translate_global_init(declarations, declarator, initializer);
-      if (errnode->tok_kind == TOK_TYPE_ERROR) {
-        (void)astree_remove(errnode, 0);
-        return astree_adopt(errnode, 1, astree_adopt(root, 1, declarations));
-      }
+             *initializer = astree_get(declaration, 1);
+      translate_global_init(declarations, declarator, initializer);
     } else {
       abort();
     }

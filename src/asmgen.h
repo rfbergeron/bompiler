@@ -59,14 +59,14 @@ ASTree *translate_global_declarations(ASTree *root, ASTree *declarations);
 ASTree *begin_translate_fn(ASTree *declaration, ASTree *declarator,
                            ASTree *body);
 ASTree *end_translate_fn(ASTree *declaration);
-ASTree *translate_static_scalar_init(const Type *type, ASTree *initializer,
-                                     ListIter *where);
-ASTree *translate_auto_scalar_init(const Type *type, ptrdiff_t disp,
-                                   ASTree *initializer, ListIter *where);
-ASTree *translate_static_literal_init(const Type *type, ASTree *literal,
-                                      ListIter *where);
-ASTree *translate_auto_literal_init(const Type *type, ptrdiff_t disp,
-                                    ASTree *literal, ListIter *where);
+void translate_static_scalar_init(const Type *type, ASTree *initializer,
+                                  ListIter *where);
+void translate_auto_scalar_init(const Type *type, ptrdiff_t disp,
+                                ASTree *initializer, ListIter *where);
+void translate_static_literal_init(const Type *type, ASTree *literal,
+                                   ListIter *where);
+void translate_auto_literal_init(const Type *type, ptrdiff_t disp,
+                                 ASTree *literal, ListIter *where);
 int generator_print_il(FILE *out);
 int generator_debug_il(FILE *out);
 void asmgen_init_globals(const char *filename);
