@@ -271,16 +271,16 @@ int main(int argc, char **argv) {
   astree_init_globals();
   asmgen_init_globals(srcname);
 
-  status = yyparse();
-  if (status) {
-    warnx("Parsing failed with status %d.", status);
+  int syntax_error = yyparse();
+  if (syntax_error) {
+    warnx("Parsing failed with status %d.", syntax_error);
     goto cleanup;
   }
 
   if (skip_diagnostics) goto skip_diagnostics;
   string_set_print(strfile);
-  astree_print_symbols(UNWRAP(parser_root), symfile, 0);
-  astree_print_tree(UNWRAP(parser_root), astfile, 0);
+  astree_print_symbols(parser_root, symfile, 0);
+  astree_print_tree(parser_root, astfile, 0);
   generator_debug_il(ilfile);
 skip_diagnostics:
   if (skip_asm) goto skip_asm;
@@ -288,13 +288,6 @@ skip_diagnostics:
 skip_asm:
 
 cleanup:
-  if (parser_root->tok_kind == TOK_TYPE_ERROR) {
-    int status = print_errors(parser_root->type, errfile);
-    if (status) {
-      warnx("Failed to print program errors.");
-    }
-  }
-
   PFDBG0('m', "Execution finished; wrapping up.");
 
   /* restore stdin */
@@ -322,5 +315,9 @@ cleanup:
   string_set_free_globals();
   PFDBG0('m', "lexing/parsing helper cleanup");
   lexer_free_globals();
-  return EXIT_SUCCESS;
+
+  if (semantic_error || syntax_error)
+    return EXIT_FAILURE;
+  else
+    return EXIT_SUCCESS;
 }

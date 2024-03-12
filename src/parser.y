@@ -4,7 +4,6 @@
 #include <assert.h>
 
 #include "astree.h"
-#include "bcc_err.h"
 #include "debug.h"
 #include "lyutils.h"
 #include "state.h"
@@ -56,7 +55,7 @@
 /* %token PREC_PREFIX PREC_POSTFIX */
 /* %token PREC_TERNARY PREC_COMMA */
 /* tokens constructed by checker */
-%token TOK_TYPE_ERROR TOK_AUTO_CONV TOK_AUTO_PROM
+%token TOK_AUTO_CONV TOK_AUTO_PROM
 /* tokens constructed by parser */
 %token TOK_DECLARATION TOK_ROOT TOK_TYPE_NAME TOK_SPEC_LIST TOK_ATTR_LIST TOK_EMPTY
 /* tokens assigned to exsting nodes */

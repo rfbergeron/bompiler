@@ -3,6 +3,7 @@
 #include "asmgen.h"
 #include "assert.h"
 #include "badalist.h"
+#include "bcc_err.h"
 #include "lyutils.h"
 #include "state.h"
 #include "stdlib.h"
@@ -318,7 +319,6 @@ static const char *create_unique_name(ASTree *tree) {
  * called with error nodes as arguments.
  */
 static ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
-  assert(declarator->tok_kind != TOK_TYPE_ERROR);
   PFDBG1('t', "Making object entry for value %s", declarator->lexinfo);
   if (location_is_empty(&declaration->loc)) declaration->loc = declarator->loc;
 
@@ -529,15 +529,7 @@ ASTree *define_dirdecl(ASTree *declarator, ASTree *dirdecl) {
 
 ASTree *define_symbol(ASTree *decl_list, ASTree *equal_sign,
                       ASTree *initializer) {
-  assert(decl_list->tok_kind != TOK_TYPE_ERROR);
   ASTree *declarator = astree_remove(decl_list, astree_count(decl_list) - 1);
-  if (initializer->tok_kind == TOK_TYPE_ERROR) {
-    ASTree *errnode = initializer;
-    return astree_adopt(errnode, 1,
-                        astree_adopt(decl_list, 1,
-                                     astree_adopt(equal_sign, 2, declarator,
-                                                  astree_remove(errnode, 0))));
-  }
   assert(declarator->tok_kind == TOK_IDENT);
 
   Symbol *symbol;

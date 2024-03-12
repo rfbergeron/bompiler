@@ -3,6 +3,7 @@
 #include <assert.h>
 
 #include "asmgen.h"
+#include "bcc_err.h"
 #include "ctype.h"
 #include "evaluate.h"
 #include "inttypes.h"

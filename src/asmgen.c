@@ -1,5 +1,6 @@
 #include "asmgen.h"
 
+#include <stdarg.h>
 #include <string.h>
 
 #include "assert.h"

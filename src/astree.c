@@ -9,7 +9,6 @@
 
 #include "badalist.h"
 #include "badllist.h"
-#include "bcc_err.h"
 #include "debug.h"
 #include "evaluate.h"
 #include "lyutils.h"
@@ -122,8 +121,6 @@ void astree_destroy(ASTree *tree) {
       tree->type->pointer.next = NULL;
       /* fallthrough */
     case TOK_TYPE_NAME:
-      /* fallthrough */
-    case TOK_TYPE_ERROR:
       type_destroy(tree->type);
       break;
   }
@@ -147,13 +144,6 @@ void astree_destroy(ASTree *tree) {
 }
 
 ASTree *astree_adopt(ASTree *parent, const size_t count, ...) {
-  /*
-   * only one of the following may be true:
-   * - the parent's symbol is TOK_TYPE_ERROR
-   * - the number of children post adoption is greater than 1
-   */
-  assert((parent->tok_kind != TOK_TYPE_ERROR) ||
-         (astree_count(parent) + count == 1));
   va_list args;
   va_start(args, count);
   size_t i;
@@ -192,64 +182,6 @@ ASTree *astree_get(const ASTree *parent, const size_t index) {
 
 ASTree *astree_remove(ASTree *parent, const size_t index) {
   return llist_extract(&parent->children, index);
-}
-
-ASTree *astree_create_errnode(ASTree *child, ErrorCode code, size_t info_size,
-                              ...) {
-  va_list info_ptrs;
-  va_start(info_ptrs, info_size);
-  CompileError *error = compile_error_init_v(code, info_size, info_ptrs);
-  va_end(info_ptrs);
-
-  if (child->tok_kind == TOK_TYPE_ERROR) {
-    type_append_error(child->type, error);
-    return child;
-  } else {
-    ASTree *errnode = astree_init(TOK_TYPE_ERROR, child->loc, "_terr");
-    errnode->type = type_init_error(error);
-    return astree_adopt(errnode, 1, child);
-  }
-}
-
-/* TODO(Robert): consider giving this function the ability to correctly
- * propogate error nodes for more complex tree structures, like enums
- */
-ASTree *astree_propogate_errnode(ASTree *parent, ASTree *child) {
-  if (child->tok_kind != TOK_TYPE_ERROR) {
-    (void)astree_adopt(UNWRAP(parent), 1, child);
-    return parent;
-  } else if (parent->tok_kind != TOK_TYPE_ERROR) {
-    ASTree *real_child = astree_replace(child, 0, parent);
-    (void)astree_adopt(parent, 1, real_child);
-    return child;
-  } else {
-    (void)type_merge_errors(parent->type, child->type);
-    (void)astree_adopt(UNWRAP(parent), 1, astree_remove(child, 0));
-    astree_destroy(child);
-    return parent;
-  }
-}
-
-ASTree *astree_propogate_errnode_v(ASTree *parent, size_t count, ...) {
-  va_list children;
-  va_start(children, count);
-  size_t i;
-  for (i = 0; i < count; ++i) {
-    ASTree *child = va_arg(children, ASTree *);
-    parent = astree_propogate_errnode(parent, child);
-  }
-  va_end(children);
-  return parent;
-}
-
-ASTree *astree_propogate_errnode_a(ASTree *parent, size_t count,
-                                   ASTree **children) {
-  size_t i;
-  for (i = 0; i < count; ++i) {
-    ASTree *child = children[i];
-    parent = astree_propogate_errnode(parent, child);
-  }
-  return parent;
 }
 
 size_t astree_count(const ASTree *parent) {

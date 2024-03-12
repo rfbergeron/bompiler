@@ -121,21 +121,9 @@ Type *type_init_base(unsigned int flags) {
   return type;
 }
 
-Type *type_init_error(CompileError *error) {
-  assert(error != NULL);
-  Type *type = malloc(sizeof(Type));
-  type->error.code = TYPE_CODE_ERROR;
-  type->error.errors_cap = 4;
-  type->error.errors_size = 1;
-  type->error.errors = malloc(4 * sizeof(Type));
-  type->error.errors[0] = error;
-  return 0;
-}
-
 void type_destroy(Type *type) {
   while (type != NULL) {
     Type *current = type;
-    size_t i;
     switch (type->any.code) {
       default:
         abort();
@@ -163,12 +151,6 @@ void type_destroy(Type *type) {
         type = type->array.next;
         free(current);
         break;
-      case TYPE_CODE_ERROR:
-        for (i = 0; i < current->error.errors_size; ++i)
-          compile_error_destroy(current->error.errors[i]);
-        free(current->error.errors);
-        free(current);
-        return;
     }
   }
   /* a properly formed type should never reach this point, but if the type
@@ -315,10 +297,6 @@ int type_to_str(const Type *type, char *buf) {
         else
           ret += sprintf(buf + ret, "pointer to ");
         current = current->pointer.next;
-        break;
-      case TYPE_CODE_ERROR:
-        ret += sprintf(buf + ret, "(error)");
-        current = NULL;
         break;
       default:
         abort();
@@ -496,10 +474,6 @@ int type_is_qualified(const Type *type) {
   return type_is_const(type) || type_is_volatile(type);
 }
 
-int type_is_error(const Type *type) {
-  return type->any.code == TYPE_CODE_ERROR;
-}
-
 int type_is_declarator(const Type *type) {
   return type->any.code == TYPE_CODE_POINTER ||
          type->any.code == TYPE_CODE_ARRAY ||
@@ -610,8 +584,6 @@ size_t type_get_alignment(const Type *type) {
       return type_get_alignment(type->array.next);
     case TYPE_CODE_BASE:
       return type_base_alignment(type);
-    case TYPE_CODE_ERROR:
-      /* fallthrough */
     default:
       abort();
   }
@@ -669,8 +641,6 @@ size_t type_get_width(const Type *type) {
       return type->array.length * type_elem_width(type);
     case TYPE_CODE_BASE:
       return type_base_width(type);
-    case TYPE_CODE_ERROR:
-      /* fallthrough */
     default:
       abort();
   }
@@ -744,8 +714,6 @@ int types_equivalent(const Type *type1, const Type *type2,
     unsigned int flags_diff;
     case TYPE_CODE_NONE:
       /* fallthrough */
-    case TYPE_CODE_ERROR:
-      abort();
     case TYPE_CODE_BASE:
       flags_diff = type1->base.flags ^ type2->base.flags;
       if (ignore_qualifiers) flags_diff &= ~QUAL_FLAG_MASK;
@@ -954,40 +922,6 @@ Type *type_common_qualified_pointer(const Type *type1, const Type *type2) {
   return new_pointer;
 }
 
-Type *type_merge_errors(Type *dest, Type *src) {
-  assert(dest->any.code == TYPE_CODE_ERROR && src->any.code == TYPE_CODE_ERROR);
-  size_t new_cap = dest->error.errors_cap > src->error.errors_cap
-                       ? dest->error.errors_cap
-                       : src->error.errors_cap;
-  if (new_cap < dest->error.errors_size + src->error.errors_size) new_cap *= 2;
-  assert(new_cap >= dest->error.errors_size + src->error.errors_size);
-  CompileError **new_errors =
-      realloc(dest->error.errors, sizeof(CompileError *) * new_cap);
-  if (new_errors == NULL) abort();
-  dest->error.errors = new_errors;
-  dest->error.errors_cap = new_cap;
-  size_t i;
-  for (i = 0; i < src->error.errors_size; ++i)
-    dest->error.errors[dest->error.errors_size++] = src->error.errors[i];
-  /* prevent src from freeing error info when it is destroyed */
-  src->error.errors_size = 0;
-  return dest;
-}
-
-/* TODO(Robert): create macro or data structure for self-resizing array */
-void type_append_error(Type *type, CompileError *error) {
-  assert(type->any.code == TYPE_CODE_ERROR);
-  if (type->error.errors_size == type->error.errors_cap) {
-    type->error.errors_cap *= 2;
-    CompileError **new_errors = realloc(
-        type->error.errors, type->error.errors_cap * sizeof(CompileError *));
-    if (new_errors == NULL) abort();
-    type->error.errors = new_errors;
-  }
-
-  type->error.errors[type->error.errors_size++] = error;
-}
-
 static int flags_valid(unsigned int old_flags, unsigned int new_flags,
                        int allow_stor_flags, int allow_spec_flags) {
   if (new_flags & QUAL_FLAG_MASK & old_flags) {
@@ -1043,8 +977,6 @@ int type_add_flags(Type *type, unsigned int flags) {
     case TYPE_CODE_FUNCTION:
       /* fallthrough */
     case TYPE_CODE_ARRAY:
-      /* fallthrough */
-    case TYPE_CODE_ERROR:
       /* fallthrough */
     default:
       abort();
@@ -1161,8 +1093,7 @@ int type_validate(const Type *type) {
 
 /*
  * Performs automatic conversions from function and array types to pointer
- * types. Replaces old type with appropriately converted type. Can safely be
- * called when `expr` is an error.
+ * types. Replaces old type with appropriately converted type.
  */
 Type *type_pointer_conversions(Type *type) {
   if (type_is_function(type) || type_is_array(type)) {

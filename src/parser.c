@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <stdarg.h>
 
 #include "astree.h"
 #include "bcc_err.h"
@@ -161,9 +162,6 @@ BCC_YYSTATIC ASTree *parser_make_decl_specs(ASTree *first_specifier) {
 BCC_YYSTATIC ASTree *parser_make_declaration(ASTree *decl_specs) {
   ASTree *declaration = astree_init(TOK_DECLARATION, LOC_EMPTY, "_declaration");
   decl_specs = finalize_decl_specs(decl_specs);
-  if (decl_specs->tok_kind == TOK_TYPE_ERROR) {
-    return astree_propogate_errnode(declaration, decl_specs);
-  }
   return astree_adopt(declaration, 1, decl_specs);
 }
 
