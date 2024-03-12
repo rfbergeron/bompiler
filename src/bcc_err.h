@@ -1,129 +1,49 @@
 #ifndef __BCC_ERR_H__
 #define __BCC_ERR_H__
-#include "stdarg.h"
-#include "stddef.h"
-#include "stdio.h"
 
-typedef enum error_code {
-  BCC_TERR_FAILURE = -1,
-  BCC_TERR_SUCCESS = 0,
-  BCC_TERR_LIBRARY_FAILURE,
-  BCC_TERR_INCOMPLETE_TYPE,
-  BCC_TERR_INCOMPLETE_SPEC,
-  BCC_TERR_INCOMPATIBLE_TYPES,
-  BCC_TERR_INCOMPATIBLE_SPEC,
-  BCC_TERR_INCOMPATIBLE_DECL,
-  BCC_TERR_EXPECTED_TAG,
-  BCC_TERR_EXPECTED_TAG_PTR,
-  BCC_TERR_EXPECTED_STRUCT,
-  BCC_TERR_EXPECTED_UNION,
-  BCC_TERR_EXPECTED_ENUM,
-  BCC_TERR_EXPECTED_FUNCTION,
-  BCC_TERR_EXPECTED_FN_PTR,
-  BCC_TERR_EXPECTED_TYPEID,
-  BCC_TERR_EXPECTED_DECLARATOR,
-  BCC_TERR_EXPECTED_CONST,
-  BCC_TERR_EXPECTED_INTEGER,
-  BCC_TERR_EXPECTED_INTCONST,
-  BCC_TERR_EXPECTED_ARITHMETIC,
-  BCC_TERR_EXPECTED_ARITHCONST,
-  BCC_TERR_EXPECTED_SCALAR,
-  BCC_TERR_EXPECTED_SCALCONST,
-  BCC_TERR_EXPECTED_POINTER,
-  BCC_TERR_EXPECTED_RETURN,
-  BCC_TERR_EXPECTED_RETVAL,
-  BCC_TERR_EXPECTED_LVAL,
-  BCC_TERR_EXPECTED_NONZERO,
-  BCC_TERR_UNEXPECTED_LIST,
-  BCC_TERR_UNEXPECTED_TOKEN,
-  BCC_TERR_UNEXPECTED_BODY,
-  BCC_TERR_UNEXPECTED_RETURN,
-  BCC_TERR_EXCESS_INITIALIZERS,
-  BCC_TERR_EXCESS_PARAMS,
-  BCC_TERR_INSUFF_PARAMS,
-  BCC_TERR_SYM_NOT_FOUND,
-  BCC_TERR_TYPEID_NOT_FOUND,
-  BCC_TERR_TAG_NOT_FOUND,
-  BCC_TERR_LABEL_NOT_FOUND,
-  BCC_TERR_REDEFINITION,
-  BCC_TERR_CONST_TOO_SMALL,
-  BCC_TERR_CONST_TOO_LARGE
-} ErrorCode;
+#include "astree.h"
+#include "bcc_types.h"
+#include "symtable.h"
 
-typedef struct compile_error CompileError;
-struct compile_error {
-  ErrorCode code;
-  void **info;
-  size_t info_size;
-};
-
-/* forward declare type to prevent circular dependency */
-union type;
-struct astree;
-struct tag;
-struct symbol;
-
-CompileError *compile_error_init(ErrorCode code, size_t info_size, ...);
-CompileError *compile_error_init_v(ErrorCode code, size_t info_size,
-                                   va_list info_ptrs);
-void compile_error_destroy(CompileError *error);
-int print_errors(const union type *type, FILE *out);
-int semerr_const_too_large(const struct astree *constant,
-                           const union type *type);
-int semerr_excess_init(const struct astree *initializer,
-                       const union type *type);
-int semerr_expected_init(const struct astree *initializer);
-int semerr_compat_init(const struct astree *init, const union type *dest);
-int semerr_incompatible_spec(const struct astree *decl_specs,
-                             const struct astree *decl_spec);
-int semerr_symbol_not_found(const struct astree *identifier);
-int semerr_expected_typedef_name(const struct astree *identifier,
-                                 const struct symbol *symbol);
-int semerr_invalid_type(const struct astree *tree);
-int semerr_incomplete_type(const struct astree *where, const union type *type);
-int semerr_invalid_linkage(const struct astree *declarator,
-                           const struct symbol *symbol);
-int semerr_incompatible_linkage(const struct astree *declarator,
-                                const struct symbol *old_symbol,
-                                const struct symbol *new_symbol);
-int semerr_redefine_symbol(const struct astree *declarator,
-                           const struct symbol *symbol);
-int semerr_invalid_arr_size(const struct astree *array,
-                            const struct astree *expr);
-int semerr_expected_ident(const struct astree *function,
-                          const struct astree *param);
-int semerr_label_not_found(const struct astree *label);
-int semerr_redefine_tag(const struct astree *tag_spec,
-                        const struct astree *tag_id,
-                        const struct tag *existing);
-int semerr_enum_not_found(const struct astree *enum_spec,
-                          const struct astree *enum_id);
-int semerr_expected_const(const struct astree *where,
-                          const struct astree *expr);
-int semerr_incompatible_types(const struct astree *where,
-                              const union type *dest, const union type *src);
-int semerr_expected_retval(const struct astree *ret, const union type *type);
-int semerr_expected_scalar(const struct astree *where, const union type *type);
-int semerr_expected_integral(const struct astree *where,
-                             const union type *type);
-int semerr_redefine_label(const struct astree *identifier,
-                          const struct astree *old_label);
-int semerr_unexpected_stmt(const struct astree *stmt);
-int semerr_expected_intconst(const struct astree *where,
-                             const struct astree *expr);
-int semerr_insufficient_args(const struct astree *call);
-int semerr_excess_args(const struct astree *call, const struct astree *arg);
-int semerr_expected_fn_ptr(const struct astree *call, const union type *type);
-int semerr_expected_arithmetic(const struct astree *where,
-                               const union type *type);
-int semerr_expected_lvalue(const struct astree *where,
-                           const struct astree *offender);
-int semerr_expected_pointer(const struct astree *where, const union type *type);
-int semerr_sizeof_fn(const struct astree *sizeof_, const union type *type);
-int semerr_sizeof_incomplete(const struct astree *sizeof_,
-                             const union type *type);
-int semerr_expected_record_ptr(const struct astree *where,
-                               const union type *type);
-int semerr_expected_record(const struct astree *where, const union type *type);
-int semerr_not_assignable(const struct astree *where, const union type *type);
+int semerr_const_too_large(const ASTree *constant, const Type *type);
+int semerr_excess_init(const ASTree *initializer, const Type *type);
+int semerr_expected_init(const ASTree *initializer);
+int semerr_compat_init(const ASTree *init, const Type *dest);
+int semerr_incompatible_spec(const ASTree *decl_specs, const ASTree *decl_spec);
+int semerr_symbol_not_found(const ASTree *identifier);
+int semerr_expected_typedef_name(const ASTree *identifier,
+                                 const Symbol *symbol);
+int semerr_invalid_type(const ASTree *tree);
+int semerr_incomplete_type(const ASTree *where, const Type *type);
+int semerr_invalid_linkage(const ASTree *declarator, const Symbol *symbol);
+int semerr_incompatible_linkage(const ASTree *declarator,
+                                const Symbol *old_symbol,
+                                const Symbol *new_symbol);
+int semerr_redefine_symbol(const ASTree *declarator, const Symbol *symbol);
+int semerr_invalid_arr_size(const ASTree *array, const ASTree *expr);
+int semerr_expected_ident(const ASTree *function, const ASTree *param);
+int semerr_label_not_found(const ASTree *label);
+int semerr_redefine_tag(const ASTree *tag_spec, const ASTree *tag_id,
+                        const Tag *existing);
+int semerr_enum_not_found(const ASTree *enum_spec, const ASTree *enum_id);
+int semerr_expected_const(const ASTree *where, const ASTree *expr);
+int semerr_incompatible_types(const ASTree *where, const Type *dest,
+                              const Type *src);
+int semerr_expected_retval(const ASTree *ret, const Type *type);
+int semerr_expected_scalar(const ASTree *where, const Type *type);
+int semerr_expected_integral(const ASTree *where, const Type *type);
+int semerr_redefine_label(const ASTree *identifier, const ASTree *old_label);
+int semerr_unexpected_stmt(const ASTree *stmt);
+int semerr_expected_intconst(const ASTree *where, const ASTree *expr);
+int semerr_insufficient_args(const ASTree *call);
+int semerr_excess_args(const ASTree *call, const ASTree *arg);
+int semerr_expected_fn_ptr(const ASTree *call, const Type *type);
+int semerr_expected_arithmetic(const ASTree *where, const Type *type);
+int semerr_expected_lvalue(const ASTree *where, const ASTree *offender);
+int semerr_expected_pointer(const ASTree *where, const Type *type);
+int semerr_sizeof_fn(const ASTree *sizeof_, const Type *type);
+int semerr_sizeof_incomplete(const ASTree *sizeof_, const Type *type);
+int semerr_expected_record_ptr(const ASTree *where, const Type *type);
+int semerr_expected_record(const ASTree *where, const Type *type);
+int semerr_not_assignable(const ASTree *where, const Type *type);
 #endif

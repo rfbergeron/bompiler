@@ -2,6 +2,7 @@
 
 #include "asmgen.h"
 #include "assert.h"
+#include "bcc_err.h"
 #include "tchk_decl.h"
 
 #define MIN(x, y) ((y) < (x) ? (y) : (x))
@@ -31,7 +32,6 @@ static void set_init_list_iterators(ASTree *init_list) {
 
 static int init_scalar(const Type *type, ptrdiff_t disp, ASTree *initializer,
                        ListIter *where) {
-  assert(initializer->tok_kind != TOK_TYPE_ERROR);
   assert(!type_is_char_array(type));
   if (initializer->tok_kind == TOK_INIT_LIST) {
     if (astree_count(initializer) > 1) {

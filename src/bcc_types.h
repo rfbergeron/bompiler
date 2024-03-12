@@ -2,7 +2,6 @@
 #define BCC_TYPES_H
 #include "badllist.h"
 #include "badmap.h"
-#include "bcc_err.h"
 #include "stdio.h"
 
 #define X64_SIZEOF_LONG ((size_t)8UL)
@@ -29,8 +28,7 @@ typedef enum type_code {
   TYPE_CODE_ENUM,
   TYPE_CODE_POINTER,
   TYPE_CODE_FUNCTION,
-  TYPE_CODE_ARRAY,
-  TYPE_CODE_ERROR
+  TYPE_CODE_ARRAY
 } TypeCode;
 
 /* when bits 0-2 equal SPEC_FLAG_INTEGRAL, additional information about the
@@ -146,12 +144,6 @@ union type {
     TypeCode code;
     unsigned int flags;
   } base;
-  struct {
-    TypeCode code;
-    CompileError **errors;
-    size_t errors_size;
-    size_t errors_cap;
-  } error;
 };
 
 extern const Type *const TYPE_VOID;
@@ -175,7 +167,6 @@ Type *type_init_function(size_t parameters_size, Type **parameters,
                          int is_variadic, int is_old_style);
 Type *type_init_tag(unsigned int flags, const char *tag_name, struct tag *tag);
 Type *type_init_base(unsigned int flags);
-Type *type_init_error(CompileError *error);
 
 void type_destroy(Type *type);
 
@@ -209,7 +200,6 @@ int type_is_char_array(const Type *type);
 int type_is_const(const Type *type);
 int type_is_volatile(const Type *type);
 int type_is_qualified(const Type *type);
-int type_is_error(const Type *type);
 int type_is_declarator(const Type *type);
 int type_is_none(const Type *type);
 int type_is_incomplete(const Type *type);
@@ -235,8 +225,6 @@ Type *type_get_decl_specs(Type *type);
 Type *type_append(Type *dest, Type *src, int copy_src);
 Type *type_copy(const Type *type, int clear_typedef_flag);
 Type *type_common_qualified_pointer(const Type *type1, const Type *type2);
-Type *type_merge_errors(Type *dest, Type *src);
-void type_append_error(Type *type, CompileError *error);
 int type_add_flags(Type *type, unsigned int flags);
 int type_normalize(Type *type);
 int type_validate(const Type *type);

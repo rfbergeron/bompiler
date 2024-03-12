@@ -4,6 +4,7 @@
 
 #include "asmgen.h"
 #include "assert.h"
+#include "bcc_err.h"
 #include "ctype.h"
 #include "errno.h"
 #include "lyutils.h"

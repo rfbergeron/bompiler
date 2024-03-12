@@ -5,7 +5,6 @@
 #include "badalist.h"
 #include "badllist.h"
 #include "badmap.h"
-#include "bcc_err.h"
 #include "ctype.h"
 #include "debug.h"
 #include "err.h"
