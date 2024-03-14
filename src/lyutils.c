@@ -82,10 +82,11 @@ void lexer_newline() {
 }
 
 int lexer_bad_char(char bad) {
+  lexical_error = 1;
   if (isgraph(bad))
-    (void)sprintf(error_buffer, "Invalid source character (%c)\n", bad);
+    (void)sprintf(error_buffer, "Invalid source character (%c)", bad);
   else
-    (void)sprintf(error_buffer, "Invalid source character (%#.2x)\n",
+    (void)sprintf(error_buffer, "Invalid source character (%#.2x)",
                   ((unsigned int)bad) & 0xff);
 
   (void)lexer_print_error(error_buffer);
@@ -197,7 +198,8 @@ int lexer_if(void) {
 }
 
 int lexer_bad_token(int tok_kind) {
-  (void)sprintf(error_buffer, "Invalid token %s (%s)\n",
+  lexical_error = 1;
+  (void)sprintf(error_buffer, "Invalid token %s (%s)",
                 parser_get_tname(tok_kind), yytext);
   (void)lexer_print_error(error_buffer);
   return lexer_token(TOK_LEX_ERROR);
@@ -223,7 +225,9 @@ void lexer_free_globals() {
   llist_destroy(&lexer_filenames);
 }
 
-void yyerror(const char *message) { lexer_print_error(message); }
+void yyerror(const char *message) {
+  if (!lexical_error) lexer_print_error(message);
+}
 
 int location_to_string(const Location *loc, char *buf) {
   return sprintf(buf, "%lu, %lu, %lu, %lu", loc->filenr, loc->linenr,
