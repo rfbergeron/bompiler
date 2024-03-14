@@ -67,6 +67,7 @@ int skip_allocator = 0;
 int skip_liveness = 0;
 int skip_diagnostics = 0;
 int semantic_error = 0;
+int lexical_error = 0;
 int stdin_tmp_fileno;
 
 void destroy_cpp_args(void) {
@@ -272,10 +273,7 @@ int main(int argc, char **argv) {
   asmgen_init_globals(srcname);
 
   int syntax_error = yyparse();
-  if (syntax_error) {
-    warnx("Parsing failed with status %d.", syntax_error);
-    goto cleanup;
-  }
+  if (syntax_error) goto cleanup;
 
   if (skip_diagnostics) goto skip_diagnostics;
   string_set_print(strfile);

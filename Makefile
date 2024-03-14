@@ -72,7 +72,7 @@ ${LIBOBJ:%=build/%}: build
 build/%.o: src/%.c ${HDRFILES} build
 	${CC} ${CFLAGS} ${CPPFLAGS} ${CWARN} -c $< -o $@
 
-build/yylex.c: src/scanner.l build
+build/yylex.c: src/lexer.l build
 	flex --outfile=$@ $<
 
 build/yyparse.h build/yyparse.c&: src/parser.y build
@@ -89,7 +89,7 @@ check:
 ci: check
 	git add ${HDR:%=src/%} ${SRC:%=src/%} ${UNITSRC:%=src/%} ${MKFILE} \
 	README.md doc/*.md .gitignore .gitmodules \
-	src/parser.y src/parser.c src/scanner.l badlib
+	src/parser.y src/parser.c src/lexer.l badlib
 	make -C test ci
 
 test:

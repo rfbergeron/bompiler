@@ -34,6 +34,7 @@ extern int lexer_interactive;
 extern struct astree *parser_root;
 extern struct astree *bcc_yyval;
 extern int semantic_error;
+extern int lexical_error;
 
 int yylex();
 int yylex_destroy();
