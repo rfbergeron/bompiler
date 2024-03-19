@@ -4,6 +4,7 @@
 #include "assert.h"
 #include "badalist.h"
 #include "bcc_err.h"
+#include "conversions.h"
 #include "lyutils.h"
 #include "state.h"
 #include "stdlib.h"
@@ -529,6 +530,9 @@ ASTree *define_dirdecl(ASTree *declarator, ASTree *dirdecl) {
 
 ASTree *define_symbol(ASTree *decl_list, ASTree *equal_sign,
                       ASTree *initializer) {
+  if (initializer->tok_kind != TOK_STRINGCON &&
+      initializer->tok_kind != TOK_INIT_LIST)
+    initializer = tchk_ptr_conv(initializer, 1);
   ASTree *declarator = astree_remove(decl_list, astree_count(decl_list) - 1);
   assert(declarator->tok_kind == TOK_IDENT);
 
@@ -545,6 +549,11 @@ ASTree *define_symbol(ASTree *decl_list, ASTree *equal_sign,
   assert(symbol->info == SYM_NONE);
   symbol->info = SYM_DEFINED;
   equal_sign->type = declarator->type;
+  if (symbol->storage != STORE_STAT && initializer->tok_kind != TOK_INIT_LIST &&
+      state_peek_table(state)->kind != TABLE_TRANS_UNIT)
+    initializer = tchk_cexpr_conv(
+        tchk_scal_conv(tchk_rval_conv(initializer, NULL), equal_sign->type),
+        NULL);
   /* code is emitted by `validate_fnbody_content`, `validate_topdecl`, or
    * `validate_block_content` and type checking is performed in `init.c`
    */

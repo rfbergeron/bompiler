@@ -1133,6 +1133,10 @@ Type *type_arithmetic_conversions(Type *type1, Type *type2) {
     return type1;
   } else if (flags2 == SPEC_FLAGS_UINT) {
     return type2;
+  } else if (flags1 == SPEC_FLAGS_SINT) {
+    return type1;
+  } else if (flags2 == SPEC_FLAGS_SINT) {
+    return type2;
   } else {
     /* no need to check for enum, char, etc. explicitly; all become int */
     return (Type *)TYPE_INT;

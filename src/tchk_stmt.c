@@ -3,17 +3,19 @@
 #include "asmgen.h"
 #include "assert.h"
 #include "bcc_err.h"
+#include "conversions.h"
 #include "state.h"
 #include "stdlib.h"
 #include "yyparse.h"
 
 ASTree *validate_return(ASTree *ret, ASTree *expr) {
+  expr = TCHK_STD_CONV(expr, 1, NULL);
   Symbol *symbol = state_get_function(state);
   Type *return_type = type_strip_declarator(symbol->type);
 
   if (expr->tok_kind != TOK_EMPTY) {
     if (types_assignable(return_type, expr->type, astree_is_const_zero(expr))) {
-      maybe_load_cexpr(expr, NULL);
+      expr = tchk_cexpr_conv(tchk_scal_conv(expr, return_type), NULL);
       return translate_return(ret, expr);
     } else if (type_is_void(expr->type) && type_is_void(return_type)) {
       return translate_return(ret, expr);
@@ -22,7 +24,6 @@ ASTree *validate_return(ASTree *ret, ASTree *expr) {
       return translate_empty_expr(astree_adopt(ret, 1, expr));
     }
   } else if (type_is_void(return_type)) {
-    maybe_load_cexpr(expr, NULL);
     return translate_return(ret, expr);
   } else {
     (void)semerr_expected_retval(ret, return_type);
@@ -32,11 +33,12 @@ ASTree *validate_return(ASTree *ret, ASTree *expr) {
 
 ASTree *validate_ifelse(ASTree *ifelse, ASTree *condition, ASTree *if_body,
                         ASTree *else_body) {
+  condition = TCHK_STD_CONV(condition, 1, if_body->first_instr);
   if (!type_is_scalar(condition->type)) {
     (void)semerr_expected_scalar(ifelse, condition->type);
     return astree_adopt(ifelse, 3, condition, if_body, else_body);
   } else {
-    maybe_load_cexpr(condition, if_body->first_instr);
+    condition = tchk_cexpr_conv(condition, if_body->first_instr);
     return translate_ifelse(ifelse, condition, if_body, else_body);
   }
 }
@@ -46,6 +48,7 @@ ASTree *validate_switch(ASTree *switch_, ASTree *expr, ASTree *stmt) {
 }
 
 ASTree *validate_switch_expr(ASTree *expr) {
+  expr = TCHK_STD_CONV(expr, 1, NULL);
   if (!type_is_integral(expr->type)) {
     (void)semerr_expected_integral(expr, expr->type);
     return expr;
@@ -53,7 +56,7 @@ ASTree *validate_switch_expr(ASTree *expr) {
     Type *promoted_type =
         type_arithmetic_conversions(expr->type, (Type *)TYPE_INT);
     state_set_control_type(state, promoted_type);
-    maybe_load_cexpr(expr, NULL);
+    expr = tchk_cexpr_conv(tchk_scal_conv(expr, promoted_type), NULL);
     return expr;
   }
 }
@@ -62,35 +65,49 @@ ASTree *validate_while(ASTree *while_, ASTree *condition, ASTree *stmt) {
   /* TODO(Robert): safely process flow control statements before checking error
    * codes so that more things are cleaned up in the event of an error.
    */
+  condition = TCHK_STD_CONV(condition, 1, stmt->first_instr);
   if (!type_is_scalar(condition->type)) {
     (void)semerr_expected_scalar(while_, condition->type);
     return astree_adopt(while_, 2, condition, stmt);
   } else {
-    maybe_load_cexpr(condition, stmt->first_instr);
+    condition = tchk_cexpr_conv(condition, stmt->first_instr);
     return translate_while(while_, condition, stmt);
   }
 }
 
 ASTree *validate_do(ASTree *do_, ASTree *stmt, ASTree *condition) {
+  condition = TCHK_STD_CONV(condition, 1, NULL);
   if (!type_is_scalar(condition->type)) {
     (void)semerr_expected_scalar(do_, condition->type);
     return astree_adopt(do_, 2, stmt, condition);
   } else {
-    maybe_load_cexpr(condition, NULL);
+    condition = tchk_cexpr_conv(condition, NULL);
     return translate_do(do_, stmt, condition);
   }
 }
 
 ASTree *validate_for(ASTree *for_, ASTree *init_expr, ASTree *pre_iter_expr,
                      ASTree *reinit_expr, ASTree *body) {
+  ListIter *anchor_iter = body->first_instr;
+  assert(anchor_iter != NULL);
+  if (reinit_expr->tok_kind != TOK_EMPTY)
+    reinit_expr = TCHK_STD_CONV(reinit_expr, 1, anchor_iter);
+  if (reinit_expr->first_instr != NULL) anchor_iter = reinit_expr->first_instr;
+  if (pre_iter_expr->tok_kind != TOK_EMPTY)
+    pre_iter_expr = TCHK_STD_CONV(pre_iter_expr, 1, anchor_iter);
+  if (pre_iter_expr->first_instr != NULL)
+    anchor_iter = pre_iter_expr->first_instr;
+  if (init_expr->tok_kind != TOK_EMPTY)
+    init_expr = TCHK_STD_CONV(init_expr, 1, anchor_iter);
+
   if (pre_iter_expr->tok_kind != TOK_EMPTY &&
       !type_is_scalar(pre_iter_expr->type)) {
     (void)semerr_expected_scalar(for_, pre_iter_expr->type);
     return astree_adopt(for_, 4, init_expr, pre_iter_expr, reinit_expr, body);
   } else {
-    maybe_load_cexpr(reinit_expr, body->first_instr);
-    maybe_load_cexpr(pre_iter_expr, reinit_expr->first_instr);
-    maybe_load_cexpr(init_expr, pre_iter_expr->first_instr);
+    reinit_expr = tchk_cexpr_conv(reinit_expr, body->first_instr);
+    pre_iter_expr = tchk_cexpr_conv(pre_iter_expr, reinit_expr->first_instr);
+    init_expr = tchk_cexpr_conv(init_expr, pre_iter_expr->first_instr);
     return translate_for(for_, init_expr, pre_iter_expr, reinit_expr, body);
   }
 }
@@ -129,7 +146,9 @@ ASTree *validate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
     return astree_adopt(case_, 2, expr, stmt);
   }
 
-  maybe_load_cexpr(expr, stmt->first_instr);
+  const Type *control_type = state_get_control_type(state);
+  expr = tchk_cexpr_conv(tchk_scal_conv(expr, (Type *)control_type),
+                         stmt->first_instr);
   return translate_case(case_, expr, stmt);
 }
 

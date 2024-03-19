@@ -7,14 +7,18 @@
 #include "lyutils.h"
 
 const char *mk_static_label(const char *name, size_t unique_id);
-void maybe_load_cexpr(ASTree *expr, ListIter *where);
 size_t asmgen_literal_label(const char *literal, const char **out);
 void bulk_mzero(size_t dest_memreg, ptrdiff_t dest_disp, size_t skip_bytes,
                 const Type *type, ListIter *where);
 void static_zero_pad(size_t count, ListIter *where);
+ASTree *translate_cexpr_conv(ASTree *cexpr_conv, ASTree *expr, ListIter *where);
+ASTree *translate_scal_conv(ASTree *conv, ASTree *expr);
+ASTree *translate_ptr_conv(ASTree *conv, ASTree *expr);
+ASTree *translate_disp_conv(ASTree *conv, ASTree *expr,
+                            const Type *pointer_type);
+ASTree *translate_rval_conv(ASTree *conv, ASTree *expr);
 ASTree *translate_empty_expr(ASTree *empty_expr);
 ASTree *translate_ident(ASTree *ident);
-ASTree *translate_cast(ASTree *cast, ASTree *expr);
 ASTree *translate_logical_not(ASTree * not, ASTree *operand);
 ASTree *translate_logical(ASTree *operator, ASTree * left, ASTree *right);
 ASTree *translate_comparison(ASTree *operator, ASTree * left, ASTree *right);
