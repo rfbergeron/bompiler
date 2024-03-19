@@ -7,7 +7,10 @@ ASTree *evaluate_charcon(ASTree *charcon);
 ASTree *evaluate_stringcon(ASTree *stringcon);
 ASTree *evaluate_ident(ASTree *ident);
 ASTree *evaluate_cast(ASTree *cast, ASTree *expr);
-ASTree *evaluate_auto_conv(ASTree *auto_conv, ASTree *expr);
+ASTree *evaluate_ptr_conv(ASTree *ptr_conv, ASTree *expr);
+ASTree *evaluate_scal_conv(ASTree *scal_conv, ASTree *expr);
+ASTree *evaluate_disp_conv(ASTree *disp_conv, ASTree *expr,
+                           const Type *pointer_type, ListIter *where);
 ASTree *evaluate_conditional(ASTree *qmark, ASTree *condition,
                              ASTree *true_expr, ASTree *false_expr);
 ASTree *evaluate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index);

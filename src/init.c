@@ -18,6 +18,9 @@
  * initializer. This is necessary for trying to determine if too many
  * initializers have been provided.
  */
+/* TODO(Robert): do not call `translate_empty_expr` when the initializer already
+ * has its iterators set
+ */
 static int init_agg_member(Type *member_type, ptrdiff_t disp, ASTree *init_list,
                            size_t *init_index, ListIter *where);
 

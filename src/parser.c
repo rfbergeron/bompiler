@@ -198,15 +198,6 @@ BCC_YYSTATIC ASTree *parser_make_label(ASTree *ident) {
   return astree_init(TOK_LABEL, ident->loc, "_label");
 }
 
-BCC_YYSTATIC ASTree *parser_make_auto_conv(ASTree *tree, int convert_arrays) {
-  if (tree->type == NULL || (!type_is_function(tree->type) &&
-                             !(convert_arrays && type_is_array(tree->type))))
-    return tree;
-  ASTree *auto_conv = astree_init(TOK_AUTO_CONV, tree->loc, "_auto_conv");
-  auto_conv->type = type_pointer_conversions(tree->type);
-  return evaluate_auto_conv(auto_conv, tree);
-}
-
 BCC_YYSTATIC ASTree *parser_make_attributes_list(void) {
   return astree_init(TOK_ATTR_LIST, lexer_get_loc(), "_attr_list");
 }

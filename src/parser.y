@@ -11,6 +11,10 @@
 #include "tchk_decl.h"
 #include "tchk_expr.h"
 #include "tchk_stmt.h"
+/* TODO(Robert): redo `init.c` (again) to allow it to insert semantic nodes;
+ * either that or live with the fact that initializers work a little funny
+ */
+#include "conversions.h"
 
 #define ERRCHK \
   if (semantic_error || lexical_error) YYABORT
@@ -28,7 +32,6 @@
   static ASTree *parser_make_cast(ASTree * left_paren, ASTree * decl_specs,
                                   ASTree * type_name, ASTree * expr);
   static ASTree *parser_make_label(ASTree * ident);
-  static ASTree *parser_make_auto_conv(ASTree * tree, int convert_arrays);
   static ASTree *parser_make_attributes_list(void);
   static ASTree *parse_pretty_function(ASTree * pretty_function);
   static ASTree *parse_sizeof(ASTree * sizeof_, ASTree * decl_specs,
@@ -55,7 +58,7 @@
 /* %token PREC_PREFIX PREC_POSTFIX */
 /* %token PREC_TERNARY PREC_COMMA */
 /* tokens constructed by checker */
-%token TOK_AUTO_CONV TOK_AUTO_PROM
+%token TOK_SCAL_CONV TOK_PTR_CONV TOK_DISP_CONV TOK_CEXPR_CONV TOK_RVAL_CONV
 /* tokens constructed by parser */
 %token TOK_DECLARATION TOK_ROOT TOK_TYPE_NAME TOK_SPEC_LIST TOK_ATTR_LIST TOK_EMPTY
 /* tokens assigned to exsting nodes */
@@ -192,7 +195,7 @@ attr_fn             : TOK_IDENT '(' TOK_IDENT                           { ERRCHK
                     | attr_fn ',' TOK_INTCON                            { ERRCHK; $$ = bcc_yyval = astree_adopt($1, 1, $3); parser_cleanup(1, $2); }
                     | attr_fn ',' TOK_STRINGCON                         { ERRCHK; $$ = bcc_yyval = astree_adopt($1, 1, $3); parser_cleanup(1, $2); }
                     ;
-initializer         : assign_expr                                       { ERRCHK; $$ = bcc_yyval = $1->tok_kind == TOK_STRINGCON ? $1 : parser_make_auto_conv($1, 1); } /* do nothing */
+initializer         : assign_expr                                       { ERRCHK; $$ = bcc_yyval = $1->tok_kind == TOK_STRINGCON ? $1 : tchk_ptr_conv($1, 1); } /* do nothing */
                     | init_list '}'                                     { ERRCHK; $$ = bcc_yyval = $1; astree_destroy($2); } /* do nothing */
                     | init_list ',' '}'                                 { ERRCHK; $$ = bcc_yyval = $1; astree_destroy($2); astree_destroy($3); } /* do nothing */
                     ;
@@ -248,7 +251,7 @@ stmt                : block                                             { ERRCHK
                     | TOK_GOTO any_ident ';'                            { ERRCHK; $$ = bcc_yyval = validate_goto($1, $2); astree_destroy($3); }
                     | stmt_expr                                         { ERRCHK; $$ = bcc_yyval = $1; }
                     ;
-stmt_expr           : expr ';'                                          { ERRCHK; $$ = bcc_yyval = parser_make_auto_conv($1, 1); astree_destroy($2); }
+stmt_expr           : expr ';'                                          { ERRCHK; $$ = bcc_yyval = $1; astree_destroy($2); }
                     | ';'                                               { ERRCHK; $$ = bcc_yyval = parser_make_empty($1->loc); astree_destroy($1); }
                     ;
 labelled_stmt       : any_ident ':' stmt                                { ERRCHK; $$ = bcc_yyval = validate_label(parser_make_label($1), $1, $3); parser_cleanup(1, $2); }
@@ -258,27 +261,26 @@ labelled_stmt       : any_ident ':' stmt                                { ERRCHK
 for                 : TOK_FOR '(' stmt_expr stmt_expr ')' stmt          { ERRCHK; $$ = bcc_yyval = validate_for($1, $3, $4, parser_make_empty($5->loc), $6); parser_cleanup(2, $2, $5); }
                     | TOK_FOR '(' stmt_expr stmt_expr expr ')' stmt     { ERRCHK; $$ = bcc_yyval = validate_for($1, $3, $4, $5, $7); parser_cleanup(2, $2, $6); }
                     ;
-dowhile             : TOK_DO stmt TOK_WHILE '(' expr ')' ';'            { ERRCHK; $$ = bcc_yyval = validate_do($1, $2, parser_make_auto_conv($5, 1)); parser_cleanup (4, $3, $4, $6, $7); }
+dowhile             : TOK_DO stmt TOK_WHILE '(' expr ')' ';'            { ERRCHK; $$ = bcc_yyval = validate_do($1, $2, $5); parser_cleanup (4, $3, $4, $6, $7); }
                     ;
-while               : TOK_WHILE '(' expr ')' stmt                       { ERRCHK; $$ = bcc_yyval = validate_while($1, parser_make_auto_conv($3, 1), $5); parser_cleanup (2, $2, $4); }
+while               : TOK_WHILE '(' expr ')' stmt                       { ERRCHK; $$ = bcc_yyval = validate_while($1, $3, $5); parser_cleanup (2, $2, $4); }
                     ;
-ifelse              : TOK_IF '(' expr ')' stmt TOK_ELSE stmt            { ERRCHK; $$ = bcc_yyval = validate_ifelse($1, parser_make_auto_conv($3, 1), $5, $7); parser_cleanup (3, $2, $4, $6); }
-                    | TOK_IF '(' expr ')' stmt %prec TOK_ELSE           { ERRCHK; $$ = bcc_yyval = validate_ifelse($1, parser_make_auto_conv($3, 1), $5, parser_make_empty(lexer_get_loc()));
-                                                                          ERRCHK; parser_cleanup (2, $2, $4); }
+ifelse              : TOK_IF '(' expr ')' stmt TOK_ELSE stmt            { ERRCHK; $$ = bcc_yyval = validate_ifelse($1, $3, $5, $7); parser_cleanup (3, $2, $4, $6); }
+                    | TOK_IF '(' expr ')' stmt %prec TOK_ELSE           { ERRCHK; $$ = bcc_yyval = validate_ifelse($1, $3, $5, parser_make_empty(lexer_get_loc())); parser_cleanup (2, $2, $4); }
                     ;
 switch              : TOK_SWITCH '(' switch_expr ')' stmt               { ERRCHK; $$ = bcc_yyval = validate_switch($1, $3, $5); parser_cleanup(2, $2, $4); }
                     ;
 switch_expr         : expr                                              { ERRCHK; $$ = bcc_yyval = validate_switch_expr($1); }
                     ;
-return              : TOK_RETURN expr ';'                               { ERRCHK; $$ = bcc_yyval = validate_return($1, parser_make_auto_conv($2, 1)); parser_cleanup (1, $3); }
+return              : TOK_RETURN expr ';'                               { ERRCHK; $$ = bcc_yyval = validate_return($1, $2); parser_cleanup (1, $3); }
                     | TOK_RETURN ';'                                    { ERRCHK; $$ = bcc_yyval = validate_return($1, parser_make_empty($2->loc)); parser_cleanup (1, $2); }
                     ;
 expr                : assign_expr                                       { ERRCHK; $$ = bcc_yyval = $1; }
                     | TOK_EXTNSN assign_expr                            { ERRCHK; $$ = bcc_yyval = $2; parser_cleanup(1, $1); }
-                    | expr ',' assign_expr                              { ERRCHK; $$ = bcc_yyval = validate_comma($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
-                    | expr ',' TOK_EXTNSN assign_expr                   { ERRCHK; $$ = bcc_yyval = validate_comma($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($4, 1)); parser_cleanup(1, $3); }
+                    | expr ',' assign_expr                              { ERRCHK; $$ = bcc_yyval = validate_comma($2, $1, $3); }
+                    | expr ',' TOK_EXTNSN assign_expr                   { ERRCHK; $$ = bcc_yyval = validate_comma($2, $1, $4); parser_cleanup(1, $3); }
                     ;
-assign_expr         : unary_expr assign_op assign_expr                  { ERRCHK; $$ = bcc_yyval = validate_assignment($2, $1, parser_make_auto_conv($3, 1)); }
+assign_expr         : unary_expr assign_op assign_expr                  { ERRCHK; $$ = bcc_yyval = validate_assignment($2, $1, $3); }
                     | cond_expr                                         { ERRCHK; $$ = bcc_yyval = $1; }
                     ;
 assign_op           : '='                                               { ERRCHK; $$ = bcc_yyval = $1; }
@@ -293,38 +295,38 @@ assign_op           : '='                                               { ERRCHK
                     | TOK_SHREQ                                         { ERRCHK; $$ = bcc_yyval = $1; }
                     | TOK_SHLEQ                                         { ERRCHK; $$ = bcc_yyval = $1; }
                     ;
-cond_expr           : binary_expr '?' expr ':' cond_expr                { ERRCHK; $$ = bcc_yyval = validate_conditional($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1), parser_make_auto_conv($5, 1)); astree_destroy($4); }
+cond_expr           : binary_expr '?' expr ':' cond_expr                { ERRCHK; $$ = bcc_yyval = validate_conditional($2, $1, $3, $5); astree_destroy($4); }
                     | binary_expr                                       { ERRCHK; $$ = bcc_yyval = $1; }
                     ;
-binary_expr         : binary_expr '+' binary_expr                       { ERRCHK; $$ = bcc_yyval = validate_addition($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
-                    | binary_expr '-' binary_expr                       { ERRCHK; $$ = bcc_yyval = validate_addition($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
-                    | binary_expr '/' binary_expr                       { ERRCHK; $$ = bcc_yyval = validate_multiply($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
-                    | binary_expr '*' binary_expr                       { ERRCHK; $$ = bcc_yyval = validate_multiply($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
-                    | binary_expr '%' binary_expr                       { ERRCHK; $$ = bcc_yyval = validate_multiply($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
-                    | binary_expr '>' binary_expr                       { ERRCHK; $$ = bcc_yyval = validate_relational($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
-                    | binary_expr '<' binary_expr                       { ERRCHK; $$ = bcc_yyval = validate_relational($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
-                    | binary_expr TOK_LE binary_expr                    { ERRCHK; $$ = bcc_yyval = validate_relational($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
-                    | binary_expr TOK_GE binary_expr                    { ERRCHK; $$ = bcc_yyval = validate_relational($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
-                    | binary_expr TOK_EQ binary_expr                    { ERRCHK; $$ = bcc_yyval = validate_equality($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
-                    | binary_expr TOK_NE binary_expr                    { ERRCHK; $$ = bcc_yyval = validate_equality($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
-                    | binary_expr TOK_OR binary_expr                    { ERRCHK; $$ = bcc_yyval = validate_logical($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
-                    | binary_expr TOK_AND binary_expr                   { ERRCHK; $$ = bcc_yyval = validate_logical($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
-                    | binary_expr '|' binary_expr                       { ERRCHK; $$ = bcc_yyval = validate_bitwise($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
-                    | binary_expr '&' binary_expr                       { ERRCHK; $$ = bcc_yyval = validate_bitwise($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
-                    | binary_expr '^' binary_expr                       { ERRCHK; $$ = bcc_yyval = validate_bitwise($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
-                    | binary_expr TOK_SHR binary_expr                   { ERRCHK; $$ = bcc_yyval = validate_shift($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
-                    | binary_expr TOK_SHL binary_expr                   { ERRCHK; $$ = bcc_yyval = validate_shift($2, parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); }
+binary_expr         : binary_expr '+' binary_expr                       { ERRCHK; $$ = bcc_yyval = validate_addition($2, $1, $3); }
+                    | binary_expr '-' binary_expr                       { ERRCHK; $$ = bcc_yyval = validate_addition($2, $1, $3); }
+                    | binary_expr '/' binary_expr                       { ERRCHK; $$ = bcc_yyval = validate_multiply($2, $1, $3); }
+                    | binary_expr '*' binary_expr                       { ERRCHK; $$ = bcc_yyval = validate_multiply($2, $1, $3); }
+                    | binary_expr '%' binary_expr                       { ERRCHK; $$ = bcc_yyval = validate_multiply($2, $1, $3); }
+                    | binary_expr '>' binary_expr                       { ERRCHK; $$ = bcc_yyval = validate_relational($2, $1, $3); }
+                    | binary_expr '<' binary_expr                       { ERRCHK; $$ = bcc_yyval = validate_relational($2, $1, $3); }
+                    | binary_expr TOK_LE binary_expr                    { ERRCHK; $$ = bcc_yyval = validate_relational($2, $1, $3); }
+                    | binary_expr TOK_GE binary_expr                    { ERRCHK; $$ = bcc_yyval = validate_relational($2, $1, $3); }
+                    | binary_expr TOK_EQ binary_expr                    { ERRCHK; $$ = bcc_yyval = validate_equality($2, $1, $3); }
+                    | binary_expr TOK_NE binary_expr                    { ERRCHK; $$ = bcc_yyval = validate_equality($2, $1, $3); }
+                    | binary_expr TOK_OR binary_expr                    { ERRCHK; $$ = bcc_yyval = validate_logical($2, $1, $3); }
+                    | binary_expr TOK_AND binary_expr                   { ERRCHK; $$ = bcc_yyval = validate_logical($2, $1, $3); }
+                    | binary_expr '|' binary_expr                       { ERRCHK; $$ = bcc_yyval = validate_bitwise($2, $1, $3); }
+                    | binary_expr '&' binary_expr                       { ERRCHK; $$ = bcc_yyval = validate_bitwise($2, $1, $3); }
+                    | binary_expr '^' binary_expr                       { ERRCHK; $$ = bcc_yyval = validate_bitwise($2, $1, $3); }
+                    | binary_expr TOK_SHR binary_expr                   { ERRCHK; $$ = bcc_yyval = validate_shift($2, $1, $3); }
+                    | binary_expr TOK_SHL binary_expr                   { ERRCHK; $$ = bcc_yyval = validate_shift($2, $1, $3); }
                     | cast_expr                                         { ERRCHK; $$ = bcc_yyval = $1; }
                     ;
-cast_expr           : '(' decl_specs abs_declarator')' unary_expr       { ERRCHK; $$ = bcc_yyval = parser_make_cast($1, $2, $3, parser_make_auto_conv($5, 1)); parser_cleanup(1, $4); }
+cast_expr           : '(' decl_specs abs_declarator')' unary_expr       { ERRCHK; $$ = bcc_yyval = parser_make_cast($1, $2, $3, $5); parser_cleanup(1, $4); }
                     | unary_expr                                        { ERRCHK; $$ = bcc_yyval = $1; }
                     ;
 unary_expr          : postfix_expr                                      { ERRCHK; $$ = bcc_yyval = $1; }
-                    | TOK_INC unary_expr                                { ERRCHK; $$ = bcc_yyval = validate_increment($1, parser_make_auto_conv($2, 0)); }
-                    | TOK_DEC unary_expr                                { ERRCHK; $$ = bcc_yyval = validate_increment($1, parser_make_auto_conv($2, 0)); }
-                    | unary_op cast_expr                                { ERRCHK; $$ = bcc_yyval = validate_unary($1, parser_make_auto_conv($2, 1)); }
+                    | TOK_INC unary_expr                                { ERRCHK; $$ = bcc_yyval = validate_increment($1, $2); }
+                    | TOK_DEC unary_expr                                { ERRCHK; $$ = bcc_yyval = validate_increment($1, $2); }
+                    | unary_op cast_expr                                { ERRCHK; $$ = bcc_yyval = validate_unary($1, $2); }
                     | '&' cast_expr                                     { ERRCHK; $$ = bcc_yyval = validate_unary(parser_new_sym($1, TOK_ADDROF), $2); }
-                    | TOK_SIZEOF unary_expr                             { ERRCHK; $$ = bcc_yyval = validate_sizeof($1, parser_make_auto_conv($2, 0)); }
+                    | TOK_SIZEOF unary_expr                             { ERRCHK; $$ = bcc_yyval = validate_sizeof($1, $2); }
                     | TOK_SIZEOF '(' decl_specs abs_declarator')'       { ERRCHK; $$ = bcc_yyval = parse_sizeof($1, $3, $4); parser_cleanup(2, $2, $5); }
                     ;
 unary_op            : '!'                                               { ERRCHK; $$ = bcc_yyval = $1; }
@@ -334,22 +336,22 @@ unary_op            : '!'                                               { ERRCHK
                     | '*'                                               { ERRCHK; $$ = bcc_yyval = parser_new_sym($1, TOK_INDIRECTION); }
                     ;
 postfix_expr        : primary_expr                                      { ERRCHK; $$ = bcc_yyval = $1; }
-                    | postfix_expr TOK_INC                              { ERRCHK; $$ = bcc_yyval = validate_increment(parser_new_sym($2, TOK_POST_INC), parser_make_auto_conv($1, 0)); }
-                    | postfix_expr TOK_DEC                              { ERRCHK; $$ = bcc_yyval = validate_increment(parser_new_sym($2, TOK_POST_DEC), parser_make_auto_conv($1, 0)); }
+                    | postfix_expr TOK_INC                              { ERRCHK; $$ = bcc_yyval = validate_increment(parser_new_sym($2, TOK_POST_INC), $1); }
+                    | postfix_expr TOK_DEC                              { ERRCHK; $$ = bcc_yyval = validate_increment(parser_new_sym($2, TOK_POST_DEC), $1); }
                     | call                                              { ERRCHK; $$ = bcc_yyval = $1; }
-                    | TOK_VA_START '(' expr ',' TOK_IDENT ')'           { ERRCHK; $$ = bcc_yyval = validate_va_start($1, parser_make_auto_conv($3, 1), $5); parser_cleanup(3, $2, $4, $6); }
-                    | TOK_VA_END '(' expr ')'                           { ERRCHK; $$ = bcc_yyval = validate_va_end($1, parser_make_auto_conv($3, 1)); parser_cleanup(2, $2, $4); }
-                    | TOK_VA_ARG '(' expr ',' decl_specs abs_declarator ')'   { ERRCHK; $$ = bcc_yyval = parse_va_arg($1, parser_make_auto_conv($3, 1), $5, $6); parser_cleanup(3, $2, $4, $7); }
-                    | postfix_expr '[' expr ']'                         { ERRCHK; $$ = bcc_yyval = validate_subscript(parser_new_sym($2, TOK_SUBSCRIPT), parser_make_auto_conv($1, 1), parser_make_auto_conv($3, 1)); parser_cleanup(1, $4); }
-                    | postfix_expr '.' any_ident                        { ERRCHK; $$ = bcc_yyval = validate_reference($2, parser_make_auto_conv($1, 0), $3); }
-                    | postfix_expr TOK_ARROW any_ident                  { ERRCHK; $$ = bcc_yyval = validate_reference($2, parser_make_auto_conv($1, 1), $3); }
+                    | TOK_VA_START '(' expr ',' TOK_IDENT ')'           { ERRCHK; $$ = bcc_yyval = validate_va_start($1, $3, $5); parser_cleanup(3, $2, $4, $6); }
+                    | TOK_VA_END '(' expr ')'                           { ERRCHK; $$ = bcc_yyval = validate_va_end($1, $3); parser_cleanup(2, $2, $4); }
+                    | TOK_VA_ARG '(' expr ',' decl_specs abs_declarator ')'   { ERRCHK; $$ = bcc_yyval = parse_va_arg($1, $3, $5, $6); parser_cleanup(3, $2, $4, $7); }
+                    | postfix_expr '[' expr ']'                         { ERRCHK; $$ = bcc_yyval = validate_subscript(parser_new_sym($2, TOK_SUBSCRIPT), $1, $3); parser_cleanup(1, $4); }
+                    | postfix_expr '.' any_ident                        { ERRCHK; $$ = bcc_yyval = validate_reference($2, $1, $3); }
+                    | postfix_expr TOK_ARROW any_ident                  { ERRCHK; $$ = bcc_yyval = validate_reference($2, $1, $3); }
                     ;
-call                : postfix_expr '(' ')'                              { ERRCHK; $$ = bcc_yyval = finalize_call(validate_call(parser_make_auto_conv($1, 1), parser_new_sym($2, TOK_CALL))); parser_cleanup(1, $3);}
+call                : postfix_expr '(' ')'                              { ERRCHK; $$ = bcc_yyval = finalize_call(validate_call($1, parser_new_sym($2, TOK_CALL))); parser_cleanup(1, $3);}
                     | call_args ')'                                     { ERRCHK; $$ = bcc_yyval = finalize_call($1); parser_cleanup(1, $2); }
                     ;
-call_args           : postfix_expr '(' assign_expr                      { ERRCHK; $$ = bcc_yyval = validate_arg(validate_call(parser_make_auto_conv($1, 1), parser_new_sym($2, TOK_CALL)), parser_make_auto_conv($3, 1)); }
-                    | call_args ',' assign_expr                         { ERRCHK; $$ = bcc_yyval = validate_arg($1, parser_make_auto_conv($3, 1)); parser_cleanup(1, $2); }
-                    | call_args ',' TOK_EXTNSN assign_expr              { ERRCHK; $$ = bcc_yyval = validate_arg($1, parser_make_auto_conv($4, 1)); parser_cleanup(2, $2, $3); }
+call_args           : postfix_expr '(' assign_expr                      { ERRCHK; $$ = bcc_yyval = validate_arg(validate_call($1, parser_new_sym($2, TOK_CALL)), $3); }
+                    | call_args ',' assign_expr                         { ERRCHK; $$ = bcc_yyval = validate_arg($1, $3); parser_cleanup(1, $2); }
+                    | call_args ',' TOK_EXTNSN assign_expr              { ERRCHK; $$ = bcc_yyval = validate_arg($1, $4); parser_cleanup(2, $2, $3); }
                     ;
 primary_expr        : TOK_IDENT                                         { ERRCHK; $$ = bcc_yyval = validate_ident($1); }
                     | constant                                          { ERRCHK; $$ = bcc_yyval = $1; }

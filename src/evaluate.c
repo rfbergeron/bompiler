@@ -5,6 +5,7 @@
 #include "asmgen.h"
 #include "assert.h"
 #include "bcc_err.h"
+#include "conversions.h"
 #include "ctype.h"
 #include "errno.h"
 #include "lyutils.h"
@@ -189,8 +190,8 @@
       }                                                                       \
       return astree_adopt(operator, 2, left, right);                          \
     } else {                                                                  \
-      maybe_load_cexpr(right, NULL);                                          \
-      maybe_load_cexpr(left, right->first_instr);                             \
+      right = tchk_cexpr_conv(right, NULL);                                   \
+      left = tchk_cexpr_conv(left, right->first_instr);                       \
       return optrans(operator, left, right);                                  \
     }
 #define UNOP_CASE(opchar, optext, optrans)                           \
@@ -200,7 +201,7 @@
       UNARY_EVAL(optext, operator, operand);                         \
       return astree_adopt(operator, 1, operand);                     \
     } else {                                                         \
-      maybe_load_cexpr(operand, NULL);                               \
+      operand = tchk_cexpr_conv(operand, NULL);                      \
       return optrans(operator, operand);                             \
     }
 
@@ -374,8 +375,8 @@ ASTree *evaluate_addition(ASTree *addition, ASTree *left, ASTree *right) {
       (left->constant.label != NULL && right->constant.label != NULL) ||
       ((left->constant.label != NULL) && type_is_pointer(right->type)) ||
       ((right->constant.label != NULL) && type_is_pointer(left->type))) {
-    maybe_load_cexpr(right, NULL);
-    maybe_load_cexpr(left, right->first_instr);
+    right = tchk_cexpr_conv(right, NULL);
+    left = tchk_cexpr_conv(left, right->first_instr);
     return translate_addition(addition, left, right);
   } else if (type_is_pointer(left->type)) {
     addition->attributes |= MIN(left->attributes & ATTR_MASK_CONST,
@@ -447,8 +448,8 @@ ASTree *evaluate_subtraction(ASTree *subtraction, ASTree *left, ASTree *right) {
       (right->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT ||
       (right->constant.label != NULL &&
        right->constant.label != left->constant.label)) {
-    maybe_load_cexpr(right, NULL);
-    maybe_load_cexpr(left, right->first_instr);
+    right = tchk_cexpr_conv(right, NULL);
+    left = tchk_cexpr_conv(left, right->first_instr);
     return translate_addition(subtraction, left, right);
   } else if (type_is_pointer(right->type)) {
     size_t stride = type_elem_width(right->type);
@@ -506,8 +507,8 @@ ASTree *evaluate_shift(ASTree *shift, ASTree *left, ASTree *right) {
     }
     return astree_adopt(shift, 2, left, right);
   } else {
-    maybe_load_cexpr(right, NULL);
-    maybe_load_cexpr(left, right->first_instr);
+    right = tchk_cexpr_conv(right, NULL);
+    left = tchk_cexpr_conv(left, right->first_instr);
     return translate_binop(shift, left, right);
   }
 }
@@ -516,8 +517,8 @@ ASTree *evaluate_relational(ASTree *relational, ASTree *left, ASTree *right) {
   if ((left->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT ||
       (right->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT ||
       left->constant.label != right->constant.label) {
-    maybe_load_cexpr(right, NULL);
-    maybe_load_cexpr(left, right->first_instr);
+    right = tchk_cexpr_conv(right, NULL);
+    left = tchk_cexpr_conv(left, right->first_instr);
     return translate_comparison(relational, left, right);
   }
 
@@ -550,8 +551,8 @@ ASTree *evaluate_equality(ASTree *equality, ASTree *left, ASTree *right) {
       (left->constant.label != right->constant.label &&
        (left->constant.integral.signed_value != 0 ||
         right->constant.integral.signed_value != 0))) {
-    maybe_load_cexpr(right, NULL);
-    maybe_load_cexpr(left, right->first_instr);
+    right = tchk_cexpr_conv(right, NULL);
+    left = tchk_cexpr_conv(left, right->first_instr);
     return translate_comparison(equality, left, right);
   }
 
@@ -572,8 +573,8 @@ ASTree *evaluate_equality(ASTree *equality, ASTree *left, ASTree *right) {
 ASTree *evaluate_logical(ASTree *logical, ASTree *left, ASTree *right) {
   if ((left->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT ||
       (right->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT) {
-    maybe_load_cexpr(right, NULL);
-    maybe_load_cexpr(left, right->first_instr);
+    right = tchk_cexpr_conv(right, NULL);
+    left = tchk_cexpr_conv(left, right->first_instr);
     return translate_logical(logical, left, right);
   }
 
@@ -594,8 +595,8 @@ ASTree *evaluate_logical(ASTree *logical, ASTree *left, ASTree *right) {
 
 ASTree *evaluate_cast(ASTree *cast, ASTree *expr) {
   if ((expr->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT) {
-    maybe_load_cexpr(expr, NULL);
-    return translate_cast(cast, expr);
+    expr = tchk_cexpr_conv(expr, NULL);
+    return translate_scal_conv(cast, expr);
   }
 
   cast->attributes |= !type_is_integral(cast->type)
@@ -611,23 +612,62 @@ ASTree *evaluate_cast(ASTree *cast, ASTree *expr) {
   return astree_adopt(cast, 1, expr);
 }
 
-ASTree *evaluate_auto_conv(ASTree *auto_conv, ASTree *expr) {
-  if ((expr->attributes & ATTR_MASK_CONST) == ATTR_CONST_MAYBE &&
-      type_is_pointer(auto_conv->type)) {
-    auto_conv->attributes |= ATTR_CONST_INIT;
-    auto_conv->constant = expr->constant;
-    return astree_adopt(auto_conv, 1, expr);
-  } else if ((expr->attributes & ATTR_MASK_CONST) >= ATTR_CONST_INIT) {
-    auto_conv->attributes |= expr->attributes & ATTR_MASK_CONST;
-    if (type_is_arithmetic(auto_conv->type)) {
-      UNARY_EVAL(+, auto_conv, expr);
-    } else {
-      auto_conv->constant = expr->constant;
-    }
-    return astree_adopt(auto_conv, 1, expr);
+ASTree *evaluate_ptr_conv(ASTree *ptr_conv, ASTree *expr) {
+  if ((expr->attributes & ATTR_MASK_CONST) != ATTR_CONST_NONE) {
+    assert(expr->constant.label != NULL);
+    ptr_conv->attributes |= ATTR_CONST_INIT;
+    ptr_conv->constant = expr->constant;
+    return astree_adopt(ptr_conv, 1, expr);
   } else {
-    maybe_load_cexpr(expr, NULL);
-    return translate_cast(auto_conv, expr);
+    assert(expr->first_instr != NULL);
+    assert(expr->last_instr != NULL);
+    return translate_ptr_conv(ptr_conv, expr);
+  }
+}
+
+ASTree *evaluate_scal_conv(ASTree *scal_conv, ASTree *expr) {
+  assert(!(expr->attributes & ATTR_EXPR_LVAL));
+  if ((expr->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT) {
+    assert((type_is_arithmetic(scal_conv->type) &&
+            type_is_arithmetic(expr->type)) ||
+           (type_is_pointer(scal_conv->type) && type_is_pointer(expr->type)));
+    assert(expr->first_instr != NULL);
+    assert(expr->last_instr != NULL);
+    return translate_scal_conv(scal_conv, expr);
+  } else if (type_is_pointer(scal_conv->type)) {
+    assert(type_is_pointer(expr->type) || astree_is_const_zero(expr));
+    scal_conv->constant = expr->constant;
+    scal_conv->attributes = expr->attributes;
+    return astree_adopt(scal_conv, 1, expr);
+  } else {
+    assert(type_is_arithmetic(expr->type));
+    assert(type_is_arithmetic(scal_conv->type));
+    scal_conv->attributes |= expr->attributes & ATTR_MASK_CONST;
+    UNARY_EVAL(+, scal_conv, expr);
+    return astree_adopt(scal_conv, 1, expr);
+  }
+}
+
+ASTree *evaluate_disp_conv(ASTree *disp_conv, ASTree *expr,
+                           const Type *pointer_type, ListIter *where) {
+  assert(disp_conv->type == TYPE_LONG);
+  assert(type_is_integral(expr->type));
+  assert(!(expr->attributes & ATTR_EXPR_LVAL));
+  if ((expr->attributes & ATTR_MASK_CONST) >= ATTR_CONST_INIT &&
+      expr->constant.label == NULL) {
+    ptrdiff_t stride = type_elem_width(pointer_type);
+    disp_conv->attributes = expr->attributes;
+    if (type_is_unsigned(expr->type))
+      disp_conv->constant.integral.signed_value =
+          expr->constant.integral.unsigned_value;
+    else
+      disp_conv->constant.integral.signed_value =
+          expr->constant.integral.signed_value;
+    disp_conv->constant.integral.signed_value *= stride;
+    return astree_adopt(disp_conv, 1, expr);
+  } else {
+    expr = tchk_cexpr_conv(expr, where);
+    return translate_disp_conv(disp_conv, expr, pointer_type);
   }
 }
 
@@ -636,9 +676,9 @@ ASTree *evaluate_conditional(ASTree *qmark, ASTree *condition,
   if ((condition->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT ||
       (true_expr->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT ||
       (false_expr->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT) {
-    maybe_load_cexpr(false_expr, NULL);
-    maybe_load_cexpr(true_expr, false_expr->first_instr);
-    maybe_load_cexpr(condition, true_expr->first_instr);
+    false_expr = tchk_cexpr_conv(false_expr, NULL);
+    true_expr = tchk_cexpr_conv(true_expr, false_expr->first_instr);
+    condition = tchk_cexpr_conv(condition, true_expr->first_instr);
     return translate_conditional(qmark, condition, true_expr, false_expr);
   }
 
@@ -668,8 +708,8 @@ ASTree *evaluate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
   if ((pointer->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT ||
       (index->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT ||
       index->constant.label != NULL) {
-    maybe_load_cexpr(index, NULL);
-    maybe_load_cexpr(pointer, index->first_instr);
+    index = tchk_cexpr_conv(index, NULL);
+    pointer = tchk_cexpr_conv(pointer, index->first_instr);
     return translate_subscript(subscript, pointer, index);
   }
 
@@ -684,7 +724,7 @@ ASTree *evaluate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
 
 ASTree *evaluate_addrof(ASTree *addrof, ASTree *operand) {
   if ((operand->attributes & ATTR_MASK_CONST) != ATTR_CONST_MAYBE) {
-    maybe_load_cexpr(operand, NULL);
+    operand = tchk_cexpr_conv(operand, NULL);
     return translate_addrof(addrof, operand);
   } else {
     addrof->attributes |= ATTR_CONST_INIT;
@@ -700,7 +740,7 @@ ASTree *evaluate_addrof(ASTree *addrof, ASTree *operand) {
  */
 ASTree *evaluate_reference(ASTree *reference, ASTree *struct_, ASTree *member) {
   if ((struct_->attributes & ATTR_MASK_CONST) < ATTR_CONST_MAYBE) {
-    maybe_load_cexpr(struct_, NULL);
+    struct_ = tchk_cexpr_conv(struct_, NULL);
     return translate_reference(reference, struct_, member);
   } else {
     Type *tag_type = reference->tok_kind == TOK_ARROW
@@ -728,8 +768,8 @@ ASTree *evaluate_comma(ASTree *comma, ASTree *left, ASTree *right) {
                              : (right->attributes & ATTR_MASK_CONST);
     comma->constant = right->constant;
   } else {
-    maybe_load_cexpr(right, NULL);
-    maybe_load_cexpr(left, right->first_instr);
+    right = tchk_cexpr_conv(right, NULL);
+    left = tchk_cexpr_conv(left, right->first_instr);
   }
   return translate_comma(comma, left, right);
 }
@@ -775,7 +815,7 @@ ASTree *evaluate_unop(ASTree *operator, ASTree * operand) {
     UNOP_CASE(TOK_NEG, -, translate_unop);
     UNOP_CASE('~', ~, translate_unop);
     /* treat like a cast */
-    UNOP_CASE(TOK_POS, +, translate_cast);
+    UNOP_CASE(TOK_POS, +, translate_scal_conv);
     case '!':
       if ((operator->attributes & ATTR_MASK_CONST) >= ATTR_CONST_INIT) {
         operator->attributes |= operand->attributes & ATTR_MASK_CONST;
@@ -786,7 +826,7 @@ ASTree *evaluate_unop(ASTree *operator, ASTree * operand) {
             operand->constant.label != NULL;
         return astree_adopt(operator, 1, operand);
       } else {
-        maybe_load_cexpr(operand, NULL);
+        operand = tchk_cexpr_conv(operand, NULL);
         return translate_logical_not(operator, operand);
       }
     case TOK_SIZEOF:

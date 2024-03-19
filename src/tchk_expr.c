@@ -4,12 +4,15 @@
 
 #include "asmgen.h"
 #include "bcc_err.h"
+#include "conversions.h"
 #include "ctype.h"
 #include "evaluate.h"
 #include "inttypes.h"
 #include "state.h"
 #include "stdlib.h"
 #include "yyparse.h"
+
+/* TODO(Robert): add a flag */
 
 ASTree *validate_empty_expr(ASTree *empty_expr) {
   assert(empty_expr->tok_kind == TOK_EMPTY);
@@ -83,18 +86,27 @@ ASTree *finalize_call(ASTree *call) {
   if (astree_count(call) - 1 < function_type->function.parameters_size) {
     (void)semerr_insufficient_args(call);
     return call;
-  } else if (astree_count(call) > 1) {
-    /* make sure to emit constexpr load before all argument instructions */
+  }
+
+  /* TODO(Robert): why was I waiting to load constant expressions here when
+   * I could have just appended them to the end of the instruction list in
+   * `validate_call`?
+   */
+  /*
+  else if (astree_count(call) > 1) {
+    / * make sure to emit constexpr load before all argument instructions * /
     ASTree *first_arg = astree_get(call, 1);
     assert(first_arg != NULL && first_arg->first_instr != NULL);
     maybe_load_cexpr(function, first_arg->first_instr);
-  } else { /* astree_count(call) == 0 */
+  } else { / * astree_count(call) == 0 * /
     maybe_load_cexpr(function, NULL);
   }
+  */
   return translate_call(call);
 }
 
 ASTree *validate_arg(ASTree *call, ASTree *arg) {
+  arg = TCHK_STD_CONV(arg, 1, NULL);
   /* functon subtree is the first child of the call node */
   ASTree *function = astree_get(call, 0);
   /* first type should be pointer; next should be function */
@@ -105,7 +117,7 @@ ASTree *validate_arg(ASTree *call, ASTree *arg) {
   if (param_index >= function_type->function.parameters_size) {
     if (type_is_variadic_function(function_type)) {
       PFDBG1('t', "Found variadic function parameter number %lu", param_index);
-      maybe_load_cexpr(arg, NULL);
+      arg = tchk_cexpr_conv(arg, NULL);
       return astree_adopt(call, 1, arg);
     } else {
       (void)semerr_excess_args(call, arg);
@@ -116,7 +128,7 @@ ASTree *validate_arg(ASTree *call, ASTree *arg) {
   Type *param_type = type_param_index(function_type, param_index);
   PFDBG0('t', "Comparing types");
   if (types_assignable(param_type, arg->type, astree_is_const_zero(arg))) {
-    maybe_load_cexpr(arg, NULL);
+    arg = tchk_cexpr_conv(tchk_scal_conv(arg, param_type), NULL);
     return astree_adopt(call, 1, arg);
   } else {
     (void)semerr_incompatible_types(arg, param_type, arg->type);
@@ -125,6 +137,7 @@ ASTree *validate_arg(ASTree *call, ASTree *arg) {
 }
 
 ASTree *validate_call(ASTree *expr, ASTree *call) {
+  expr = tchk_cexpr_conv(TCHK_STD_CONV(expr, 1, NULL), NULL);
   if (!type_is_function_pointer(expr->type)) {
     (void)semerr_expected_fn_ptr(call, expr->type);
     return astree_adopt(call, 1, expr);
@@ -145,6 +158,7 @@ ASTree *validate_call(ASTree *expr, ASTree *call) {
 }
 
 ASTree *validate_va_start(ASTree *va_start_, ASTree *expr, ASTree *ident) {
+  expr = TCHK_STD_CONV(expr, 1, NULL);
   if (!types_assignable(TYPE_VA_LIST_POINTER, expr->type,
                         astree_is_const_zero(expr))) {
     (void)semerr_incompatible_types(va_start_, TYPE_VA_LIST_POINTER,
@@ -157,6 +171,7 @@ ASTree *validate_va_start(ASTree *va_start_, ASTree *expr, ASTree *ident) {
 }
 
 ASTree *validate_va_end(ASTree *va_end_, ASTree *expr) {
+  expr = TCHK_STD_CONV(expr, 1, NULL);
   if (!types_assignable(TYPE_VA_LIST_POINTER, expr->type,
                         astree_is_const_zero(expr))) {
     (void)semerr_incompatible_types(va_end_, TYPE_VA_LIST_POINTER, expr->type);
@@ -168,6 +183,7 @@ ASTree *validate_va_end(ASTree *va_end_, ASTree *expr) {
 }
 
 ASTree *validate_va_arg(ASTree *va_arg_, ASTree *expr, ASTree *type_name) {
+  expr = TCHK_STD_CONV(expr, 1, NULL);
   Type *arg_type = astree_get(type_name, 1)->type;
   if (type_is_incomplete(arg_type)) {
     (void)semerr_incomplete_type(va_arg_, arg_type);
@@ -184,19 +200,26 @@ ASTree *validate_va_arg(ASTree *va_arg_, ASTree *expr, ASTree *type_name) {
 
 ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
                              ASTree *true_expr, ASTree *false_expr) {
+  false_expr = TCHK_STD_CONV(false_expr, 1, NULL);
+  true_expr = TCHK_STD_CONV(true_expr, 1, false_expr->first_instr);
+  condition = TCHK_STD_CONV(condition, 1, true_expr->first_instr);
   /* NOTE: whenever the result type is a pointer, the pointer type information,
    * not the element type information, must be copied and not assigned, because
    * the result may be a common qualified pointer type and determining whether
    * or not this is the case at destruction time is harder than making
    * unnecessary copies
    */
+
   if (!type_is_scalar(condition->type)) {
     (void)semerr_expected_scalar(qmark, condition->type);
     return astree_adopt(qmark, 3, condition, true_expr, false_expr);
   } else if (type_is_arithmetic(true_expr->type) &&
              type_is_arithmetic(false_expr->type)) {
-    qmark->type =
+    Type *conv_type =
         type_arithmetic_conversions(true_expr->type, false_expr->type);
+    true_expr = tchk_scal_conv(true_expr, conv_type);
+    false_expr = tchk_scal_conv(false_expr, conv_type);
+    qmark->type = conv_type;
   } else if ((type_is_struct(true_expr->type) &&
               type_is_struct(false_expr->type)) ||
              (type_is_union(true_expr->type) &&
@@ -211,11 +234,13 @@ ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
     }
   } else if (type_is_pointer(true_expr->type) &&
              astree_is_const_zero(false_expr)) {
+    false_expr = tchk_scal_conv(false_expr, true_expr->type);
     /* duplicate only the pointer type information */
     qmark->type = malloc(sizeof(*qmark->type));
     *(qmark->type) = *(true_expr->type);
   } else if (astree_is_const_zero(true_expr) &&
              type_is_pointer(false_expr->type)) {
+    true_expr = tchk_scal_conv(true_expr, false_expr->type);
     /* duplicate only the pointer type information */
     qmark->type = malloc(sizeof(*qmark->type));
     *(qmark->type) = *(false_expr->type);
@@ -226,6 +251,8 @@ ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
               types_equivalent(true_expr->type, false_expr->type, 1, 1))) {
     qmark->type =
         type_common_qualified_pointer(true_expr->type, false_expr->type);
+    true_expr = tchk_scal_conv(true_expr, qmark->type);
+    false_expr = tchk_scal_conv(false_expr, qmark->type);
   } else {
     (void)semerr_incompatible_types(qmark, true_expr->type, false_expr->type);
     return astree_adopt(qmark, 3, condition, true_expr, false_expr);
@@ -235,12 +262,15 @@ ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
 }
 
 ASTree *validate_comma(ASTree *comma, ASTree *left, ASTree *right) {
+  left = TCHK_STD_CONV(left, 1, NULL);
+  right = TCHK_STD_CONV(right, 1, NULL);
   comma->type = right->type;
   return evaluate_comma(comma, left, right);
 }
 
 /* TODO(Robert): allow casting void to void */
 ASTree *validate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
+  expr = TCHK_STD_CONV(expr, 1, NULL);
   ASTree *type_name = astree_get(declaration, 1);
   if (!(type_is_scalar(type_name->type) || type_is_void(type_name->type)) ||
       !type_is_scalar(expr->type)) {
@@ -252,48 +282,43 @@ ASTree *validate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
   }
 }
 
-static int subtraction_type(Type **out, Type *left_type, Type *right_type) {
-  if (type_is_arithmetic(left_type) && type_is_arithmetic(right_type)) {
-    *out = type_arithmetic_conversions(left_type, right_type);
-    return 0;
-  } else if (type_is_pointer(left_type) && type_is_integral(right_type)) {
-    return *out = left_type, 0;
-  } else if (type_is_pointer(left_type) && type_is_pointer(right_type) &&
-             types_equivalent(left_type, right_type, 1, 1)) {
-    /* TODO(Robert): dedicated pointer difference type constant? */
-    return *out = (Type *)TYPE_LONG, 0;
-  } else {
-    return *out = NULL, -1;
-  }
-}
-
-static int addition_type(Type **out, Type *left_type, Type *right_type) {
-  if (type_is_arithmetic(left_type) && type_is_arithmetic(right_type)) {
-    *out = type_arithmetic_conversions(left_type, right_type);
-    return 0;
-  } else if (type_is_pointer(left_type) && type_is_integral(right_type)) {
-    return *out = left_type, 0;
-  } else if (type_is_integral(left_type) && type_is_pointer(right_type)) {
-    return *out = right_type, 0;
-  } else {
-    return *out = NULL, -1;
-  }
-}
-
+/* TODO(Robert): do not allow addition or subtraction operations involving
+ * operands with type `void *`
+ */
 ASTree *validate_addition(ASTree *operator, ASTree * left, ASTree *right) {
-  int status = operator->tok_kind == '-'
-                   ? subtraction_type(&operator->type, left->type, right->type)
-                   : addition_type(&operator->type, left->type, right->type);
-
-  if (status || operator->type == NULL) {
+  right = TCHK_STD_CONV(right, 1, NULL);
+  left = TCHK_STD_CONV(left, 1, right->first_instr);
+  if (type_is_arithmetic(left->type) && type_is_arithmetic(right->type)) {
+    Type *conv_type = type_arithmetic_conversions(left->type, right->type);
+    left = tchk_scal_conv(left, conv_type);
+    right = tchk_scal_conv(right, conv_type);
+    operator->type = operator->tok_kind == TOK_ADDEQ || operator->tok_kind ==
+        TOK_SUBEQ
+        ? left->type
+        : right->type;
+    return evaluate_binop(operator, left, right);
+  } else if (type_is_pointer(left->type) && type_is_integral(right->type)) {
+    right = tchk_disp_conv(right, left->type, NULL);
+    operator->type = left->type;
+    return evaluate_binop(operator, left, right);
+  } else if (operator->tok_kind == '+' && type_is_integral(left->type) &&
+             type_is_pointer(right->type)) {
+    left = tchk_disp_conv(left, right->type, right->first_instr);
+    operator->type = right->type;
+    return evaluate_binop(operator, left, right);
+  } else if (operator->tok_kind == '-' && type_is_pointer(left->type) &&
+             types_equivalent(left->type, right->type, 1, 1)) {
+    operator->type =(Type *) TYPE_LONG;
+    return evaluate_binop(operator, left, right);
+  } else {
     (void)semerr_incompatible_types(operator, left->type, right->type);
     return astree_adopt(operator, 2, left, right);
-  } else {
-    return evaluate_binop(operator, left, right);
   }
 }
 
 ASTree *validate_logical(ASTree *operator, ASTree * left, ASTree *right) {
+  right = TCHK_STD_CONV(right, 1, NULL);
+  left = TCHK_STD_CONV(left, 1, right->first_instr);
   if (type_is_scalar(left->type) && type_is_scalar(right->type)) {
     operator->type =(Type *) TYPE_INT;
     return evaluate_binop(operator, left, right);
@@ -306,11 +331,16 @@ ASTree *validate_logical(ASTree *operator, ASTree * left, ASTree *right) {
 }
 
 ASTree *validate_relational(ASTree *operator, ASTree * left, ASTree *right) {
+  right = TCHK_STD_CONV(right, 1, NULL);
+  left = TCHK_STD_CONV(left, 1, right->first_instr);
   operator->type =(Type *) TYPE_INT;
 
   if (type_is_arithmetic(left->type) && type_is_arithmetic(right->type)) {
+    Type *conv_type = type_arithmetic_conversions(left->type, right->type);
+    left = tchk_scal_conv(left, conv_type);
+    right = tchk_scal_conv(right, conv_type);
     return evaluate_binop(operator, left, right);
-  } else if (type_is_pointer(left->type) && type_is_pointer(right->type) &&
+  } else if (type_is_pointer(left->type) &&
              types_equivalent(left->type, right->type, 1, 1)) {
     return evaluate_binop(operator, left, right);
   } else {
@@ -320,18 +350,29 @@ ASTree *validate_relational(ASTree *operator, ASTree * left, ASTree *right) {
 }
 
 ASTree *validate_equality(ASTree *operator, ASTree * left, ASTree *right) {
+  right = TCHK_STD_CONV(right, 1, NULL);
+  left = TCHK_STD_CONV(left, 1, right->first_instr);
   operator->type =(Type *) TYPE_INT;
 
   if (type_is_arithmetic(left->type) && type_is_arithmetic(right->type)) {
+    Type *conv_type = type_arithmetic_conversions(left->type, right->type);
+    left = tchk_scal_conv(left, conv_type);
+    right = tchk_scal_conv(right, conv_type);
     return evaluate_binop(operator, left, right);
   } else if (type_is_pointer(right->type) && astree_is_const_zero(left)) {
+    left = tchk_scal_conv(left, right->type);
     return evaluate_binop(operator, left, right);
   } else if (type_is_pointer(left->type) && astree_is_const_zero(right)) {
+    right = tchk_scal_conv(right, left->type);
     return evaluate_binop(operator, left, right);
-  } else if (type_is_pointer(left->type) && type_is_pointer(right->type) &&
-             (types_equivalent(left->type, right->type, 1, 1) ||
-              type_is_void_pointer(left->type) ||
-              type_is_void_pointer(right->type))) {
+  } else if (type_is_pointer(left->type) &&
+             types_equivalent(left->type, right->type, 1, 1)) {
+    return evaluate_binop(operator, left, right);
+  } else if (type_is_pointer(left->type) && type_is_void_pointer(right->type)) {
+    left = tchk_scal_conv(left, right->type);
+    return evaluate_binop(operator, left, right);
+  } else if (type_is_void_pointer(left->type) && type_is_pointer(right->type)) {
+    right = tchk_scal_conv(right, left->type);
     return evaluate_binop(operator, left, right);
   } else {
     (void)semerr_incompatible_types(operator, left->type, right->type);
@@ -339,9 +380,17 @@ ASTree *validate_equality(ASTree *operator, ASTree * left, ASTree *right) {
   }
 }
 
+/* TODO(Robert): separate function for remainder, which can only accept
+ * operands of integral type
+ */
 ASTree *validate_multiply(ASTree *operator, ASTree * left, ASTree *right) {
+  right = TCHK_STD_CONV(right, 1, NULL);
+  left = TCHK_STD_CONV(left, 1, right->first_instr);
   if (type_is_arithmetic(left->type) && type_is_arithmetic(right->type)) {
-    operator->type = type_arithmetic_conversions(left->type, right->type);
+    Type *conv_type = type_arithmetic_conversions(left->type, right->type);
+    left = tchk_scal_conv(left, conv_type);
+    right = tchk_scal_conv(right, conv_type);
+    operator->type = conv_type;
     return evaluate_binop(operator, left, right);
   } else {
     Type *offending_type =
@@ -352,8 +401,14 @@ ASTree *validate_multiply(ASTree *operator, ASTree * left, ASTree *right) {
 }
 
 ASTree *validate_shift(ASTree *operator, ASTree * left, ASTree *right) {
+  right = TCHK_STD_CONV(right, 1, NULL);
+  left = TCHK_STD_CONV(left, 1, right->first_instr);
   if (type_is_integral(left->type) && type_is_integral(right->type)) {
-    operator->type = type_arithmetic_conversions(left->type, (Type *)TYPE_INT);
+    left = tchk_scal_conv(
+        left, type_arithmetic_conversions(left->type, (Type *)TYPE_INT));
+    /* explicitly narrow to char */
+    right = tchk_scal_conv(right, (Type *)TYPE_CHAR);
+    operator->type = left->type;
     return evaluate_binop(operator, left, right);
   } else {
     Type *offending_type =
@@ -364,8 +419,13 @@ ASTree *validate_shift(ASTree *operator, ASTree * left, ASTree *right) {
 }
 
 ASTree *validate_bitwise(ASTree *operator, ASTree * left, ASTree *right) {
+  right = TCHK_STD_CONV(right, 1, NULL);
+  left = TCHK_STD_CONV(left, 1, right->first_instr);
   if (type_is_integral(left->type) && type_is_integral(right->type)) {
-    operator->type = type_arithmetic_conversions(left->type, right->type);
+    Type *conv_type = type_arithmetic_conversions(left->type, right->type);
+    left = tchk_scal_conv(left, conv_type);
+    right = tchk_scal_conv(right, conv_type);
+    operator->type = conv_type;
     return evaluate_binop(operator, left, right);
   } else {
     Type *offending_type =
@@ -376,12 +436,13 @@ ASTree *validate_bitwise(ASTree *operator, ASTree * left, ASTree *right) {
 }
 
 ASTree *validate_increment(ASTree *operator, ASTree * operand) {
+  operand = tchk_ptr_conv(operand, 0);
   if (!(operand->attributes & ATTR_EXPR_LVAL)) {
     (void)semerr_expected_lvalue(operator, operand);
     return astree_adopt(operator, 1, operand);
   } else if (type_is_pointer(operand->type)) {
     operator->type = operand->type;
-    maybe_load_cexpr(operand, NULL);
+    operand = tchk_cexpr_conv(operand, NULL);
     return operator->tok_kind == TOK_POST_INC || operator->tok_kind ==
                TOK_POST_DEC
                ? translate_post_inc_dec(operator, operand)
@@ -389,7 +450,7 @@ ASTree *validate_increment(ASTree *operator, ASTree * operand) {
   } else if (type_is_arithmetic(operand->type)) {
     operator->type =
         type_arithmetic_conversions(operand->type, (Type *)TYPE_INT);
-    maybe_load_cexpr(operand, NULL);
+    operand = tchk_cexpr_conv(operand, NULL);
     return operator->tok_kind == TOK_POST_INC || operator->tok_kind ==
                TOK_POST_DEC
                ? translate_post_inc_dec(operator, operand)
@@ -401,6 +462,7 @@ ASTree *validate_increment(ASTree *operator, ASTree * operand) {
 }
 
 static ASTree *validate_not(ASTree *operator, ASTree * operand) {
+  operand = TCHK_STD_CONV(operand, 1, NULL);
   operator->type =(Type *) TYPE_INT;
   if (type_is_scalar(operand->type)) {
     return evaluate_unop(operator, operand);
@@ -411,9 +473,12 @@ static ASTree *validate_not(ASTree *operator, ASTree * operand) {
 }
 
 static ASTree *validate_complement(ASTree *operator, ASTree * operand) {
+  operand = TCHK_STD_CONV(operand, 1, NULL);
   if (type_is_integral(operand->type)) {
-    operator->type =
+    Type *conv_type =
         type_arithmetic_conversions(operand->type, (Type *)TYPE_INT);
+    operand = tchk_scal_conv(operand, conv_type);
+    operator->type = operand->type;
     return evaluate_unop(operator, operand);
   } else {
     (void)semerr_expected_integral(operator, operand->type);
@@ -422,9 +487,12 @@ static ASTree *validate_complement(ASTree *operator, ASTree * operand) {
 }
 
 static ASTree *validate_negation(ASTree *operator, ASTree * operand) {
+  operand = TCHK_STD_CONV(operand, 1, NULL);
   if (type_is_arithmetic(operand->type)) {
-    operator->type =
+    Type *conv_type =
         type_arithmetic_conversions(operand->type, (Type *)TYPE_INT);
+    operand = tchk_scal_conv(operand, conv_type);
+    operator->type = operand->type;
     return evaluate_unop(operator, operand);
   } else {
     (void)semerr_expected_arithmetic(operator, operand->type);
@@ -433,11 +501,12 @@ static ASTree *validate_negation(ASTree *operator, ASTree * operand) {
 }
 
 static ASTree *validate_indirection(ASTree *indirection, ASTree *operand) {
+  operand = TCHK_STD_CONV(operand, 1, NULL);
   if (type_is_pointer(operand->type)) {
     indirection->type = type_strip_declarator(operand->type);
     if (type_is_object(indirection->type))
       indirection->attributes |= ATTR_EXPR_LVAL;
-    maybe_load_cexpr(operand, NULL);
+    operand = tchk_cexpr_conv(operand, NULL);
     return translate_indirection(indirection, operand);
   } else {
     (void)semerr_expected_pointer(indirection, operand->type);
@@ -446,7 +515,8 @@ static ASTree *validate_indirection(ASTree *indirection, ASTree *operand) {
 }
 
 static ASTree *validate_addrof(ASTree *addrof, ASTree *operand) {
-  if (!(operand->attributes & ATTR_EXPR_LVAL)) {
+  if (type_is_object(operand->type) &&
+      !(operand->attributes & ATTR_EXPR_LVAL)) {
     (void)semerr_expected_lvalue(addrof, operand);
     return astree_adopt(addrof, 1, operand);
   } else {
@@ -476,9 +546,13 @@ ASTree *validate_unary(ASTree *unary, ASTree *operand) {
 }
 
 ASTree *validate_sizeof(ASTree *sizeof_, ASTree *operand) {
-  Type *type = operand->tok_kind == TOK_DECLARATION
-                   ? astree_get(operand, 1)->type
-                   : operand->type;
+  Type *type;
+  if (operand->tok_kind == TOK_DECLARATION) {
+    type = astree_get(operand, 1)->type;
+  } else {
+    operand = tchk_ptr_conv(operand, 0);
+    type = operand->type;
+  }
 
   if (type_is_function(type)) {
     (void)semerr_sizeof_fn(sizeof_, type);
@@ -493,6 +567,8 @@ ASTree *validate_sizeof(ASTree *sizeof_, ASTree *operand) {
 }
 
 ASTree *validate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
+  index = TCHK_STD_CONV(index, 1, NULL);
+  pointer = TCHK_STD_CONV(pointer, 1, index->first_instr);
   /* TODO(Robert): the only stipulation on the types of the operands of the
    * array reference operator is that one must have integral type and the other
    * must have pointer type; where the operands go is not important
@@ -504,6 +580,7 @@ ASTree *validate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
     (void)semerr_expected_integral(subscript, index->type);
     return astree_adopt(subscript, 2, pointer, index);
   } else {
+    index = tchk_disp_conv(index, pointer->type, NULL);
     subscript->type = type_strip_declarator(pointer->type);
     if (type_is_object(subscript->type))
       subscript->attributes |= ATTR_EXPR_LVAL;
@@ -512,6 +589,8 @@ ASTree *validate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
 }
 
 ASTree *validate_reference(ASTree *reference, ASTree *struct_, ASTree *member) {
+  struct_ = TCHK_STD_CONV(struct_, reference->tok_kind == TOK_ARROW, NULL);
+
   if (reference->tok_kind == TOK_ARROW &&
       !type_is_struct_pointer(struct_->type) &&
       !type_is_union_pointer(struct_->type)) {
@@ -542,6 +621,8 @@ ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src) {
   /* TODO(Robert): check if struct and union members/submembers are
    * const-qualified
    */
+  src = TCHK_STD_CONV(src, 1, NULL);
+  dest = tchk_ptr_conv(dest, 0);
   if (type_is_incomplete(dest->type) || type_is_const(dest->type)) {
     (void)semerr_not_assignable(assignment, dest->type);
     return astree_adopt(assignment, 2, dest, src);
@@ -556,39 +637,71 @@ ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src) {
       case TOK_ADDEQ:
         /* fallthrough */
       case TOK_SUBEQ:
-        if ((type_is_arithmetic(dest->type) && type_is_arithmetic(src->type)) ||
-            (type_is_pointer(dest->type) && type_is_integral(src->type)))
+        if (type_is_arithmetic(dest->type) && type_is_arithmetic(src->type)) {
+          Type *promoted_type =
+              type_arithmetic_conversions(dest->type, src->type);
+          src = tchk_scal_conv(src, promoted_type);
           break;
-        goto incompatible;
+        } else if (type_is_pointer(dest->type) && type_is_integral(src->type)) {
+          src = tchk_disp_conv(src, dest->type, NULL);
+          break;
+        } else {
+          goto incompatible;
+        }
       case TOK_MULEQ:
         /* fallthrough */
       case TOK_DIVEQ:
         /* fallthrough */
+      /* TODO(Robert): separate case for remainder, which can only accept
+       * operands of integral type
+       */
       case TOK_REMEQ:
-        if (type_is_arithmetic(dest->type) && type_is_arithmetic(src->type))
+        if (type_is_arithmetic(dest->type) && type_is_arithmetic(src->type)) {
+          Type *promoted_type =
+              type_arithmetic_conversions(dest->type, src->type);
+          src = tchk_scal_conv(src, promoted_type);
           break;
-        goto incompatible;
+        } else {
+          goto incompatible;
+        }
       case TOK_ANDEQ:
         /* fallthrough */
       case TOK_OREQ:
         /* fallthrough */
       case TOK_XOREQ:
-        /* fallthrough */
+        if (type_is_integral(dest->type) && type_is_integral(src->type)) {
+          Type *promoted_type =
+              type_arithmetic_conversions(dest->type, src->type);
+          src = tchk_scal_conv(src, promoted_type);
+          break;
+        } else {
+          goto incompatible;
+        }
       case TOK_SHREQ:
         /* fallthrough */
       case TOK_SHLEQ:
-        if (type_is_integral(dest->type) && type_is_integral(src->type)) break;
-        goto incompatible;
-      case '=':
-        if (types_assignable(dest->type, src->type, astree_is_const_zero(src)))
+        if (type_is_integral(dest->type) && type_is_integral(src->type)) {
+          Type *promoted_type =
+              type_arithmetic_conversions((Type *)TYPE_INT, src->type);
+          src = tchk_scal_conv(src, promoted_type);
           break;
-        goto incompatible;
+        } else {
+          goto incompatible;
+        }
+      case '=':
+        if (types_assignable(dest->type, src->type,
+                             astree_is_const_zero(src))) {
+          src = tchk_scal_conv(src, dest->type);
+          break;
+        } else {
+          goto incompatible;
+        }
       default:
         abort();
     }
     assignment->type = dest->type;
-    maybe_load_cexpr(src, NULL);
-    maybe_load_cexpr(dest, src->first_instr);
+    src = tchk_cexpr_conv(src, NULL);
+    dest = tchk_cexpr_conv(dest, src->first_instr);
     /* `translate_assignment` does not perform adoption because it is reused
      * within `asmgen.c` for initialization. it also cannot return error nodes
      */

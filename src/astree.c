@@ -113,7 +113,7 @@ void astree_destroy(ASTree *tree) {
     case '?':
       if (tree->type == NULL || !type_is_pointer(tree->type)) break;
       /* fallthrough */
-    case TOK_AUTO_CONV:
+    case TOK_PTR_CONV:
       /* fallthrough */
     case TOK_ADDROF:
       if (tree->type == NULL) break;

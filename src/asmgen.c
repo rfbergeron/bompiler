@@ -90,6 +90,16 @@ const Type *TYPE_VA_SPILL_REGION;
 extern int skip_allocator;
 extern int skip_liveness;
 
+#define SEMCHK(tree)                                                  \
+  assert(((tree)->attributes & ATTR_MASK_CONST) == ATTR_CONST_NONE && \
+         !((tree)->attributes & ATTR_EXPR_LVAL))
+#define TYPCHK(left, right) assert(types_equivalent(left, right, 1, 1))
+#define WIDCHK(left, right)                         \
+  assert((left)->dest.all.mode == MODE_REGISTER &&  \
+         (right)->dest.all.mode == MODE_REGISTER && \
+         (left)->dest.reg.width == (right)->dest.reg.width)
+#define REGCHK(instr) assert((instr)->dest.all.mode == MODE_REGISTER)
+
 static const char *deduplicate_text(size_t size, const char *fmt, ...) {
   char *label = malloc(size);
   va_list args;
@@ -463,111 +473,6 @@ static void assign_static_space(const char *ident, Symbol *symbol) {
   symbol->static_id = *static_count++;
 }
 
-/* NOTE: on x64, most operations that write to the lower 32 bits of a
- * register will zero the upper 32 bits.
- *
- * any signed int -> any wider unsigned int: movz
- * any signed int -> any wider signed int: movs
- * any unsigned int -> any wider int: movz
- * any int -> any narrower int: simple mov
- * any int -> any int of same width: nop
- */
-/* NOTE: all casts are semantically valid unless one of the following is true:
- * - the source type is a struct, union, or function
- * - the destination type is a struct, union, function or array
- * - the source type is void and the destination type is not void
- */
-static void scalar_conversions(ASTree *expr, const Type *to) {
-  assert(!type_is_record(expr->type) && !type_is_function(expr->type));
-  assert(!type_is_aggregate(to) && !type_is_function(to));
-  assert(!type_is_void(expr->type) || type_is_void(to));
-
-  if (type_is_void(to)) {
-    Instruction *nop_instr = instr_init(OP_NOP);
-    int status =
-        liter_push_back(expr->last_instr, &expr->last_instr, 1, nop_instr);
-    if (status) abort();
-    return;
-  }
-
-  int src_persistence_set = 0;
-  const Type *from = expr->type;
-  size_t from_width =
-      type_is_array(from) ? X64_SIZEOF_LONG : type_get_width(from);
-  Instruction *expr_instr = liter_get(expr->last_instr);
-  /* TODO(Robert): is it possible for this to happen? and if it is, is it
-   * correct?
-   */
-  if (expr_instr->dest.all.mode != MODE_REGISTER) {
-    assert(expr_instr->dest.all.mode == MODE_INDIRECT ||
-           expr_instr->dest.all.mode == MODE_SCALE);
-    Instruction *mov_instr = instr_init(OP_MOV);
-    mov_instr->src = expr_instr->dest;
-    set_op_reg(&mov_instr->dest, from_width, next_vreg());
-    mov_instr->persist_flags |= PERSIST_SRC_SET;
-    src_persistence_set = 1;
-    int status =
-        liter_push_back(expr->last_instr, &expr->last_instr, 1, mov_instr);
-    if (status) abort();
-    expr_instr = mov_instr;
-  }
-
-  if ((expr->attributes & ATTR_EXPR_LVAL) && !type_is_array(from)) {
-    assert(!type_is_function(from));
-    Instruction *mov_instr = instr_init(OP_MOV);
-    set_op_ind(&mov_instr->src, NO_DISP, expr_instr->dest.reg.num);
-    set_op_reg(&mov_instr->dest, from_width, next_vreg());
-    mov_instr->persist_flags |= PERSIST_DEST_CLEAR;
-    if (!src_persistence_set)
-      mov_instr->persist_flags |= PERSIST_SRC_SET, src_persistence_set = 1;
-    int status =
-        liter_push_back(expr->last_instr, &expr->last_instr, 1, mov_instr);
-    if (status) abort();
-    expr_instr = mov_instr;
-  }
-
-  size_t to_width = type_get_width(to);
-  if (from_width == to_width) {
-    return;
-  } else if (from_width > to_width) {
-    /* unnecessary mov so that the width of the destination is set correctly,
-     * and the whole structure describing the operand can just be copied to the
-     * next instruction that needs it.
-     */
-    Instruction *mov_instr = instr_init(OP_MOV);
-    set_op_reg(&mov_instr->src, to_width, expr_instr->dest.reg.num);
-    set_op_reg(&mov_instr->dest, to_width, next_vreg());
-    mov_instr->persist_flags |= src_persistence_set
-                                    ? PERSIST_DEST_CLEAR
-                                    : PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
-    int status =
-        liter_push_back(expr->last_instr, &expr->last_instr, 1, mov_instr);
-    if (status) abort();
-  } else if (type_is_signed(from) || type_is_enum(from)) {
-    Instruction *movs_instr = instr_init(OP_MOVS);
-    movs_instr->src = expr_instr->dest;
-    set_op_reg(&movs_instr->dest, to_width, next_vreg());
-    movs_instr->persist_flags |= src_persistence_set
-                                     ? PERSIST_DEST_CLEAR
-                                     : PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
-    int status =
-        liter_push_back(expr->last_instr, &expr->last_instr, 1, movs_instr);
-    if (status) abort();
-  } else if (type_is_unsigned(from)) {
-    Instruction *movz_instr = instr_init(OP_MOVZ);
-    movz_instr->src = expr_instr->dest;
-    set_op_reg(&movz_instr->dest, to_width, next_vreg());
-    movz_instr->persist_flags |= src_persistence_set
-                                     ? PERSIST_DEST_CLEAR
-                                     : PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
-    int status =
-        liter_push_back(expr->last_instr, &expr->last_instr, 1, movz_instr);
-    if (status) abort();
-  } else {
-    abort();
-  }
-}
-
 static void save_preserved_regs(void) {
   size_t i;
   for (i = 1; i <= PRESERVED_REG_COUNT; ++i) {
@@ -629,44 +534,191 @@ ASTree *translate_empty_expr(ASTree *empty_expr) {
   return empty_expr;
 }
 
-void maybe_load_cexpr(ASTree *expr, ListIter *where) {
-  if ((expr->attributes & ATTR_MASK_CONST) != ATTR_CONST_NONE) {
-    assert(expr->first_instr == NULL && expr->last_instr == NULL);
-    Instruction *load_instr;
-    if (type_is_void(expr->type)) {
-      /* emit NOP when casting a constant to void */
-      load_instr = instr_init(OP_NOP);
-    } else if (expr->constant.label != NULL) {
-      /* use LEA when expression has an address component */
-      load_instr = instr_init(OP_LEA);
-      set_op_pic(&load_instr->src, expr->constant.integral.signed_value,
-                 expr->constant.label);
-      set_op_reg(&load_instr->dest, REG_QWORD, next_vreg());
-      load_instr->persist_flags |= PERSIST_DEST_CLEAR;
+ASTree *translate_cexpr_conv(ASTree *cexpr_conv, ASTree *expr,
+                             ListIter *where) {
+  assert((expr->attributes & ATTR_MASK_CONST) != ATTR_CONST_NONE);
+  assert(expr->first_instr == NULL && expr->last_instr == NULL);
+  Instruction *load_instr;
+  if (type_is_void(expr->type)) {
+    /* emit NOP when casting a constant to void */
+    load_instr = instr_init(OP_NOP);
+  } else if (expr->constant.label != NULL) {
+    /* use LEA when expression has an address component */
+    load_instr = instr_init(OP_LEA);
+    set_op_pic(&load_instr->src, expr->constant.integral.signed_value,
+               expr->constant.label);
+    set_op_reg(&load_instr->dest, REG_QWORD, next_vreg());
+    load_instr->persist_flags |= PERSIST_DEST_CLEAR;
+  } else {
+    load_instr = instr_init(OP_MOV);
+    if (type_is_unsigned(expr->type)) {
+      set_op_imm(&load_instr->src, expr->constant.integral.unsigned_value, 1);
     } else {
-      load_instr = instr_init(OP_MOV);
-      if (type_is_unsigned(expr->type)) {
-        set_op_imm(&load_instr->src, expr->constant.integral.unsigned_value, 1);
-      } else {
-        set_op_imm(&load_instr->src, expr->constant.integral.signed_value, 0);
-      }
-      set_op_reg(&load_instr->dest, type_get_width(expr->type), next_vreg());
-      load_instr->persist_flags |= PERSIST_DEST_CLEAR;
+      set_op_imm(&load_instr->src, expr->constant.integral.signed_value, 0);
     }
-    if (where) {
-      int status = liter_push_front(where, &expr->first_instr, 1, load_instr);
-      if (status) abort();
-      expr->last_instr = liter_copy(expr->first_instr);
-      if (expr->last_instr == NULL) abort();
-    } else {
-      int status = llist_push_back(instructions, load_instr);
-      if (status) abort();
-      expr->first_instr = llist_iter_last(instructions);
-      if (expr->first_instr == NULL) abort();
-      expr->last_instr = llist_iter_last(instructions);
-      if (expr->last_instr == NULL) abort();
-    }
+    set_op_reg(&load_instr->dest, type_get_width(expr->type), next_vreg());
+    load_instr->persist_flags |= PERSIST_DEST_CLEAR;
   }
+
+  if (where) {
+    int status =
+        liter_push_front(where, &cexpr_conv->first_instr, 1, load_instr);
+    if (status) abort();
+    cexpr_conv->last_instr = liter_copy(cexpr_conv->first_instr);
+  } else {
+    int status = llist_push_back(instructions, load_instr);
+    if (status) abort();
+    cexpr_conv->first_instr = llist_iter_last(instructions);
+    cexpr_conv->last_instr = llist_iter_last(instructions);
+  }
+
+  assert(cexpr_conv->first_instr != NULL);
+  assert(cexpr_conv->last_instr != NULL);
+  return astree_adopt(cexpr_conv, 1, expr);
+}
+
+static Instruction *convert_rval(const Instruction *instr, const Type *type) {
+  assert(instr->dest.all.mode == MODE_REGISTER);
+  assert(instr->dest.reg.width == X64_SIZEOF_LONG);
+
+  Instruction *mov_instr = instr_init(OP_MOV);
+  set_op_ind(&mov_instr->src, NO_DISP, instr->dest.reg.num);
+  set_op_reg(&mov_instr->dest, type_get_width(type), next_vreg());
+  mov_instr->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
+  return mov_instr;
+}
+
+ASTree *translate_rval_conv(ASTree *rval_conv, ASTree *expr) {
+  assert(expr->attributes & ATTR_EXPR_LVAL);
+  assert((expr->attributes & ATTR_MASK_CONST) == ATTR_CONST_NONE);
+
+  rval_conv->first_instr = liter_copy(expr->first_instr);
+  assert(rval_conv->first_instr != NULL);
+
+  if (type_is_scalar(expr->type)) {
+    Instruction *conv_instr =
+        convert_rval(liter_get(expr->last_instr), expr->type);
+    int status = liter_push_back(expr->last_instr, &rval_conv->last_instr, 1,
+                                 conv_instr);
+    if (status) abort();
+  } else {
+    rval_conv->last_instr = liter_copy(expr->last_instr);
+  }
+
+  assert(rval_conv->last_instr != NULL);
+  return astree_adopt(rval_conv, 1, expr);
+}
+
+ASTree *translate_ptr_conv(ASTree *ptr_conv, ASTree *expr) {
+  assert(!type_is_object(expr->type));
+  assert((expr->attributes & ATTR_MASK_CONST) == ATTR_CONST_NONE);
+  ptr_conv->first_instr = liter_copy(expr->first_instr);
+  assert(ptr_conv->first_instr != NULL);
+  ptr_conv->last_instr = liter_copy(expr->last_instr);
+  assert(ptr_conv->last_instr != NULL);
+  return astree_adopt(ptr_conv, 1, expr);
+}
+
+/* NOTE: on x64, most operations that write to the lower 32 bits of a
+ * register will zero the upper 32 bits.
+ *
+ * any signed int -> any wider unsigned int: movz
+ * any signed int -> any wider signed int: movs
+ * any unsigned int -> any wider int: movz
+ * any int -> any narrower int: simple mov
+ * any int -> any int of same width: nop
+ */
+/* NOTE: all casts are semantically valid unless one of the following is true:
+ * - the source type is a struct, union, or function
+ * - the destination type is a struct, union, function or array
+ * - the source type is void and the destination type is not void
+ */
+static Instruction *convert_scalar(const Instruction *instr,
+                                   const Type *to_type, const Type *from_type) {
+  assert(type_is_scalar(from_type) ||
+         (type_is_void(from_type) && type_is_void(from_type)));
+  assert(type_is_scalar(to_type) || type_is_void(to_type));
+  assert(instr->dest.all.mode == MODE_REGISTER);
+
+  size_t from_width = type_get_width(from_type);
+  size_t to_width = type_get_width(to_type);
+
+  if (type_is_void(to_type)) {
+    return instr_init(OP_NOP);
+  } else if (from_width == to_width) {
+    Instruction *mov_instr = instr_init(OP_MOV);
+    mov_instr->src = mov_instr->dest = instr->dest;
+    mov_instr->persist_flags |= PERSIST_SRC_SET;
+    return mov_instr;
+  } else if (from_width > to_width) {
+    /* unnecessary mov so that the width of the destination is set correctly,
+     * and the whole structure describing the operand can just be copied to the
+     * next instruction that needs it.
+     */
+    Instruction *mov_instr = instr_init(OP_MOV);
+    set_op_reg(&mov_instr->src, to_width, instr->dest.reg.num);
+    set_op_reg(&mov_instr->dest, to_width, next_vreg());
+    mov_instr->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
+    return mov_instr;
+  } else if (type_is_signed(from_type) || type_is_enum(from_type)) {
+    Instruction *movs_instr = instr_init(OP_MOVS);
+    movs_instr->src = instr->dest;
+    set_op_reg(&movs_instr->dest, to_width, next_vreg());
+    movs_instr->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
+    return movs_instr;
+  } else if (to_width != X64_SIZEOF_LONG || from_width != X64_SIZEOF_INT) {
+    assert(type_is_unsigned(from_type));
+    Instruction *movz_instr = instr_init(OP_MOVZ);
+    movz_instr->src = instr->dest;
+    set_op_reg(&movz_instr->dest, to_width, next_vreg());
+    movz_instr->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
+    return movz_instr;
+  } else {
+    /* set width of destination; no need to extend */
+    assert(type_is_unsigned(from_type));
+    Instruction *mov_instr = instr_init(OP_MOV);
+    mov_instr->src = instr->dest;
+    set_op_reg(&mov_instr->dest, REG_QWORD, next_vreg());
+    mov_instr->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
+    return mov_instr;
+  }
+}
+
+ASTree *translate_scal_conv(ASTree *scal_conv, ASTree *expr) {
+  SEMCHK(expr);
+  scal_conv->first_instr = liter_copy(expr->first_instr);
+  assert(expr->first_instr != NULL);
+
+  Instruction *conv_instr =
+      convert_scalar(liter_get(expr->last_instr), scal_conv->type, expr->type);
+  int status =
+      liter_push_back(expr->last_instr, &scal_conv->last_instr, 1, conv_instr);
+  if (status) abort();
+  assert(scal_conv->last_instr != NULL);
+  return astree_adopt(scal_conv, 1, expr);
+}
+
+ASTree *translate_disp_conv(ASTree *disp_conv, ASTree *expr,
+                            const Type *pointer_type) {
+  SEMCHK(expr);
+  disp_conv->first_instr = liter_copy(expr->first_instr);
+  assert(disp_conv->first_instr != NULL);
+
+  Instruction *conv_instr =
+      convert_scalar(liter_get(expr->last_instr), disp_conv->type, expr->type);
+
+  /* use two-operand imul because it is more convenient */
+  Instruction *imul_instr = instr_init(OP_IMUL);
+  set_op_imm(&imul_instr->src, type_elem_width(pointer_type), IMM_SIGNED);
+  imul_instr->persist_flags = PERSIST_DEST_SET | PERSIST_DEST_CLEAR;
+
+  imul_instr->dest = conv_instr->dest;
+  int status = liter_push_back(expr->last_instr, &disp_conv->last_instr, 2,
+                               conv_instr, imul_instr);
+
+  if (status) abort();
+  assert(disp_conv->last_instr != NULL);
+  return astree_adopt(disp_conv, 1, expr);
 }
 
 ASTree *translate_ident(ASTree *ident) {
@@ -696,30 +748,6 @@ ASTree *translate_ident(ASTree *ident) {
   return ident;
 }
 
-ASTree *translate_cast(ASTree *cast, ASTree *expr) {
-  PFDBG0('g', "Translating cast");
-
-  if (type_is_scalar(cast->type) || type_is_enum(cast->type) ||
-      type_is_array(cast->type)) {
-    /* `scalar_conversions` should do everything we need */
-    scalar_conversions(expr, cast->type);
-    cast->last_instr = liter_copy(expr->last_instr);
-    if (cast->last_instr == NULL) abort();
-  } else if (type_is_void(cast->type)) {
-    Instruction *nop_instr = instr_init(OP_NOP);
-    int status =
-        liter_push_back(expr->last_instr, &cast->last_instr, 1, nop_instr);
-    if (status) abort();
-  } else {
-    cast->last_instr = liter_copy(expr->last_instr);
-    if (cast->last_instr == NULL) abort();
-  }
-
-  cast->first_instr = liter_copy(expr->first_instr);
-  if (cast->first_instr == NULL) abort();
-  return astree_adopt(cast, 1, expr);
-}
-
 /* Two classes of operators whose result is a boolean:
  * - comparison: >, <, >=, <=, ==, !=
  * - logical: &&, ||, !
@@ -728,8 +756,7 @@ ASTree *translate_cast(ASTree *cast, ASTree *expr) {
  * to a boolean except instead of using SETNZ it does SETZ
  */
 ASTree *translate_logical_not(ASTree * not, ASTree *operand) {
-  /* move lval into reg, if necessary */
-  scalar_conversions(operand, operand->type);
+  SEMCHK(operand);
   Instruction *operand_instr = liter_get(operand->last_instr);
 
   /* TEST operand with itself */
@@ -754,8 +781,9 @@ ASTree *translate_logical_not(ASTree * not, ASTree *operand) {
 }
 
 ASTree *translate_logical(ASTree *operator, ASTree * left, ASTree *right) {
+  SEMCHK(left);
+  SEMCHK(right);
   /* test first operand; jump on false for && and true for || */
-  scalar_conversions(left, left->type);
   Instruction *left_instr = liter_get(left->last_instr);
 
   const char *skip_label = operator->tok_kind == TOK_AND
@@ -773,7 +801,6 @@ ASTree *translate_logical(ASTree *operator, ASTree * left, ASTree *right) {
                                jmp_left_instr);
   if (status) abort();
 
-  scalar_conversions(right, right->type);
   Instruction *right_instr = liter_get(right->last_instr);
 
   Instruction *test_right_instr = instr_init(OP_TEST);
@@ -798,20 +825,16 @@ ASTree *translate_logical(ASTree *operator, ASTree * left, ASTree *right) {
 }
 
 ASTree *translate_comparison(ASTree *operator, ASTree * left, ASTree *right) {
+  SEMCHK(left);
+  SEMCHK(right);
+  TYPCHK(left->type, right->type);
   operator->first_instr = liter_copy(left->first_instr);
   if (operator->first_instr == NULL) abort();
 
-  Type *common_type =
-      (type_is_pointer(left->type) || type_is_pointer(right->type))
-          ? (Type *)TYPE_LONG
-          : type_arithmetic_conversions(left->type, right->type);
-
-  scalar_conversions(left, common_type);
   Instruction *left_instr = liter_get(left->last_instr);
-
-  scalar_conversions(right, common_type);
   Instruction *right_instr = liter_get(right->last_instr);
 
+  WIDCHK(left_instr, right_instr);
   Instruction *cmp_instr = instr_init(OP_CMP);
   /* reverse operands; looks weird in AT&T syntax but is correct */
   cmp_instr->dest = left_instr->dest;
@@ -819,7 +842,7 @@ ASTree *translate_comparison(ASTree *operator, ASTree * left, ASTree *right) {
   cmp_instr->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_SET;
 
   Instruction *setcc_instr =
-      instr_init(opcode_from_operator(operator->tok_kind, common_type));
+      instr_init(opcode_from_operator(operator->tok_kind, right->type));
   set_op_reg(&setcc_instr->dest, REG_BYTE, next_vreg());
 
   Instruction *movz_instr = instr_init(OP_MOVZ);
@@ -834,25 +857,24 @@ ASTree *translate_comparison(ASTree *operator, ASTree * left, ASTree *right) {
 }
 
 ASTree *translate_indirection(ASTree *indirection, ASTree *operand) {
+  SEMCHK(operand);
+  REGCHK((Instruction *)liter_get(operand->last_instr));
   PFDBG0('g', "Translating indirection operation.");
+  /* this function doesn't need to do anything. if the operand was an lvalue,
+   * the semantic analyzer should have created a semantic node which handles
+   * the dereferencing of the original value. whether or not this occurred,
+   * the value is then marked as an lvalue so that it may be dereferenced
+   * again
+   */
   indirection->first_instr = liter_copy(operand->first_instr);
   if (indirection->first_instr == NULL) abort();
-
-  scalar_conversions(operand, TYPE_POINTER);
-
-  /* `scalar_conversions` already converts lvalues to rvalues, so by this
-   * point the destination of `operand_instr` will already be the value, not the
-   * location, of the result of the expression the indirection operator is being
-   * applied to. since the operand must have had pointer type, this value is
-   * also a location. this value should be left as-is, since the result is an
-   * lvalue, and in order to use it as an lvalue we need the location.
-   */
   indirection->last_instr = liter_copy(operand->last_instr);
   if (indirection->last_instr == NULL) abort();
   return astree_adopt(indirection, 1, operand);
 }
 
 ASTree *translate_addrof(ASTree *addrof, ASTree *operand) {
+  REGCHK((Instruction *)liter_get(operand->last_instr));
   PFDBG0('g', "Translating address operation.");
   /* this function doesn't need to do anything. the operand has to be an lvalue,
    * which means the destination operand of the last instruction emitted should
@@ -870,45 +892,35 @@ ASTree *translate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
   /* both the pointer and index must be in a register so that the displacement
    * and scale addressing mode can be used
    */
-  scalar_conversions(pointer, TYPE_POINTER);
+  SEMCHK(pointer);
+  SEMCHK(index);
   Instruction *pointer_instr = liter_get(pointer->last_instr);
-
-  scalar_conversions(index, TYPE_LONG);
   Instruction *index_instr = liter_get(index->last_instr);
+
+  WIDCHK(pointer_instr, index_instr);
 
   subscript->first_instr = liter_copy(pointer->first_instr);
   if (subscript->first_instr == NULL) abort();
 
+  /* index should already have been scaled */
   Instruction *lea_instr = instr_init(OP_LEA);
   set_op_reg(&lea_instr->dest, REG_QWORD, next_vreg());
+  set_op_sca(&lea_instr->src, SCALE_BYTE, NO_DISP, pointer_instr->dest.reg.num,
+             index_instr->dest.reg.num);
   lea_instr->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
-
-  size_t scale = type_get_width(subscript->type);
-  if (scale == 1 || scale == 2 || scale == 4 || scale == 8) {
-    set_op_sca(&lea_instr->src, scale, NO_DISP, pointer_instr->dest.reg.num,
-               index_instr->dest.reg.num);
-    int status = liter_push_back(index->last_instr, &subscript->last_instr, 1,
-                                 lea_instr);
-    if (status) abort();
-  } else {
-    set_op_sca(&lea_instr->src, SCALE_BYTE, NO_DISP,
-               pointer_instr->dest.reg.num, index_instr->dest.reg.num);
-    Instruction *mul_instr = instr_init(OP_IMUL);
-    mul_instr->dest = index_instr->dest;
-    set_op_imm(&mul_instr->src, scale, IMM_UNSIGNED);
-    int status = liter_push_back(index->last_instr, &subscript->last_instr, 2,
-                                 mul_instr, lea_instr);
-    if (status) abort();
-  }
+  int status =
+      liter_push_back(index->last_instr, &subscript->last_instr, 1, lea_instr);
+  if (status) abort();
+  assert(subscript->last_instr != NULL);
   return astree_adopt(subscript, 2, pointer, index);
 }
 
 ASTree *translate_reference(ASTree *reference, ASTree *struct_,
                             ASTree *member) {
+  SEMCHK(struct_);
   PFDBG0('g', "Translating reference operator");
   Type *record_type;
   if (reference->tok_kind == TOK_ARROW) {
-    scalar_conversions(struct_, struct_->type);
     record_type = type_strip_declarator(struct_->type);
   } else {
     record_type = struct_->type;
@@ -917,6 +929,7 @@ ASTree *translate_reference(ASTree *reference, ASTree *struct_,
   Instruction *struct_instr = liter_get(struct_->last_instr);
   Symbol *member_symbol = type_member_name(record_type, member->lexinfo);
   assert(member_symbol);
+  REGCHK(struct_instr);
 
   Instruction *lea_instr = instr_init(OP_LEA);
   set_op_ind(&lea_instr->src, member_symbol->disp, struct_instr->dest.reg.num);
@@ -936,32 +949,31 @@ ASTree *translate_post_inc_dec(ASTree *post_inc_dec, ASTree *operand) {
   post_inc_dec->first_instr = liter_copy(operand->first_instr);
   if (post_inc_dec->first_instr == NULL) abort();
   Instruction *lvalue_instr = liter_get(operand->last_instr);
-  if (lvalue_instr == NULL) abort();
-  scalar_conversions(operand, post_inc_dec->type);
-  Instruction *operand_instr = liter_get(operand->last_instr);
+  Instruction *rval_conv_instr = convert_rval(lvalue_instr, operand->type);
+  Instruction *type_conv_instr =
+      convert_scalar(rval_conv_instr, post_inc_dec->type, operand->type);
 
   Instruction *mov_instr = instr_init(OP_MOV);
-  mov_instr->src = operand_instr->dest;
+  mov_instr->src = type_conv_instr->dest;
   set_op_reg(&mov_instr->dest, type_get_width(post_inc_dec->type), next_vreg());
+  mov_instr->persist_flags |= PERSIST_DEST_CLEAR;
 
   Instruction *inc_dec_instr = instr_init(
       opcode_from_operator(post_inc_dec->tok_kind, post_inc_dec->type));
-  inc_dec_instr->dest = operand_instr->dest;
+  inc_dec_instr->dest = type_conv_instr->dest;
 
-  Instruction *mov_instr_2 = instr_init(OP_MOV);
-  set_op_ind(&mov_instr_2->dest, NO_DISP, lvalue_instr->dest.reg.num);
-  set_op_reg(&mov_instr_2->src, type_get_width(operand->type),
-             operand_instr->dest.reg.num);
-  /* both the location and value of the object must persist until this point */
-  mov_instr_2->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_SET;
+  /* no need to set flags; conversion functions should do that */
+  Instruction *store_instr = instr_init(OP_MOV);
+  set_op_ind(&store_instr->dest, NO_DISP, lvalue_instr->dest.reg.num);
+  set_op_reg(&store_instr->src, type_get_width(operand->type),
+             type_conv_instr->dest.reg.num);
 
   Instruction *dummy_instr = instr_init(OP_MOV);
   dummy_instr->src = dummy_instr->dest = mov_instr->dest;
-  dummy_instr->persist_flags |= PERSIST_DEST_CLEAR;
 
-  int status =
-      liter_push_back(operand->last_instr, &post_inc_dec->last_instr, 4,
-                      mov_instr, inc_dec_instr, mov_instr_2, dummy_instr);
+  int status = liter_push_back(operand->last_instr, &post_inc_dec->last_instr,
+                               6, rval_conv_instr, type_conv_instr, mov_instr,
+                               inc_dec_instr, store_instr, dummy_instr);
   if (status) abort();
   return astree_adopt(post_inc_dec, 1, operand);
 }
@@ -971,35 +983,35 @@ ASTree *translate_inc_dec(ASTree *inc_dec, ASTree *operand) {
   inc_dec->first_instr = liter_copy(operand->first_instr);
   if (inc_dec->first_instr == NULL) abort();
   Instruction *lvalue_instr = liter_get(operand->last_instr);
-  if (lvalue_instr == NULL) abort();
-  scalar_conversions(operand, inc_dec->type);
-  Instruction *operand_instr = liter_get(operand->last_instr);
+  Instruction *rval_conv_instr = convert_rval(lvalue_instr, operand->type);
+  Instruction *type_conv_instr =
+      convert_scalar(rval_conv_instr, inc_dec->type, operand->type);
 
+  /* no need to set persistence flags; conversion functions do that */
   Instruction *inc_dec_instr =
       instr_init(opcode_from_operator(inc_dec->tok_kind, inc_dec->type));
-  inc_dec_instr->dest = operand_instr->dest;
+  inc_dec_instr->dest = type_conv_instr->dest;
 
-  Instruction *mov_instr = instr_init(OP_MOV);
-  set_op_ind(&mov_instr->dest, NO_DISP, lvalue_instr->dest.reg.num);
-  set_op_reg(&mov_instr->src, type_get_width(operand->type),
-             operand_instr->dest.reg.num);
-  /* both the location and value of the object must persist until this point */
-  mov_instr->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_SET;
+  Instruction *store_instr = instr_init(OP_MOV);
+  set_op_ind(&store_instr->dest, NO_DISP, lvalue_instr->dest.reg.num);
+  set_op_reg(&store_instr->src, type_get_width(operand->type),
+             type_conv_instr->dest.reg.num);
 
   Instruction *dummy_instr = instr_init(OP_MOV);
-  dummy_instr->src = dummy_instr->dest = operand_instr->dest;
-  dummy_instr->persist_flags |= PERSIST_DEST_CLEAR;
+  dummy_instr->src = dummy_instr->dest = type_conv_instr->dest;
 
-  int status = liter_push_back(operand->last_instr, &inc_dec->last_instr, 3,
-                               inc_dec_instr, mov_instr, dummy_instr);
+  int status = liter_push_back(operand->last_instr, &inc_dec->last_instr, 5,
+                               rval_conv_instr, type_conv_instr, inc_dec_instr,
+                               store_instr, dummy_instr);
   if (status) abort();
   return astree_adopt(inc_dec, 1, operand);
 }
 
 ASTree *translate_unop(ASTree *operator, ASTree * operand) {
+  SEMCHK(operand);
   PFDBG0('g', "Translating unary operation");
-  scalar_conversions(operand, operator->type);
   Instruction *operand_instr = liter_get(operand->last_instr);
+  REGCHK(operand_instr);
 
   Instruction *operator_instr =
       instr_init(opcode_from_operator(operator->tok_kind, operator->type));
@@ -1034,27 +1046,13 @@ ASTree *translate_sizeof(ASTree *sizeof_, ASTree *operand) {
   return astree_adopt(sizeof_, 1, operand);
 }
 
-static void convert_int_to_offset(const Operand *int_op, const Type *ptr_type,
-                                  ListIter *where, ListIter **out) {
-  assert(type_is_pointer(ptr_type));
-  assert(where != NULL);
-  assert(int_op->all.mode == MODE_REGISTER);
-
-  Type *element_type = type_strip_declarator(ptr_type);
-  Instruction *imul_instr = instr_init(OP_IMUL);
-  imul_instr->dest = *int_op;
-  set_op_imm(&imul_instr->src, type_get_width(element_type), IMM_UNSIGNED);
-  int status = liter_push_back(where, out, 1, imul_instr);
-  if (status) abort();
-}
-
 ASTree *translate_addition(ASTree *operator, ASTree * left, ASTree *right) {
   PFDBG0('g', "Translating additive operation");
-  scalar_conversions(left, operator->type);
+  SEMCHK(left);
+  SEMCHK(right);
   Instruction *left_instr = liter_get(left->last_instr);
-
-  scalar_conversions(right, operator->type);
   Instruction *right_instr = liter_get(right->last_instr);
+  WIDCHK(left_instr, right_instr);
 
   Instruction *operator_instr =
       instr_init(opcode_from_operator(operator->tok_kind, operator->type));
@@ -1067,24 +1065,10 @@ ASTree *translate_addition(ASTree *operator, ASTree * left, ASTree *right) {
   operator->first_instr = liter_copy(left->first_instr);
   if (operator->first_instr == NULL) abort();
 
-  /* use two-operand IMUL, since it is more convenient in this case */
-  if (type_is_pointer(left->type) && !type_is_pointer(right->type)) {
-    convert_int_to_offset(&right_instr->dest, left->type, right->last_instr,
-                          &operator->last_instr);
-    int status = liter_push_back(operator->last_instr, &operator->last_instr, 1,
-                                 operator_instr);
-    if (status) abort();
-  } else if (!type_is_pointer(left->type) && type_is_pointer(right->type)) {
-    convert_int_to_offset(&left_instr->dest, right->type, right->last_instr,
-                          &operator->last_instr);
-    int status = liter_push_back(operator->last_instr, &operator->last_instr, 1,
-                                 operator_instr);
-    if (status) abort();
-  } else {
-    int status = liter_push_back(right->last_instr, &operator->last_instr, 1,
-                                 operator_instr);
-    if (status) abort();
-  }
+  /* if this is a pointer-integer operation, scaling already occurred */
+  int status = liter_push_back(right->last_instr, &operator->last_instr, 1,
+                               operator_instr);
+  if (status) abort();
   return astree_adopt(operator, 2, left, right);
 }
 
@@ -1110,28 +1094,25 @@ ASTree *translate_addition(ASTree *operator, ASTree * left, ASTree *right) {
  * Attempting to do so will only trip up the register allocator.
  */
 static void multiply_helper(ASTree *operator, ASTree * left, ASTree *right) {
-  Type *common_type;
-  Instruction *lvalue_instr, *left_instr;
+  Instruction *lvalue_instr, *conv_instr, *left_instr;
   if (operator->tok_kind == TOK_MULEQ ||
       operator->tok_kind == TOK_DIVEQ ||
       operator->tok_kind == TOK_REMEQ) {
     lvalue_instr = liter_get(left->last_instr);
     assert(lvalue_instr->dest.all.mode == MODE_REGISTER);
     assert(lvalue_instr->dest.reg.width == REG_QWORD);
-    common_type = type_arithmetic_conversions(left->type, right->type);
-    scalar_conversions(left, common_type);
-    left_instr = liter_get(left->last_instr);
+    conv_instr = convert_rval(lvalue_instr, operator->type);
+    left_instr = convert_scalar(conv_instr, right->type, operator->type);
   } else {
-    lvalue_instr = NULL;
-    common_type = operator->type;
-    scalar_conversions(left, common_type);
+    lvalue_instr = conv_instr = NULL;
+    right->type = operator->type;
     left_instr = liter_get(left->last_instr);
   }
 
-  assert(type_get_width(common_type) >= 4);
+  assert(type_get_width(right->type) >= 4);
 
-  scalar_conversions(right, common_type);
   Instruction *right_instr = liter_get(right->last_instr);
+  WIDCHK(left_instr, right_instr);
 
   /* save registers whose values may or may not be clobbered */
   Instruction *push_rax_instr = instr_init(OP_PUSH);
@@ -1156,22 +1137,22 @@ static void multiply_helper(ASTree *operator, ASTree * left, ASTree *right) {
 
   /* mov left operand into rax as implicit destination operand */
   Instruction *mov_rax_instr = instr_init(OP_MOV);
-  set_op_reg(&mov_rax_instr->dest, type_get_width(common_type), RAX_VREG);
+  set_op_reg(&mov_rax_instr->dest, type_get_width(right->type), RAX_VREG);
   mov_rax_instr->src = left_instr->dest;
   mov_rax_instr->persist_flags |= PERSIST_SRC_SET;
 
   /* extend rax into rdx to be double its width for division */
-  Opcode opcode = opcode_from_operator(operator->tok_kind, common_type);
+  Opcode opcode = opcode_from_operator(operator->tok_kind, right->type);
   Instruction *extend_instr;
   if (opcode != OP_DIV && opcode != OP_IDIV) {
     extend_instr = instr_init(OP_NOP);
-  } else if (type_is_signed(common_type)) {
-    extend_instr = type_get_width(common_type) == 8 ? instr_init(OP_CQO)
+  } else if (type_is_signed(right->type)) {
+    extend_instr = type_get_width(right->type) == 8 ? instr_init(OP_CQO)
                                                     : instr_init(OP_CDQ);
   } else {
     extend_instr = instr_init(OP_MOV);
     set_op_imm(&extend_instr->src, 0, IMM_UNSIGNED);
-    set_op_reg(&extend_instr->dest, type_get_width(common_type), RDX_VREG);
+    set_op_reg(&extend_instr->dest, type_get_width(right->type), RDX_VREG);
   }
 
   /* pop right operand into r10 */
@@ -1180,7 +1161,7 @@ static void multiply_helper(ASTree *operator, ASTree * left, ASTree *right) {
 
   /* perform operation with right operand in r10 */
   Instruction *operator_instr = instr_init(opcode);
-  set_op_reg(&operator_instr->dest, type_get_width(common_type), R10_VREG);
+  set_op_reg(&operator_instr->dest, type_get_width(right->type), R10_VREG);
 
   /* if this is a compound assignment operator, store result in lvalue
    * location; otherwise, store in 3rd unspill register, which should not be
@@ -1206,9 +1187,9 @@ static void multiply_helper(ASTree *operator, ASTree * left, ASTree *right) {
 
   Instruction *store_instr = instr_init(OP_MOV);
   if (operator->tok_kind == '%' || operator->tok_kind == TOK_REMEQ)
-    set_op_reg(&store_instr->src, type_get_width(common_type), RDX_VREG);
+    set_op_reg(&store_instr->src, type_get_width(right->type), RDX_VREG);
   else
-    set_op_reg(&store_instr->src, type_get_width(common_type), RAX_VREG);
+    set_op_reg(&store_instr->src, type_get_width(right->type), RAX_VREG);
   set_op_ind(&store_instr->dest, UNSPILL_REGIONS[2], RBP_VREG);
 
   /* restore clobbered registers */
@@ -1223,7 +1204,7 @@ static void multiply_helper(ASTree *operator, ASTree * left, ASTree *right) {
   Instruction *load_instr = instr_init(OP_MOV);
   load_instr->src = store_instr->dest;
   if (lvalue_instr == NULL)
-    set_op_reg(&load_instr->dest, type_get_width(common_type), next_vreg());
+    set_op_reg(&load_instr->dest, type_get_width(right->type), next_vreg());
   else
     set_op_reg(&load_instr->dest, type_get_width(left->type), next_vreg());
   load_instr->persist_flags |= PERSIST_DEST_CLEAR;
@@ -1231,30 +1212,46 @@ static void multiply_helper(ASTree *operator, ASTree * left, ASTree *right) {
   operator->first_instr = liter_copy(left->first_instr);
   assert(operator->first_instr != NULL);
 
-  int status = liter_push_back(
-      right->last_instr, &operator->last_instr, 16, push_rax_instr,
-      push_rdx_instr, push_r10_instr, push_right_instr, spill_lvalue_instr,
-      mov_rax_instr, extend_instr, pop_right_instr, operator_instr,
-      unspill_lvalue_instr, assign_instr, store_instr, pop_r10_instr,
-      pop_rdx_instr, pop_rax_instr, load_instr);
-  assert(!status);
+  if (lvalue_instr == NULL) {
+    int status = liter_push_back(
+        right->last_instr, &operator->last_instr, 16, push_rax_instr,
+        push_rdx_instr, push_r10_instr, push_right_instr, spill_lvalue_instr,
+        mov_rax_instr, extend_instr, pop_right_instr, operator_instr,
+        unspill_lvalue_instr, assign_instr, store_instr, pop_r10_instr,
+        pop_rdx_instr, pop_rax_instr, load_instr);
+    if (status) abort();
+  } else {
+    int status = liter_push_back(
+        right->last_instr, &operator->last_instr, 18, conv_instr, left_instr,
+        push_rax_instr, push_rdx_instr, push_r10_instr, push_right_instr,
+        spill_lvalue_instr, mov_rax_instr, extend_instr, pop_right_instr,
+        operator_instr, unspill_lvalue_instr, assign_instr, store_instr,
+        pop_r10_instr, pop_rdx_instr, pop_rax_instr, load_instr);
+    if (status) abort();
+  }
   assert(operator->last_instr != NULL);
 }
 
 ASTree *translate_multiplication(ASTree *operator, ASTree * left,
                                  ASTree *right) {
+  SEMCHK(left);
+  SEMCHK(right);
+  TYPCHK(left->type, right->type);
   PFDBG0('g', "Translating binary operation");
   multiply_helper(operator, left, right);
   return astree_adopt(operator, 2, left, right);
 }
 
 ASTree *translate_binop(ASTree *operator, ASTree * left, ASTree *right) {
+  SEMCHK(left);
+  SEMCHK(right);
   PFDBG0('g', "Translating binary operation");
-  scalar_conversions(left, operator->type);
   Instruction *left_instr = liter_get(left->last_instr);
-
-  scalar_conversions(right, operator->type);
   Instruction *right_instr = liter_get(right->last_instr);
+  if (operator->tok_kind != TOK_SHR && operator->tok_kind != TOK_SHL) {
+    TYPCHK(left->type, right->type);
+    WIDCHK(left_instr, right_instr);
+  }
 
   Instruction *operator_instr =
       instr_init(opcode_from_operator(operator->tok_kind, operator->type));
@@ -1275,7 +1272,10 @@ ASTree *translate_binop(ASTree *operator, ASTree * left, ASTree *right) {
 
 ASTree *translate_conditional(ASTree *qmark, ASTree *condition,
                               ASTree *true_expr, ASTree *false_expr) {
-  scalar_conversions(condition, condition->type);
+  SEMCHK(condition);
+  SEMCHK(true_expr);
+  SEMCHK(false_expr);
+  TYPCHK(true_expr->type, false_expr->type);
   size_t current_branch = next_branch();
   Instruction *condition_instr = liter_get(condition->last_instr);
   Instruction *test_instr = instr_init(OP_TEST);
@@ -1302,7 +1302,6 @@ ASTree *translate_conditional(ASTree *qmark, ASTree *condition,
     status = liter_push_back(false_expr->last_instr, &qmark->last_instr, 1,
                              end_label);
   } else {
-    scalar_conversions(true_expr, qmark->type);
     Instruction *true_expr_instr = liter_get(true_expr->last_instr);
     Instruction *mov_true_instr = instr_init(OP_MOV);
     mov_true_instr->src = true_expr_instr->dest;
@@ -1314,10 +1313,10 @@ ASTree *translate_conditional(ASTree *qmark, ASTree *condition,
     status = liter_push_back(true_expr->last_instr, NULL, 2, mov_true_instr,
                              jmp_end_instr);
 
-    scalar_conversions(false_expr, qmark->type);
     Instruction *false_label = liter_get(false_expr->first_instr);
     false_label->label = mk_false_label(current_branch);
     Instruction *false_expr_instr = liter_get(false_expr->last_instr);
+    WIDCHK(true_expr_instr, false_expr_instr);
     Instruction *mov_false_instr = instr_init(OP_MOV);
     mov_false_instr->src = false_expr_instr->dest;
     mov_false_instr->dest = mov_true_instr->dest;
@@ -1368,49 +1367,59 @@ static void assign_aggregate(ASTree *assignment, ASTree *lvalue,
   if (status) abort();
 }
 
-static void assign_add(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
+static void assign_compound(ASTree *assignment, ASTree *lvalue,
+                            ASTree *rvalue) {
+  SEMCHK(rvalue);
+  /* no need to set persistence flags; conversion functions do that */
   Instruction *lvalue_instr = liter_get(lvalue->last_instr);
+  REGCHK(lvalue_instr);
+  Instruction *rval_conv_instr = convert_rval(lvalue_instr, assignment->type);
+  Instruction *type_conv_instr;
+  if (assignment->tok_kind == TOK_SHREQ || assignment->tok_kind == TOK_SHLEQ) {
+    Type *promoted_type =
+        type_arithmetic_conversions(assignment->type, (Type *)TYPE_INT);
+    type_conv_instr =
+        convert_scalar(rval_conv_instr, promoted_type, assignment->type);
+  } else {
+    type_conv_instr =
+        convert_scalar(rval_conv_instr, rvalue->type, assignment->type);
+  }
 
-  scalar_conversions(rvalue, lvalue->type);
   Instruction *rvalue_instr = liter_get(rvalue->last_instr);
+  REGCHK(rvalue_instr);
 
-  Instruction *assignment_instr =
-      instr_init(opcode_from_operator(assignment->tok_kind, assignment->type));
-  set_op_ind(&assignment_instr->dest, NO_DISP, lvalue_instr->dest.reg.num);
-  assignment_instr->src = rvalue_instr->dest;
-  assignment_instr->persist_flags |= PERSIST_SRC_SET;
+  /* perform operation at promoted width */
+  Instruction *operator_instr =
+      instr_init(opcode_from_operator(assignment->tok_kind, rvalue->type));
+  operator_instr->src = rvalue_instr->dest;
+  operator_instr->dest = type_conv_instr->dest;
 
-  /* load new value to register in case parent expression needs it */
+  /* save result */
+  Instruction *store_instr = instr_init(OP_MOV);
+  set_op_reg(&store_instr->src, type_get_width(assignment->type),
+             operator_instr->dest.reg.num);
+  set_op_ind(&store_instr->dest, NO_DISP, lvalue_instr->dest.reg.num);
+
+  /* dummy mov with new value */
   Instruction *dummy_instr = instr_init(OP_MOV);
-  set_op_ind(&dummy_instr->src, NO_DISP, lvalue_instr->dest.reg.num);
-  set_op_reg(&dummy_instr->dest, type_get_width(assignment->type), next_vreg());
-  dummy_instr->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
+  dummy_instr->dest = dummy_instr->src = store_instr->src;
 
   assignment->first_instr = liter_copy(lvalue->first_instr);
   if (assignment->first_instr == NULL) abort();
 
-  /* TODO(Robert): copied from translate_addition */
-  /* use two-operand IMUL, since it is more convenient in this case */
-  if (type_is_pointer(lvalue->type) && !type_is_pointer(rvalue->type)) {
-    Type *element_type = type_strip_declarator(lvalue->type);
-    Instruction *mul_instr = instr_init(OP_IMUL);
-    mul_instr->dest = rvalue_instr->dest;
-    set_op_imm(&mul_instr->src, type_get_width(element_type), IMM_UNSIGNED);
-    int status = liter_push_back(rvalue->last_instr, &assignment->last_instr, 3,
-                                 mul_instr, assignment_instr, dummy_instr);
-    if (status) abort();
-  } else {
-    int status = liter_push_back(rvalue->last_instr, &assignment->last_instr, 2,
-                                 assignment_instr, dummy_instr);
-    if (status) abort();
-  }
+  int status = liter_push_back(rvalue->last_instr, &assignment->last_instr, 5,
+                               rval_conv_instr, type_conv_instr, operator_instr,
+                               store_instr, dummy_instr);
+  if (status) abort();
 }
 
 static void assign_scalar(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
+  SEMCHK(rvalue);
+  TYPCHK(lvalue->type, rvalue->type);
   Instruction *lvalue_instr = liter_get(lvalue->last_instr);
-
-  scalar_conversions(rvalue, assignment->type);
+  REGCHK(lvalue_instr);
   Instruction *rvalue_instr = liter_get(rvalue->last_instr);
+  REGCHK(rvalue_instr);
 
   Instruction *assignment_instr =
       instr_init(opcode_from_operator(assignment->tok_kind, assignment->type));
@@ -1430,22 +1439,24 @@ static void assign_scalar(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   if (status) abort();
 }
 
-/* NOTE: callers assume this function does not return errors */
 ASTree *translate_assignment(ASTree *assignment, ASTree *lvalue,
                              ASTree *rvalue) {
+  SEMCHK(rvalue);
+  assert(lvalue->attributes & ATTR_EXPR_LVAL);
+  assert((lvalue->attributes & ATTR_MASK_CONST) == ATTR_CONST_NONE);
   PFDBG0('g', "Translating assignment");
   if (type_is_union(assignment->type) || type_is_struct(assignment->type)) {
     assign_aggregate(assignment, lvalue, rvalue);
-  } else if (assignment->tok_kind == TOK_ADDEQ ||
-             assignment->tok_kind == TOK_SUBEQ) {
-    assign_add(assignment, lvalue, rvalue);
   } else if (assignment->tok_kind == TOK_MULEQ ||
              assignment->tok_kind == TOK_DIVEQ ||
              assignment->tok_kind == TOK_REMEQ) {
     multiply_helper(assignment, lvalue, rvalue);
+  } else if (assignment->tok_kind != '=') {
+    assign_compound(assignment, lvalue, rvalue);
   } else {
     assign_scalar(assignment, lvalue, rvalue);
   }
+
   /* don't adopt; this function gets used for initialization */
   return assignment;
 }
@@ -1568,23 +1579,30 @@ static void save_call_subexprs(ASTree *call) {
 
   for (i = 0; i < astree_count(call); ++i) {
     ASTree *subexpr = astree_get(call, i);
-    /* turn lvalues into rvalues and extend all scalar arguments to be eight
-     * bytes wide to make loading and storing more convenient
-     */
-    if (type_is_scalar(subexpr->type))
-      scalar_conversions(subexpr, TYPE_UNSIGNED_LONG);
-
-    Instruction *subexpr_instr = liter_get(subexpr->last_instr);
-    assert(subexpr_instr->dest.all.mode == MODE_REGISTER);
-    assert(subexpr_instr->dest.reg.width == REG_QWORD);
     Instruction *spill_instr = instr_init(OP_MOV);
-    spill_instr->src = subexpr_instr->dest;
     set_op_ind(&spill_instr->dest,
                spill_regions[call->spill_eightbytes - (i + 1)], RBP_VREG);
     spill_instr->persist_flags |= PERSIST_SRC_SET;
-    int status = liter_push_back(subexpr->last_instr, &subexpr->last_instr, 1,
-                                 spill_instr);
-    if (status) abort();
+    Instruction *subexpr_instr = liter_get(subexpr->last_instr);
+
+    if (type_is_scalar(subexpr->type)) {
+      /* extend all scalar arguments to be eight bytes wide to make loading and
+       * storing more convenient
+       */
+      Instruction *conv_instr =
+          convert_scalar(subexpr_instr, TYPE_UNSIGNED_LONG, subexpr->type);
+      spill_instr->src = conv_instr->dest;
+      int status = liter_push_back(subexpr->last_instr, &subexpr->last_instr, 2,
+                                   conv_instr, spill_instr);
+      if (status) abort();
+    } else {
+      assert(subexpr_instr->dest.all.mode == MODE_REGISTER);
+      assert(subexpr_instr->dest.reg.width == REG_QWORD);
+      spill_instr->src = subexpr_instr->dest;
+      int status = liter_push_back(subexpr->last_instr, &subexpr->last_instr, 1,
+                                   spill_instr);
+      if (status) abort();
+    }
   }
 }
 
@@ -1690,10 +1708,11 @@ ASTree *translate_call(ASTree *call) {
 }
 
 ASTree *translate_va_start(ASTree *va_start_, ASTree *expr, ASTree *ident) {
+  SEMCHK(expr);
   va_start_->first_instr = liter_copy(expr->first_instr);
   if (va_start_->first_instr == NULL) abort();
-  scalar_conversions(expr, (Type *)TYPE_LONG);
   Instruction *expr_instr = liter_get(expr->last_instr);
+  REGCHK(expr_instr);
   if (expr_instr == NULL) abort();
   size_t va_list_vreg = expr_instr->dest.reg.num;
 
@@ -1757,6 +1776,8 @@ ASTree *translate_va_start(ASTree *va_start_, ASTree *expr, ASTree *ident) {
 }
 
 ASTree *translate_va_end(ASTree *va_end_, ASTree *expr) {
+  SEMCHK(expr);
+  REGCHK((Instruction *)liter_get(expr->last_instr));
   va_end_->first_instr = liter_copy(expr->first_instr);
   if (va_end_->first_instr == NULL) abort();
   va_end_->last_instr = liter_copy(expr->last_instr);
@@ -1770,7 +1791,9 @@ ASTree *translate_va_end(ASTree *va_end_, ASTree *expr) {
  */
 static void helper_va_arg_reg_param(ASTree *va_arg_, ASTree *expr,
                                     ASTree *type_name) {
+  SEMCHK(expr);
   Instruction *expr_instr = liter_get(expr->last_instr);
+  REGCHK(expr_instr);
   assert(expr_instr != NULL && expr_instr->dest.all.mode == MODE_REGISTER);
   size_t va_list_vreg = expr_instr->dest.reg.num;
   size_t eightbytes = type_get_eightbytes(astree_get(type_name, 1)->type);
@@ -1860,7 +1883,9 @@ static void helper_va_arg_reg_param(ASTree *va_arg_, ASTree *expr,
 
 static void helper_va_arg_stack_param(ASTree *va_arg_, ASTree *expr,
                                       ASTree *type_name) {
+  SEMCHK(expr);
   Instruction *expr_instr = liter_get(expr->last_instr);
+  REGCHK(expr_instr);
   assert(expr_instr != NULL && expr_instr->dest.all.mode == MODE_REGISTER);
   size_t va_list_vreg = expr_instr->dest.reg.num;
   size_t eightbytes = type_get_eightbytes(astree_get(type_name, 1)->type);
@@ -1971,8 +1996,9 @@ static void translate_params(ASTree *declarator) {
 
 ASTree *translate_ifelse(ASTree *ifelse, ASTree *condition, ASTree *if_body,
                          ASTree *else_body) {
-  scalar_conversions(condition, condition->type);
+  SEMCHK(condition);
   Instruction *condition_instr = liter_get(condition->last_instr);
+  REGCHK(condition_instr);
 
   ifelse->first_instr = liter_copy(condition->first_instr);
   if (ifelse->first_instr == NULL) abort();
@@ -2016,6 +2042,7 @@ ASTree *translate_ifelse(ASTree *ifelse, ASTree *condition, ASTree *if_body,
 }
 
 ASTree *translate_switch(ASTree *switch_, ASTree *condition, ASTree *body) {
+  SEMCHK(condition);
   size_t saved_break = SIZE_MAX, saved_selection = SIZE_MAX;
   if (state_get_break_id(state) != switch_->jump_id)
     saved_break = state_get_break_id(state), state_pop_break_id(state);
@@ -2033,9 +2060,9 @@ ASTree *translate_switch(ASTree *switch_, ASTree *condition, ASTree *body) {
   size_t control_vreg = state_get_control_reg(state);
   state_pop_selection_id(state);
 
-  scalar_conversions(condition, control_type);
   Instruction *cond_instr = liter_get(condition->last_instr);
   if (cond_instr == NULL) abort();
+  REGCHK(cond_instr);
   switch_->first_instr = liter_copy(condition->first_instr);
   if (switch_->first_instr == NULL) abort();
 
@@ -2079,6 +2106,7 @@ ASTree *translate_switch(ASTree *switch_, ASTree *condition, ASTree *body) {
 }
 
 ASTree *translate_while(ASTree *while_, ASTree *condition, ASTree *body) {
+  SEMCHK(condition);
   size_t saved_break = SIZE_MAX, saved_continue = SIZE_MAX;
   if (state_get_break_id(state) != while_->jump_id)
     saved_break = state_get_break_id(state), state_pop_break_id(state);
@@ -2097,8 +2125,8 @@ ASTree *translate_while(ASTree *while_, ASTree *condition, ASTree *body) {
                                 condition_label);
   if (status) abort();
 
-  scalar_conversions(condition, condition->type);
   Instruction *condition_instr = liter_get(condition->last_instr);
+  REGCHK(condition_instr);
   Instruction *test_instr = instr_init(OP_TEST);
   test_instr->src = test_instr->dest = condition_instr->dest;
   test_instr->persist_flags |= PERSIST_DEST_SET;
@@ -2127,6 +2155,10 @@ ASTree *translate_while(ASTree *while_, ASTree *condition, ASTree *body) {
 
 ASTree *translate_for(ASTree *for_, ASTree *initializer, ASTree *condition,
                       ASTree *reinitializer, ASTree *body) {
+  SEMCHK(initializer);
+  SEMCHK(condition);
+  SEMCHK(reinitializer);
+
   size_t saved_break = SIZE_MAX, saved_continue = SIZE_MAX;
   if (state_get_break_id(state) != for_->jump_id)
     saved_break = state_get_break_id(state), state_pop_break_id(state);
@@ -2158,8 +2190,8 @@ ASTree *translate_for(ASTree *for_, ASTree *initializer, ASTree *condition,
 
   /* emit loop exit jump if condition is not empty */
   if (condition->tok_kind != TOK_EMPTY) {
-    scalar_conversions(condition, condition->type);
     Instruction *condition_instr = liter_get(condition->last_instr);
+    REGCHK(condition_instr);
     Instruction *test_instr = instr_init(OP_TEST);
     test_instr->dest = test_instr->src = condition_instr->dest;
     test_instr->persist_flags |= PERSIST_DEST_SET;
@@ -2197,6 +2229,7 @@ ASTree *translate_for(ASTree *for_, ASTree *initializer, ASTree *condition,
 }
 
 ASTree *translate_do(ASTree *do_, ASTree *body, ASTree *condition) {
+  SEMCHK(condition);
   /* fix bogus jump id information created by TOK_WHILE */
   size_t saved_break = state_get_break_id(state);
   state_pop_break_id(state);
@@ -2226,8 +2259,8 @@ ASTree *translate_do(ASTree *do_, ASTree *body, ASTree *condition) {
   status = liter_push_front(condition->first_instr, NULL, 1, condition_label);
   if (status) abort();
 
-  scalar_conversions(condition, condition->type);
   Instruction *condition_instr = liter_get(condition->last_instr);
+  REGCHK(condition_instr);
   if (condition_instr == NULL) abort();
 
   Instruction *test_instr = instr_init(OP_TEST);
@@ -2285,14 +2318,16 @@ ASTree *translate_block(ASTree *block) {
 }
 
 static void return_scalar(ASTree *ret, ASTree *expr) {
+  SEMCHK(expr);
   ret->first_instr = liter_copy(expr->first_instr);
   if (ret->first_instr == NULL) abort();
   Symbol *function_symbol = state_get_function(state);
   const Type *function_type = function_symbol->type;
   /* strip function */
   Type *return_type = type_strip_declarator(function_type);
-  scalar_conversions(expr, return_type);
+  TYPCHK(expr->type, return_type);
   Instruction *expr_instr = liter_get(expr->last_instr);
+  REGCHK(expr_instr);
 
   Instruction *mov_instr = instr_init(OP_MOV);
   mov_instr->src = expr_instr->dest;
@@ -2310,9 +2345,11 @@ static void return_scalar(ASTree *ret, ASTree *expr) {
 }
 
 static void return_aggregate(ASTree *ret, ASTree *expr) {
+  SEMCHK(expr);
   ret->first_instr = liter_copy(expr->first_instr);
   if (ret->first_instr == NULL) abort();
   Instruction *expr_instr = liter_get(expr->last_instr);
+  REGCHK(expr_instr);
   size_t expr_eightbytes = type_get_eightbytes(expr->type);
 
   if (expr_eightbytes <= 2) {
@@ -2415,14 +2452,16 @@ ASTree *translate_label(ASTree *label, ASTree *ident, ASTree *stmt) {
 }
 
 ASTree *translate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
+  SEMCHK(expr);
   case_->last_instr = liter_copy(stmt->last_instr);
   if (case_->last_instr == NULL) abort();
 
   const Type *control_type = state_get_control_type(state);
   if (control_type == NULL) abort();
+  TYPCHK(expr->type, control_type);
 
-  scalar_conversions(expr, control_type);
   Instruction *expr_instr = liter_get(expr->last_instr);
+  REGCHK(expr_instr);
   assert(expr_instr != NULL && expr_instr->dest.all.mode == MODE_REGISTER);
 
   Instruction *test_instr = instr_init(OP_TEST);
@@ -2716,7 +2755,6 @@ static void translate_auto_local_init(ASTree *assignment, ASTree *declarator,
   (void)state_get_symbol(state, (char *)declarator->lexinfo,
                          strlen(declarator->lexinfo), &symbol);
   symbol->disp = assign_stack_space(symbol->type);
-  maybe_load_cexpr(initializer, NULL);
 
   Instruction *lea_instr = instr_init(OP_LEA);
   set_op_ind(&lea_instr->src, symbol->disp, RBP_VREG);
@@ -2751,10 +2789,11 @@ static ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
     return declaration;
   } else if (initializer->tok_kind != TOK_INIT_LIST &&
              initializer->tok_kind != TOK_STRINGCON &&
-             (initializer->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT) {
+             (initializer->attributes & ATTR_MASK_CONST) == ATTR_CONST_NONE) {
     translate_auto_local_init(assignment, declarator, initializer);
     return declaration;
   } else {
+    assert((initializer->attributes & ATTR_MASK_CONST) != ATTR_CONST_MAYBE);
     symbol->disp = assign_stack_space(symbol->type);
 
     ListIter *temp = llist_iter_last(instructions);
