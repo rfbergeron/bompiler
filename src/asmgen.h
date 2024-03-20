@@ -33,6 +33,7 @@ ASTree *translate_sizeof(ASTree *sizeof_, ASTree *operand);
 ASTree *translate_addition(ASTree *operator, ASTree * left, ASTree *right);
 ASTree *translate_multiplication(ASTree *operator, ASTree * left,
                                  ASTree *right);
+ASTree *translate_shift(ASTree *operator, ASTree * left, ASTree *right);
 ASTree *translate_binop(ASTree *operator, ASTree * left, ASTree *right);
 ASTree *translate_conditional(ASTree *qmark, ASTree *condition,
                               ASTree *true_expr, ASTree *false_expr);

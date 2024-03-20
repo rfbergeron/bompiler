@@ -509,7 +509,7 @@ ASTree *evaluate_shift(ASTree *shift, ASTree *left, ASTree *right) {
   } else {
     right = tchk_cexpr_conv(right, NULL);
     left = tchk_cexpr_conv(left, right->first_instr);
-    return translate_binop(shift, left, right);
+    return translate_shift(shift, left, right);
   }
 }
 
