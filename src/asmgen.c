@@ -1105,6 +1105,7 @@ static void multiply_helper(ASTree *operator, ASTree * left, ASTree *right) {
     left_instr = convert_scalar(conv_instr, right->type, operator->type);
   } else {
     lvalue_instr = conv_instr = NULL;
+    /* TODO(Robert): remove this line */
     right->type = operator->type;
     left_instr = liter_get(left->last_instr);
   }
@@ -1239,6 +1240,120 @@ ASTree *translate_multiplication(ASTree *operator, ASTree * left,
   TYPCHK(left->type, right->type);
   PFDBG0('g', "Translating binary operation");
   multiply_helper(operator, left, right);
+  return astree_adopt(operator, 2, left, right);
+}
+
+static void shift_helper(ASTree *operator, ASTree * left, ASTree *right) {
+  Instruction *lvalue_instr, *conv_instr, *left_instr;
+  Type *promoted_type;
+  if (operator->tok_kind == TOK_SHLEQ || operator->tok_kind == TOK_SHREQ) {
+    lvalue_instr = liter_get(left->last_instr);
+    assert(lvalue_instr->dest.all.mode == MODE_REGISTER);
+    assert(lvalue_instr->dest.reg.width == REG_QWORD);
+    conv_instr = convert_rval(lvalue_instr, operator->type);
+    promoted_type =
+        type_arithmetic_conversions(operator->type, (Type *)TYPE_INT);
+    left_instr = convert_scalar(conv_instr, promoted_type, operator->type);
+  } else {
+    promoted_type = operator->type;
+    lvalue_instr = conv_instr = NULL;
+    left_instr = liter_get(left->last_instr);
+  }
+
+  PFDBG0('g', "Translating shift operation");
+  Instruction *right_instr = liter_get(right->last_instr);
+  REGCHK(right_instr);
+
+  /* save registers whose values may be clobbered */
+  Instruction *push_rcx_instr = instr_init(OP_PUSH);
+  set_op_reg(&push_rcx_instr->dest, REG_QWORD, RCX_VREG);
+  Instruction *push_r10_instr = instr_init(OP_PUSH);
+  set_op_reg(&push_r10_instr->dest, REG_QWORD, R10_VREG);
+  Instruction *push_right_instr = instr_init(OP_PUSH);
+  set_op_reg(&push_right_instr->dest, REG_QWORD, right_instr->dest.reg.num);
+  push_right_instr->persist_flags |= PERSIST_DEST_SET;
+
+  /* spill lvalue location to 3rd unspill region, if applicable */
+  Instruction *spill_lvalue_instr = NULL;
+  if (lvalue_instr != NULL) {
+    spill_lvalue_instr = instr_init(OP_MOV);
+    spill_lvalue_instr->src = lvalue_instr->dest;
+    set_op_ind(&spill_lvalue_instr->dest, UNSPILL_REGIONS[2], RBP_VREG);
+  }
+
+  /* put left operand in r10 */
+  Instruction *mov_left_instr = instr_init(OP_MOV);
+  mov_left_instr->src = left_instr->dest;
+  set_op_reg(&mov_left_instr->dest, left_instr->dest.reg.width, R10_VREG);
+  mov_left_instr->persist_flags |= PERSIST_SRC_SET;
+
+  /* pop right operand into rcx */
+  Instruction *pop_right_instr = instr_init(OP_POP);
+  pop_right_instr->dest = push_rcx_instr->dest;
+
+  /* shifts can only use `cl` as a register source operand */
+  Instruction *operator_instr =
+      instr_init(opcode_from_operator(operator->tok_kind, promoted_type));
+  operator_instr->dest = mov_left_instr->dest;
+  set_op_reg(&operator_instr->src, REG_BYTE, RCX_VREG);
+
+  /* if this is a compound assignment operator, store result in lvalue
+   * location; otherwise, store in 3rd unspill register, which should not be
+   * used by any subsequent instructions. if it is a compound assignment
+   * operator, we also need to unspill the register containing the lvalue
+   * location; we can use rcx since we are done with the right operand.
+   */
+  Instruction *unspill_lvalue_instr = NULL, *assign_instr = NULL;
+  if (lvalue_instr != NULL) {
+    unspill_lvalue_instr = instr_init(OP_MOV);
+    set_op_ind(&unspill_lvalue_instr->src, UNSPILL_REGIONS[2], RBP_VREG);
+    set_op_reg(&unspill_lvalue_instr->dest, REG_QWORD, RCX_VREG);
+
+    assign_instr = instr_init(OP_MOV);
+    set_op_reg(&assign_instr->src, type_get_width(left->type), R10_VREG);
+    set_op_ind(&assign_instr->dest, NO_DISP, RCX_VREG);
+  }
+
+  /* save result to 3rd unspill region, which should not be used */
+  Instruction *store_instr = instr_init(OP_MOV);
+  store_instr->src = operator_instr->dest;
+  set_op_ind(&store_instr->dest, UNSPILL_REGIONS[2], RBP_VREG);
+
+  /* restore clobbered registers */
+  Instruction *pop_r10_instr = instr_init(OP_POP);
+  pop_r10_instr->dest = push_r10_instr->dest;
+  Instruction *pop_rcx_instr = instr_init(OP_POP);
+  pop_rcx_instr->dest = push_rcx_instr->dest;
+
+  /* load result into a fresh vreg */
+  Instruction *load_instr = instr_init(OP_MOV);
+  load_instr->src = store_instr->dest;
+  set_op_reg(&load_instr->dest, store_instr->src.reg.width, next_vreg());
+  load_instr->persist_flags |= PERSIST_DEST_CLEAR;
+
+  operator->first_instr = liter_copy(left->first_instr);
+  if (operator->first_instr == NULL) abort();
+
+  if (lvalue_instr == NULL) {
+    int status = liter_push_back(
+        right->last_instr, &operator->last_instr, 10, push_rcx_instr,
+        push_r10_instr, push_right_instr, mov_left_instr, pop_right_instr,
+        operator_instr, store_instr, pop_r10_instr, pop_rcx_instr, load_instr);
+    if (status) abort();
+  } else {
+    int status = liter_push_back(
+        right->last_instr, &operator->last_instr, 15, conv_instr, left_instr,
+        push_rcx_instr, push_r10_instr, push_right_instr, spill_lvalue_instr,
+        mov_left_instr, pop_right_instr, operator_instr, unspill_lvalue_instr,
+        assign_instr, store_instr, pop_r10_instr, pop_rcx_instr, load_instr);
+    if (status) abort();
+  }
+}
+
+ASTree *translate_shift(ASTree *operator, ASTree * left, ASTree *right) {
+  SEMCHK(right);
+  SEMCHK(left);
+  shift_helper(operator, left, right);
   return astree_adopt(operator, 2, left, right);
 }
 
@@ -1451,6 +1566,9 @@ ASTree *translate_assignment(ASTree *assignment, ASTree *lvalue,
              assignment->tok_kind == TOK_DIVEQ ||
              assignment->tok_kind == TOK_REMEQ) {
     multiply_helper(assignment, lvalue, rvalue);
+  } else if (assignment->tok_kind == TOK_SHLEQ ||
+             assignment->tok_kind == TOK_SHREQ) {
+    shift_helper(assignment, lvalue, rvalue);
   } else if (assignment->tok_kind != '=') {
     assign_compound(assignment, lvalue, rvalue);
   } else {

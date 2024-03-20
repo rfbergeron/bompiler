@@ -182,16 +182,22 @@ static int opcode_to_str(Instruction *instr, char *str) {
     case OPTYPE_CONTEXTUAL:
       /* fallthrough */
     case OPTYPE_BINARY:
-      if (instr->opcode == OP_MOVS || instr->opcode == OP_MOVZ) {
+      if (instr->opcode == OP_SHL || instr->opcode == OP_SHR ||
+          instr->opcode == OP_SAL || instr->opcode == OP_SAR) {
+        assert(instr->src.all.mode == MODE_REGISTER &&
+               instr->dest.all.mode == MODE_REGISTER);
+        assert(instr->src.reg.num == RCX_VREG &&
+               instr->src.reg.width == REG_BYTE);
+        return sprintf(str, "%s%c", OPCODES[instr->opcode],
+                       WIDTH_TO_CHAR[instr->dest.reg.width]);
+      } else if (instr->opcode == OP_MOVS || instr->opcode == OP_MOVZ) {
         assert(instr->src.all.mode == MODE_REGISTER &&
                instr->dest.all.mode == MODE_REGISTER);
         return sprintf(str, "%s%c%c", OPCODES[instr->opcode],
                        WIDTH_TO_CHAR[instr->src.reg.width],
                        WIDTH_TO_CHAR[instr->dest.reg.width]);
       } else if (instr->src.all.mode == MODE_REGISTER) {
-        assert(instr->opcode == OP_SHL || instr->opcode == OP_SHR ||
-               instr->opcode == OP_SAL || instr->opcode == OP_SAR ||
-               instr->opcode == OP_MOV ||
+        assert(instr->opcode == OP_MOV ||
                instr->dest.all.mode != MODE_REGISTER ||
                instr->src.reg.width == instr->dest.reg.width);
         return sprintf(str, "%s%c", OPCODES[instr->opcode],
