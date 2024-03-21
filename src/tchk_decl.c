@@ -415,23 +415,26 @@ static void replace_param_dirdecl(ASTree *declarator) {
 ASTree *validate_param(ASTree *param_list, ASTree *declaration,
                        ASTree *declarator) {
   declarator = validate_declaration(declaration, declarator);
-
-  if (type_is_function(declarator->type) || type_is_array(declarator->type)) {
+  /* we cannot replace dirdecls until after `validate_declaration`, since that
+   * function may introduce a function or array type through a typedef
+   */
+  if ((type_is_function(declarator->type) || type_is_array(declarator->type)))
     replace_param_dirdecl(declarator);
-    if (declarator->tok_kind != TOK_TYPE_NAME) {
-      Symbol *param_symbol;
-      int is_param =
-          state_get_symbol(state, declarator->lexinfo,
-                           strlen(declarator->lexinfo), &param_symbol);
+
+  if (declarator->tok_kind != TOK_TYPE_NAME) {
+    Symbol *param_symbol;
+    int is_param = state_get_symbol(state, declarator->lexinfo,
+                                    strlen(declarator->lexinfo), &param_symbol);
+    assert(param_symbol != NULL);
+    assert(is_param);
+    assert(param_symbol->linkage == LINK_NONE);
+    assert(param_symbol->storage == STORE_AUTO);
+    /* assign in case dirdecl was replaced */
+    param_symbol->type = declarator->type;
+    param_symbol->info = SYM_DEFINED;
 #ifdef NDEBUG
-      (void)is_param;
+    (void)is_param;
 #endif
-      assert(param_symbol != NULL);
-      assert(param_symbol->linkage == LINK_NONE);
-      assert(param_symbol->storage == STORE_AUTO);
-      assert(is_param);
-      param_symbol->type = declarator->type;
-    }
   }
 
   return astree_adopt(
