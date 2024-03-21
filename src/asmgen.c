@@ -2054,7 +2054,8 @@ ASTree *translate_va_arg(ASTree *va_arg_, ASTree *expr, ASTree *type_name) {
 }
 
 static void translate_params(ASTree *declarator) {
-  ASTree *fn_dirdecl = astree_get(declarator, astree_count(declarator) - 1);
+  ASTree *fn_dirdecl = astree_get(declarator, 0);
+  assert(fn_dirdecl->tok_kind == TOK_PARAM_LIST);
   const Type *fn_type = declarator->type;
   Type *ret_type = type_strip_declarator(fn_type);
   /* account for hidden out param */
@@ -2068,33 +2069,29 @@ static void translate_params(ASTree *declarator) {
   }
   /* offset to account for preserved regs and return address */
   param_stack_disp = PROLOGUE_EIGHTBYTES * X64_SIZEOF_LONG;
-  size_t i, param_count = astree_count(fn_dirdecl);
-  if (param_count > 0 && type_is_variadic_function(fn_type)) --param_count;
-  if (param_count != 0 && astree_get(fn_dirdecl, 0)->tok_kind != TOK_VOID) {
-    for (i = 0; i < param_count; ++i) {
-      ASTree *param = astree_get(fn_dirdecl, i);
-      ASTree *param_decl = astree_get(param, 1);
-      Symbol *param_symbol = NULL;
-      int in_current_scope =
-          state_get_symbol(state, param_decl->lexinfo,
-                           strlen(param_decl->lexinfo), &param_symbol);
+  size_t i, param_count = type_param_count(fn_type);
+  for (i = 0; i < param_count; ++i) {
+    ASTree *param = astree_get(fn_dirdecl, i);
+    ASTree *param_decl = astree_get(param, 1);
+    Symbol *param_symbol = NULL;
+    int in_current_scope = state_get_symbol(
+        state, param_decl->lexinfo, strlen(param_decl->lexinfo), &param_symbol);
 #ifdef NDEBUG
-      (void)in_current_scope;
+    (void)in_current_scope;
 #endif
-      assert(in_current_scope && param_symbol);
-      size_t param_symbol_eightbytes = type_get_eightbytes(param_symbol->type);
-      if (param_symbol_eightbytes <= 2 &&
-          param_reg_index + param_symbol_eightbytes <= PARAM_REG_COUNT) {
-        param_symbol->disp = assign_stack_space(param_symbol->type);
-        ListIter *temp = llist_iter_last(instructions);
-        bulk_rtom(RBP_VREG, param_symbol->disp, PARAM_REGS + param_reg_index,
-                  param_symbol->type, temp);
-        param_reg_index += param_symbol_eightbytes;
-        free(temp);
-      } else {
-        param_symbol->disp = param_stack_disp;
-        param_stack_disp += param_symbol_eightbytes * X64_SIZEOF_LONG;
-      }
+    assert(in_current_scope && param_symbol);
+    size_t param_symbol_eightbytes = type_get_eightbytes(param_symbol->type);
+    if (param_symbol_eightbytes <= 2 &&
+        param_reg_index + param_symbol_eightbytes <= PARAM_REG_COUNT) {
+      param_symbol->disp = assign_stack_space(param_symbol->type);
+      ListIter *temp = llist_iter_last(instructions);
+      bulk_rtom(RBP_VREG, param_symbol->disp, PARAM_REGS + param_reg_index,
+                param_symbol->type, temp);
+      param_reg_index += param_symbol_eightbytes;
+      free(temp);
+    } else {
+      param_symbol->disp = param_stack_disp;
+      param_stack_disp += param_symbol_eightbytes * X64_SIZEOF_LONG;
     }
   }
 
