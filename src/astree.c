@@ -87,7 +87,6 @@ ASTree *astree_init(int tok_kind, const Location location, const char *info) {
   tree->symbol_table = NULL;
   tree->constant.integral.signed_value = 0L;
   tree->constant.label = NULL;
-  tree->constant.symbol = NULL;
   return tree;
 }
 
@@ -121,6 +120,8 @@ void astree_destroy(ASTree *tree) {
       tree->type->pointer.next = NULL;
       /* fallthrough */
     case TOK_TYPE_NAME:
+      /* fallthrough */
+    case TOK_STRINGCON:
       type_destroy(tree->type);
       break;
   }

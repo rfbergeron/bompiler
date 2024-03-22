@@ -32,7 +32,6 @@ typedef struct astree {
       unsigned long unsigned_value;
     } integral;
     const char *label;
-    Symbol *symbol;
   } constant;
   Location loc; /* source location */
   size_t jump_id;

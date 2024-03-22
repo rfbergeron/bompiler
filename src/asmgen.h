@@ -7,7 +7,7 @@
 #include "lyutils.h"
 
 const char *mk_static_label(const char *name, size_t unique_id);
-size_t asmgen_literal_label(const char *literal, const char **out);
+const char *asmgen_literal_label(const char *literal);
 void bulk_mzero(size_t dest_memreg, ptrdiff_t dest_disp, size_t skip_bytes,
                 const Type *type, ListIter *where);
 void static_zero_pad(size_t count, ListIter *where);
