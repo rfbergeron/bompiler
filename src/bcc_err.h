@@ -20,6 +20,7 @@ int semerr_incompatible_linkage(const ASTree *declarator,
                                 const Symbol *old_symbol,
                                 const Symbol *new_symbol);
 int semerr_redefine_symbol(const ASTree *declarator, const Symbol *symbol);
+int semerr_define_extern(const ASTree *declarator);
 int semerr_invalid_arr_size(const ASTree *array, const ASTree *expr);
 int semerr_expected_ident(const ASTree *function, const ASTree *param);
 int semerr_label_not_found(const ASTree *label);
