@@ -28,35 +28,11 @@ ASTree *validate_charcon(ASTree *charcon) {
 }
 
 ASTree *validate_stringcon(ASTree *stringcon) {
-  const char *stringcon_label;
-  /* this function will emit the necessary directives for the literal */
-  size_t static_id = asmgen_literal_label(stringcon->lexinfo, &stringcon_label);
-
-  /* create symbol for string literal; it is more convenient that way */
-  /* insert string literal into the symbol table if it's not already there */
-  Symbol *symbol = NULL;
-  (void)state_get_symbol(state, stringcon_label, strlen(stringcon_label),
-                         &symbol);
-  if (symbol == NULL) {
-    symbol = symbol_init(&stringcon->loc);
-    symbol->disp = 0;
-    symbol->linkage = LINK_INT;
-    symbol->storage = STORE_STAT;
-    symbol->info = SYM_DEFINED;
-    symbol->static_id = static_id;
-
-    /* subtract 2 for quotes, add one for terminating nul */
-    symbol->type = type_init_array(strlen(stringcon->lexinfo) - 2 + 1, 0);
-
-    Type *char_type =
-        type_init_base(SPEC_FLAG_CHAR | QUAL_FLAG_CONST | STOR_FLAG_STATIC);
-
-    (void)type_append(symbol->type, char_type, 0);
-    state_insert_symbol(state, stringcon_label, strlen(stringcon_label),
-                        symbol);
-  }
-
-  stringcon->type = symbol->type;
+  /* subtract 2 for quotes, add one for terminating nul */
+  Type *arr_type = type_init_array(strlen(stringcon->lexinfo) - 2 + 1, 0);
+  Type *char_type = type_init_base(SPEC_FLAG_CHAR);
+  (void)type_append(arr_type, char_type, 0);
+  stringcon->type = arr_type;
   return evaluate_stringcon(stringcon);
 }
 

@@ -425,12 +425,11 @@ static Opcode opcode_from_operator(int tok_kind, const Type *type) {
   }
 }
 
-size_t asmgen_literal_label(const char *literal, const char **out) {
+const char *asmgen_literal_label(const char *literal) {
   /* TODO(Robert): bad time complexity */
   size_t i;
   for (i = 0; i < literals_size; ++i)
-    if (strcmp(literals[i].literal, literal) == 0)
-      return *out = literals[i].label, i;
+    if (strcmp(literals[i].literal, literal) == 0) return literals[i].label;
 
   if (literals_size >= literals_cap)
     literals = realloc(literals, sizeof(*literals) * (literals_cap *= 2));
@@ -447,8 +446,7 @@ size_t asmgen_literal_label(const char *literal, const char **out) {
   if (status) abort();
 
   literals[literals_size].literal = literal;
-  literals[literals_size].label = label_instr->label;
-  return *out = label_instr->label, literals_size++;
+  return literals[literals_size++].label = label_instr->label;
 }
 
 static ptrdiff_t assign_stack_space(const Type *type) {

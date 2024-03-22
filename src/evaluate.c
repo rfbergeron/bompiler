@@ -330,15 +330,12 @@ ASTree *evaluate_charcon(ASTree *charcon) {
 }
 
 ASTree *evaluate_stringcon(ASTree *stringcon) {
-  const char *stringcon_label;
-  (void)asmgen_literal_label(stringcon->lexinfo, &stringcon_label);
+  /* this function will emit the necessary directives for the literal */
+  const char *stringcon_label = asmgen_literal_label(stringcon->lexinfo);
   assert(stringcon_label != NULL);
   stringcon->attributes |= ATTR_CONST_INIT;
   stringcon->constant.label = stringcon_label;
   stringcon->constant.integral.signed_value = 0;
-  (void)state_get_symbol(state, stringcon_label, strlen(stringcon_label),
-                         &stringcon->constant.symbol);
-  assert(stringcon->constant.symbol != NULL);
   return stringcon;
 }
 
@@ -349,7 +346,6 @@ ASTree *evaluate_ident(ASTree *ident) {
   (void)state_get_symbol(state, id_str, id_str_len, &symbol);
   if (symbol->storage == STORE_EXT || symbol->storage == STORE_STAT) {
     ident->attributes |= ATTR_CONST_MAYBE;
-    ident->constant.symbol = symbol;
     ident->constant.integral.signed_value = 0;
     if (symbol->linkage == LINK_NONE)
       ident->constant.label =
@@ -473,7 +469,6 @@ ASTree *evaluate_subtraction(ASTree *subtraction, ASTree *left, ASTree *right) {
                                    right->attributes & ATTR_MASK_CONST);
     if (left->constant.label != right->constant.label) {
       subtraction->constant.label = left->constant.label;
-      subtraction->constant.symbol = left->constant.symbol;
     }
     if (type_is_unsigned(subtraction->type)) {
       BINARY_EVAL(-, subtraction->constant.integral.unsigned_value,
@@ -698,12 +693,6 @@ ASTree *evaluate_conditional(ASTree *qmark, ASTree *condition,
   return astree_adopt(qmark, 3, condition, true_expr, false_expr);
 }
 
-/* TODO(Robert): determine if `constant.symbol` should actually be
- * propogated by this function. currently, we do it because the register
- * allocator expects a symbol to be there for pic mode operands. this may
- * not even be necessary at all since pic mode operands use no registers
- * except for the instruction pointer, whose liveness we don't care about
- */
 ASTree *evaluate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
   if ((pointer->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT ||
       (index->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT ||
@@ -733,11 +722,6 @@ ASTree *evaluate_addrof(ASTree *addrof, ASTree *operand) {
   }
 }
 
-/* TODO(Robert): determine if `constant.symbol` should be set to the
- * symbol of the member being referenced. also, in the case of a constant
- * address being used between multiple functions, find a way to clear the
- * liveness info for all symbols before determining liveness.
- */
 ASTree *evaluate_reference(ASTree *reference, ASTree *struct_, ASTree *member) {
   if ((struct_->attributes & ATTR_MASK_CONST) < ATTR_CONST_MAYBE) {
     struct_ = tchk_cexpr_conv(struct_, NULL);
@@ -749,7 +733,6 @@ ASTree *evaluate_reference(ASTree *reference, ASTree *struct_, ASTree *member) {
 
     Symbol *symbol = type_member_name(tag_type, member->lexinfo);
     assert(symbol);
-    reference->constant.symbol = symbol;
     reference->constant.integral.signed_value =
         struct_->constant.integral.signed_value + symbol->disp;
     reference->constant.label = struct_->constant.label;
