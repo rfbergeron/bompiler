@@ -371,6 +371,8 @@ static ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
       exists->storage = symbol->storage;
       exists->info = SYM_NONE;
     }
+    if (exists->storage == STORE_EXT && symbol->storage == STORE_STAT)
+      exists->storage = STORE_STAT;
     symbol_destroy(symbol);
     declarator->type = exists->type;
     return declarator;
@@ -533,11 +535,12 @@ ASTree *define_dirdecl(ASTree *declarator, ASTree *dirdecl) {
 
 ASTree *define_symbol(ASTree *decl_list, ASTree *equal_sign,
                       ASTree *initializer) {
-  if (initializer->tok_kind != TOK_STRINGCON &&
-      initializer->tok_kind != TOK_INIT_LIST)
-    initializer = tchk_ptr_conv(initializer, 1);
   ASTree *declarator = astree_remove(decl_list, astree_count(decl_list) - 1);
   assert(declarator->tok_kind == TOK_IDENT);
+  if (initializer->tok_kind != TOK_INIT_LIST &&
+      (!type_is_char_array(declarator->type) ||
+       initializer->tok_kind != TOK_STRINGCON))
+    initializer = tchk_ptr_conv(initializer, 1);
 
   Symbol *symbol;
   (void)state_get_symbol(state, declarator->lexinfo,
@@ -548,17 +551,39 @@ ASTree *define_symbol(ASTree *decl_list, ASTree *equal_sign,
     (void)semerr_redefine_symbol(declarator, symbol);
     return astree_adopt(decl_list, 1,
                         astree_adopt(equal_sign, 2, declarator, initializer));
+  } else if (symbol->storage == STORE_EXT) {
+    (void)semerr_define_extern(declarator);
+    return astree_adopt(decl_list, 1,
+                        astree_adopt(equal_sign, 2, declarator, initializer));
+  } else if (initializer->tok_kind == TOK_INIT_LIST ||
+             initializer->tok_kind == TOK_STRINGCON) {
+    /*
+     * nothing to be done; let `init.c` type check
+     */
+  } else if (symbol->storage == STORE_STAT &&
+             (initializer->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT) {
+    (void)semerr_expected_init(initializer);
+    return astree_adopt(decl_list, 1,
+                        astree_adopt(equal_sign, 2, declarator, initializer));
+  } else if (!types_assignable(declarator->type, initializer->type,
+                               astree_is_const_zero(initializer))) {
+    (void)semerr_incompatible_types(equal_sign, declarator->type,
+                                    initializer->type);
+    return astree_adopt(decl_list, 1,
+                        astree_adopt(equal_sign, 2, declarator, initializer));
+  } else if (symbol->storage == STORE_AUTO) {
+    initializer = tchk_cexpr_conv(
+        tchk_scal_conv(tchk_rval_conv(initializer, NULL), declarator->type),
+        NULL);
+  } else {
+    initializer = tchk_scal_conv(initializer, declarator->type);
   }
+
   assert(symbol->info == SYM_NONE);
   symbol->info = SYM_DEFINED;
   equal_sign->type = declarator->type;
-  if (symbol->storage != STORE_STAT && initializer->tok_kind != TOK_INIT_LIST &&
-      state_peek_table(state)->kind != TABLE_TRANS_UNIT)
-    initializer = tchk_cexpr_conv(
-        tchk_scal_conv(tchk_rval_conv(initializer, NULL), equal_sign->type),
-        NULL);
   /* code is emitted by `validate_fnbody_content`, `validate_topdecl`, or
-   * `validate_block_content` and type checking is performed in `init.c`
+   * `validate_block_content`
    */
   return astree_adopt(decl_list, 1,
                       astree_adopt(equal_sign, 2, declarator, initializer));

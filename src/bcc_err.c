@@ -151,6 +151,15 @@ int semerr_redefine_symbol(const ASTree *declarator, const Symbol *symbol) {
       declarator->loc.offset, declarator->lexinfo, old_sym_buffer);
 }
 
+int semerr_define_extern(const ASTree *declarator) {
+  semantic_error = 1;
+  return fprintf(stderr,
+                 "%s:%lu.%lu: attempt to initialize symbol `%s`, which has "
+                 "external storage\n",
+                 lexer_filename(declarator->loc.filenr), declarator->loc.linenr,
+                 declarator->loc.offset, declarator->lexinfo);
+}
+
 int semerr_invalid_arr_size(const ASTree *array, const ASTree *expr) {
   semantic_error = 1;
   int chars_written;
