@@ -245,6 +245,10 @@ int astree_to_string(const ASTree *tree, char *buffer) {
                      tree->lexinfo, locstr, typestr, attrstr,
                      tree->constant.integral.unsigned_value);
     }
+  } else if (tree->tok_kind == TOK_CALL) {
+    return sprintf(buffer, "%s \"%s\" {%s} {%s} {%s} {SPILL: %lu}", tname,
+                   tree->lexinfo, locstr, typestr, attrstr,
+                   tree->spill_eightbytes * 8);
   } else {
     return sprintf(buffer, "%s \"%s\" {%s} {%s} {%s}", tname, tree->lexinfo,
                    locstr, typestr, attrstr);

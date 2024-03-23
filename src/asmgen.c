@@ -3103,6 +3103,7 @@ ASTree *begin_translate_fn(ASTree *declaration, ASTree *declarator,
   PFDBG0('g', "Translating function prologue");
   ++fn_count;
   window_size = INIT_WINDOW_SIZE;
+  spill_regions = realloc(spill_regions, (spill_regions_count = 0));
   Instruction *text_instr = instr_init(OP_TEXT);
   int status = llist_push_back(instructions, text_instr);
   if (status) abort();
