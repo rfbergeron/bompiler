@@ -102,7 +102,7 @@ int symbol_print(const Symbol *symbol, char *buffer) {
   const char *link_str = LINKAGE_STRINGS[symbol->linkage];
   const char *stor_str = STORAGE_STRINGS[symbol->storage];
 
-  if (symbol->disp < 0) {
+  if (symbol->storage == STORE_AUTO) {
     return sprintf(buffer,
                    "{%s} {%s} {WIDTH: %lu, ALIGN: %lu} {LINK: %s, STORE: %s} "
                    "{INFO: %s} {DISPLACEMENT: %li}",

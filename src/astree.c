@@ -318,11 +318,12 @@ static int print_sym_child_helper(ASTree *tree, FILE *out, int depth) {
     case TOK_BLOCK:
       block = tree;
       break;
+    case TOK_FOR:
+      block = astree_get(tree, 3);
+      break;
     case TOK_SWITCH:
       /* fallthrough */
     case TOK_WHILE:
-      /* fallthrough */
-    case TOK_FOR:
       /* fallthrough */
     case TOK_IF:
       /* fallthrough */
@@ -356,6 +357,9 @@ static int print_sym_child_helper(ASTree *tree, FILE *out, int depth) {
         tree->lexinfo, locstr, table_type_to_str(block->symbol_table->kind));
     if (characters_printed < 0) return characters_printed;
     int status = astree_print_symbols(block, out, depth + 1);
+    if (tree->tok_kind == TOK_IF &&
+        astree_get(tree, 2)->tok_kind == TOK_BLOCK && status >= 0)
+      status = astree_print_symbols(astree_get(tree, 2), out, depth + 1);
     return status < 0 ? status : 0;
   } else {
     return 0;
