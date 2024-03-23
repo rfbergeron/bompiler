@@ -1911,16 +1911,16 @@ static void helper_va_arg_reg_param(ASTree *va_arg_, ASTree *expr,
   Instruction *expr_instr = liter_get(expr->last_instr);
   REGCHK(expr_instr);
   assert(expr_instr != NULL && expr_instr->dest.all.mode == MODE_REGISTER);
+  const Type *arg_type = astree_get(type_name, 1)->type;
   size_t va_list_vreg = expr_instr->dest.reg.num;
-  size_t eightbytes = type_get_eightbytes(astree_get(type_name, 1)->type);
+  size_t eightbytes = type_get_eightbytes(arg_type);
   size_t result_vreg = next_vreg(), current_branch = next_branch();
 
   /* load gp offset member */
   Instruction *load_gp_offset_instr = instr_init(OP_MOV);
   set_op_ind(&load_gp_offset_instr->src, GP_OFFSET_MEMBER_DISP, va_list_vreg);
-  set_op_reg(&load_gp_offset_instr->dest, REG_DWORD, result_vreg);
-  /* first use of result_vreg; it no longer needs to persist */
-  load_gp_offset_instr->persist_flags = PERSIST_DEST_CLEAR;
+  set_op_reg(&load_gp_offset_instr->dest, REG_DWORD, next_vreg());
+  load_gp_offset_instr->persist_flags |= PERSIST_DEST_CLEAR;
 
   /* jump if arg cannot fit into the save area */
   Instruction *cmp_gp_offset_instr = instr_init(OP_CMP);
@@ -1941,7 +1941,22 @@ static void helper_va_arg_reg_param(ASTree *va_arg_, ASTree *expr,
   set_op_ind(&add_save_area_instr->src, REG_SAVE_AREA_MEMBER_DISP,
              va_list_vreg);
   /* dword mov should zero hi 32 bits, so a qword add should behave here */
-  set_op_reg(&add_save_area_instr->dest, REG_QWORD, result_vreg);
+  set_op_reg(&add_save_area_instr->dest, REG_QWORD,
+             load_gp_offset_instr->dest.reg.num);
+  add_save_area_instr->persist_flags |= PERSIST_DEST_SET;
+
+  Instruction *load_reg_save_instr = instr_init(OP_MOV);
+  set_op_reg(&load_reg_save_instr->dest, REG_QWORD, result_vreg);
+  /* first use of result_vreg; clear persistence */
+  load_reg_save_instr->persist_flags |= PERSIST_DEST_CLEAR;
+  if (type_is_scalar(arg_type)) {
+    /* load value from register save area into result vreg */
+    set_op_ind(&load_reg_save_instr->src, NO_DISP,
+               add_save_area_instr->dest.reg.num);
+  } else {
+    /* argument is a struct/union; return its location */
+    load_reg_save_instr->src = add_save_area_instr->dest;
+  }
 
   /* TODO(Robert): give all operands/instructions a width field; currently the
    * compiler cannot emit instructions with one immediate mode operand and one
@@ -1966,8 +1981,21 @@ static void helper_va_arg_reg_param(ASTree *va_arg_, ASTree *expr,
   Instruction *load_overflow_arg_area_instr = instr_init(OP_MOV);
   set_op_ind(&load_overflow_arg_area_instr->src, OVERFLOW_ARG_AREA_MEMBER_DISP,
              va_list_vreg);
-  set_op_reg(&load_overflow_arg_area_instr->dest, REG_QWORD, result_vreg);
+  set_op_reg(&load_overflow_arg_area_instr->dest, REG_QWORD, next_vreg());
   load_overflow_arg_area_instr->label = mk_true_label(current_branch);
+
+  Instruction *load_stack_save_instr = instr_init(OP_MOV);
+  if (type_is_scalar(arg_type)) {
+    /* load value from stack save area into result vreg */
+    set_op_reg(&load_stack_save_instr->dest, type_get_width(arg_type),
+               result_vreg);
+    set_op_ind(&load_stack_save_instr->src, NO_DISP,
+               load_overflow_arg_area_instr->dest.reg.num);
+  } else {
+    /* argument is a struct/union; return its location */
+    set_op_reg(&load_stack_save_instr->dest, REG_QWORD, result_vreg);
+    load_stack_save_instr->src = load_overflow_arg_area_instr->dest;
+  }
 
   /* update stack param save pointer */
   Instruction *load_disp_instr = instr_init(OP_MOV);
@@ -1983,17 +2011,16 @@ static void helper_va_arg_reg_param(ASTree *va_arg_, ASTree *expr,
 
   /* dummy mov so last instruction holds result */
   Instruction *dummy_instr = instr_init(OP_MOV);
-  set_op_reg(&dummy_instr->src, REG_QWORD, result_vreg);
-  dummy_instr->dest = dummy_instr->src;
+  dummy_instr->src = dummy_instr->dest = load_stack_save_instr->dest;
   dummy_instr->label = mk_false_label(current_branch);
   dummy_instr->persist_flags = PERSIST_DEST_SET;
 
-  int status = liter_push_back(expr->last_instr, &va_arg_->last_instr, 11,
-                               load_gp_offset_instr, cmp_gp_offset_instr,
-                               jmp_ge_instr, add_save_area_instr,
-                               load_eightbyte_instr, update_offset_instr,
-                               jmp_false_instr, load_overflow_arg_area_instr,
-                               load_disp_instr, add_disp_instr, dummy_instr);
+  int status = liter_push_back(
+      expr->last_instr, &va_arg_->last_instr, 13, load_gp_offset_instr,
+      cmp_gp_offset_instr, jmp_ge_instr, add_save_area_instr,
+      load_reg_save_instr, load_eightbyte_instr, update_offset_instr,
+      jmp_false_instr, load_overflow_arg_area_instr, load_stack_save_instr,
+      load_disp_instr, add_disp_instr, dummy_instr);
   if (status) abort();
 }
 
