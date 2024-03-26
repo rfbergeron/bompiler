@@ -51,8 +51,9 @@ const char OPCODES[][MAX_OPCODE_LENGTH] = {FOREACH_OPCODE(GENERATE_STRING)};
 const size_t PARAM_REGS[] = {RDI_VREG, RSI_VREG, RDX_VREG,
                              RCX_VREG, R8_VREG,  R9_VREG};
 const size_t RETURN_REGS[] = {RAX_VREG, RDX_VREG};
-const size_t PRESERVED_REGS[] = {RBX_VREG, RSP_VREG, RBP_VREG, R12_VREG,
-                                 R13_VREG, R14_VREG, R15_VREG};
+/* rsp and rbp are special purpose, and not included in preserved registers */
+const size_t PRESERVED_REGS[] = {RBX_VREG, R12_VREG, R13_VREG, R14_VREG,
+                                 R15_VREG};
 const size_t VOLATILE_REGS[] = {RAX_VREG, RDX_VREG, RCX_VREG,
                                 RSI_VREG, RDI_VREG, R8_VREG,
                                 R9_VREG,  R10_VREG, R11_VREG};

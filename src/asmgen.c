@@ -44,7 +44,7 @@ static const char CASE_FMT[] = ".LS%luC%lu";
 static const char FALL_FMT[] = ".LS%luF%lu";
 static const char STR_FMT[] = ".LSTR%lu";
 static const char FN_SIZE_FMT[] = ".-%s";
-static const size_t PROLOGUE_EIGHTBYTES = 8;
+static const ptrdiff_t PROLOGUE_EIGHTBYTES = 2;
 static const ptrdiff_t FP_OFFSET = 304;
 static const ptrdiff_t GP_OFFSET_MAX = 48;
 static const ptrdiff_t GP_OFFSET_MEMBER_DISP = NO_DISP;
@@ -52,18 +52,23 @@ static const ptrdiff_t FP_OFFSET_MEMBER_DISP = X64_SIZEOF_INT;
 static const ptrdiff_t OVERFLOW_ARG_AREA_MEMBER_DISP = 2 * X64_SIZEOF_INT;
 static const ptrdiff_t REG_SAVE_AREA_MEMBER_DISP =
     2 * X64_SIZEOF_INT + X64_SIZEOF_LONG;
-/* reserve offset -8 for function call return values, offset -16 for hidden
- * parameter storage, and offsets -40, -32 and -24 for the first, second and
- * third register unspill regions, repsectively
+/* reserve 8 bytes for function call return values, 8 bytes for hidden
+ * parameter storage, and 8 bytes each for the first, second and third register
+ * unspill regions, repsectively
  */
-static const ptrdiff_t RETURN_VAL_DISP = -8;
-static const ptrdiff_t HIDDEN_PARAM_DISP = -16;
+static const ptrdiff_t RETURN_VAL_DISP = -8 * (PRESERVED_REG_COUNT + 1);
+static const ptrdiff_t HIDDEN_PARAM_DISP = -8 * (PRESERVED_REG_COUNT + 2);
 static const ptrdiff_t INIT_WINDOW_SIZE = 40;
 static const ptrdiff_t VA_INIT_WINDOW_SIZE = 88;
 /* locations of 8-byte regions for contents of unspilled registers */
-const ptrdiff_t UNSPILL_REGIONS[] = {-40, -32, -24};
+const ptrdiff_t UNSPILL_REGIONS[] = {-8 * (PRESERVED_REG_COUNT + 5),
+                                     -8 * (PRESERVED_REG_COUNT + 4),
+                                     -8 * (PRESERVED_REG_COUNT + 3)};
 const size_t UNSPILL_REGIONS_SIZE = ARRAY_ELEM_COUNT(UNSPILL_REGIONS);
-const ptrdiff_t VA_SPILL_REGIONS[] = {-88, -80, -72, -64, -56, -48};
+const ptrdiff_t VA_SPILL_REGIONS[] = {
+    -8 * (PRESERVED_REG_COUNT + 11), -8 * (PRESERVED_REG_COUNT + 10),
+    -8 * (PRESERVED_REG_COUNT + 9),  -8 * (PRESERVED_REG_COUNT + 8),
+    -8 * (PRESERVED_REG_COUNT + 7),  -8 * (PRESERVED_REG_COUNT + 6)};
 static size_t param_reg_index;
 static ptrdiff_t param_stack_disp;
 ptrdiff_t window_size;
@@ -228,6 +233,10 @@ static void bulk_rtom(size_t dest_memreg, ptrdiff_t dest_disp,
   }
 }
 
+/* NOTE: any bytes not written by this function will contain garbage; this is
+ * fine for aggregates but it means that using it to move scalar values will
+ * result in zeroes in the high bits for 32-bit values and garbage otherwise
+ */
 static void bulk_mtor(const size_t *dest_regs, size_t src_memreg,
                       ptrdiff_t src_disp, const Type *type) {
   size_t alignment = type_get_alignment(type);
@@ -462,7 +471,8 @@ static ptrdiff_t assign_stack_space(const Type *type) {
   assert(padded_space >= 0);
   assert(window_size >= 0 && PTRDIFF_MAX - window_size >= padded_space);
   window_size += padded_space;
-  return -window_size;
+  /* account for saved preserved registers */
+  return -(window_size + 8 * PRESERVED_REG_COUNT);
 }
 
 static void assign_static_space(const char *ident, Symbol *symbol) {
@@ -477,6 +487,17 @@ static void assign_static_space(const char *ident, Symbol *symbol) {
 }
 
 static void save_preserved_regs(void) {
+  Instruction *push_rbp_instr = instr_init(OP_PUSH);
+  set_op_reg(&push_rbp_instr->dest, REG_QWORD, RBP_VREG);
+  int status = llist_push_back(instructions, push_rbp_instr);
+  if (status) abort();
+
+  Instruction *mov_instr = instr_init(OP_MOV);
+  set_op_reg(&mov_instr->dest, REG_QWORD, RBP_VREG);
+  set_op_reg(&mov_instr->src, REG_QWORD, RSP_VREG);
+  status = llist_push_back(instructions, mov_instr);
+  if (status) abort();
+
   size_t i;
   for (i = 1; i <= PRESERVED_REG_COUNT; ++i) {
     Instruction *push_instr = instr_init(OP_PUSH);
@@ -485,11 +506,6 @@ static void save_preserved_regs(void) {
     int status = llist_push_back(instructions, push_instr);
     if (status) abort();
   }
-  Instruction *mov_instr = instr_init(OP_MOV);
-  set_op_reg(&mov_instr->dest, REG_QWORD, RBP_VREG);
-  set_op_reg(&mov_instr->src, REG_QWORD, RSP_VREG);
-  int status = llist_push_back(instructions, mov_instr);
-  if (status) abort();
 }
 
 static void save_volatile_regs(void) {
@@ -504,11 +520,6 @@ static void save_volatile_regs(void) {
 }
 
 static void restore_preserved_regs(void) {
-  Instruction *mov_instr = instr_init(OP_MOV);
-  set_op_reg(&mov_instr->dest, REG_QWORD, RSP_VREG);
-  set_op_reg(&mov_instr->src, REG_QWORD, RBP_VREG);
-  int status = llist_push_back(instructions, mov_instr);
-  if (status) abort();
   size_t i;
   for (i = 0; i < PRESERVED_REG_COUNT; ++i) {
     Instruction *pop_instr = instr_init(OP_POP);
@@ -516,6 +527,17 @@ static void restore_preserved_regs(void) {
     int status = llist_push_back(instructions, pop_instr);
     if (status) abort();
   }
+
+  Instruction *mov_instr = instr_init(OP_MOV);
+  set_op_reg(&mov_instr->dest, REG_QWORD, RSP_VREG);
+  set_op_reg(&mov_instr->src, REG_QWORD, RBP_VREG);
+  int status = llist_push_back(instructions, mov_instr);
+  if (status) abort();
+
+  Instruction *pop_rbp_instr = instr_init(OP_POP);
+  set_op_reg(&pop_rbp_instr->dest, REG_QWORD, RBP_VREG);
+  status = llist_push_back(instructions, pop_rbp_instr);
+  if (status) abort();
 }
 
 static void restore_volatile_regs(void) {
@@ -1682,6 +1704,7 @@ static size_t load_args(ASTree *call) {
   }
 
   assert(stack_disp % 8 == 0);
+  /* 16x+8 window size and 9 push ops align the stack; maintain that here */
   if (stack_disp & 0x8) stack_disp += 8;
   set_op_imm(&rsp_sub_instr->src, stack_disp, IMM_UNSIGNED);
 
@@ -2109,7 +2132,7 @@ static void va_translate_params(ASTree *declarator) {
 
   ASTree *fn_dirdecl = astree_get(declarator, 0);
   assert(fn_dirdecl->tok_kind == TOK_PARAM_LIST);
-  /* offset to account for preserved regs and return address */
+  /* offset to account for return address and saved rbp */
   param_stack_disp = PROLOGUE_EIGHTBYTES * X64_SIZEOF_LONG;
   window_size = VA_INIT_WINDOW_SIZE;
   size_t i, param_count = type_param_count(declarator->type);
@@ -2152,7 +2175,7 @@ static void translate_params(ASTree *declarator) {
 
   ASTree *fn_dirdecl = astree_get(declarator, 0);
   assert(fn_dirdecl->tok_kind == TOK_PARAM_LIST);
-  /* offset to account for preserved regs and return address */
+  /* offset to account for return address and saved rbp */
   param_stack_disp = PROLOGUE_EIGHTBYTES * X64_SIZEOF_LONG;
   window_size = INIT_WINDOW_SIZE;
   size_t i, param_count = type_param_count(declarator->type);
@@ -3222,9 +3245,7 @@ no_live:;
 no_alloc:;
 
   /* align to ensure stack alignment to 16x + 8 */
-  size_t window_padding = (window_size % 16 > 0) ? 16 - (window_size % 16) : 0;
-  assert(window_padding <= PTRDIFF_MAX);
-  window_size += window_padding;
+  if (window_size & 0xf) window_size += 16 - (window_size & 0xf);
 
   /* set rsp adjustment to its actual value */
   rsp_sub_instr->src.imm.val = window_size;

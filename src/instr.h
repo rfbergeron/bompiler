@@ -211,11 +211,12 @@ extern const size_t PARAM_REGS[6];
 #define PARAM_REG_COUNT ARRAY_ELEM_COUNT(PARAM_REGS)
 extern const size_t RETURN_REGS[2];
 #define RETURN_REG_COUNT ARRAY_ELEM_COUNT(RETURN_REGS)
-extern const size_t PRESERVED_REGS[7];
+extern const size_t PRESERVED_REGS[5];
 #define PRESERVED_REG_COUNT ARRAY_ELEM_COUNT(PRESERVED_REGS)
 extern const size_t VOLATILE_REGS[9];
 #define VOLATILE_REG_COUNT ARRAY_ELEM_COUNT(VOLATILE_REGS)
-#define REAL_REG_COUNT (VOLATILE_REG_COUNT + PRESERVED_REG_COUNT)
+/* rsp and rbp are special purpose, and not included in preserved registers */
+#define REAL_REG_COUNT (VOLATILE_REG_COUNT + PRESERVED_REG_COUNT + 2)
 
 OpType optype_from_opcode(Opcode opcode);
 int opcode_needs_width(Opcode opcode);
