@@ -4,6 +4,5 @@
 #include "badllist.h"
 #include "bcc_types.h"
 
-int traverse_initializer(Type *type, ptrdiff_t disp, ASTree *initializer,
-                         ListIter *where);
+int traverse_initializer(Type *type, ptrdiff_t disp, ASTree *initializer);
 #endif

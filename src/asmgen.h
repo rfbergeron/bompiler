@@ -9,8 +9,8 @@
 const char *mk_static_label(const char *name, size_t unique_id);
 const char *asmgen_literal_label(const char *literal);
 void bulk_mzero(size_t dest_memreg, ptrdiff_t dest_disp, size_t skip_bytes,
-                const Type *type, ListIter *where);
-void static_zero_pad(size_t count, ListIter *where);
+                const Type *type);
+void static_zero_pad(size_t count);
 ASTree *translate_cexpr_conv(ASTree *cexpr_conv, ASTree *expr, ListIter *where);
 ASTree *translate_scal_conv(ASTree *conv, ASTree *expr);
 ASTree *translate_ptr_conv(ASTree *conv, ASTree *expr);
@@ -64,14 +64,12 @@ ASTree *translate_global_declarations(ASTree *root, ASTree *declarations);
 ASTree *begin_translate_fn(ASTree *declaration, ASTree *declarator,
                            ASTree *body);
 ASTree *end_translate_fn(ASTree *declaration);
-void translate_static_scalar_init(const Type *type, ASTree *initializer,
-                                  ListIter *where);
+void translate_static_scalar_init(const Type *type, ASTree *initializer);
 void translate_auto_scalar_init(const Type *type, ptrdiff_t disp,
-                                ASTree *initializer, ListIter *where);
-void translate_static_literal_init(const Type *type, ASTree *literal,
-                                   ListIter *where);
+                                ASTree *initializer);
+void translate_static_literal_init(const Type *type, ASTree *literal);
 void translate_auto_literal_init(const Type *type, ptrdiff_t disp,
-                                 ASTree *literal, ListIter *where);
+                                 ASTree *literal);
 int generator_print_il(FILE *out);
 int generator_debug_il(FILE *out);
 void asmgen_init_globals(const char *filename);
