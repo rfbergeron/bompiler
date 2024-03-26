@@ -59,10 +59,11 @@ static const ptrdiff_t REG_SAVE_AREA_MEMBER_DISP =
 static const ptrdiff_t RETURN_VAL_DISP = -8;
 static const ptrdiff_t HIDDEN_PARAM_DISP = -16;
 static const ptrdiff_t INIT_WINDOW_SIZE = 40;
+static const ptrdiff_t VA_INIT_WINDOW_SIZE = 88;
 /* locations of 8-byte regions for contents of unspilled registers */
 const ptrdiff_t UNSPILL_REGIONS[] = {-40, -32, -24};
 const size_t UNSPILL_REGIONS_SIZE = ARRAY_ELEM_COUNT(UNSPILL_REGIONS);
-static ptrdiff_t reg_save_area_disp;
+const ptrdiff_t VA_SPILL_REGIONS[] = {-88, -80, -72, -64, -56, -48};
 static size_t param_reg_index;
 static ptrdiff_t param_stack_disp;
 ptrdiff_t window_size;
@@ -1859,7 +1860,7 @@ ASTree *translate_va_start(ASTree *va_start_, ASTree *expr, ASTree *ident) {
 
   /* `list->reg_save_area = reg_save_area_disp + %rbp` */
   Instruction *reg_save_area_disp_instr = instr_init(OP_MOV);
-  set_op_imm(&reg_save_area_disp_instr->src, reg_save_area_disp, IMM_SIGNED);
+  set_op_imm(&reg_save_area_disp_instr->src, VA_SPILL_REGIONS[0], IMM_SIGNED);
   set_op_reg(&reg_save_area_disp_instr->dest, REG_QWORD, next_vreg());
 
   Instruction *add_rbp_instr = instr_init(OP_ADD);
@@ -2084,23 +2085,77 @@ ASTree *translate_va_arg(ASTree *va_arg_, ASTree *expr, ASTree *type_name) {
   return astree_adopt(va_arg_, 2, expr, type_name);
 }
 
-static void translate_params(ASTree *declarator) {
-  ASTree *fn_dirdecl = astree_get(declarator, 0);
-  assert(fn_dirdecl->tok_kind == TOK_PARAM_LIST);
-  const Type *fn_type = declarator->type;
-  Type *ret_type = type_strip_declarator(fn_type);
+static void va_translate_params(ASTree *declarator) {
+  Type *ret_type = type_strip_declarator(declarator->type);
+
   /* account for hidden out param */
-  param_reg_index = type_get_eightbytes(ret_type) > 2 ? 1 : 0;
-  if (param_reg_index == 1) {
+  if (type_get_eightbytes(ret_type) > 2) {
     Instruction *mov_instr = instr_init(OP_MOV);
     set_op_reg(&mov_instr->src, REG_QWORD, RDI_VREG);
     set_op_ind(&mov_instr->dest, HIDDEN_PARAM_DISP, RBP_VREG);
     int status = llist_push_back(instructions, mov_instr);
     if (status) abort();
+    param_reg_index = 1;
+  } else {
+    param_reg_index = 0;
   }
+
+  /* because spill region type is large enough to hold all registers, we must
+   * copy all registers to the stack when the function is variadic since
+   * `bulk_rtom` determines the number of registers to copy based on the size
+   * of the type
+   */
+  bulk_rtom(RBP_VREG, VA_SPILL_REGIONS[0], PARAM_REGS, TYPE_VA_SPILL_REGION);
+
+  ASTree *fn_dirdecl = astree_get(declarator, 0);
+  assert(fn_dirdecl->tok_kind == TOK_PARAM_LIST);
   /* offset to account for preserved regs and return address */
   param_stack_disp = PROLOGUE_EIGHTBYTES * X64_SIZEOF_LONG;
-  size_t i, param_count = type_param_count(fn_type);
+  window_size = VA_INIT_WINDOW_SIZE;
+  size_t i, param_count = type_param_count(declarator->type);
+  for (i = 0; i < param_count; ++i) {
+    ASTree *param = astree_get(fn_dirdecl, i);
+    ASTree *param_decl = astree_get(param, 1);
+    Symbol *param_symbol = NULL;
+    int in_current_scope = state_get_symbol(
+        state, param_decl->lexinfo, strlen(param_decl->lexinfo), &param_symbol);
+#ifdef NDEBUG
+    (void)in_current_scope;
+#endif
+    assert(in_current_scope && param_symbol);
+    size_t param_symbol_eightbytes = type_get_eightbytes(param_symbol->type);
+    if (param_symbol_eightbytes <= 2 &&
+        param_reg_index + param_symbol_eightbytes <= PARAM_REG_COUNT) {
+      param_symbol->disp = VA_SPILL_REGIONS[param_reg_index];
+      param_reg_index += param_symbol_eightbytes;
+    } else {
+      param_symbol->disp = param_stack_disp;
+      param_stack_disp += param_symbol_eightbytes * X64_SIZEOF_LONG;
+    }
+  }
+}
+
+static void translate_params(ASTree *declarator) {
+  Type *ret_type = type_strip_declarator(declarator->type);
+
+  /* account for hidden out param */
+  if (type_get_eightbytes(ret_type) > 2) {
+    Instruction *mov_instr = instr_init(OP_MOV);
+    set_op_reg(&mov_instr->src, REG_QWORD, RDI_VREG);
+    set_op_ind(&mov_instr->dest, HIDDEN_PARAM_DISP, RBP_VREG);
+    int status = llist_push_back(instructions, mov_instr);
+    if (status) abort();
+    param_reg_index = 1;
+  } else {
+    param_reg_index = 0;
+  }
+
+  ASTree *fn_dirdecl = astree_get(declarator, 0);
+  assert(fn_dirdecl->tok_kind == TOK_PARAM_LIST);
+  /* offset to account for preserved regs and return address */
+  param_stack_disp = PROLOGUE_EIGHTBYTES * X64_SIZEOF_LONG;
+  window_size = INIT_WINDOW_SIZE;
+  size_t i, param_count = type_param_count(declarator->type);
   for (i = 0; i < param_count; ++i) {
     ASTree *param = astree_get(fn_dirdecl, i);
     ASTree *param_decl = astree_get(param, 1);
@@ -2122,16 +2177,6 @@ static void translate_params(ASTree *declarator) {
       param_symbol->disp = param_stack_disp;
       param_stack_disp += param_symbol_eightbytes * X64_SIZEOF_LONG;
     }
-  }
-
-  if (type_is_variadic_function(fn_type) && param_reg_index < PARAM_REG_COUNT) {
-    reg_save_area_disp = assign_stack_space(TYPE_VA_SPILL_REGION);
-    /* because spill region type is large enough to hold all registers, we must
-     * copy all registers to the stack when the function is variadic since
-     * `bulk_rtom` determines the number of registers to copy based on the size
-     * of the type
-     */
-    bulk_rtom(RBP_VREG, reg_save_area_disp, PARAM_REGS, TYPE_VA_SPILL_REGION);
   }
 }
 
@@ -3102,7 +3147,6 @@ ASTree *begin_translate_fn(ASTree *declaration, ASTree *declarator,
                            ASTree *body) {
   PFDBG0('g', "Translating function prologue");
   ++fn_count;
-  window_size = INIT_WINDOW_SIZE;
   spill_regions = realloc(spill_regions, (spill_regions_count = 0));
   Instruction *text_instr = instr_init(OP_TEXT);
   int status = llist_push_back(instructions, text_instr);
@@ -3135,7 +3179,10 @@ ASTree *begin_translate_fn(ASTree *declaration, ASTree *declarator,
   declaration->last_instr = llist_iter_last(instructions);
   if (declaration->last_instr == NULL) abort();
 
-  translate_params(declarator);
+  if (type_is_variadic_function(declarator->type))
+    va_translate_params(declarator);
+  else
+    translate_params(declarator);
   return astree_adopt(declaration, 2, declarator, body);
 }
 
