@@ -63,8 +63,6 @@ static const ptrdiff_t INIT_WINDOW_SIZE = 40;
 const ptrdiff_t UNSPILL_REGIONS[] = {-40, -32, -24};
 const size_t UNSPILL_REGIONS_SIZE = ARRAY_ELEM_COUNT(UNSPILL_REGIONS);
 static ptrdiff_t reg_save_area_disp;
-static size_t arg_reg_index;
-static ptrdiff_t arg_stack_disp;
 static size_t param_reg_index;
 static ptrdiff_t param_stack_disp;
 ptrdiff_t window_size;
@@ -1584,95 +1582,110 @@ ASTree *translate_assignment(ASTree *assignment, ASTree *lvalue,
   return assignment;
 }
 
-static void translate_agg_arg(ASTree *arg) {
-  size_t arg_eightbytes = type_get_eightbytes(arg->type);
+static void load_reg_arg(ASTree *arg, size_t reg_index) {
   Instruction *arg_instr = liter_get(arg->last_instr);
-  assert(arg_instr->dest.all.mode == MODE_INDIRECT);
-  Instruction *mov_instr = instr_init(OP_MOV);
-  /* use arbitrary volatile reg to store arg, since they should be saved at
-   * this point; avoid argument and return regs in case the way i handle calls
-   * needs to change
-   */
-  set_op_reg(&mov_instr->dest, REG_QWORD, R10_VREG);
-  mov_instr->src = arg_instr->dest;
-  int status = llist_push_back(instructions, mov_instr);
+  if (type_is_scalar(arg->type)) {
+    Instruction *load_arg_instr = instr_init(OP_MOV);
+    load_arg_instr->src = arg_instr->dest;
+    set_op_reg(&load_arg_instr->dest, REG_QWORD, PARAM_REGS[reg_index]);
+    int status = llist_push_back(instructions, load_arg_instr);
+    if (status) abort();
+  } else {
+    Instruction *load_arg_instr = instr_init(OP_MOV);
+    load_arg_instr->src = arg_instr->dest;
+    set_op_reg(&load_arg_instr->dest, REG_QWORD, R10_VREG);
+    int status = llist_push_back(instructions, load_arg_instr);
+    if (status) abort();
+    bulk_mtor(&PARAM_REGS[reg_index], R10_VREG, NO_DISP, arg->type);
+  }
+}
+
+static void load_spilled_arg(ASTree *arg, size_t disp) {
+  Instruction *arg_instr = liter_get(arg->last_instr);
+
+  Instruction *load_arg_instr = instr_init(OP_MOV);
+  load_arg_instr->src = arg_instr->dest;
+  set_op_reg(&load_arg_instr->dest, REG_QWORD, R10_VREG);
+  int status = llist_push_back(instructions, load_arg_instr);
+
+  Instruction *stack_arg_instr = instr_init(OP_MOV);
+  stack_arg_instr->src = load_arg_instr->dest;
+  set_op_ind(&stack_arg_instr->dest, disp, RSP_VREG);
+  status = llist_push_back(instructions, stack_arg_instr);
+  if (status) abort();
+}
+
+static void load_stack_arg(ASTree *arg, size_t disp) {
+  assert(type_is_aggregate(arg->type));
+  Instruction *arg_instr = liter_get(arg->last_instr);
+
+  Instruction *arg_loc_instr = instr_init(OP_MOV);
+  arg_loc_instr->src = arg_instr->dest;
+  set_op_reg(&arg_loc_instr->dest, REG_QWORD, R11_VREG);
+  int status = llist_push_back(instructions, arg_loc_instr);
   if (status) abort();
 
-  if (arg_eightbytes <= 2 &&
-      arg_eightbytes + arg_reg_index <= PARAM_REG_COUNT) {
-    bulk_mtor(PARAM_REGS + arg_reg_index, mov_instr->dest.reg.num, NO_DISP,
-              arg->type);
-    arg_reg_index += arg_eightbytes;
-  } else {
-    Instruction *stack_loc_instr = instr_init(OP_LEA);
-    set_op_ind(&stack_loc_instr->src, arg_stack_disp, RSP_VREG);
-    set_op_reg(&stack_loc_instr->dest, REG_QWORD, R10_VREG);
-    status = llist_push_back(instructions, stack_loc_instr);
-    if (status) abort();
-    bulk_mtom(R10_VREG, mov_instr->dest.reg.num, arg->type);
-    arg_stack_disp += arg_eightbytes * X64_SIZEOF_LONG;
-  }
+  Instruction *stack_loc_instr = instr_init(OP_LEA);
+  set_op_ind(&stack_loc_instr->src, disp, RSP_VREG);
+  set_op_reg(&stack_loc_instr->dest, REG_QWORD, R10_VREG);
+  status = llist_push_back(instructions, stack_loc_instr);
+  if (status) abort();
+
+  bulk_mtom(R10_VREG, R11_VREG, arg->type);
 }
 
-static void translate_scalar_arg(ASTree *arg) {
-  Instruction *arg_instr = liter_get(arg->last_instr);
-  assert(arg_instr->dest.all.mode == MODE_INDIRECT);
-  assert(arg_instr->src.all.mode == MODE_REGISTER);
-  assert(arg_instr->src.reg.width == REG_QWORD);
+static size_t load_args(ASTree *call) {
+  /* emit stack adjustment instruction; set source operand later */
+  Instruction *rsp_sub_instr = instr_init(OP_SUB);
+  set_op_reg(&rsp_sub_instr->dest, REG_QWORD, RSP_VREG);
+  int status = llist_push_back(instructions, rsp_sub_instr);
+  if (status) abort();
 
-  Instruction *mov_instr = instr_init(OP_MOV);
-  mov_instr->src = arg_instr->dest;
-
-  if (arg_reg_index < PARAM_REG_COUNT) {
-    set_op_reg(&mov_instr->dest, REG_QWORD, PARAM_REGS[arg_reg_index++]);
-    int status = llist_push_back(instructions, mov_instr);
-    if (status) abort();
-  } else {
-    /* use arbitrary volatile reg to store arg, since they should be saved at
-     * this point; avoid argument and return regs in case the way i handle calls
-     * needs to change
-     */
-    set_op_reg(&mov_instr->dest, REG_QWORD, R10_VREG);
-    int status = llist_push_back(instructions, mov_instr);
-    if (status) abort();
-
-    Instruction *store_instr = instr_init(OP_MOV);
-    store_instr->src = mov_instr->dest;
-    set_op_ind(&store_instr->dest, arg_stack_disp, RSP_VREG);
-    status = llist_push_back(instructions, store_instr);
-    if (status) abort();
-    arg_stack_disp += X64_SIZEOF_LONG;
-  }
-}
-
-static void translate_args(ASTree *call) {
   /* account for hidden out param */
-  int out_param = type_get_eightbytes(call->type) > 2;
-  arg_reg_index = out_param ? 1 : 0;
-  arg_stack_disp = 0;
-  if (type_is_struct(call->type) || type_is_union(call->type)) {
-    if (out_param) {
-      Instruction *lea_instr = instr_init(OP_LEA);
-      set_op_reg(&lea_instr->dest, REG_QWORD, RDI_VREG);
-      set_op_ind(&lea_instr->src, assign_stack_space(call->type), RBP_VREG);
-      int status = llist_push_back(instructions, lea_instr);
-      if (status) abort();
+  size_t reg_index;
+  if (type_get_eightbytes(call->type) > 2) {
+    Instruction *hidden_arg_instr = instr_init(OP_LEA);
+    set_op_ind(&hidden_arg_instr->src, assign_stack_space(call->type),
+               RBP_VREG);
+    set_op_reg(&hidden_arg_instr->dest, REG_QWORD, RDI_VREG);
+    status = llist_push_back(instructions, hidden_arg_instr);
+    if (status) abort();
+    reg_index = 1;
+  } else {
+    reg_index = 0;
+  }
+
+  size_t stack_disp = 0;
+
+  /* move arguments to appropriate locations */
+  size_t i, arg_count = astree_count(call) - 1;
+  for (i = 0; i < arg_count; ++i) {
+    ASTree *arg = astree_get(call, i + 1);
+    size_t arg_eightbytes = type_get_eightbytes(arg->type);
+    Instruction *arg_instr = liter_get(arg->last_instr);
+    assert(arg_instr->dest.all.mode == MODE_INDIRECT);
+    assert(arg_instr->dest.ind.num == RBP_VREG);
+    if (arg_eightbytes > 2) {
+      load_stack_arg(arg, stack_disp);
+      stack_disp += arg_eightbytes * X64_SIZEOF_LONG;
+    } else if (reg_index + arg_eightbytes <= PARAM_REG_COUNT) {
+      load_reg_arg(arg, reg_index);
+      reg_index += arg_eightbytes;
+    } else if (type_is_aggregate(arg->type)) {
+      load_stack_arg(arg, stack_disp);
+      stack_disp += arg_eightbytes * X64_SIZEOF_LONG;
     } else {
-      (void)assign_stack_space(call->type);
+      load_spilled_arg(arg, stack_disp);
+      stack_disp += X64_SIZEOF_LONG;
     }
   }
 
-  size_t i;
-  for (i = 1; i < astree_count(call); ++i) {
-    PFDBG1('g', "Translating parameter %i", i);
-    ASTree *arg = astree_get(call, i);
-    assert(arg->type != NULL && !type_is_array(arg->type));
-    if (type_is_union(arg->type) || type_is_struct(arg->type)) {
-      translate_agg_arg(arg);
-    } else {
-      translate_scalar_arg(arg);
-    }
-  }
+  assert(stack_disp % 8 == 0);
+  if (stack_disp & 0x8) stack_disp += 8;
+  set_op_imm(&rsp_sub_instr->src, stack_disp, IMM_UNSIGNED);
+
+  /* return size of stack adustment */
+  return stack_disp;
 }
 
 static void save_call_subexprs(ASTree *call) {
@@ -1723,91 +1736,94 @@ static void save_call_subexprs(ASTree *call) {
   }
 }
 
+static void recieve_void(void) {
+  Instruction *nop_instr = instr_init(OP_NOP);
+  int status = llist_push_back(instructions, nop_instr);
+  if (status) abort();
+
+  restore_volatile_regs();
+}
+
+static void recieve_narrow(ASTree *call) {
+  Instruction *store_instr = instr_init(OP_MOV);
+  set_op_ind(&store_instr->dest, RETURN_VAL_DISP, RBP_VREG);
+  set_op_reg(&store_instr->src,
+             type_get_eightbytes(call->type) > 2 ? REG_QWORD
+                                                 : type_get_width(call->type),
+             RAX_VREG);
+  int status = llist_push_back(instructions, store_instr);
+  if (status) abort();
+
+  restore_volatile_regs();
+
+  Instruction *load_instr = instr_init(OP_MOV);
+  set_op_reg(&load_instr->dest, store_instr->src.reg.width, next_vreg());
+  load_instr->src = store_instr->dest;
+  status = llist_push_back(instructions, load_instr);
+  if (status) abort();
+}
+
+static void recieve_wide(ASTree *call) {
+  ptrdiff_t disp = assign_stack_space(call->type);
+  bulk_rtom(RBP_VREG, disp, RETURN_REGS, call->type);
+
+  restore_volatile_regs();
+
+  Instruction *agg_addr_instr = instr_init(OP_LEA);
+  set_op_ind(&agg_addr_instr->src, disp, RBP_VREG);
+  set_op_reg(&agg_addr_instr->dest, REG_QWORD, next_vreg());
+  int status = llist_push_back(instructions, agg_addr_instr);
+  if (status) abort();
+}
+
 ASTree *translate_call(ASTree *call) {
   PFDBG0('g', "Translating function call");
-  ASTree *fn_pointer = astree_get(call, 0);
-  call->first_instr = liter_copy(fn_pointer->first_instr);
+  ASTree *designator = astree_get(call, 0);
+  call->first_instr = liter_copy(designator->first_instr);
   if (call->first_instr == NULL) abort();
 
   save_volatile_regs();
   save_call_subexprs(call);
+  size_t rsp_adjustment = load_args(call);
 
-  Instruction *sub_instr = instr_init(OP_SUB);
-  set_op_reg(&sub_instr->dest, REG_QWORD, RSP_VREG);
-  int status = llist_push_back(instructions, sub_instr);
-  if (status) abort();
-
-  translate_args(call);
-
-  /* set sub_instr's src op now that we know stack param space */
-  assert(arg_stack_disp % X64_SIZEOF_LONG == 0);
-  /* align stack to 16-byte boundary; we can use a bitand since we know the
-   * stack should already be aligned to an 8-byte boundary
-   */
-  if (arg_stack_disp & X64_SIZEOF_LONG) arg_stack_disp += X64_SIZEOF_LONG;
-  set_op_imm(&sub_instr->src, arg_stack_disp, IMM_UNSIGNED);
-
-  if (type_is_variadic_function(type_strip_declarator(fn_pointer->type))) {
+  int status;
+  if (type_is_variadic_function(type_strip_declarator(designator->type))) {
     Instruction *zero_eax_instr = instr_init(OP_MOV);
     set_op_imm(&zero_eax_instr->src, 0, IMM_UNSIGNED);
-    set_op_reg(&zero_eax_instr->dest, REG_DWORD, RAX_VREG);
-    int status = llist_push_back(instructions, zero_eax_instr);
+    set_op_reg(&zero_eax_instr->dest, REG_BYTE, RAX_VREG);
+    status = llist_push_back(instructions, zero_eax_instr);
     if (status) abort();
   }
 
-  Instruction *fn_pointer_instr = liter_get(fn_pointer->last_instr);
-  assert(fn_pointer_instr->dest.all.mode == MODE_INDIRECT);
-  Instruction *load_fn_instr = instr_init(OP_MOV);
-  load_fn_instr->src = fn_pointer_instr->dest;
+  Instruction *store_desg_instr = liter_get(designator->last_instr);
+  assert(store_desg_instr->dest.all.mode == MODE_INDIRECT);
+  Instruction *load_desg_instr = instr_init(OP_MOV);
+  load_desg_instr->src = store_desg_instr->dest;
   /* use r10 since it is never used for args */
-  set_op_reg(&load_fn_instr->dest, type_get_width(fn_pointer->type), R10_VREG);
-  Instruction *call_instr = instr_init(OP_CALL);
-  call_instr->dest = load_fn_instr->dest;
-  status = llist_push_back(instructions, load_fn_instr);
+  set_op_reg(&load_desg_instr->dest, type_get_width(designator->type),
+             R10_VREG);
+  status = llist_push_back(instructions, load_desg_instr);
   if (status) abort();
+
+  Instruction *call_instr = instr_init(OP_CALL);
+  call_instr->dest = load_desg_instr->dest;
   status = llist_push_back(instructions, call_instr);
   if (status) abort();
 
-  Instruction *rsp_reset_instr = instr_init(OP_ADD);
-  set_op_reg(&rsp_reset_instr->dest, REG_QWORD, RSP_VREG);
-  set_op_imm(&rsp_reset_instr->src, arg_stack_disp, IMM_UNSIGNED);
-  status = llist_push_back(instructions, rsp_reset_instr);
+  Instruction *rsp_add_instr = instr_init(OP_ADD);
+  set_op_imm(&rsp_add_instr->src, rsp_adjustment, IMM_UNSIGNED);
+  set_op_reg(&rsp_add_instr->dest, REG_QWORD, RSP_VREG);
+  status = llist_push_back(instructions, rsp_add_instr);
   if (status) abort();
 
-  if (!type_is_void(call->type)) {
-    /* store return value on the stack temporarily so that volatile registers
-     * can be restored without worrying about the return value being clobbered
-     */
-    Instruction *store_instr = instr_init(OP_MOV);
-    set_op_ind(&store_instr->dest, RETURN_VAL_DISP, RBP_VREG);
-    Instruction *load_instr = instr_init(OP_MOV);
-    load_instr->src = store_instr->dest;
-    if (type_is_struct(call->type) || type_is_union(call->type)) {
-      if (type_get_eightbytes(call->type) <= 2) {
-        bulk_rtom(RBP_VREG, -window_size, RETURN_REGS, call->type);
-      }
-      Instruction *agg_addr_instr = instr_init(OP_LEA);
-      set_op_ind(&agg_addr_instr->src, -window_size, RBP_VREG);
-      /* any volatile register is fine since they will all be restored */
-      set_op_reg(&agg_addr_instr->dest, REG_QWORD, RCX_VREG);
-      int status = llist_push_back(instructions, agg_addr_instr);
-      if (status) abort();
-      store_instr->src = agg_addr_instr->dest;
-      set_op_reg(&load_instr->dest, REG_QWORD, next_vreg());
-      load_instr->persist_flags |= PERSIST_DEST_CLEAR;
-    } else {
-      set_op_reg(&store_instr->src, type_get_width(call->type), RAX_VREG);
-      set_op_reg(&load_instr->dest, type_get_width(call->type), next_vreg());
-      load_instr->persist_flags |= PERSIST_DEST_CLEAR;
-    }
-    int status = llist_push_back(instructions, store_instr);
-    if (status) abort();
-    restore_volatile_regs();
-    status = llist_push_back(instructions, load_instr);
-    if (status) abort();
+  if (type_is_void(call->type)) {
+    recieve_void();
+  } else if (type_get_eightbytes(call->type) == 2) {
+    recieve_wide(call);
   } else {
-    restore_volatile_regs();
+    recieve_narrow(call);
   }
+
   call->last_instr = llist_iter_last(instructions);
   if (call->last_instr == NULL) abort();
   return call;
