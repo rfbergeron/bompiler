@@ -2494,15 +2494,28 @@ static void return_aggregate(ASTree *ret, ASTree *expr) {
   size_t expr_eightbytes = type_get_eightbytes(expr->type);
 
   if (expr_eightbytes <= 2) {
-    /* `bulk_mtor` should handle persistence flags */
-    bulk_mtor(RETURN_REGS, expr_instr->dest.reg.num, NO_DISP, expr->type);
+    /* mov location in case it is in rax or rdx */
+    Instruction *mov_loc_r10_instr = instr_init(OP_MOV);
+    mov_loc_r10_instr->src = expr_instr->dest;
+    set_op_reg(&mov_loc_r10_instr->dest, REG_QWORD, R10_VREG);
+    mov_loc_r10_instr->persist_flags |= PERSIST_SRC_SET;
+    int status = llist_push_back(instructions, mov_loc_r10_instr);
+    if (status) abort();
+    bulk_mtor(RETURN_REGS, R10_VREG, NO_DISP, expr->type);
   } else {
     Instruction *hidden_mov_instr = instr_init(OP_MOV);
-    set_op_reg(&hidden_mov_instr->dest, REG_QWORD, RAX_VREG);
+    set_op_reg(&hidden_mov_instr->dest, REG_QWORD, next_vreg());
     set_op_ind(&hidden_mov_instr->src, HIDDEN_PARAM_DISP, RBP_VREG);
+    hidden_mov_instr->persist_flags |= PERSIST_DEST_CLEAR;
     int status = llist_push_back(instructions, hidden_mov_instr);
     if (status) abort();
-    bulk_mtom(RAX_VREG, expr_instr->dest.reg.num, expr->type);
+    bulk_mtom(hidden_mov_instr->dest.reg.num, expr_instr->dest.reg.num,
+              expr->type);
+    Instruction *mov_rax_instr = instr_init(OP_MOV);
+    set_op_ind(&mov_rax_instr->src, HIDDEN_PARAM_DISP, RBP_VREG);
+    set_op_reg(&mov_rax_instr->dest, REG_QWORD, RAX_VREG);
+    status = llist_push_back(instructions, mov_rax_instr);
+    if (status) abort();
   }
 
   if (ret->first_instr == NULL) abort();
