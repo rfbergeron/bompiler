@@ -26,3 +26,5 @@ or the meaning of the C standard.
   concatenate the contents of `rax` and `rdx`, so the value you need to put into
   `rdx` changes depending on whether or not the dividend has its top bit set. I
   also didn't realize that `cwd`, `cdq`, and `cqo` existed until reading this.
+- <https://en.wikipedia.org/wiki/Extended_Euclidean_algorithm#Computing_multiplicative_inverses_in_modular_structures>
+  Yes, I know, a wikipedia source. Used to simplify comupted result of pointer differences.
