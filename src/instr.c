@@ -185,10 +185,11 @@ static int opcode_to_str(Instruction *instr, char *str) {
     case OPTYPE_BINARY:
       if (instr->opcode == OP_SHL || instr->opcode == OP_SHR ||
           instr->opcode == OP_SAL || instr->opcode == OP_SAR) {
-        assert(instr->src.all.mode == MODE_REGISTER &&
-               instr->dest.all.mode == MODE_REGISTER);
-        assert(instr->src.reg.num == RCX_VREG &&
-               instr->src.reg.width == REG_BYTE);
+        assert(instr->dest.all.mode == MODE_REGISTER);
+        assert(instr->src.all.mode == MODE_IMMEDIATE ||
+               (instr->src.all.mode == MODE_REGISTER &&
+                instr->src.reg.num == RCX_VREG &&
+                instr->src.reg.width == REG_BYTE));
         return sprintf(str, "%s%c", OPCODES[instr->opcode],
                        WIDTH_TO_CHAR[instr->dest.reg.width]);
       } else if (instr->opcode == OP_MOVS || instr->opcode == OP_MOVZ) {
