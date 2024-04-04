@@ -1,6 +1,7 @@
 #include "tchk_expr.h"
 
 #include <assert.h>
+#include <ctype.h>
 
 #include "asmgen.h"
 #include "bcc_err.h"
@@ -27,9 +28,73 @@ ASTree *validate_charcon(ASTree *charcon) {
   return evaluate_charcon(charcon);
 }
 
+static size_t real_literal_len(const char *str) {
+  size_t unescaped_len = 0, index = 0;
+  while (str[index] != '\0') {
+    ++unescaped_len;
+    if (str[index++] != '\\') continue;
+
+    switch (str[index]) {
+      case 'x':
+        do ++index;
+        while (isxdigit(str[index]));
+        break;
+      case 'n':
+        /* fallthrough */
+      case 't':
+        /* fallthrough */
+      case 'v':
+        /* fallthrough */
+      case 'b':
+        /* fallthrough */
+      case 'r':
+        /* fallthrough */
+      case 'f':
+        /* fallthrough */
+      case 'a':
+        /* fallthrough */
+      case '\\':
+        /* fallthrough */
+      case '\?':
+        /* fallthrough */
+      case '\'':
+        /* fallthrough */
+      case '"':
+        ++index;
+        break;
+      case '0':
+        /* fallthrough */
+      case '1':
+        /* fallthrough */
+      case '2':
+        /* fallthrough */
+      case '3':
+        /* fallthrough */
+      case '4':
+        /* fallthrough */
+      case '5':
+        /* fallthrough */
+      case '6':
+        /* fallthrough */
+      case '7':
+        /* fallthrough */
+      case '8':
+        /* fallthrough */
+      case '9':
+        while (isdigit(str[index])) ++index;
+        break;
+      default:
+        break;
+    }
+  }
+
+  /* subtract 2 for double quotes, add 1 for null terminator */
+  return unescaped_len - 2 + 1;
+}
+
 ASTree *validate_stringcon(ASTree *stringcon) {
   /* subtract 2 for quotes, add one for terminating nul */
-  Type *arr_type = type_init_array(strlen(stringcon->lexinfo) - 2 + 1, 0);
+  Type *arr_type = type_init_array(real_literal_len(stringcon->lexinfo), 0);
   Type *char_type = type_init_base(SPEC_FLAG_CHAR);
   (void)type_append(arr_type, char_type, 0);
   stringcon->type = arr_type;
