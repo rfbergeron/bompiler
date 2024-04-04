@@ -70,17 +70,17 @@ static int init_scalar(const Type *type, ptrdiff_t disp, ASTree *initializer) {
 
 static int init_literal(Type *arr_type, ptrdiff_t arr_disp, ASTree *literal) {
   assert((literal->attributes & ATTR_MASK_CONST) == ATTR_CONST_INIT);
-  /* subtract 2 for quotes */
-  size_t literal_length = strlen(literal->lexinfo) - 2;
-  if (!type_is_deduced_array(arr_type) &&
-      type_get_width(arr_type) < literal_length) {
+  assert(type_is_char_array(literal->type));
+  /* size adjusted in tchk_expr */
+  size_t literal_length = type_get_width(literal->type);
+
+  if (type_is_deduced_array(arr_type)) {
+    assert(arr_type->array.length == 0);
+    arr_type->array.length = literal_length;
+  } else if (literal_length - 1 > type_get_width(arr_type)) {
     (void)semerr_excess_init(literal, arr_type);
     (void)translate_empty_expr(literal);
     return 1;
-  } else if (type_is_deduced_array(arr_type) &&
-             type_get_width(arr_type) <= literal_length) {
-    /* add 1 for nul terminator */
-    arr_type->array.length = literal_length + 1;
   }
 
   if (arr_disp >= 0) {

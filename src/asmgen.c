@@ -2922,9 +2922,7 @@ void translate_static_literal_init(const Type *arr_type, ASTree *literal) {
     int status = llist_push_back(instructions, nop_instr);
     if (status) abort();
     literal->first_instr = llist_iter_last(instructions);
-    assert(literal->first_instr != NULL);
     literal->last_instr = liter_copy(literal->first_instr);
-    assert(literal->last_instr != NULL);
   }
 
   /* TODO(Robert): use a map here. this is ugly. */
@@ -2933,40 +2931,30 @@ void translate_static_literal_init(const Type *arr_type, ASTree *literal) {
     if (literals[i].label == literal->constant.label) {
       const char *str = literals[i].literal;
       size_t arr_width = type_get_width(arr_type);
-      size_t literal_length = strlen(str) - 2;
-      if (type_is_deduced_array(arr_type)) {
-        assert(arr_width == literal_length + 1);
-        Instruction *asciz_instr = instr_init(OP_ASCIZ);
-        set_op_dir(&asciz_instr->dest, str);
-        int status = liter_push_back(before_definition, &before_definition, 1,
-                                     asciz_instr);
-        if (status) abort();
+      size_t literal_length = type_get_width(literal->type);
+      assert(literal_length - 1 <= arr_width);
 
-        if (state_get_function(state) == NULL) {
-          literal->first_instr = liter_copy(before_definition);
-          assert(literal->first_instr != NULL);
-          literal->last_instr = liter_copy(before_definition);
-          assert(literal->last_instr != NULL);
-        }
-        return;
-      } else if (literal_length <= arr_width) {
-        Instruction *ascii_instr = instr_init(OP_ASCII);
-        set_op_dir(&ascii_instr->dest, str);
-        int status = liter_push_back(before_definition, &before_definition, 1,
-                                     ascii_instr);
-        if (status) abort();
-        size_t zero_count = arr_width - literal_length;
-        if (zero_count > 0) static_zero_pad(zero_count);
-        if (state_get_function(state) == NULL) {
-          literal->first_instr = liter_copy(before_definition);
-          assert(literal->first_instr != NULL);
-          literal->last_instr = liter_copy(before_definition);
-          assert(literal->last_instr != NULL);
-        }
-        return;
-      } else {
-        abort();
-      }
+      Instruction *ascii_instr = arr_width == literal_length
+                                     ? instr_init(OP_ASCIZ)
+                                     : instr_init(OP_ASCII);
+      set_op_dir(&ascii_instr->dest, str);
+      int status = liter_push_back(before_definition, &before_definition, 1,
+                                   ascii_instr);
+      if (status) abort();
+
+      if (state_get_function(state) == NULL)
+        literal->first_instr = liter_copy(before_definition);
+      assert(literal->first_instr != NULL);
+
+      if (arr_width > literal_length)
+        /* add one for null terminator since we used `.ascii` above */
+        static_zero_pad(arr_width - literal_length + 1);
+
+      if (state_get_function(state) == NULL)
+        literal->last_instr = liter_copy(before_definition);
+      assert(literal->last_instr != NULL);
+
+      return;
     }
   }
   /* literal not found */
