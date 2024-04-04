@@ -258,8 +258,10 @@ labelled_stmt       : any_ident ':' stmt                                { ERRCHK
                     | TOK_DEFAULT ':' stmt                              { ERRCHK; $$ = bcc_yyval = validate_default($1, $3); parser_cleanup(1, $2); }
                     | TOK_CASE cond_expr   ':' stmt                     { ERRCHK; $$ = bcc_yyval = validate_case($1, $2, $4); parser_cleanup(1, $3); }
                     ;
-for                 : TOK_FOR '(' stmt_expr stmt_expr ')' stmt          { ERRCHK; $$ = bcc_yyval = validate_for($1, $3, $4, parser_make_empty($5->loc), $6); parser_cleanup(2, $2, $5); }
-                    | TOK_FOR '(' stmt_expr stmt_expr expr ')' stmt     { ERRCHK; $$ = bcc_yyval = validate_for($1, $3, $4, $5, $7); parser_cleanup(2, $2, $6); }
+for_reinit          : expr ')'                                          { ERRCHK; $$ = bcc_yyval = $1; parser_cleanup(1, $2); }
+                    | ')'                                               { ERRCHK; $$ = bcc_yyval = parser_make_empty($1->loc); parser_cleanup(1, $1); }
+                    ;
+for                 : TOK_FOR '(' stmt_expr stmt_expr for_reinit stmt   { ERRCHK; $$ = bcc_yyval = validate_for($1, $3, $4, $5, $6); parser_cleanup(1, $2); }
                     ;
 dowhile             : TOK_DO stmt TOK_WHILE '(' expr ')' ';'            { ERRCHK; $$ = bcc_yyval = validate_do($1, $2, $5); parser_cleanup (4, $3, $4, $6, $7); }
                     ;
