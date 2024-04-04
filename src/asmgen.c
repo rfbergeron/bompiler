@@ -704,8 +704,8 @@ static Instruction *convert_scalar(const Instruction *instr,
     /* set width of destination; no need to extend */
     assert(type_is_unsigned(from_type));
     Instruction *mov_instr = instr_init(OP_MOV);
-    mov_instr->src = instr->dest;
-    set_op_reg(&mov_instr->dest, REG_QWORD, next_vreg());
+    set_op_reg(&mov_instr->src, REG_QWORD, instr->dest.reg.num);
+    mov_instr->dest = mov_instr->src;
     mov_instr->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
     return mov_instr;
   }
