@@ -12,6 +12,7 @@
 #include "lyutils.h"
 #include "regalloc.h"
 #include "state.h"
+#include "strset.h"
 #include "symtable.h"
 
 /* TODO(Robert): make sure that function calls emit correct code when calling
@@ -440,6 +441,43 @@ static Opcode opcode_from_operator(int tok_kind, const Type *type) {
   }
 }
 
+static const char *process_literal(const char *literal) {
+  size_t literal_len = strlen(literal), i;
+  size_t processed_len = literal_len;
+  /* increase length to account for octal sequences */
+  for (i = 0; i < literal_len; ++i)
+    if (literal[i] == '\\' && (literal[i + 1] == 'a' || literal[i + 1] == 'v'))
+      processed_len += 2;
+  char *processed = malloc((processed_len + 1) * sizeof(char));
+  processed[processed_len] = '\0';
+
+  size_t j;
+  for (i = 0, j = 0; i < literal_len; ++i) {
+    if (literal[i] == '\\' && literal[i + 1] == 'a') {
+      /* insert octal sequence */
+      processed[j++] = '\\';
+      processed[j++] = '0';
+      processed[j++] = '0';
+      processed[j++] = '7';
+      /* skip escaped character */
+      ++i;
+    } else if (literal[i] == '\\' && literal[i + 1] == 'v') {
+      processed[j++] = '\\';
+      processed[j++] = '0';
+      processed[j++] = '1';
+      processed[j++] = '3';
+      ++i;
+    } else {
+      processed[j++] = literal[i];
+    }
+  }
+
+  assert(processed[processed_len] == '\0');
+  const char *ret = string_set_intern(processed);
+  free(processed);
+  return ret;
+}
+
 const char *asmgen_literal_label(const char *literal) {
   /* TODO(Robert): bad time complexity */
   size_t i;
@@ -455,7 +493,7 @@ const char *asmgen_literal_label(const char *literal) {
   Instruction *label_instr = instr_init(OP_NONE);
   label_instr->label = mk_literal_label(literals_size);
   Instruction *string_instr = instr_init(OP_ASCIZ);
-  set_op_dir(&string_instr->dest, literal);
+  set_op_dir(&string_instr->dest, process_literal(literal));
   int status = liter_push_back(before_definition, &before_definition, 3,
                                section_instr, label_instr, string_instr);
   if (status) abort();
