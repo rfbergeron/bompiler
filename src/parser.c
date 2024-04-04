@@ -129,14 +129,17 @@ BCC_YYSTATIC ASTree *parser_join_strings(ASTree *joiner) {
   }
 
   size_t joined_len, i, literal_count = astree_count(joiner);
-  for (joined_len = 0, i = 0; i < literal_count; ++i)
+  /* start at 2 to account for double quotes */
+  for (joined_len = 2, i = 0; i < literal_count; ++i)
     /* omit double quotes from length calculation */
     joined_len += strlen(astree_get(joiner, i)->lexinfo) - 2;
   /* add one for null byte */
   char *joined_string = malloc(sizeof(char) * (joined_len + 1)), *endptr;
   joined_string[joined_len] = '\0';
+  joined_string[joined_len - 1] = '\"';
+  joined_string[0] = '\"';
 
-  for (i = 0, endptr = joined_string; i < literal_count; ++i) {
+  for (i = 0, endptr = joined_string + 1; i < literal_count; ++i) {
     const char *literal = astree_get(joiner, i)->lexinfo;
     size_t literal_len = strlen(literal);
     /* omit double quotes from copy */
