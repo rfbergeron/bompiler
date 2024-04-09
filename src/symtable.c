@@ -62,6 +62,7 @@ Symbol *symbol_init(const Location *loc) {
   Symbol *symbol = malloc(sizeof(*symbol));
   symbol->loc = loc;
   symbol->type = NULL;
+  symbol->directive_iter = NULL;
   symbol->linkage = LINK_NONE;
   symbol->storage = STORE_AUTO;
   symbol->disp = 0;
@@ -76,6 +77,7 @@ void symbol_destroy(Symbol *symbol) {
 
   /* type information owned by outer symbol */
   if (symbol->info != SYM_INHERITOR) type_destroy(symbol->type);
+  free(symbol->directive_iter);
   free(symbol);
 
   PFDBG0('t', "done");

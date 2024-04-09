@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <symtable.h>
 
 #define MAX_OPCODE_LENGTH 8
 #define MAX_OPERAND_LENGTH 64
@@ -73,6 +74,11 @@ Instruction *instr_init(Opcode opcode) {
   return ret;
 }
 
+void set_op_sym(Operand *operand, Symbol *symbol) {
+  operand->sym.mode = MODE_SYMBOL;
+  operand->sym.symbol = symbol;
+}
+
 void set_op_reg(Operand *operand, RegWidth width, size_t num) {
   operand->reg.mode = MODE_REGISTER;
   operand->reg.width = width;
@@ -136,6 +142,8 @@ static int operand_to_str(Operand *operand, char *str) {
     case MODE_NONE:
       str[0] = 0;
       return 0;
+    case MODE_SYMBOL:
+      return sprintf(str, "$%lu", type_get_width(operand->sym.symbol->type));
     case MODE_REGISTER:
       if (operand->reg.num < REAL_REG_COUNT)
         return sprintf(str, "%%%s",
@@ -269,11 +277,18 @@ static int dir_to_str(Instruction *instr, char *str) {
       return sprintf(str, ".%s %s", OPCODES[instr->opcode],
                      instr->dest.dir.lab);
     case OP_ZERO:
-      /* fallthrough */
+      assert(instr->dest.all.mode == MODE_IMMEDIATE ||
+             instr->dest.all.mode == MODE_SYMBOL);
+      if (instr->dest.all.mode == MODE_IMMEDIATE)
+        return sprintf(str, ".%s %lu", OPCODES[instr->opcode],
+                       instr->dest.imm.val);
+      else
+        return sprintf(str, ".%s %lu", OPCODES[instr->opcode],
+                       type_get_alignment(instr->dest.sym.symbol->type));
     case OP_ALIGN:
-      assert(instr->dest.all.mode == MODE_IMMEDIATE);
+      assert(instr->dest.all.mode == MODE_SYMBOL);
       return sprintf(str, ".%s %lu", OPCODES[instr->opcode],
-                     instr->dest.imm.val);
+                     type_get_alignment(instr->dest.sym.symbol->type));
     case OP_BYTE:
       /* fallthrough */
     case OP_VALUE:
@@ -292,10 +307,11 @@ static int dir_to_str(Instruction *instr, char *str) {
     case OP_SIZE:
       assert(instr->dest.all.mode == MODE_DIRECT);
       assert(instr->src.all.mode == MODE_DIRECT ||
-             instr->src.all.mode == MODE_IMMEDIATE);
-      if (instr->src.all.mode == MODE_IMMEDIATE)
+             instr->src.all.mode == MODE_SYMBOL);
+      if (instr->src.all.mode == MODE_SYMBOL)
         return sprintf(str, ".%s %s, %lu", OPCODES[OP_SIZE],
-                       instr->dest.dir.lab, instr->src.imm.val);
+                       instr->dest.dir.lab,
+                       type_get_width(instr->src.sym.symbol->type));
       else
         return sprintf(str, ".%s %s, %s", OPCODES[OP_SIZE], instr->dest.dir.lab,
                        instr->src.dir.lab);
@@ -349,6 +365,13 @@ static int operand_debug(Operand *operand, char *str) {
                      operand->pic.lab,
                      operand->pic.lab == NULL ? "" : operand->pic.lab,
                      operand->pic.disp);
+    case MODE_SYMBOL:
+      return sprintf(str,
+                     " (SYMBOL):\n"
+                     "\t\tSymbol: %p\n"
+                     "\t\tSize: %lu\n",
+                     operand->sym.symbol,
+                     type_get_width(operand->sym.symbol->type));
     case MODE_INDIRECT:
       return sprintf(str,
                      " (INDIRECT):\n"

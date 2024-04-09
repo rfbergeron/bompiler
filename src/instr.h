@@ -120,6 +120,7 @@ typedef enum optype {
 } OpType;
 typedef enum address_mode {
   MODE_NONE,
+  MODE_SYMBOL,
   MODE_REGISTER,
   MODE_IMMEDIATE,
   MODE_DIRECT,
@@ -154,6 +155,10 @@ typedef union operand {
   struct opall {
     AddressMode mode;
   } all;
+  struct opsym {
+    AddressMode mode;
+    struct symbol *symbol;
+  } sym;
   struct opreg {
     AddressMode mode;
     RegWidth width;
@@ -221,6 +226,7 @@ extern const size_t VOLATILE_REGS[9];
 OpType optype_from_opcode(Opcode opcode);
 int opcode_needs_width(Opcode opcode);
 Instruction *instr_init(Opcode opcode);
+void set_op_sym(Operand *operand, struct symbol *symbol);
 void set_op_reg(Operand *operand, RegWidth width, size_t num);
 void set_op_imm(Operand *operand, unsigned long val, int is_signed);
 void set_op_dir(Operand *operand, const char *label);

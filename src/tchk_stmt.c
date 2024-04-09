@@ -200,11 +200,9 @@ ASTree *validate_block(ASTree *block) {
 }
 
 ASTree *validate_block_content(ASTree *block, ASTree *block_content) {
-  if (block_content->tok_kind == TOK_DECLARATION) {
-    return translate_local_declarations(block, block_content);
-  } else {
-    return astree_adopt(block, 1, block_content);
-  }
+  if (block_content->tok_kind == TOK_DECLARATION)
+    end_local_decls(block_content);
+  return astree_adopt(block, 1, block_content);
 }
 
 ASTree *finalize_block(ASTree *block) {

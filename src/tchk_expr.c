@@ -743,10 +743,6 @@ ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src) {
     assignment->type = dest->type;
     src = tchk_cexpr_conv(src, NULL);
     dest = tchk_cexpr_conv(dest, src->first_instr);
-    /* `translate_assignment` does not perform adoption because it is reused
-     * within `asmgen.c` for initialization. it also cannot return error nodes
-     */
-    return astree_adopt(translate_assignment(assignment, dest, src), 2, dest,
-                        src);
+    return translate_assignment(assignment, dest, src);
   }
 }
