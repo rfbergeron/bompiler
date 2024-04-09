@@ -250,27 +250,39 @@ static void bulk_mtor(const size_t *dest_regs, size_t src_memreg,
       size_t j;
       for (j = 0; j < 8 && i * 8 + j < width; j += alignment) {
         size_t chunk_disp = src_disp + i * 8 + j;
+
         Instruction *mov_instr = instr_init(OP_MOV);
         set_op_ind(&mov_instr->src, chunk_disp, src_memreg);
         set_op_reg(&mov_instr->dest, alignment, next_vreg());
         /* persist vregs across basic blocks */
         if (i == 0 && src_memreg >= REAL_REG_COUNT)
           mov_instr->persist_flags |= PERSIST_SRC_SET;
-        Instruction *movz_instr = instr_init(OP_MOVZ);
-        movz_instr->src = mov_instr->dest;
-        set_op_reg(&movz_instr->dest, REG_QWORD, next_vreg());
-        Instruction *shl_instr = instr_init(OP_SHL);
-        shl_instr->dest = movz_instr->dest;
-        set_op_imm(&shl_instr->src, j, IMM_UNSIGNED);
-        Instruction *bitor_instr = instr_init(OP_OR);
-        bitor_instr->src = movz_instr->dest;
-        set_op_reg(&bitor_instr->dest, REG_QWORD, dest_regs[i]);
         int status = llist_push_back(instructions, mov_instr);
         if (status) abort();
-        status = llist_push_back(instructions, movz_instr);
-        if (status) abort();
+
+        Instruction *movz_instr;
+        if (alignment == X64_ALIGNOF_INT) {
+          movz_instr = NULL;
+        } else {
+          movz_instr = instr_init(OP_MOVZ);
+          movz_instr->src = mov_instr->dest;
+          set_op_reg(&movz_instr->dest, REG_QWORD, next_vreg());
+          status = llist_push_back(instructions, movz_instr);
+          if (status) abort();
+        }
+
+        Instruction *shl_instr = instr_init(OP_SHL);
+        if (alignment == X64_ALIGNOF_INT)
+          set_op_reg(&shl_instr->dest, REG_QWORD, mov_instr->dest.reg.num);
+        else
+          shl_instr->dest = movz_instr->dest;
+        set_op_imm(&shl_instr->src, j, IMM_UNSIGNED);
         status = llist_push_back(instructions, shl_instr);
         if (status) abort();
+
+        Instruction *bitor_instr = instr_init(OP_OR);
+        bitor_instr->src = shl_instr->dest;
+        set_op_reg(&bitor_instr->dest, REG_QWORD, dest_regs[i]);
         status = llist_push_back(instructions, bitor_instr);
         if (status) abort();
       }
