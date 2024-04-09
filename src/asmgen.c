@@ -77,6 +77,7 @@ ptrdiff_t window_size;
 
 static LinkedList *instructions;
 static ListIter *before_definition;
+static ListIter *before_function;
 static struct {
   const char *literal;
   const char *label;
@@ -366,11 +367,8 @@ void bulk_mzero(size_t dest_memreg, ptrdiff_t dest_disp, size_t skip_bytes,
 void static_zero_pad(size_t count) {
   Instruction *zero_instr = instr_init(OP_ZERO);
   set_op_imm(&zero_instr->dest, count, IMM_UNSIGNED);
-  /* although `where` was passed by value, `liter_push_back` should mutate it
-   * in-place since the output parameter points to the input parameter
-   */
   int status =
-      liter_push_back(before_definition, &before_definition, 1, zero_instr);
+      liter_push_back(before_function, &before_function, 1, zero_instr);
   if (status) abort();
 }
 
@@ -1727,8 +1725,7 @@ ASTree *translate_assignment(ASTree *assignment, ASTree *lvalue,
     assign_scalar(assignment, lvalue, rvalue);
   }
 
-  /* don't adopt; this function gets used for initialization */
-  return assignment;
+  return astree_adopt(assignment, 2, lvalue, rvalue);
 }
 
 static void load_reg_arg(ASTree *arg, size_t reg_index) {
@@ -2874,7 +2871,7 @@ void translate_static_scalar_init(const Type *type, ASTree *initializer) {
   } else {
     set_op_imm(&instr->dest, initializer->constant.integral.signed_value, 0);
   }
-  int status = liter_push_back(before_definition, &before_definition, 1, instr);
+  int status = liter_push_back(before_function, &before_function, 1, instr);
   if (status) abort();
 
   if (state_get_function(state) != NULL) {
@@ -2886,9 +2883,9 @@ void translate_static_scalar_init(const Type *type, ASTree *initializer) {
     initializer->last_instr = liter_copy(initializer->first_instr);
     if (initializer->last_instr == NULL) abort();
   } else {
-    initializer->first_instr = liter_copy(before_definition);
+    initializer->first_instr = liter_copy(before_function);
     if (initializer->first_instr == NULL) abort();
-    initializer->last_instr = liter_copy(before_definition);
+    initializer->last_instr = liter_copy(before_function);
     if (initializer->last_instr == NULL) abort();
   }
 }
@@ -2950,12 +2947,12 @@ void translate_static_literal_init(const Type *arr_type, ASTree *literal) {
                                      ? instr_init(OP_ASCIZ)
                                      : instr_init(OP_ASCII);
       set_op_dir(&ascii_instr->dest, str);
-      int status = liter_push_back(before_definition, &before_definition, 1,
-                                   ascii_instr);
+      int status =
+          liter_push_back(before_function, &before_function, 1, ascii_instr);
       if (status) abort();
 
       if (state_get_function(state) == NULL)
-        literal->first_instr = liter_copy(before_definition);
+        literal->first_instr = liter_copy(before_function);
       assert(literal->first_instr != NULL);
 
       if (arr_width > literal_length)
@@ -2963,7 +2960,7 @@ void translate_static_literal_init(const Type *arr_type, ASTree *literal) {
         static_zero_pad(arr_width - literal_length + 1);
 
       if (state_get_function(state) == NULL)
-        literal->last_instr = liter_copy(before_definition);
+        literal->last_instr = liter_copy(before_function);
       assert(literal->last_instr != NULL);
 
       return;
@@ -3005,8 +3002,11 @@ void translate_auto_literal_init(const Type *arr_type, ptrdiff_t arr_disp,
   assert(literal->last_instr != NULL);
 }
 
-int translate_static_prelude(ASTree *declarator, Symbol *symbol,
-                             ListIter *where, int is_initialized) {
+static void translate_static_decl(ASTree *declarator, ASTree *initializer) {
+  Symbol *symbol = NULL;
+  (void)state_get_symbol(state, (char *)declarator->lexinfo,
+                         strlen(declarator->lexinfo), &symbol);
+
   const char *identifier =
       symbol->linkage == LINK_NONE
           ? mk_static_label(declarator->lexinfo, symbol->static_id)
@@ -3016,67 +3016,85 @@ int translate_static_prelude(ASTree *declarator, Symbol *symbol,
   if (type_is_const(symbol->type)) {
     section_instr = instr_init(OP_SECTION);
     set_op_dir(&section_instr->dest, ".rodata");
-  } else if (is_initialized) {
-    section_instr = instr_init(OP_DATA);
-  } else {
+  } else if (initializer == NULL) {
     section_instr = instr_init(OP_BSS);
+  } else {
+    section_instr = instr_init(OP_DATA);
   }
 
   Instruction *align_instr = instr_init(OP_ALIGN);
-  set_op_imm(&align_instr->dest, type_get_alignment(declarator->type),
-             IMM_UNSIGNED);
+  set_op_sym(&align_instr->dest, symbol);
   Instruction *type_instr = instr_init(OP_TYPE);
   set_op_dir(&type_instr->dest, identifier);
   set_op_dir(&type_instr->src, "@object");
   Instruction *size_instr = instr_init(OP_SIZE);
   set_op_dir(&size_instr->dest, identifier);
-  set_op_imm(&size_instr->src, type_get_width(declarator->type), IMM_UNSIGNED);
+  set_op_sym(&size_instr->src, symbol);
   Instruction *label_instr = instr_init(OP_NONE);
   label_instr->label = identifier;
 
-  /* this call to `liter_push_back` should mutate `where` in-place, since the
-   * output parameter points to the input parameter
-   */
+  ListIter *first_directive = NULL;
+  int status;
   if (symbol->linkage == LINK_EXT) {
     Instruction *globl_instr = instr_init(OP_GLOBL);
     set_op_dir(&globl_instr->dest, declarator->lexinfo);
 
-    return liter_push_back(where, &where, 6, globl_instr, section_instr,
-                           align_instr, type_instr, size_instr, label_instr);
-  } else {
-    return liter_push_back(where, &where, 5, section_instr, align_instr,
-                           type_instr, size_instr, label_instr);
+    status = liter_push_back(before_function, &before_function, 1, globl_instr);
+    if (status) abort();
+    first_directive = liter_copy(before_function);
+    assert(first_directive != NULL);
   }
+
+  status = liter_push_back(before_function, &before_function, 5, section_instr,
+                           align_instr, type_instr, size_instr, label_instr);
+  if (status) abort();
+  if (symbol->linkage != LINK_EXT)
+    first_directive = liter_prev(before_function, 4);
+  assert(first_directive != NULL);
+
+  if (initializer == NULL) {
+    /* can't use `static_zero_pad` since type may not be complete yet */
+    Instruction *zero_instr = instr_init(OP_ZERO);
+    set_op_sym(&zero_instr->dest, symbol);
+    status = liter_push_back(before_function, &before_function, 1, zero_instr);
+    if (status) abort();
+  } else {
+    (void)traverse_initializer(symbol->type, symbol->disp, initializer);
+  }
+
+  if (symbol->directive_iter != NULL) {
+    assert(
+        ((Instruction *)liter_get(symbol->directive_iter))->opcode ==
+            OP_SECTION ||
+        ((Instruction *)liter_get(symbol->directive_iter))->opcode == OP_DATA ||
+        ((Instruction *)liter_get(symbol->directive_iter))->opcode == OP_BSS ||
+        ((Instruction *)liter_get(symbol->directive_iter))->opcode == OP_GLOBL);
+    size_t i, remove_count = symbol->linkage == LINK_EXT ? 7 : 6;
+    for (i = 0; i < remove_count; ++i) liter_delete(symbol->directive_iter);
+    free(symbol->directive_iter);
+  }
+
+  symbol->directive_iter = first_directive;
+  free(before_definition);
+  before_definition = liter_prev(first_directive, 1);
+  assert(before_definition != NULL);
 }
 
-static void translate_static_local_init(ASTree *assignment, ASTree *declarator,
-                                        ASTree *initializer) {
-  (void)assignment;
-  Symbol *symbol = NULL;
-  (void)state_get_symbol(state, (char *)declarator->lexinfo,
-                         strlen(declarator->lexinfo), &symbol);
-  assign_static_space(declarator->lexinfo, symbol);
-  ListIter *temp = liter_copy(before_definition);
-  (void)traverse_initializer(declarator->type, symbol->disp, initializer);
-
-  /* wait to do this so that deduced array sizes are set */
-  int status = translate_static_prelude(declarator, symbol, temp, 1);
-  if (status) abort();
-  free(temp);
-
-  assert(declarator->first_instr == NULL && declarator->last_instr == NULL);
-  assert(assignment->first_instr == NULL && assignment->last_instr == NULL);
+static ASTree *translate_static_local_init(ASTree *assignment,
+                                           ASTree *declarator,
+                                           ASTree *initializer) {
+  translate_static_decl(declarator, initializer);
   assert(initializer->first_instr != NULL && initializer->last_instr != NULL);
-
-  assignment->first_instr = liter_copy(initializer->first_instr);
+  assignment->first_instr = liter_copy(declarator->first_instr);
   if (assignment->first_instr == NULL) abort();
   assignment->last_instr = liter_copy(initializer->last_instr);
   if (assignment->last_instr == NULL) abort();
+  return astree_adopt(assignment, 2, declarator, initializer);
 }
 
 /* TODO(Robert): merge with `translate_auto_scalar_init` */
-static void translate_auto_local_init(ASTree *assignment, ASTree *declarator,
-                                      ASTree *initializer) {
+static ASTree *translate_auto_local_init(ASTree *assignment, ASTree *declarator,
+                                         ASTree *initializer) {
   Symbol *symbol = NULL;
   (void)state_get_symbol(state, (char *)declarator->lexinfo,
                          strlen(declarator->lexinfo), &symbol);
@@ -3087,20 +3105,20 @@ static void translate_auto_local_init(ASTree *assignment, ASTree *declarator,
   set_op_reg(&lea_instr->dest, REG_QWORD, next_vreg());
   lea_instr->persist_flags |= PERSIST_DEST_CLEAR;
 
-  /* object initialized is loaded before the initializer is computed to mirror
-   * the way assignment operations look in assembly
-   */
-  int status = liter_push_front(initializer->first_instr,
-                                &declarator->first_instr, 1, lea_instr);
+  int status = liter_push_back(declarator->last_instr, &declarator->last_instr,
+                               1, lea_instr);
   if (status) abort();
-  declarator->last_instr = liter_copy(declarator->first_instr);
-  if (declarator->last_instr == NULL) abort();
 
-  (void)translate_assignment(assignment, declarator, initializer);
+  return translate_assignment(assignment, declarator, initializer);
 }
 
-static ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
-                                    ASTree *declarator, ASTree *initializer) {
+ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
+                             ASTree *declarator, ASTree *initializer) {
+  assert(declarator->first_instr != NULL && declarator->last_instr != NULL);
+  assert(liter_get(declarator->first_instr) ==
+         liter_get(declarator->last_instr));
+  assert(((Instruction *)liter_get(declarator->first_instr))->opcode == OP_NOP);
+  assert(assignment->first_instr == NULL && assignment->last_instr == NULL);
   PFDBG0('g', "Translating local initialization");
   Symbol *symbol = NULL;
   int in_current_scope = state_get_symbol(state, (char *)declarator->lexinfo,
@@ -3111,30 +3129,33 @@ static ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
   assert(in_current_scope && symbol);
 
   if (symbol->storage == STORE_STAT) {
-    translate_static_local_init(assignment, declarator, initializer);
-    return declaration;
+    return astree_adopt(
+        declaration, 1,
+        translate_static_local_init(assignment, declarator, initializer));
   } else if (initializer->tok_kind != TOK_INIT_LIST &&
              initializer->tok_kind != TOK_STRINGCON &&
              (initializer->attributes & ATTR_MASK_CONST) == ATTR_CONST_NONE) {
-    translate_auto_local_init(assignment, declarator, initializer);
-    return declaration;
+    return astree_adopt(
+        declaration, 1,
+        translate_auto_local_init(assignment, declarator, initializer));
   } else {
     assert((initializer->attributes & ATTR_MASK_CONST) != ATTR_CONST_MAYBE);
     symbol->disp = assign_stack_space(symbol->type);
 
     (void)traverse_initializer(declarator->type, symbol->disp, initializer);
 
-    assert(declarator->first_instr == NULL && declarator->last_instr == NULL);
     assert(initializer->first_instr != NULL && initializer->last_instr != NULL);
-    assignment->first_instr = liter_copy(initializer->first_instr);
+
+    assignment->first_instr = liter_copy(declarator->first_instr);
     assert(assignment->first_instr != NULL);
     assignment->last_instr = liter_copy(initializer->last_instr);
     assert(assignment->last_instr != NULL);
-    return declaration;
+    return astree_adopt(declaration, 1,
+                        astree_adopt(assignment, 2, declarator, initializer));
   }
 }
 
-static ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
+ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
   PFDBG0('g', "Translating local declaration");
   assert(declarator->first_instr == NULL && declarator->last_instr == NULL);
   Instruction *nop_instr = instr_init(OP_NOP);
@@ -3156,71 +3177,40 @@ static ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
   if (type_is_function(declarator->type) || symbol->info == SYM_INHERITOR ||
       declarator->tok_kind == TOK_TYPE_NAME || symbol->linkage == LINK_EXT ||
       symbol->linkage == LINK_TYPEDEF) {
-    return declaration;
+    return astree_adopt(declaration, 1, declarator);
   } else if (symbol->storage == STORE_STAT) {
     assign_static_space(declarator->lexinfo, symbol);
-    int status =
-        translate_static_prelude(declarator, symbol, before_definition, 0);
-    if (status) abort();
-  } else if (symbol->storage == STORE_AUTO) {
+    translate_static_decl(declarator, NULL);
+    return astree_adopt(declaration, 1, declarator);
+  } else { /* symbol->storage == STORE_AUTO */
+    assert(symbol->storage == STORE_AUTO);
     symbol->disp = assign_stack_space(symbol->type);
+    return astree_adopt(declaration, 1, declarator);
   }
-
-  return declaration;
 }
 
-ASTree *translate_local_declarations(ASTree *block, ASTree *declarations) {
-  /* skip typespec list */
-  size_t i, decl_count = astree_count(declarations);
-  for (i = 1; i < decl_count; ++i) {
-    ASTree *declaration = astree_get(declarations, i);
-    if (declaration->tok_kind == TOK_IDENT) {
-      (void)translate_local_decl(declarations, declaration);
-    } else if (declaration->tok_kind == '=') {
-      ASTree *declarator = astree_get(declaration, 0),
-             *initializer = astree_get(declaration, 1);
-      translate_local_init(declarations, declaration, declarator, initializer);
-    } else {
-      abort();
-    }
-  }
-
-  declarations->first_instr =
-      liter_copy(astree_get(declarations, 1)->first_instr);
-  assert(declarations->first_instr != NULL);
-  declarations->last_instr =
-      liter_copy(astree_get(declarations, decl_count - 1)->last_instr);
-  assert(declarations->last_instr != NULL);
-  return astree_adopt(block, 1, declarations);
+void end_local_decls(ASTree *declaration) {
+  assert(declaration->first_instr == NULL && declaration->last_instr == NULL);
+  ASTree *first_declarator = astree_get(declaration, 1);
+  assert(first_declarator->first_instr != NULL);
+  ASTree *last_declarator =
+      astree_get(declaration, astree_count(declaration) - 1);
+  assert(last_declarator->last_instr != NULL);
+  declaration->first_instr = liter_copy(first_declarator->first_instr);
+  assert(declaration->first_instr != NULL);
+  declaration->last_instr = liter_copy(last_declarator->last_instr);
+  assert(declaration->last_instr != NULL);
 }
 
-static ASTree *translate_global_init(ASTree *declaration, ASTree *declarator,
-                                     ASTree *initializer) {
+ASTree *translate_global_init(ASTree *declaration, ASTree *assignment,
+                              ASTree *declarator, ASTree *initializer) {
   PFDBG0('g', "Translating global initialization");
-  Symbol *symbol = NULL;
-  int in_current_scope = state_get_symbol(state, (char *)declarator->lexinfo,
-                                          strlen(declarator->lexinfo), &symbol);
-#ifdef NDEBUG
-  (void)in_current_scope;
-#endif
-  assert(in_current_scope && symbol);
-
-  free(before_definition);
-  before_definition = llist_iter_last(instructions);
-  ListIter *temp = liter_copy(before_definition);
-
-  (void)traverse_initializer(declarator->type, NO_DISP, initializer);
-  /* wait to do this so that deduced array sizes are set */
-  int status = translate_static_prelude(declarator, symbol, temp, 1);
-  free(temp);
-  if (status) abort();
-  free(before_definition);
-  before_definition = llist_iter_last(instructions);
-  if (before_definition == NULL) abort();
-  return declaration;
+  translate_static_decl(declarator, initializer);
+  return astree_adopt(declaration, 1,
+                      astree_adopt(assignment, 2, declarator, initializer));
 }
 
-static ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
+ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
   PFDBG0('g', "Translating global declaration");
   assert(declarator->tok_kind == TOK_IDENT);
   Symbol *symbol = NULL;
@@ -3231,53 +3221,17 @@ static ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
 #endif
   assert(in_current_scope && symbol);
 
-  if (symbol->storage == STORE_EXT || type_is_function(declarator->type)) {
-    return declaration;
-  } else if (symbol->storage == STORE_STAT) {
-    ListIter *temp = llist_iter_last(instructions);
-    int status = translate_static_prelude(declarator, symbol, temp, 0);
-    free(temp);
-    if (status) abort();
-    Instruction *zero_instr = instr_init(OP_ZERO);
-    set_op_imm(&zero_instr->dest, type_get_width(declarator->type),
-               IMM_UNSIGNED);
-    status = llist_push_back(instructions, zero_instr);
-    if (status) abort();
-  } else if (symbol->storage != STORE_TYPEDEF) {
-    abort();
-  }
+  if (symbol->storage == STORE_STAT && !type_is_function(declarator->type) &&
+      symbol->info != SYM_DEFINED)
+    translate_static_decl(declarator, NULL);
 
-  free(before_definition);
-  before_definition = llist_iter_last(instructions);
-  if (before_definition == NULL) abort();
-  return declaration;
+  return astree_adopt(declaration, 1, declarator);
 }
 
-ASTree *translate_global_declarations(ASTree *root, ASTree *declarations) {
-  if (astree_count(declarations) == 3 &&
-      astree_get(declarations, 2)->tok_kind == TOK_BLOCK)
-    /* function defnition; no further instructions to emit */
-    return astree_adopt(root, 1, declarations);
-  else if (astree_count(declarations) == 2 &&
-           astree_get(declarations, 1)->tok_kind == TOK_TYPE_NAME)
-    /* declares nothing; emit no instructions */
-    return astree_adopt(root, 1, declarations);
-
-  /* skip typespec list */
-  size_t i, decl_count = astree_count(declarations);
-  for (i = 1; i < decl_count; ++i) {
-    ASTree *declaration = astree_get(declarations, i);
-    if (declaration->tok_kind == TOK_IDENT) {
-      (void)translate_global_decl(declarations, declaration);
-    } else if (declaration->tok_kind == '=') {
-      ASTree *declarator = astree_get(declaration, 0),
-             *initializer = astree_get(declaration, 1);
-      translate_global_init(declarations, declarator, initializer);
-    } else {
-      abort();
-    }
-  }
-  return astree_adopt(root, 1, declarations);
+void end_global_decls(ASTree *declaration) {
+  /* TODO(Robert): set instruction iterators for all top level declarations */
+  (void)declaration;
+  return;
 }
 
 ASTree *begin_translate_fn(ASTree *declaration, ASTree *declarator,
@@ -3350,6 +3304,10 @@ ASTree *end_translate_fn(ASTree *declaration) {
   before_definition = llist_iter_last(instructions);
   if (before_definition == NULL) abort();
 
+  free(before_function);
+  before_function = llist_iter_last(instructions);
+  if (before_function == NULL) abort();
+
   if (skip_liveness) goto no_live;
   liveness_sr(declaration->first_instr, declaration->last_instr);
   if (skip_allocator) goto no_alloc;
@@ -3411,7 +3369,9 @@ void asmgen_init_globals(const char *filename) {
   status = llist_push_back(instructions, file_instr);
   if (status) abort();
   before_definition = llist_iter_last(instructions);
-  if (before_definition == NULL) abort();
+  assert(before_definition != NULL);
+  before_function = llist_iter_last(instructions);
+  assert(before_function != NULL);
   literals = malloc(sizeof(*literals) * literals_cap);
   static_locals = malloc(sizeof(*static_locals));
   status =
@@ -3434,6 +3394,7 @@ void asmgen_init_globals(const char *filename) {
 
 void asmgen_free_globals(void) {
   free(before_definition);
+  free(before_function);
 
   int status = llist_destroy(instructions);
   if (status) abort();

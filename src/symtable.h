@@ -51,6 +51,7 @@ typedef enum symbol_info {
 typedef struct symbol {
   const Location *loc;
   Type *type;
+  ListIter *directive_iter;
   StorageClass storage;
   Linkage linkage;
   ptrdiff_t disp;

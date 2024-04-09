@@ -319,7 +319,7 @@ static const char *create_unique_name(ASTree *tree) {
  * as the second argument, or an error node enclosing this node. Can be safely
  * called with error nodes as arguments.
  */
-static ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
+static Symbol *validate_declaration(ASTree *declaration, ASTree *declarator) {
   PFDBG1('t', "Making object entry for value %s", declarator->lexinfo);
   if (location_is_empty(&declaration->loc)) declaration->loc = declarator->loc;
 
@@ -330,12 +330,13 @@ static ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
     (void)type_append(declarator->type, decl_specs->type, 1);
   }
 
-  if (declarator->tok_kind == TOK_TYPE_NAME) return declarator;
+  if (declarator->tok_kind == TOK_TYPE_NAME) return NULL;
 
+  /* TODO(Robert): why don't we do this for type names? */
   if (type_validate(declarator->type)) {
     (void)semerr_invalid_type(declarator);
     type_destroy(declarator->type);
-    return declarator;
+    return NULL;
   }
 
   const char *identifier = declarator->tok_kind == TOK_TYPE_NAME
@@ -351,20 +352,20 @@ static ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
   if (set_symbol_qualifiers(identifier, identifier_len, symbol)) {
     (void)semerr_invalid_linkage(declarator, symbol);
     symbol_destroy(symbol);
-    return declarator;
+    return NULL;
   } else if (!is_redeclaration) {
     state_insert_symbol(state, identifier, identifier_len, symbol);
     if (symbol_is_lvalue(symbol)) declarator->attributes |= ATTR_EXPR_LVAL;
     /* reassign type information in case it was replaced */
     if (symbol->info == SYM_INHERITOR) declarator->type = symbol->type;
-    return declarator;
+    return symbol;
   } else if (!linkage_valid(exists, symbol->linkage) ||
              !(types_equivalent(exists->type, declarator->type, 0, 1) ||
                type_complete_array(exists->type, declarator->type) ||
                type_prototype_function(exists->type, declarator->type))) {
     (void)semerr_incompatible_linkage(declarator, exists, symbol);
     symbol_destroy(symbol);
-    return declarator;
+    return NULL;
   } else {
     if (exists->info == SYM_HIDDEN) {
       assert(exists->linkage == LINK_EXT && symbol->linkage == LINK_EXT);
@@ -375,7 +376,7 @@ static ASTree *validate_declaration(ASTree *declaration, ASTree *declarator) {
       exists->storage = STORE_STAT;
     symbol_destroy(symbol);
     declarator->type = exists->type;
-    return declarator;
+    return exists;
   }
 }
 
@@ -416,28 +417,21 @@ static void replace_param_dirdecl(ASTree *declarator) {
 
 ASTree *validate_param(ASTree *param_list, ASTree *declaration,
                        ASTree *declarator) {
-  declarator = validate_declaration(declaration, declarator);
+  Symbol *param_symbol = validate_declaration(declaration, declarator);
   /* we cannot replace dirdecls until after `validate_declaration`, since that
    * function may introduce a function or array type through a typedef
    */
   if ((type_is_function(declarator->type) || type_is_array(declarator->type)))
     replace_param_dirdecl(declarator);
 
-  if (declarator->tok_kind != TOK_TYPE_NAME) {
-    Symbol *param_symbol;
-    int is_param = state_get_symbol(state, declarator->lexinfo,
-                                    strlen(declarator->lexinfo), &param_symbol);
-    assert(param_symbol != NULL);
-    assert(is_param);
-    assert(param_symbol->linkage == LINK_NONE);
-    assert(param_symbol->storage == STORE_AUTO);
-    /* assign in case dirdecl was replaced */
-    param_symbol->type = declarator->type;
-    param_symbol->info = SYM_DEFINED;
-#ifdef NDEBUG
-    (void)is_param;
-#endif
-  }
+  if (param_symbol == NULL)
+    return astree_adopt(
+        param_list, 1,
+        finalize_declaration(astree_adopt(declaration, 1, declarator)));
+
+  /* assign in case dirdecl was replaced */
+  param_symbol->type = declarator->type;
+  param_symbol->info = SYM_DEFINED;
 
   return astree_adopt(
       param_list, 1,
@@ -537,6 +531,7 @@ ASTree *define_symbol(ASTree *decl_list, ASTree *equal_sign,
                       ASTree *initializer) {
   ASTree *declarator = astree_remove(decl_list, astree_count(decl_list) - 1);
   assert(declarator->tok_kind == TOK_IDENT);
+
   if (initializer->tok_kind != TOK_INIT_LIST &&
       (!type_is_char_array(declarator->type) ||
        initializer->tok_kind != TOK_STRINGCON))
@@ -582,26 +577,22 @@ ASTree *define_symbol(ASTree *decl_list, ASTree *equal_sign,
   assert(symbol->info == SYM_NONE);
   symbol->info = SYM_DEFINED;
   equal_sign->type = declarator->type;
-  /* code is emitted by `validate_fnbody_content`, `validate_topdecl`, or
-   * `validate_block_content`
-   */
-  return astree_adopt(decl_list, 1,
-                      astree_adopt(equal_sign, 2, declarator, initializer));
+
+  if (symbol->linkage == LINK_NONE || symbol->info == SYM_INHERITOR)
+    return translate_local_init(decl_list, equal_sign, declarator, initializer);
+  else
+    return translate_global_init(decl_list, equal_sign, declarator,
+                                 initializer);
 }
 
 ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
-  declarator = validate_declaration(declaration, declarator);
+  Symbol *symbol = validate_declaration(declaration, declarator);
 
-  Symbol *symbol;
-  int in_current_scope = state_get_symbol(state, declarator->lexinfo,
-                                          strlen(declarator->lexinfo), &symbol);
-#ifdef NDEBUG
-  (void)in_current_scope;
-#endif
-  assert(in_current_scope);
-  assert(symbol != NULL);
+  if (symbol == NULL) return astree_adopt(declaration, 2, declarator, body);
+
   assert(type_is_function(symbol->type));
   assert(symbol->type == declarator->type);
+
   if (symbol->info == SYM_DEFINED) {
     (void)semerr_redefine_symbol(declarator, symbol);
     return astree_adopt(declaration, 2, declarator, body);
@@ -639,11 +630,11 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
 }
 
 ASTree *validate_fnbody_content(ASTree *function, ASTree *fnbody_content) {
-  ASTree *fnbody = astree_get(function, 2);
   if (fnbody_content->tok_kind == TOK_DECLARATION)
-    (void)translate_local_declarations(fnbody, fnbody_content);
-  else
-    (void)astree_adopt(fnbody, 1, fnbody_content);
+    end_local_decls(fnbody_content);
+
+  ASTree *fnbody = astree_get(function, 2);
+  (void)astree_adopt(fnbody, 1, fnbody_content);
   return function;
 }
 
@@ -929,10 +920,17 @@ ASTree *define_record_member(ASTree *record_spec, ASTree *member) {
 }
 
 ASTree *declare_symbol(ASTree *declaration, ASTree *declarator) {
-  (void)validate_declaration(declaration, declarator);
-  return astree_adopt(declaration, 1, declarator);
+  Symbol *symbol = validate_declaration(declaration, declarator);
+  if (symbol == NULL) return astree_adopt(declaration, 1, declarator);
+  assert(symbol->type = declarator->type);
+
+  if (symbol->linkage == LINK_NONE || symbol->info == SYM_INHERITOR)
+    return translate_local_decl(declaration, declarator);
+  else
+    return translate_global_decl(declaration, declarator);
 }
 
 ASTree *validate_topdecl(ASTree *root, ASTree *topdecl) {
-  return translate_global_declarations(root, topdecl);
+  end_global_decls(topdecl);
+  return astree_adopt(root, 1, topdecl);
 }
