@@ -348,10 +348,12 @@ postfix_expr        : primary_expr                                      { ERRCHK
                     | postfix_expr '.' any_ident                        { ERRCHK; $$ = bcc_yyval = validate_reference($2, $1, $3); }
                     | postfix_expr TOK_ARROW any_ident                  { ERRCHK; $$ = bcc_yyval = validate_reference($2, $1, $3); }
                     ;
-call                : postfix_expr '(' ')'                              { ERRCHK; $$ = bcc_yyval = finalize_call(validate_call($1, parser_new_sym($2, TOK_CALL))); parser_cleanup(1, $3);}
+designator          : postfix_expr                                      { ERRCHK; $$ = bcc_yyval = validate_designator($1); }
+                    ;
+call                : designator '(' ')'                                { ERRCHK; $$ = bcc_yyval = finalize_call(astree_adopt(parser_new_sym($2, TOK_CALL), 1, $1)); parser_cleanup(1, $3);}
                     | call_args ')'                                     { ERRCHK; $$ = bcc_yyval = finalize_call($1); parser_cleanup(1, $2); }
                     ;
-call_args           : postfix_expr '(' assign_expr                      { ERRCHK; $$ = bcc_yyval = validate_arg(validate_call($1, parser_new_sym($2, TOK_CALL)), $3); }
+call_args           : designator '(' assign_expr                        { ERRCHK; $$ = bcc_yyval = validate_arg(astree_adopt(parser_new_sym($2, TOK_CALL), 1, $1), $3); }
                     | call_args ',' assign_expr                         { ERRCHK; $$ = bcc_yyval = validate_arg($1, $3); parser_cleanup(1, $2); }
                     | call_args ',' TOK_EXTNSN assign_expr              { ERRCHK; $$ = bcc_yyval = validate_arg($1, $4); parser_cleanup(2, $2, $3); }
                     ;
