@@ -214,7 +214,7 @@ static void bulk_rtom(size_t dest_memreg, ptrdiff_t dest_disp,
           mov_instr->persist_flags |= PERSIST_DEST_SET;
         Instruction *shr_instr = instr_init(OP_SHR);
         set_op_reg(&shr_instr->dest, REG_QWORD, src_regs[i]);
-        set_op_imm(&shr_instr->src, alignment, IMM_UNSIGNED);
+        set_op_imm(&shr_instr->src, alignment * 8, IMM_UNSIGNED);
         int status = llist_push_back(instructions, mov_instr);
         if (status) abort();
         status = llist_push_back(instructions, shr_instr);
@@ -240,6 +240,13 @@ static void bulk_rtom(size_t dest_memreg, ptrdiff_t dest_disp,
  * fine for aggregates but it means that using it to move scalar values will
  * result in zeroes in the high bits for 32-bit values and garbage otherwise
  */
+/* NOTE: this function is used exclusively for moving arguments, parameters,
+ * and return values. because the register allocator is bad and ignores
+ * instructions which have already been assigned a real register, we cannot
+ * use virtual registers in this function, because the source and destination
+ * registers will be real registers. The `r10` volatile register is already
+ * being used if this function is called, so the only safe register is `r11`.
+ */
 static void bulk_mtor(const size_t *dest_regs, size_t src_memreg,
                       ptrdiff_t src_disp, const Type *type) {
   size_t alignment = type_get_alignment(type);
@@ -248,13 +255,19 @@ static void bulk_mtor(const size_t *dest_regs, size_t src_memreg,
     size_t eightbytes = type_get_eightbytes(type);
     size_t i;
     for (i = 0; i < eightbytes; ++i) {
+      Instruction *zero_dest_instr = instr_init(OP_XOR);
+      set_op_reg(&zero_dest_instr->dest, REG_QWORD, dest_regs[i]);
+      zero_dest_instr->src = zero_dest_instr->dest;
+      int status = llist_push_back(instructions, zero_dest_instr);
+      if (status) abort();
+
       size_t j;
       for (j = 0; j < 8 && i * 8 + j < width; j += alignment) {
         size_t chunk_disp = src_disp + i * 8 + j;
 
         Instruction *mov_instr = instr_init(OP_MOV);
         set_op_ind(&mov_instr->src, chunk_disp, src_memreg);
-        set_op_reg(&mov_instr->dest, alignment, next_vreg());
+        set_op_reg(&mov_instr->dest, alignment, R11_VREG);
         /* persist vregs across basic blocks */
         if (i == 0 && src_memreg >= REAL_REG_COUNT)
           mov_instr->persist_flags |= PERSIST_SRC_SET;
@@ -267,7 +280,7 @@ static void bulk_mtor(const size_t *dest_regs, size_t src_memreg,
         } else {
           movz_instr = instr_init(OP_MOVZ);
           movz_instr->src = mov_instr->dest;
-          set_op_reg(&movz_instr->dest, REG_QWORD, next_vreg());
+          set_op_reg(&movz_instr->dest, REG_QWORD, R11_VREG);
           status = llist_push_back(instructions, movz_instr);
           if (status) abort();
         }
@@ -277,7 +290,7 @@ static void bulk_mtor(const size_t *dest_regs, size_t src_memreg,
           set_op_reg(&shl_instr->dest, REG_QWORD, mov_instr->dest.reg.num);
         else
           shl_instr->dest = movz_instr->dest;
-        set_op_imm(&shl_instr->src, j, IMM_UNSIGNED);
+        set_op_imm(&shl_instr->src, j * 8, IMM_UNSIGNED);
         status = llist_push_back(instructions, shl_instr);
         if (status) abort();
 
