@@ -58,7 +58,7 @@
 /* %token PREC_PREFIX PREC_POSTFIX */
 /* %token PREC_TERNARY PREC_COMMA */
 /* tokens constructed by checker */
-%token TOK_SCAL_CONV TOK_PTR_CONV TOK_DISP_CONV TOK_CEXPR_CONV TOK_RVAL_CONV
+%token TOK_SCAL_CONV TOK_PTR_CONV TOK_DISP_CONV TOK_CEXPR_CONV TOK_RVAL_CONV TOK_DIFF_CONV
 /* tokens constructed by parser */
 %token TOK_DECLARATION TOK_ROOT TOK_TYPE_NAME TOK_SPEC_LIST TOK_ATTR_LIST TOK_EMPTY
 /* tokens assigned to exsting nodes */

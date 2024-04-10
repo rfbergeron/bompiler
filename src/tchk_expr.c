@@ -339,7 +339,7 @@ ASTree *validate_addition(ASTree *operator, ASTree * left, ASTree *right) {
   } else if (operator->tok_kind == '-' && type_is_pointer(left->type) &&
              types_equivalent(left->type, right->type, 1, 1)) {
     operator->type =(Type *) TYPE_LONG;
-    return evaluate_binop(operator, left, right);
+    return tchk_diff_conv(evaluate_binop(operator, left, right), left->type);
   } else {
     (void)semerr_incompatible_types(operator, left->type, right->type);
     return astree_adopt(operator, 2, left, right);

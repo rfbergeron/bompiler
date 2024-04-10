@@ -16,6 +16,8 @@ ASTree *translate_scal_conv(ASTree *conv, ASTree *expr);
 ASTree *translate_ptr_conv(ASTree *conv, ASTree *expr);
 ASTree *translate_disp_conv(ASTree *conv, ASTree *expr,
                             const Type *pointer_type);
+ASTree *translate_diff_conv(ASTree *conv, ASTree *expr,
+                            const Type *pointer_type);
 ASTree *translate_rval_conv(ASTree *conv, ASTree *expr);
 ASTree *translate_empty_expr(ASTree *empty_expr);
 ASTree *translate_ident(ASTree *ident);
