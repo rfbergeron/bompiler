@@ -378,24 +378,22 @@ ASTree *evaluate_addition(ASTree *addition, ASTree *left, ASTree *right) {
     addition->attributes |= MIN(left->attributes & ATTR_MASK_CONST,
                                 right->attributes & ATTR_MASK_CONST);
     addition->constant = left->constant;
-    size_t stride = type_elem_width(left->type);
     if (type_is_signed(right->type) || type_is_enum(right->type))
       addition->constant.integral.signed_value +=
-          (long)(right->constant.integral.signed_value * stride);
+          right->constant.integral.signed_value;
     else
       addition->constant.integral.signed_value +=
-          (long)(right->constant.integral.unsigned_value * stride);
+          right->constant.integral.unsigned_value;
   } else if (type_is_pointer(right->type)) {
     addition->attributes |= MIN(left->attributes & ATTR_MASK_CONST,
                                 right->attributes & ATTR_MASK_CONST);
     addition->constant = right->constant;
-    size_t stride = type_elem_width(right->type);
     if (type_is_signed(left->type) || type_is_enum(left->type))
       addition->constant.integral.signed_value +=
-          (long)(left->constant.integral.signed_value * stride);
+          left->constant.integral.signed_value;
     else
       addition->constant.integral.signed_value +=
-          (long)(left->constant.integral.unsigned_value * stride);
+          left->constant.integral.unsigned_value;
   } else {
     addition->attributes |= MIN(left->attributes & ATTR_MASK_CONST,
                                 right->attributes & ATTR_MASK_CONST);
@@ -455,15 +453,14 @@ ASTree *evaluate_subtraction(ASTree *subtraction, ASTree *left, ASTree *right) {
          right->constant.integral.signed_value) /
         (long)stride;
   } else if (type_is_pointer(left->type)) {
-    size_t stride = type_elem_width(left->type);
     subtraction->attributes |= ATTR_CONST_INIT;
     subtraction->constant = left->constant;
     if (type_is_signed(right->type) || type_is_enum(right->type))
       subtraction->constant.integral.signed_value -=
-          (long)(right->constant.integral.signed_value * stride);
+          right->constant.integral.signed_value;
     else
       subtraction->constant.integral.signed_value -=
-          (long)(right->constant.integral.unsigned_value * stride);
+          right->constant.integral.unsigned_value;
   } else {
     subtraction->attributes |= MIN(left->attributes & ATTR_MASK_CONST,
                                    right->attributes & ATTR_MASK_CONST);
@@ -704,9 +701,8 @@ ASTree *evaluate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
 
   subscript->attributes |= ATTR_CONST_MAYBE;
   subscript->constant = pointer->constant;
-  size_t stride = type_get_width(subscript->type);
   subscript->constant.integral.signed_value +=
-      (long)(index->constant.integral.signed_value * stride);
+      index->constant.integral.signed_value;
 
   return astree_adopt(subscript, 2, pointer, index);
 }
