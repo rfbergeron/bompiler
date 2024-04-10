@@ -119,39 +119,29 @@ ASTree *validate_ident(ASTree *ident) {
 }
 
 ASTree *finalize_call(ASTree *call) {
-  ASTree *function = astree_get(call, 0);
+  ASTree *designator = astree_get(call, 0);
   /* first type node is pointer; second is function */
-  Type *function_type = type_strip_declarator(function->type);
+  Type *function_type = type_strip_declarator(designator->type);
   assert(function_type->any.code == TYPE_CODE_FUNCTION);
+  /* strip function */
+  Type *return_type = type_strip_declarator(function_type);
+  call->type = return_type;
+
   /* subtract one since function expression is also a child */
   if (astree_count(call) - 1 < function_type->function.parameters_size) {
     (void)semerr_insufficient_args(call);
     return call;
   }
 
-  /* TODO(Robert): why was I waiting to load constant expressions here when
-   * I could have just appended them to the end of the instruction list in
-   * `validate_call`?
-   */
-  /*
-  else if (astree_count(call) > 1) {
-    / * make sure to emit constexpr load before all argument instructions * /
-    ASTree *first_arg = astree_get(call, 1);
-    assert(first_arg != NULL && first_arg->first_instr != NULL);
-    maybe_load_cexpr(function, first_arg->first_instr);
-  } else { / * astree_count(call) == 0 * /
-    maybe_load_cexpr(function, NULL);
-  }
-  */
   return translate_call(call);
 }
 
 ASTree *validate_arg(ASTree *call, ASTree *arg) {
   arg = TCHK_STD_CONV(arg, 1, NULL);
-  /* functon subtree is the first child of the call node */
-  ASTree *function = astree_get(call, 0);
+  /* functon designator is the first child of the call node */
+  ASTree *designator = astree_get(call, 0);
   /* first type should be pointer; next should be function */
-  Type *function_type = type_strip_declarator(function->type);
+  Type *function_type = type_strip_declarator(designator->type);
   assert(function_type->any.code == TYPE_CODE_FUNCTION);
   /* subtract one since function expression is also a child */
   size_t param_index = astree_count(call) - 1;
@@ -177,25 +167,24 @@ ASTree *validate_arg(ASTree *call, ASTree *arg) {
   }
 }
 
-ASTree *validate_call(ASTree *expr, ASTree *call) {
-  expr = tchk_cexpr_conv(TCHK_STD_CONV(expr, 1, NULL), NULL);
-  if (!type_is_function_pointer(expr->type)) {
-    (void)semerr_expected_fn_ptr(call, expr->type);
-    return astree_adopt(call, 1, expr);
+ASTree *validate_designator(ASTree *designator) {
+  designator = tchk_cexpr_conv(TCHK_STD_CONV(designator, 1, NULL), NULL);
+  if (!type_is_function_pointer(designator->type)) {
+    (void)semerr_expected_fn_ptr(designator, designator->type);
+    return designator;
   }
 
   /* strip pointer */
-  Type *function_type = type_strip_declarator(expr->type);
+  Type *function_type = type_strip_declarator(designator->type);
   /* strip function */
   Type *return_type = type_strip_declarator(function_type);
-  call->type = return_type;
 
   if (!type_is_void(return_type) && type_is_incomplete(return_type)) {
-    (void)semerr_incomplete_type(call, call->type);
-    return astree_adopt(call, 1, expr);
+    (void)semerr_incomplete_type(designator, return_type);
+    return designator;
   }
 
-  return astree_adopt(call, 1, expr);
+  return designator;
 }
 
 ASTree *validate_va_start(ASTree *va_start_, ASTree *expr, ASTree *ident) {
