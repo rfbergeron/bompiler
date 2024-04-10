@@ -11,6 +11,8 @@ ASTree *evaluate_ptr_conv(ASTree *ptr_conv, ASTree *expr);
 ASTree *evaluate_scal_conv(ASTree *scal_conv, ASTree *expr);
 ASTree *evaluate_disp_conv(ASTree *disp_conv, ASTree *expr,
                            const Type *pointer_type, ListIter *where);
+ASTree *evaluate_diff_conv(ASTree *diff_conv, ASTree *expr,
+                           const Type *pointer_type);
 ASTree *evaluate_conditional(ASTree *qmark, ASTree *condition,
                              ASTree *true_expr, ASTree *false_expr);
 ASTree *evaluate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index);

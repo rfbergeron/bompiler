@@ -796,6 +796,87 @@ ASTree *translate_disp_conv(ASTree *disp_conv, ASTree *expr,
   return astree_adopt(disp_conv, 1, expr);
 }
 
+/* implemented based on wikipedia pseudocode */
+/* TODO(Robert): come up with some better names... */
+static unsigned long mulinv(unsigned long l) {
+  static const unsigned long TWO_POW_63 = 0x8000000000000000UL;
+  assert(l % 2 != 0);
+
+  unsigned long t0 = 1, r0 = l;
+  unsigned long t1, r1;
+  if (l > TWO_POW_63) {
+    t1 = ULONG_MAX;
+    r1 = 0 - l;
+  } else {
+    unsigned long q0 = 2 * (TWO_POW_63 / l);
+    if (0 - q0 * l > l) ++q0;
+    t1 = 0 - q0 * 1;
+    r1 = 0 - q0 * l;
+  }
+
+  while (r1 != 0) {
+    unsigned long quotient = r0 / r1;
+    unsigned long tt = t0;
+    t0 = t1;
+    t1 = tt - quotient * t1;
+    unsigned long rt = r0;
+    r0 = r1;
+    r1 = rt - quotient * r1;
+  }
+
+  return t0;
+}
+
+ASTree *translate_diff_conv(ASTree *diff_conv, ASTree *expr,
+                            const Type *pointer_type) {
+  SEMCHK(expr);
+  assert(diff_conv->first_instr == NULL && diff_conv->last_instr == NULL);
+
+  diff_conv->first_instr = liter_copy(expr->first_instr);
+  assert(diff_conv->first_instr != NULL);
+  diff_conv->last_instr = liter_copy(expr->last_instr);
+  assert(diff_conv->last_instr != NULL);
+
+  Instruction *expr_instr = liter_get(expr->last_instr);
+  assert(expr_instr->dest.all.mode == MODE_REGISTER &&
+         expr_instr->dest.reg.width == REG_QWORD);
+
+  size_t stride = type_elem_width(pointer_type);
+  assert(stride != 0);
+  int shift_amount = 0;
+  while (!(stride & 0x1)) {
+    stride >>= 1;
+    ++shift_amount;
+  }
+
+  if (shift_amount != 0) {
+    Instruction *sar_instr = instr_init(OP_SAR);
+    sar_instr->dest = expr_instr->dest;
+    set_op_imm(&sar_instr->src, shift_amount, IMM_UNSIGNED);
+
+    int status = liter_push_back(diff_conv->last_instr, &diff_conv->last_instr,
+                                 1, sar_instr);
+    if (status) abort();
+  }
+
+  if (stride == 1) return astree_adopt(diff_conv, 1, expr);
+
+  size_t stride_inv = mulinv(stride);
+  Instruction *load_inv_instr = instr_init(OP_MOV);
+  set_op_imm(&load_inv_instr->src, stride_inv, IMM_UNSIGNED);
+  set_op_reg(&load_inv_instr->dest, REG_QWORD, next_vreg());
+
+  Instruction *imul_instr = instr_init(OP_IMUL);
+  imul_instr->src = load_inv_instr->dest;
+  imul_instr->dest = expr_instr->dest;
+
+  int status = liter_push_back(diff_conv->last_instr, &diff_conv->last_instr, 2,
+                               load_inv_instr, imul_instr);
+  if (status) abort();
+
+  return astree_adopt(diff_conv, 1, expr);
+}
+
 ASTree *translate_ident(ASTree *ident) {
   Instruction *lea_instr = instr_init(OP_LEA);
   Symbol *symbol = NULL;
@@ -1121,76 +1202,6 @@ ASTree *translate_sizeof(ASTree *sizeof_, ASTree *operand) {
   return astree_adopt(sizeof_, 1, operand);
 }
 
-/* implemented based on wikipedia pseudocode */
-/* TODO(Robert): come up with some better names... */
-static unsigned long mulinv(unsigned long l) {
-  static const unsigned long TWO_POW_63 = 0x8000000000000000UL;
-  assert(l % 2 != 0);
-
-  unsigned long t0 = 1, r0 = l;
-  unsigned long t1, r1;
-  if (l > TWO_POW_63) {
-    t1 = ULONG_MAX;
-    r1 = 0 - l;
-  } else {
-    unsigned long q0 = 2 * (TWO_POW_63 / l);
-    if (0 - q0 * l > l) ++q0;
-    t1 = 0 - q0 * 1;
-    r1 = 0 - q0 * l;
-  }
-
-  while (r1 != 0) {
-    unsigned long quotient = r0 / r1;
-    unsigned long tt = t0;
-    t0 = t1;
-    t1 = tt - quotient * t1;
-    unsigned long rt = r0;
-    r0 = r1;
-    r1 = rt - quotient * r1;
-  }
-
-  return t0;
-}
-
-static ASTree *ptrdiff_helper(ASTree *operator, ASTree * left, ASTree *right) {
-  size_t stride = type_elem_width(right->type);
-  assert(stride != 0);
-  int shift_amount = 0;
-  while (!(stride & 0x1)) {
-    stride >>= 1;
-    ++shift_amount;
-  }
-
-  if (shift_amount != 0) {
-    Instruction *sar_instr = instr_init(OP_SAR);
-    Instruction *operator_instr = liter_get(operator->last_instr);
-    sar_instr->dest = operator_instr->dest;
-    set_op_imm(&sar_instr->src, shift_amount, IMM_UNSIGNED);
-
-    int status = liter_push_back(operator->last_instr, &operator->last_instr, 1,
-                                 sar_instr);
-    if (status) abort();
-  }
-
-  if (stride == 1) return astree_adopt(operator, 2, left, right);
-
-  size_t stride_inv = mulinv(stride);
-  Instruction *load_inv_instr = instr_init(OP_MOV);
-  set_op_imm(&load_inv_instr->src, stride_inv, IMM_UNSIGNED);
-  set_op_reg(&load_inv_instr->dest, REG_QWORD, next_vreg());
-
-  Instruction *imul_instr = instr_init(OP_IMUL);
-  imul_instr->src = load_inv_instr->dest;
-  Instruction *operator_instr = liter_get(operator->last_instr);
-  imul_instr->dest = operator_instr->dest;
-
-  int status = liter_push_back(operator->last_instr, &operator->last_instr, 2,
-                               load_inv_instr, imul_instr);
-  if (status) abort();
-
-  return astree_adopt(operator, 2, left, right);
-}
-
 ASTree *translate_addition(ASTree *operator, ASTree * left, ASTree *right) {
   PFDBG0('g', "Translating additive operation");
   SEMCHK(left);
@@ -1210,16 +1221,11 @@ ASTree *translate_addition(ASTree *operator, ASTree * left, ASTree *right) {
   operator->first_instr = liter_copy(left->first_instr);
   if (operator->first_instr == NULL) abort();
 
-  /* if this is a pointer-integer operation, scaling already occurred */
+  /* pointer-integer and pointer-pointer instructions handled elsewhere */
   int status = liter_push_back(right->last_instr, &operator->last_instr, 1,
                                operator_instr);
   if (status) abort();
-
-  if (type_is_pointer(right->type) && operator->tok_kind == '-') {
-    return ptrdiff_helper(operator, left, right);
-  } else {
-    return astree_adopt(operator, 2, left, right);
-  }
+  return astree_adopt(operator, 2, left, right);
 }
 
 /* DIV/IDIV: divide dx:ax by operand; quotient -> ax; remainder -> dx except

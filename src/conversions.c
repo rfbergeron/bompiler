@@ -30,6 +30,14 @@ ASTree *tchk_disp_conv(ASTree *expr, const Type *pointer_type,
   return evaluate_disp_conv(disp_conv, expr, pointer_type, where);
 }
 
+ASTree *tchk_diff_conv(ASTree *expr, const Type *pointer_type) {
+  assert(expr->type == TYPE_LONG);
+  assert(pointer_type != NULL && type_is_pointer(pointer_type));
+  ASTree *diff_conv = astree_init(TOK_DIFF_CONV, expr->loc, "_diff_conv");
+  diff_conv->type = (Type *)TYPE_LONG;
+  return evaluate_diff_conv(diff_conv, expr, pointer_type);
+}
+
 ASTree *tchk_ptr_conv(ASTree *expr, int conv_arr) {
   if (expr->tok_kind != TOK_EMPTY && expr->type != NULL &&
       (type_is_function(expr->type) ||

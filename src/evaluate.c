@@ -446,12 +446,10 @@ ASTree *evaluate_subtraction(ASTree *subtraction, ASTree *left, ASTree *right) {
     left = tchk_cexpr_conv(left, right->first_instr);
     return translate_addition(subtraction, left, right);
   } else if (type_is_pointer(right->type)) {
-    size_t stride = type_elem_width(right->type);
     subtraction->attributes |= ATTR_CONST_INIT;
     subtraction->constant.integral.signed_value =
         (left->constant.integral.signed_value -
-         right->constant.integral.signed_value) /
-        (long)stride;
+         right->constant.integral.signed_value);
   } else if (type_is_pointer(left->type)) {
     subtraction->attributes |= ATTR_CONST_INIT;
     subtraction->constant = left->constant;
@@ -660,6 +658,21 @@ ASTree *evaluate_disp_conv(ASTree *disp_conv, ASTree *expr,
   } else {
     expr = tchk_cexpr_conv(expr, where);
     return translate_disp_conv(disp_conv, expr, pointer_type);
+  }
+}
+
+ASTree *evaluate_diff_conv(ASTree *diff_conv, ASTree *expr,
+                           const Type *pointer_type) {
+  if ((expr->attributes & ATTR_MASK_CONST) >= ATTR_CONST_INIT &&
+      expr->constant.label == NULL) {
+    ptrdiff_t stride = type_elem_width(pointer_type);
+    diff_conv->attributes = expr->attributes;
+    diff_conv->constant.integral.signed_value =
+        expr->constant.integral.signed_value / stride;
+    return astree_adopt(diff_conv, 1, expr);
+  } else {
+    expr = tchk_cexpr_conv(expr, NULL);
+    return translate_diff_conv(diff_conv, expr, pointer_type);
   }
 }
 
