@@ -1910,7 +1910,7 @@ static void recieve_void(void) {
   restore_volatile_regs();
 }
 
-static void recieve_narrow(ASTree *call) {
+static void recieve_normal(ASTree *call) {
   Instruction *store_instr = instr_init(OP_MOV);
   set_op_ind(&store_instr->dest, RETURN_VAL_DISP, RBP_VREG);
   set_op_reg(&store_instr->src,
@@ -1929,7 +1929,7 @@ static void recieve_narrow(ASTree *call) {
   if (status) abort();
 }
 
-static void recieve_wide(ASTree *call) {
+static void recieve_reg_agg(ASTree *call) {
   ptrdiff_t disp = assign_stack_space(call->type);
   bulk_rtom(RBP_VREG, disp, RETURN_REGS, call->type);
 
@@ -1984,10 +1984,11 @@ ASTree *translate_call(ASTree *call) {
 
   if (type_is_void(call->type)) {
     recieve_void();
-  } else if (type_get_eightbytes(call->type) == 2) {
-    recieve_wide(call);
+  } else if (type_is_aggregate(call->type) &&
+             type_get_eightbytes(call->type) <= 2) {
+    recieve_reg_agg(call);
   } else {
-    recieve_narrow(call);
+    recieve_normal(call);
   }
 
   call->last_instr = llist_iter_last(instructions);
