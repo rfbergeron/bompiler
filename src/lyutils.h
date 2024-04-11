@@ -24,6 +24,8 @@ typedef struct location {
 
 extern const Location LOC_EMPTY;
 
+/* hack because `fileno` is not included with `-std=c90` */
+extern int fileno(FILE *stream);
 extern FILE *yyin;
 extern char *yytext;
 extern int yy_flex_debug;

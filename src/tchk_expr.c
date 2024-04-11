@@ -188,7 +188,7 @@ ASTree *validate_designator(ASTree *designator) {
 }
 
 ASTree *validate_va_start(ASTree *va_start_, ASTree *expr, ASTree *ident) {
-  expr = TCHK_STD_CONV(expr, 1, NULL);
+  expr = tchk_cexpr_conv(TCHK_STD_CONV(expr, 1, NULL), NULL);
   if (!types_assignable(TYPE_VA_LIST_POINTER, expr->type,
                         astree_is_const_zero(expr))) {
     (void)semerr_incompatible_types(va_start_, TYPE_VA_LIST_POINTER,
@@ -201,7 +201,7 @@ ASTree *validate_va_start(ASTree *va_start_, ASTree *expr, ASTree *ident) {
 }
 
 ASTree *validate_va_end(ASTree *va_end_, ASTree *expr) {
-  expr = TCHK_STD_CONV(expr, 1, NULL);
+  expr = tchk_cexpr_conv(TCHK_STD_CONV(expr, 1, NULL), NULL);
   if (!types_assignable(TYPE_VA_LIST_POINTER, expr->type,
                         astree_is_const_zero(expr))) {
     (void)semerr_incompatible_types(va_end_, TYPE_VA_LIST_POINTER, expr->type);
@@ -213,8 +213,10 @@ ASTree *validate_va_end(ASTree *va_end_, ASTree *expr) {
 }
 
 ASTree *validate_va_arg(ASTree *va_arg_, ASTree *expr, ASTree *type_name) {
-  expr = TCHK_STD_CONV(expr, 1, NULL);
-  Type *arg_type = astree_get(type_name, 1)->type;
+  ASTree *abs_decl = astree_get(type_name, 1);
+  assert(abs_decl->first_instr != NULL && abs_decl->last_instr != NULL);
+  expr = tchk_cexpr_conv(TCHK_STD_CONV(expr, 1, NULL), abs_decl->first_instr);
+  Type *arg_type = abs_decl->type;
   if (type_is_incomplete(arg_type)) {
     (void)semerr_incomplete_type(va_arg_, arg_type);
     return astree_adopt(va_arg_, 2, expr, type_name);
