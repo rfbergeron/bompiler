@@ -613,6 +613,8 @@ static void restore_volatile_regs(void) {
 }
 
 ASTree *translate_empty_expr(ASTree *empty_expr) {
+  assert(empty_expr->first_instr == NULL);
+  assert(empty_expr->last_instr == NULL);
   Instruction *nop_instr = instr_init(OP_NOP);
   llist_push_back(instructions, nop_instr);
   empty_expr->first_instr = llist_iter_last(instructions);

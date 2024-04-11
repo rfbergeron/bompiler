@@ -59,6 +59,10 @@ static int init_scalar(const Type *type, ptrdiff_t disp, ASTree *initializer) {
     translate_auto_scalar_init(type, disp, initializer);
     return 0;
   } else if ((initializer->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT) {
+    free(initializer->first_instr);
+    free(initializer->last_instr);
+    initializer->first_instr = NULL;
+    initializer->last_instr = NULL;
     (void)semerr_expected_init(initializer);
     (void)translate_empty_expr(initializer);
     return 1;
@@ -171,8 +175,13 @@ static int init_agg_member(Type *member_type, ptrdiff_t disp, ASTree *init_list,
   ASTree *initializer = astree_get(init_list, *init_index);
   if (initializer->tok_kind != TOK_INIT_LIST &&
       (initializer->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT) {
+    free(initializer->first_instr);
+    free(initializer->last_instr);
+    initializer->first_instr = NULL;
+    initializer->last_instr = NULL;
     (void)semerr_expected_init(initializer);
     (void)translate_empty_expr(initializer);
+    ++*init_index;
     return 1;
   } else if (type_is_scalar(member_type)) {
     ++*init_index;
@@ -193,6 +202,7 @@ static int init_agg_member(Type *member_type, ptrdiff_t disp, ASTree *init_list,
   } else {
     (void)semerr_compat_init(initializer, member_type);
     (void)translate_empty_expr(initializer);
+    ++*init_index;
     return 1;
   }
 }
