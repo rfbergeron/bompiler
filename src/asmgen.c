@@ -2086,7 +2086,8 @@ static void helper_va_arg_reg_param(ASTree *va_arg_, ASTree *expr,
   Instruction *expr_instr = liter_get(expr->last_instr);
   REGCHK(expr_instr);
   assert(expr_instr != NULL && expr_instr->dest.all.mode == MODE_REGISTER);
-  const Type *arg_type = astree_get(type_name, 1)->type;
+  ASTree *abs_decl = astree_get(type_name, 1);
+  const Type *arg_type = abs_decl->type;
   size_t va_list_vreg = expr_instr->dest.reg.num;
   size_t eightbytes = type_get_eightbytes(arg_type);
   size_t result_vreg = next_vreg(), current_branch = next_branch();
@@ -2191,7 +2192,7 @@ static void helper_va_arg_reg_param(ASTree *va_arg_, ASTree *expr,
   dummy_instr->persist_flags = PERSIST_DEST_SET;
 
   int status = liter_push_back(
-      expr->last_instr, &va_arg_->last_instr, 13, load_gp_offset_instr,
+      abs_decl->last_instr, &va_arg_->last_instr, 13, load_gp_offset_instr,
       cmp_gp_offset_instr, jmp_ge_instr, add_save_area_instr,
       load_reg_save_instr, load_eightbyte_instr, update_offset_instr,
       jmp_false_instr, load_overflow_arg_area_instr, load_stack_save_instr,
@@ -2206,7 +2207,8 @@ static void helper_va_arg_stack_param(ASTree *va_arg_, ASTree *expr,
   REGCHK(expr_instr);
   assert(expr_instr != NULL && expr_instr->dest.all.mode == MODE_REGISTER);
   size_t va_list_vreg = expr_instr->dest.reg.num;
-  size_t eightbytes = type_get_eightbytes(astree_get(type_name, 1)->type);
+  ASTree *abs_decl = astree_get(type_name, 1);
+  size_t eightbytes = type_get_eightbytes(abs_decl->type);
 
   /* load location of next stack parameter */
   Instruction *load_overflow_arg_area_instr = instr_init(OP_MOV);
@@ -2233,7 +2235,7 @@ static void helper_va_arg_stack_param(ASTree *va_arg_, ASTree *expr,
   Instruction *dummy_instr = instr_init(OP_MOV);
   dummy_instr->src = dummy_instr->dest = load_overflow_arg_area_instr->dest;
 
-  int status = liter_push_back(expr->last_instr, &va_arg_->last_instr, 4,
+  int status = liter_push_back(abs_decl->last_instr, &va_arg_->last_instr, 4,
                                load_overflow_arg_area_instr, load_disp_instr,
                                add_disp_instr, dummy_instr);
   if (status) abort();

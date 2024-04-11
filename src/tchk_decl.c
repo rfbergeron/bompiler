@@ -125,7 +125,6 @@ static unsigned int type_flag_from_tok_kind(int tok_kind) {
 
 ASTree *validate_decl_spec(ASTree *decl_specs, ASTree *decl_spec) {
   assert(decl_specs->type != NULL);
-  assert(!type_is_declarator(decl_specs->type));
 
   if (decl_spec->tok_kind == TOK_ATTR_LIST) {
     astree_destroy(decl_spec);
@@ -921,7 +920,11 @@ ASTree *define_record_member(ASTree *record_spec, ASTree *member) {
 
 ASTree *declare_symbol(ASTree *declaration, ASTree *declarator) {
   Symbol *symbol = validate_declaration(declaration, declarator);
-  if (symbol == NULL) return astree_adopt(declaration, 1, declarator);
+  /* emit a `nop` in case we just validated a type name */
+  if (symbol == NULL)
+    return state_peek_table(state)->kind == TABLE_TRANS_UNIT
+               ? astree_adopt(declaration, 1, declarator)
+               : astree_adopt(declaration, 1, translate_empty_expr(declarator));
   assert(symbol->type = declarator->type);
 
   if (symbol->linkage == LINK_NONE || symbol->info == SYM_INHERITOR)
