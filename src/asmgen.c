@@ -3193,6 +3193,10 @@ ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
   Symbol *symbol = NULL;
   int in_current_scope = state_get_symbol(state, (char *)declarator->lexinfo,
                                           strlen(declarator->lexinfo), &symbol);
+  if (symbol == NULL)
+    state_get_member(state, (char *)declarator->lexinfo,
+                     strlen(declarator->lexinfo), &symbol);
+
 #ifdef NDEBUG
   (void)in_current_scope;
 #endif
@@ -3240,6 +3244,10 @@ ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
   Symbol *symbol = NULL;
   int in_current_scope = state_get_symbol(state, (char *)declarator->lexinfo,
                                           strlen(declarator->lexinfo), &symbol);
+  if (symbol == NULL)
+    in_current_scope = state_get_member(state, (char *)declarator->lexinfo,
+                                        strlen(declarator->lexinfo), &symbol);
+
 #ifdef NDEBUG
   (void)in_current_scope;
 #endif
@@ -3406,11 +3414,9 @@ void asmgen_init_globals(const char *filename) {
       map_init(generated_text, DEFAULT_MAP_SIZE, NULL, free, strncmp_wrapper);
   if (status) abort();
 
-  static Tag tag_va_spill_region = {X64_SIZEOF_LONG * PARAM_REG_COUNT,
-                                    X64_ALIGNOF_LONG,
-                                    {{NULL, BLIB_LLIST_EMPTY}},
-                                    TAG_STRUCT,
-                                    1};
+  static Tag tag_va_spill_region = {{TAG_STRUCT, 1,
+                                     X64_SIZEOF_LONG * PARAM_REG_COUNT,
+                                     X64_ALIGNOF_LONG, NULL, BLIB_LLIST_EMPTY}};
   static Type type_va_spill_region = {{TYPE_CODE_STRUCT, 0}};
   type_va_spill_region.tag.value = &tag_va_spill_region;
   TYPE_VA_SPILL_REGION = &type_va_spill_region;

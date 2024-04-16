@@ -138,7 +138,7 @@ union type {
     TypeCode code;
     unsigned int flags;
     const char *name;
-    struct tag *value;
+    union tag *value;
   } tag;
   struct {
     TypeCode code;
@@ -165,7 +165,7 @@ Type *type_init_pointer(unsigned int qualifiers);
 Type *type_init_array(size_t length, int deduce_length);
 Type *type_init_function(size_t parameters_size, Type **parameters,
                          int is_variadic, int is_old_style);
-Type *type_init_tag(unsigned int flags, const char *tag_name, struct tag *tag);
+Type *type_init_tag(unsigned int flags, const char *tag_name, union tag *tag);
 Type *type_init_base(unsigned int flags);
 
 void type_destroy(Type *type);

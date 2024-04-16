@@ -93,7 +93,7 @@ Type *type_init_tag(unsigned int flags, const char *tag_name, Tag *tag) {
   assert(!(flags & SPEC_FLAG_MASK));
   assert(tag_name != NULL && tag != NULL);
   Type *type = malloc(sizeof(Type));
-  switch (tag->kind) {
+  switch (tag->record.kind) {
     case TAG_STRUCT:
       type->tag.code = TYPE_CODE_STRUCT;
       break;
@@ -488,7 +488,7 @@ int type_is_incomplete(const Type *type) {
   } else if (type_is_deduced_array(type) && type->array.length == 0) {
     return 1;
   } else if ((type_is_union(type) || type_is_struct(type)) &&
-             !type->tag.value->is_defined) {
+             !type->tag.value->record.defined) {
     return 1;
   } else {
     return 0;
@@ -497,13 +497,13 @@ int type_is_incomplete(const Type *type) {
 
 Symbol *type_member_name(const Type *type, const char *name) {
   assert(type_is_union(type) || type_is_struct(type));
-  return symbol_table_get(type->tag.value->data.members.by_name, name,
-                          strlen(name));
+  return symbol_table_get_member(type->tag.value->record.by_name, name,
+                                 strlen(name));
 }
 
 Symbol *type_member_index(const Type *type, size_t index) {
   assert(type_is_union(type) || type_is_struct(type));
-  return llist_get(&type->tag.value->data.members.in_order, index);
+  return llist_get(&type->tag.value->record.in_order, index);
 }
 
 size_t type_member_count(const Type *type) {
@@ -512,7 +512,7 @@ size_t type_member_count(const Type *type) {
     case TYPE_CODE_UNION:
       return 1;
     case TYPE_CODE_STRUCT:
-      return llist_size(&type->tag.value->data.members.in_order);
+      return llist_size(&type->tag.value->record.in_order);
     case TYPE_CODE_ARRAY:
       if (type->array.deduce_length && type->array.length == 0)
         return SIZE_MAX;
@@ -577,7 +577,7 @@ size_t type_get_alignment(const Type *type) {
     case TYPE_CODE_UNION:
       /* fallthrough */
     case TYPE_CODE_ENUM:
-      return type->tag.value->alignment;
+      return type->tag.value->enumeration.alignment;
     case TYPE_CODE_POINTER:
       return X64_ALIGNOF_LONG;
     case TYPE_CODE_ARRAY:
@@ -634,7 +634,7 @@ size_t type_get_width(const Type *type) {
     case TYPE_CODE_UNION:
       /* fallthrough */
     case TYPE_CODE_STRUCT:
-      return type->tag.value->width;
+      return type->tag.value->record.width;
     case TYPE_CODE_POINTER:
       return X64_SIZEOF_LONG;
     case TYPE_CODE_ARRAY:

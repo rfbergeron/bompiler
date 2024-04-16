@@ -356,7 +356,7 @@ ASTree *evaluate_ident(ASTree *ident) {
   } else if (symbol->storage == STORE_ENUM_CONST) {
     ident->attributes |= ATTR_CONST_INT;
     Tag *tag = ident->type->tag.value;
-    int *value = map_get(&tag->data.enumerators.by_name, (char *)ident->lexinfo,
+    int *value = map_get(&tag->enumeration.by_name, (char *)ident->lexinfo,
                          strlen(ident->lexinfo));
     ident->constant.integral.signed_value = *value;
     return ident;

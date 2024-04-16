@@ -112,23 +112,23 @@ ASTree *validate_for(ASTree *for_, ASTree *init_expr, ASTree *pre_iter_expr,
   }
 }
 
-ASTree *validate_label(ASTree *label, ASTree *ident_node, ASTree *stmt) {
+ASTree *validate_label(ASTree *label_node, ASTree *ident_node, ASTree *stmt) {
   const char *ident = ident_node->lexinfo;
   size_t ident_len = strlen(ident);
-  LabelValue *existing_entry = state_get_label(state, ident, ident_len);
+  Label *existing_entry = state_get_label(state, ident, ident_len);
   if (existing_entry == NULL) {
-    LabelValue *labval = malloc(sizeof(*labval));
-    labval->tree = ident_node;
-    labval->is_defined = 1;
-    state_insert_label(state, ident, ident_len, labval);
-    return translate_label(label, ident_node, stmt);
-  } else if (existing_entry->is_defined) {
+    Label *label = malloc(sizeof(*label));
+    label->tree = ident_node;
+    label->defined = 1;
+    state_insert_label(state, ident, ident_len, label);
+    return translate_label(label_node, ident_node, stmt);
+  } else if (existing_entry->defined) {
     (void)semerr_redefine_label(ident_node, existing_entry->tree);
-    return astree_adopt(label, 2, ident_node, stmt);
+    return astree_adopt(label_node, 2, ident_node, stmt);
   } else {
     existing_entry->tree = ident_node;
-    existing_entry->is_defined = 1;
-    return translate_label(label, ident_node, stmt);
+    existing_entry->defined = 1;
+    return translate_label(label_node, ident_node, stmt);
   }
 }
 
@@ -165,12 +165,12 @@ ASTree *validate_default(ASTree *default_, ASTree *stmt) {
 ASTree *validate_goto(ASTree *goto_, ASTree *ident) {
   const char *ident_str = ident->lexinfo;
   size_t ident_str_len = strlen(ident_str);
-  LabelValue *existing_entry = state_get_label(state, ident_str, ident_str_len);
+  Label *existing_entry = state_get_label(state, ident_str, ident_str_len);
   if (!existing_entry) {
-    LabelValue *labval = malloc(sizeof(*labval));
-    labval->tree = ident;
-    labval->is_defined = 0;
-    state_insert_label(state, ident_str, ident_str_len, labval);
+    Label *label = malloc(sizeof(*label));
+    label->tree = ident;
+    label->defined = 0;
+    state_insert_label(state, ident_str, ident_str_len, label);
   }
   return translate_goto(goto_, ident);
 }
