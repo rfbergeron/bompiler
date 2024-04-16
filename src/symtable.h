@@ -16,11 +16,11 @@ typedef enum table_kind {
 } TableKind;
 
 typedef struct symbol_table {
+  TableKind kind;
   Map *primary_namespace;
   Map *tag_namespace;
   Map *label_namespace;
-  LinkedList *control_stack;
-  TableKind kind;
+  Map *member_namespace;
 } SymbolTable;
 
 typedef enum linkage {
@@ -62,42 +62,29 @@ typedef struct symbol {
 typedef enum tag_kind { TAG_STRUCT = 0, TAG_UNION, TAG_ENUM } TagKind;
 
 /* TODO(Robert): make this a tagged union */
-typedef struct tag {
-  size_t width;     /* struct/enum width */
-  size_t alignment; /* struct/enum alignment */
-  union {
-    struct {
-      SymbolTable *by_name; /* struct members by name */
-      LinkedList in_order;  /* struct members in declaration order */
-    } members;
-    struct {
-      Map by_name; /* mapping from names to string constants */
-      LinkedList struct_name_spaces; /* temporary struct member storage */
-      int last_value;                /* value of last enum constant */
-    } enumerators;
-  } data;
-  TagKind kind;   /* indicates struct, union or enum tag */
-  int is_defined; /* used to identify forward declarations */
+typedef union tag {
+  struct {
+    TagKind kind;
+    int defined;
+    size_t width;
+    size_t alignment;
+    SymbolTable *by_name;
+    LinkedList in_order;
+  } record;
+  struct {
+    TagKind kind;
+    int defined;
+    size_t width;
+    size_t alignment;
+    Map by_name;
+    int last_value;
+  } enumeration;
 } Tag;
 
-typedef enum control_type {
-  CTRL_BREAK,
-  CTRL_CONTINUE,
-  CTRL_GOTO,
-  CTRL_RETURN,
-  CTRL_CASE,
-  CTRL_DEFAULT
-} ControlType;
-
-typedef struct control_value {
+typedef struct label {
   struct astree *tree;
-  ControlType type;
-} ControlValue;
-
-typedef struct label_value {
-  struct astree *tree;
-  int is_defined;
-} LabelValue;
+  int defined;
+} Label;
 
 /* Symbol functions */
 Symbol *symbol_init(const Location *loc);
@@ -117,12 +104,16 @@ void symbol_table_insert(SymbolTable *table, const char *ident,
                          const size_t ident_len, Symbol *symbol);
 Symbol *symbol_table_get(SymbolTable *table, const char *ident,
                          const size_t ident_len);
+void symbol_table_insert_member(SymbolTable *table, const char *ident,
+                                const size_t ident_len, Symbol *symbol);
+Symbol *symbol_table_get_member(SymbolTable *table, const char *ident,
+                                const size_t ident_len);
 void symbol_table_insert_tag(SymbolTable *table, const char *ident,
                              const size_t ident_len, Tag *tag);
 Tag *symbol_table_get_tag(SymbolTable *table, const char *ident,
                           const size_t ident_len);
 void symbol_table_insert_label(SymbolTable *table, const char *ident,
-                               const size_t ident_len, LabelValue *labval);
-LabelValue *symbol_table_get_label(SymbolTable *table, const char *ident,
-                                   const size_t ident_len);
+                               const size_t ident_len, Label *label);
+Label *symbol_table_get_label(SymbolTable *table, const char *ident,
+                              const size_t ident_len);
 #endif

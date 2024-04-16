@@ -344,7 +344,9 @@ static Symbol *validate_declaration(ASTree *declaration, ASTree *declarator) {
   size_t identifier_len = strlen(identifier);
   Symbol *exists = NULL;
   int is_redeclaration =
-      state_get_symbol(state, identifier, identifier_len, &exists);
+      state_peek_table(state)->kind == TABLE_MEMBER
+          ? state_get_member(state, identifier, identifier_len, &exists)
+          : state_get_symbol(state, identifier, identifier_len, &exists);
   Symbol *symbol = symbol_init(&declarator->loc);
   symbol->type = declarator->type;
 
@@ -353,7 +355,10 @@ static Symbol *validate_declaration(ASTree *declaration, ASTree *declarator) {
     symbol_destroy(symbol);
     return NULL;
   } else if (!is_redeclaration) {
-    state_insert_symbol(state, identifier, identifier_len, symbol);
+    if (symbol->linkage == LINK_MEMBER)
+      state_insert_member(state, identifier, identifier_len, symbol);
+    else
+      state_insert_symbol(state, identifier, identifier_len, symbol);
     if (symbol_is_lvalue(symbol)) declarator->attributes |= ATTR_EXPR_LVAL;
     /* reassign type information in case it was replaced */
     if (symbol->info == SYM_INHERITOR) declarator->type = symbol->type;
@@ -541,6 +546,7 @@ ASTree *define_symbol(ASTree *decl_list, ASTree *equal_sign,
                          strlen(declarator->lexinfo), &symbol);
   assert(symbol != NULL);
   assert(symbol->type = declarator->type);
+  assert(symbol->linkage != LINK_MEMBER);
   if (symbol->info == SYM_DEFINED) {
     (void)semerr_redefine_symbol(declarator, symbol);
     return astree_adopt(decl_list, 1,
@@ -650,8 +656,8 @@ ASTree *finalize_function(ASTree *function) {
     for (i = 0; i < alist_size(&label_strs); ++i) {
       const char *label_str = alist_get(&label_strs, i);
       size_t label_str_len = strlen(label_str);
-      LabelValue *labval = state_get_label(state, label_str, label_str_len);
-      if (!labval->is_defined) (void)semerr_label_not_found(labval->tree);
+      Label *label = state_get_label(state, label_str, label_str_len);
+      if (!label->defined) (void)semerr_label_not_found(label->tree);
     }
     status = alist_destroy(&label_strs, NULL);
     if (status) abort();
@@ -687,21 +693,8 @@ ASTree *validate_unique_tag(ASTree *tag_spec, ASTree *left_brace) {
   state_insert_tag(state, id_str, id_str_len, tag);
   tag_spec->type = type_init_tag(QUAL_FLAG_NONE | STOR_FLAG_NONE, id_str, tag);
 
-  if (kind == TAG_ENUM) {
-    /* remove struct/union member tables from scope stack */
-    SymbolTable *top_scope = state_peek_table(state);
-    while (top_scope->kind == TABLE_MEMBER) {
-      int status =
-          llist_push_back(&tag->data.enumerators.struct_name_spaces, top_scope);
-      if (status) abort();
-      state_pop_table(state);
-      top_scope = state_peek_table(state);
-    }
-    tag->width = 4;
-    tag->alignment = 4;
-  } else {
-    state_push_table(state, tag->data.members.by_name);
-  }
+  if (kind == TAG_STRUCT || kind == TAG_UNION)
+    state_push_table(state, tag->record.by_name);
   return astree_adopt(tag_spec, 1, left_brace);
 }
 
@@ -714,7 +707,7 @@ ASTree *validate_tag_decl(ASTree *tag_spec, ASTree *tag_id) {
 
   if (exists) {
     if (is_redeclaration) {
-      if (kind != exists->kind) {
+      if (kind != exists->record.kind) {
         (void)semerr_redefine_tag(tag_spec, tag_id, exists);
         return astree_adopt(tag_spec, 1, tag_id);
       } else {
@@ -724,7 +717,7 @@ ASTree *validate_tag_decl(ASTree *tag_spec, ASTree *tag_id) {
       }
     } else {
       Tag *tag;
-      if (kind != exists->kind) {
+      if (kind != exists->record.kind) {
         tag = tag_init(kind);
         state_insert_tag(state, id_str, id_str_len, tag);
       } else {
@@ -755,7 +748,7 @@ ASTree *validate_tag_def(ASTree *tag_spec, ASTree *tag_id, ASTree *left_brace) {
   int is_redeclaration = state_get_tag(state, id_str, id_str_len, &exists);
   TagKind kind = tag_from_tok_kind(tag_spec->tok_kind);
 
-  if (is_redeclaration && exists->is_defined) {
+  if (is_redeclaration && exists->record.defined) {
     (void)semerr_redefine_tag(tag_spec, tag_id, exists);
     return astree_adopt(tag_spec, 2, tag_id, left_brace);
   } else {
@@ -771,45 +764,24 @@ ASTree *validate_tag_def(ASTree *tag_spec, ASTree *tag_id, ASTree *left_brace) {
     tag_spec->type =
         type_init_tag(QUAL_FLAG_NONE | STOR_FLAG_NONE, id_str, tag);
 
-    if (kind == TAG_ENUM) {
-      /* remove struct/union member tables from scope stack */
-      SymbolTable *top_scope = state_peek_table(state);
-      while (top_scope->kind == TABLE_MEMBER) {
-        int status = llist_push_back(&tag->data.enumerators.struct_name_spaces,
-                                     top_scope);
-        if (status) abort();
-        state_pop_table(state);
-        top_scope = state_peek_table(state);
-      }
-      tag->width = 4;
-      tag->alignment = 4;
-    } else {
-      state_push_table(state, tag->data.members.by_name);
-    }
+    if (kind == TAG_STRUCT || kind == TAG_UNION)
+      state_push_table(state, tag->record.by_name);
     return astree_adopt(tag_spec, 2, tag_id, left_brace);
   }
 }
 
 ASTree *finalize_tag_def(ASTree *tag_spec) {
   Tag *tag = tag_spec->type->tag.value;
-  tag->is_defined = 1;
+  tag->record.defined = 1;
 
-  if (tag->kind == TAG_ENUM) {
-    /* push struct/union member tables back onto the scope stack */
-    while (!llist_empty(&tag->data.enumerators.struct_name_spaces)) {
-      SymbolTable *member_scope =
-          llist_pop_back(&tag->data.enumerators.struct_name_spaces);
-      assert(member_scope != NULL);
-      state_push_table(state, member_scope);
-    }
-  } else {
+  if (tag->record.kind == TAG_STRUCT || tag->record.kind == TAG_UNION) {
     /* pop member scope from stack */
-    if (state_peek_table(state) == tag->data.members.by_name)
-      state_pop_table(state);
+    if (state_peek_table(state) == tag->record.by_name) state_pop_table(state);
     /* pad aggregate so that it can tile an array */
-    if (tag->alignment != 0) {
-      size_t padding = tag->alignment - (tag->width % tag->alignment);
-      if (padding != tag->alignment) tag->width += padding;
+    if (tag->record.alignment != 0) {
+      size_t padding =
+          tag->record.alignment - (tag->record.width % tag->record.alignment);
+      if (padding != tag->record.alignment) tag->record.width += padding;
     }
   }
 
@@ -855,21 +827,21 @@ ASTree *define_enumerator(ASTree *enum_spec, ASTree *enum_id,
     }
     int *value = malloc(sizeof(int));
     if (type_is_unsigned(expr->type)) {
-      *value = tag->data.enumerators.last_value =
+      *value = tag->enumeration.last_value =
           expr->constant.integral.unsigned_value;
     } else {
-      *value = tag->data.enumerators.last_value =
+      *value = tag->enumeration.last_value =
           expr->constant.integral.signed_value;
     }
-    int status = map_insert(&tag->data.enumerators.by_name, (char *)id_str,
+    int status = map_insert(&tag->enumeration.by_name, (char *)id_str,
                             id_str_len, value);
     if (status) abort();
     astree_adopt(left_brace, 1, astree_adopt(equal_sign, 2, enum_id, expr));
     return enum_spec;
   } else {
     int *value = malloc(sizeof(int));
-    *value = ++tag->data.enumerators.last_value;
-    int status = map_insert(&tag->data.enumerators.by_name, (char *)id_str,
+    *value = ++tag->enumeration.last_value;
+    int status = map_insert(&tag->enumeration.by_name, (char *)id_str,
                             id_str_len, value);
     if (status) abort();
     astree_adopt(left_brace, 1, enum_id);
@@ -886,13 +858,13 @@ ASTree *define_record_member(ASTree *record_spec, ASTree *member) {
       astree_get(record_spec, astree_count(record_spec) == 2 ? 1 : 0);
 
   Tag *tag = record_spec->type->tag.value;
-  LinkedList *member_list = &tag->data.members.in_order;
+  LinkedList *member_list = &tag->record.in_order;
   size_t i;
   /* skip first child, which is the typespec list */
   for (i = 1; i < astree_count(member); ++i) {
     ASTree *declarator = astree_get(member, i);
     Symbol *symbol;
-    int is_member = state_get_symbol(state, declarator->lexinfo,
+    int is_member = state_get_member(state, declarator->lexinfo,
                                      strlen(declarator->lexinfo), &symbol);
 #ifdef NDEBUG
     (void)is_member;
@@ -901,16 +873,17 @@ ASTree *define_record_member(ASTree *record_spec, ASTree *member) {
     assert(symbol != NULL);
     size_t member_alignment = type_get_alignment(declarator->type);
     size_t member_width = type_get_width(declarator->type);
-    if (tag->alignment < member_alignment) {
-      tag->alignment = member_alignment;
+    if (tag->record.alignment < member_alignment) {
+      tag->record.alignment = member_alignment;
     }
-    if (tag->kind == TAG_STRUCT) {
-      size_t padding = member_alignment - (tag->width % member_alignment);
-      if (padding != member_alignment) tag->width += padding;
-      symbol->disp = tag->width;
-      tag->width += member_width;
-    } else if (tag->width < member_width) {
-      tag->width = member_width;
+    if (tag->record.kind == TAG_STRUCT) {
+      size_t padding =
+          member_alignment - (tag->record.width % member_alignment);
+      if (padding != member_alignment) tag->record.width += padding;
+      symbol->disp = tag->record.width;
+      tag->record.width += member_width;
+    } else if (tag->record.width < member_width) {
+      tag->record.width = member_width;
     }
     llist_push_back(member_list, symbol);
   }

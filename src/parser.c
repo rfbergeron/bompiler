@@ -38,11 +38,11 @@ BCC_YYSTATIC void make_va_list_type(void) {
   Tag *builtin_tag = tag_init(TAG_STRUCT);
   state_insert_tag(state, VA_LIST_STRUCT_NAME, strlen(VA_LIST_STRUCT_NAME),
                    builtin_tag);
-  state_push_table(state, builtin_tag->data.members.by_name);
-  builtin_tag->alignment = X64_ALIGNOF_LONG;
-  builtin_tag->width = 2 * X64_SIZEOF_LONG + 2 * X64_SIZEOF_INT;
-  builtin_tag->is_defined = 1;
-  LinkedList *member_list = &builtin_tag->data.members.in_order;
+  state_push_table(state, builtin_tag->record.by_name);
+  builtin_tag->record.alignment = X64_ALIGNOF_LONG;
+  builtin_tag->record.width = 2 * X64_SIZEOF_LONG + 2 * X64_SIZEOF_INT;
+  builtin_tag->record.defined = 1;
+  LinkedList *member_list = &builtin_tag->record.in_order;
   size_t i;
   ptrdiff_t displacement;
   for (i = 0, displacement = 0; i < 4; ++i) {
@@ -60,7 +60,7 @@ BCC_YYSTATIC void make_va_list_type(void) {
     int status = llist_push_back(member_list, member_symbol);
     if (status) abort();
     const char *symname = VA_LIST_MEMBER_NAMES[i];
-    state_insert_symbol(state, symname, strlen(symname), member_symbol);
+    state_insert_member(state, symname, strlen(symname), member_symbol);
     if (status) abort();
   }
 

@@ -38,15 +38,19 @@ void state_insert_symbol(CompilerState *state, const char *ident,
                          const size_t ident_len, Symbol *symbol);
 int state_inheritance_valid(CompilerState *state, const char *ident,
                             const size_t ident_len, Symbol *symbol);
+int state_get_member(CompilerState *state, const char *ident,
+                     const size_t ident_len, Symbol **out);
+void state_insert_member(CompilerState *state, const char *ident,
+                         const size_t ident_len, Symbol *symbol);
 size_t state_get_sequence(CompilerState *state);
 int state_get_tag(CompilerState *state, const char *ident,
                   const size_t ident_len, Tag **out);
 void state_insert_tag(CompilerState *state, const char *ident,
                       const size_t ident_len, Tag *tag);
-LabelValue *state_get_label(CompilerState *state, const char *ident,
-                            const size_t ident_len);
+Label *state_get_label(CompilerState *state, const char *ident,
+                       const size_t ident_len);
 void state_insert_label(CompilerState *state, const char *ident,
-                        const size_t ident_len, LabelValue *labval);
+                        const size_t ident_len, Label *label);
 size_t state_get_selection_id(CompilerState *state);
 size_t state_get_case_id(CompilerState *state);
 size_t state_get_control_reg(CompilerState *state);

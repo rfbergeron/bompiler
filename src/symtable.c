@@ -136,60 +136,48 @@ int symbol_is_lvalue(const Symbol *symbol) {
  */
 Tag *tag_init(TagKind kind) {
   Tag *tag = malloc(sizeof(*tag));
-  tag->kind = kind;
-  tag->width = 0;
-  tag->alignment = 0;
-  tag->is_defined = 0;
   if (kind == TAG_STRUCT || kind == TAG_UNION) {
-    tag->data.members.by_name = symbol_table_init(TABLE_MEMBER);
-    if (tag->data.members.by_name == NULL) {
-      free(tag);
-      return NULL;
-    }
-    int status = llist_init(&tag->data.members.in_order, NULL, NULL);
-    if (status) {
-      symbol_table_destroy(tag->data.members.by_name);
-      free(tag);
-      return NULL;
-    }
-  } else if (kind == TAG_ENUM) {
+    tag->record.kind = kind;
+    tag->record.defined = 0;
+    tag->record.width = 0;
+    tag->record.alignment = 0;
+    tag->record.by_name = symbol_table_init(TABLE_MEMBER);
+    assert(tag->record.by_name != NULL);
+    int status = llist_init(&tag->record.in_order, NULL, NULL);
+    if (status) abort();
+    return tag;
+  } else {
+    assert(kind == TAG_ENUM);
+    tag->enumeration.kind = kind;
+    tag->enumeration.defined = 0;
+    tag->enumeration.width = X64_SIZEOF_INT;
+    tag->enumeration.alignment = X64_ALIGNOF_INT;
     /* this map stores (char*, int*) pairs, which are the names of enumeration
      * constants and their values, respectively. it is responsible for freeing
      * the resources allocated to store the constants, but not the strings
      */
-    int status = map_init(&tag->data.enumerators.by_name, DEFAULT_MAP_SIZE,
-                          NULL, free, strncmp_wrapper);
-    if (status) return NULL;
-    status = llist_init(&tag->data.enumerators.struct_name_spaces, NULL, NULL);
-    if (status) return NULL;
-    tag->data.enumerators.last_value = 0;
-  } else {
-    /* error: invalid tag type */
-    fprintf(stderr, "ERROR: invalid tag type\n");
-    return NULL;
+    int status = map_init(&tag->enumeration.by_name, DEFAULT_MAP_SIZE, NULL,
+                          free, strncmp_wrapper);
+    if (status) abort();
+    tag->enumeration.last_value = 0;
+    return tag;
   }
-  return tag;
 }
 
 void tag_destroy(Tag *tag) {
   if (tag == NULL) {
     return;
-  } else if (tag->kind == TAG_STRUCT || tag->kind == TAG_UNION) {
-    int status = llist_destroy(&tag->data.members.in_order);
-    if (status) {
-      fprintf(stderr, "your data structures library sucks\n");
-      abort();
-    }
-    symbol_table_destroy(tag->data.members.by_name);
-  } else if (tag->kind == TAG_ENUM) {
-    int status = map_destroy(&tag->data.enumerators.by_name);
+  } else if (tag->record.kind == TAG_STRUCT || tag->record.kind == TAG_UNION) {
+    int status = llist_destroy(&tag->record.in_order);
     if (status) abort();
-    status = llist_destroy(&tag->data.enumerators.struct_name_spaces);
-    if (status) abort();
+    symbol_table_destroy(tag->record.by_name);
+    free(tag);
   } else {
-    abort();
+    assert(tag->enumeration.kind == TAG_ENUM);
+    int status = map_destroy(&tag->enumeration.by_name);
+    if (status) abort();
+    free(tag);
   }
-  free(tag);
 }
 
 #ifndef UNIT_TESTING
@@ -201,10 +189,11 @@ int tag_print(const Tag *tag, char *buffer, size_t size) {
 
   int buffer_offset =
       sprintf(buffer, "Type: %s, Width: %lu, Align: %lu, Members: {",
-              TAG_TYPE_STRINGS[tag->kind], tag->width, tag->alignment);
+              TAG_TYPE_STRINGS[tag->record.kind], tag->record.width,
+              tag->record.alignment);
   if (buffer_offset < 0) return -1;
-  if (tag->kind == TAG_STRUCT || tag->kind == TAG_UNION) {
-    Map *symbols = tag->data.members.by_name->primary_namespace;
+  if (tag->record.kind == TAG_STRUCT || tag->record.kind == TAG_UNION) {
+    Map *symbols = tag->record.by_name->primary_namespace;
     ArrayList symnames;
     int status = alist_init(&symnames, map_size(symbols));
     if (status) abort();
@@ -251,10 +240,15 @@ SymbolTable *symbol_table_init(TableKind kind) {
                         (void (*)(void *))destroy_unique_name,
                         (void (*)(void *))tag_destroy, strncmp_wrapper);
       if (status) abort();
-      /* fallthrough */
-    case TABLE_MEMBER:
       table->primary_namespace = malloc(sizeof(Map));
       status = map_init(table->primary_namespace, DEFAULT_MAP_SIZE,
+                        (void (*)(void *))destroy_unique_name,
+                        (void (*)(void *))symbol_destroy, strncmp_wrapper);
+      if (status) abort();
+      break;
+    case TABLE_MEMBER:
+      table->member_namespace = malloc(sizeof(Map));
+      status = map_init(table->member_namespace, DEFAULT_MAP_SIZE,
                         (void (*)(void *))destroy_unique_name,
                         (void (*)(void *))symbol_destroy, strncmp_wrapper);
       if (status) abort();
@@ -279,11 +273,14 @@ void symbol_table_destroy(SymbolTable *table) {
       status = map_destroy(table->tag_namespace);
       if (status) abort();
       free(table->tag_namespace);
-      /* fallthrough */
-    case TABLE_MEMBER:
       status = map_destroy(table->primary_namespace);
       if (status) abort();
       free(table->primary_namespace);
+      break;
+    case TABLE_MEMBER:
+      status = map_destroy(table->member_namespace);
+      if (status) abort();
+      free(table->member_namespace);
       break;
     default:
       abort();
@@ -301,6 +298,16 @@ Symbol *symbol_table_get(SymbolTable *table, const char *ident,
   return map_get(table->primary_namespace, (char *)ident, ident_len);
 }
 
+void symbol_table_insert_member(SymbolTable *table, const char *ident,
+                                const size_t ident_len, Symbol *symbol) {
+  map_insert(table->member_namespace, (char *)ident, ident_len, symbol);
+}
+
+Symbol *symbol_table_get_member(SymbolTable *table, const char *ident,
+                                const size_t ident_len) {
+  return map_get(table->member_namespace, (char *)ident, ident_len);
+}
+
 void symbol_table_insert_tag(SymbolTable *table, const char *ident,
                              const size_t ident_len, Tag *tag) {
   map_insert(table->tag_namespace, (char *)ident, ident_len, tag);
@@ -312,11 +319,11 @@ Tag *symbol_table_get_tag(SymbolTable *table, const char *ident,
 }
 
 void symbol_table_insert_label(SymbolTable *table, const char *ident,
-                               const size_t ident_len, LabelValue *labval) {
-  map_insert(table->label_namespace, (char *)ident, ident_len, labval);
+                               const size_t ident_len, Label *label) {
+  map_insert(table->label_namespace, (char *)ident, ident_len, label);
 }
 
-LabelValue *symbol_table_get_label(SymbolTable *table, const char *ident,
-                                   const size_t ident_len) {
+Label *symbol_table_get_label(SymbolTable *table, const char *ident,
+                              const size_t ident_len) {
   return map_get(table->label_namespace, (char *)ident, ident_len);
 }
