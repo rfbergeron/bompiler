@@ -27,6 +27,7 @@
 #define MAX_OPERAND_LENGTH 64
 #define MAX_LABEL_LENGTH 64
 #define MAX_INSTR_LENGTH 1024
+#define LABEL_BUFFER_SIZE ((size_t)1024)
 #define NO_DISP 0
 #define IMM_SIGNED 1
 #define IMM_UNSIGNED 0
@@ -86,8 +87,6 @@ static struct {
 } *literals;
 static size_t literals_cap = 10;
 static size_t literals_size;
-static Map *static_locals;
-static Map *generated_text;
 
 static ptrdiff_t *spill_regions = NULL;
 static size_t spill_regions_count = 0;
@@ -109,37 +108,11 @@ extern int skip_liveness;
          (left)->dest.reg.width == (right)->dest.reg.width)
 #define REGCHK(instr) assert((instr)->dest.all.mode == MODE_REGISTER)
 
-static const char *deduplicate_text(size_t size, const char *fmt, ...) {
-  char *label = malloc(size);
-  va_list args;
-  va_start(args, fmt);
-  int status = vsprintf(label, fmt, args);
-  va_end(args);
-  if (status < 0) {
-    free(label);
-    return NULL;
-  } else {
-    const char *existing = map_get(generated_text, label, size - 1);
-    if (existing) {
-      free(label);
-      return existing;
-    } else {
-      int status = map_insert(generated_text, label, size - 1, label);
-      if (status) {
-        free(label);
-        return NULL;
-      } else {
-        return label;
-      }
-    }
-  }
-}
-
 const char *mk_generic_label(const char *fmt, size_t unique_id) {
-  char temp[64];
-  sprintf(temp, "%lu", unique_id);
-  size_t label_len = (strlen(fmt) - 3) + strlen(temp) + 1;
-  return deduplicate_text(label_len, fmt, unique_id);
+  char buffer[LABEL_BUFFER_SIZE];
+  sprintf(buffer, fmt, unique_id);
+  assert(strlen(buffer) < LABEL_BUFFER_SIZE);
+  return gen_string_intern(buffer);
 }
 
 #define mk_def_label(id) mk_generic_label(DEF_FMT, id)
@@ -152,40 +125,38 @@ const char *mk_generic_label(const char *fmt, size_t unique_id) {
 #define mk_literal_label(id) mk_generic_label(STR_FMT, id)
 
 const char *mk_static_label(const char *name, size_t unique_id) {
-  char temp[64];
-  sprintf(temp, "%lu", unique_id);
-  size_t label_len = strlen(name) + strlen(temp) + sizeof(STATIC_FMT) - 5;
-  return deduplicate_text(label_len, STATIC_FMT, name, unique_id);
+  char buffer[LABEL_BUFFER_SIZE];
+  sprintf(buffer, STATIC_FMT, name, unique_id);
+  assert(strlen(buffer) < LABEL_BUFFER_SIZE);
+  return gen_string_intern(buffer);
 }
 
 const char *mk_fallthru_label(size_t switch_id, size_t case_id) {
-  char temp1[64];
-  sprintf(temp1, "%lu", switch_id);
-  char temp2[64];
-  sprintf(temp2, "%lu", case_id);
-  size_t label_len = strlen(temp1) + strlen(temp2) + sizeof(FALL_FMT) - 6;
-  return deduplicate_text(label_len, FALL_FMT, switch_id, case_id);
+  char buffer[LABEL_BUFFER_SIZE];
+  sprintf(buffer, FALL_FMT, switch_id, case_id);
+  assert(strlen(buffer) < LABEL_BUFFER_SIZE);
+  return gen_string_intern(buffer);
 }
 
 const char *mk_case_label(size_t switch_id, size_t case_id) {
-  char temp1[64];
-  sprintf(temp1, "%lu", switch_id);
-  char temp2[64];
-  sprintf(temp2, "%lu", case_id);
-  size_t label_len = strlen(temp1) + strlen(temp2) + sizeof(CASE_FMT) - 6;
-  return deduplicate_text(label_len, CASE_FMT, switch_id, case_id);
+  char buffer[LABEL_BUFFER_SIZE];
+  sprintf(buffer, CASE_FMT, switch_id, case_id);
+  assert(strlen(buffer) < LABEL_BUFFER_SIZE);
+  return gen_string_intern(buffer);
 }
 
 const char *mk_local_label(const char *name) {
-  char temp[64];
-  sprintf(temp, "%lu", fn_count);
-  size_t label_len = strlen(name) + strlen(temp) + sizeof(LOCAL_FMT) - 5;
-  return deduplicate_text(label_len, LOCAL_FMT, fn_count, name);
+  char buffer[LABEL_BUFFER_SIZE];
+  sprintf(buffer, LOCAL_FMT, fn_count, name);
+  assert(strlen(buffer) < LABEL_BUFFER_SIZE);
+  return gen_string_intern(buffer);
 }
 
 const char *mk_fn_size(const char *name) {
-  size_t text_len = strlen(name) + sizeof(FN_SIZE_FMT) - 2;
-  return deduplicate_text(text_len, FN_SIZE_FMT, name);
+  char buffer[LABEL_BUFFER_SIZE];
+  sprintf(buffer, FN_SIZE_FMT, name);
+  assert(strlen(buffer) < LABEL_BUFFER_SIZE);
+  return gen_string_intern(buffer);
 }
 
 size_t next_vreg(void) {
@@ -196,6 +167,11 @@ size_t next_vreg(void) {
 size_t next_branch(void) {
   static size_t branch_count;
   return branch_count++;
+}
+
+size_t next_static_id(void) {
+  static size_t static_id_count;
+  return static_id_count++;
 }
 
 static void bulk_rtom(size_t dest_memreg, ptrdiff_t dest_disp,
@@ -537,17 +513,6 @@ static ptrdiff_t assign_stack_space(const Type *type) {
   window_size += padded_space;
   /* account for saved preserved registers */
   return -(window_size + 8 * PRESERVED_REG_COUNT);
-}
-
-static void assign_static_space(const char *ident, Symbol *symbol) {
-  size_t *static_count = map_get(static_locals, (void *)ident, strlen(ident));
-  if (!static_count) {
-    static_count = calloc(1, sizeof(size_t));
-    int status =
-        map_insert(static_locals, (void *)ident, strlen(ident), static_count);
-    if (status) abort();
-  }
-  symbol->static_id = *static_count++;
 }
 
 static void save_preserved_regs(void) {
@@ -3204,7 +3169,7 @@ ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
       symbol->linkage == LINK_TYPEDEF) {
     return astree_adopt(declaration, 1, declarator);
   } else if (symbol->storage == STORE_STAT) {
-    assign_static_space(declarator->lexinfo, symbol);
+    symbol->static_id = next_static_id();
     translate_static_decl(declarator, NULL);
     return astree_adopt(declaration, 1, declarator);
   } else { /* symbol->storage == STORE_AUTO */
@@ -3376,16 +3341,6 @@ int generator_debug_il(FILE *out) {
   return 0;
 }
 
-static int strncmp_wrapper(void *s1, void *s2) {
-  int ret = 0;
-  if (!s1 || !s2) {
-    ret = s1 == s2;
-  } else {
-    ret = !strncmp(s1, s2, MAX_IDENT_LEN);
-  }
-  return ret;
-}
-
 void asmgen_init_globals(const char *filename) {
   instructions = malloc(sizeof(*instructions));
   int status = llist_init(instructions, free, NULL);
@@ -3399,14 +3354,6 @@ void asmgen_init_globals(const char *filename) {
   before_function = llist_iter_last(instructions);
   assert(before_function != NULL);
   literals = malloc(sizeof(*literals) * literals_cap);
-  static_locals = malloc(sizeof(*static_locals));
-  status =
-      map_init(static_locals, DEFAULT_MAP_SIZE, NULL, free, strncmp_wrapper);
-  if (status) abort();
-  generated_text = malloc(sizeof(*generated_text));
-  status =
-      map_init(generated_text, DEFAULT_MAP_SIZE, NULL, free, strncmp_wrapper);
-  if (status) abort();
 
   static Tag tag_va_spill_region = {{TAG_STRUCT, 1,
                                      X64_SIZEOF_LONG * PARAM_REG_COUNT,
@@ -3423,12 +3370,4 @@ void asmgen_free_globals(void) {
   int status = llist_destroy(instructions);
   if (status) abort();
   free(literals);
-
-  status = map_destroy(static_locals);
-  if (status) abort();
-  free(static_locals);
-
-  status = map_destroy(generated_text);
-  if (status) abort();
-  free(generated_text);
 }
