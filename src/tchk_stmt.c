@@ -114,13 +114,12 @@ ASTree *validate_for(ASTree *for_, ASTree *init_expr, ASTree *pre_iter_expr,
 
 ASTree *validate_label(ASTree *label_node, ASTree *ident_node, ASTree *stmt) {
   const char *ident = ident_node->lexinfo;
-  size_t ident_len = strlen(ident);
-  Label *existing_entry = state_get_label(state, ident, ident_len);
+  Label *existing_entry = state_get_label(state, ident);
   if (existing_entry == NULL) {
     Label *label = malloc(sizeof(*label));
     label->tree = ident_node;
     label->defined = 1;
-    state_insert_label(state, ident, ident_len, label);
+    state_insert_label(state, ident, label);
     return translate_label(label_node, ident_node, stmt);
   } else if (existing_entry->defined) {
     (void)semerr_redefine_label(ident_node, existing_entry->tree);
@@ -164,13 +163,12 @@ ASTree *validate_default(ASTree *default_, ASTree *stmt) {
 
 ASTree *validate_goto(ASTree *goto_, ASTree *ident) {
   const char *ident_str = ident->lexinfo;
-  size_t ident_str_len = strlen(ident_str);
-  Label *existing_entry = state_get_label(state, ident_str, ident_str_len);
+  Label *existing_entry = state_get_label(state, ident_str);
   if (!existing_entry) {
     Label *label = malloc(sizeof(*label));
     label->tree = ident;
     label->defined = 0;
-    state_insert_label(state, ident_str, ident_str_len, label);
+    state_insert_label(state, ident_str, label);
   }
   return translate_goto(goto_, ident);
 }
@@ -194,8 +192,8 @@ ASTree *validate_break(ASTree *break_) {
 }
 
 ASTree *validate_block(ASTree *block) {
-  block->symbol_table = symbol_table_init(TABLE_BLOCK);
-  state_push_table(state, block->symbol_table);
+  block->scope = scope_init(SCOPE_BLOCK);
+  state_enter_block(state, block);
   return block;
 }
 
@@ -206,6 +204,6 @@ ASTree *validate_block_content(ASTree *block, ASTree *block_content) {
 }
 
 ASTree *finalize_block(ASTree *block) {
-  state_pop_table(state);
+  state_leave_block(state);
   return translate_block(block);
 }

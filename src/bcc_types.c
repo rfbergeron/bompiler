@@ -3,6 +3,7 @@
 #include "assert.h"
 #include "badllist.h"
 #include "badmap.h"
+#include "scope.h"
 #include "stdint.h"
 #include "stdio.h"
 #include "stdlib.h"
@@ -497,13 +498,14 @@ int type_is_incomplete(const Type *type) {
 
 Symbol *type_member_name(const Type *type, const char *name) {
   assert(type_is_union(type) || type_is_struct(type));
-  return symbol_table_get_member(type->tag.value->record.by_name, name,
-                                 strlen(name));
+  return scope_get_member(type->tag.value->record.members, name);
 }
 
 Symbol *type_member_index(const Type *type, size_t index) {
   assert(type_is_union(type) || type_is_struct(type));
-  return llist_get(&type->tag.value->record.in_order, index);
+  Symbol *member;
+  scope_member_at(type->tag.value->record.members, index, NULL, &member);
+  return member;
 }
 
 size_t type_member_count(const Type *type) {
@@ -512,7 +514,7 @@ size_t type_member_count(const Type *type) {
     case TYPE_CODE_UNION:
       return 1;
     case TYPE_CODE_STRUCT:
-      return llist_size(&type->tag.value->record.in_order);
+      return scope_member_count(type->tag.value->record.members);
     case TYPE_CODE_ARRAY:
       if (type->array.deduce_length && type->array.length == 0)
         return SIZE_MAX;

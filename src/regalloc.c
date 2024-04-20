@@ -11,6 +11,8 @@
 #include "instr.h"
 #include "symtable.h"
 
+#define DEFAULT_MAP_SIZE 100
+
 static struct reg_desc {
   size_t vreg_num;
   Instruction *next_use;

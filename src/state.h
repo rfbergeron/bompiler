@@ -1,56 +1,42 @@
 #ifndef __STATE_H__
 #define __STATE_H__
 #include "badllist.h"
+#include "scope.h"
 #include "simplestack.h"
 #include "symtable.h"
 
-DECLARE_STACK(size_t_stack, size_t)
-typedef struct size_t_stack SizetStack;
-
-typedef struct switch_info {
-  size_t id;
-  size_t case_id;
-  size_t control_reg;
-  const Type *control_type;
-  int has_default;
-} SwitchInfo;
-
-typedef struct compiler_state {
-  LinkedList table_stack;
-  SizetStack break_stack;
-  SizetStack continue_stack;
-  LinkedList switch_stack;
-  Symbol *enclosing_function;
-  const char *enclosing_function_name;
-  size_t jump_id_count;
-} CompilerState;
-
+typedef struct compiler_state CompilerState;
 extern CompilerState *state;
 
 CompilerState *state_init(void);
 void state_destroy(CompilerState *state);
-void state_push_table(CompilerState *state, SymbolTable *table);
-void state_pop_table(CompilerState *state);
-SymbolTable *state_peek_table(CompilerState *state);
-int state_get_symbol(CompilerState *state, const char *ident,
-                     const size_t ident_len, Symbol **out);
+void state_enter_file(CompilerState *state, const struct astree *root);
+void state_leave_file(CompilerState *state);
+void state_enter_function(CompilerState *state, const struct astree *declarator,
+                          const struct astree *body);
+void state_leave_function(CompilerState *state);
+void state_enter_prototype(CompilerState *state,
+                           const struct astree *param_list);
+void state_leave_prototype(CompilerState *state);
+void state_enter_block(CompilerState *state, const struct astree *block);
+void state_leave_block(CompilerState *state);
+void state_enter_record(CompilerState *state, const Tag *record_tag);
+void state_leave_record(CompilerState *state);
+Scope *state_peek_scope(CompilerState *state);
+Symbol *state_get_function(CompilerState *state);
+const char *state_get_function_name(CompilerState *state);
+int state_get_symbol(CompilerState *state, const char *ident, Symbol **out);
 void state_insert_symbol(CompilerState *state, const char *ident,
-                         const size_t ident_len, Symbol *symbol);
+                         Symbol *symbol);
 int state_inheritance_valid(CompilerState *state, const char *ident,
-                            const size_t ident_len, Symbol *symbol);
-int state_get_member(CompilerState *state, const char *ident,
-                     const size_t ident_len, Symbol **out);
+                            Symbol *symbol);
+int state_get_member(CompilerState *state, const char *ident, Symbol **out);
 void state_insert_member(CompilerState *state, const char *ident,
-                         const size_t ident_len, Symbol *symbol);
-size_t state_get_sequence(CompilerState *state);
-int state_get_tag(CompilerState *state, const char *ident,
-                  const size_t ident_len, Tag **out);
-void state_insert_tag(CompilerState *state, const char *ident,
-                      const size_t ident_len, Tag *tag);
-Label *state_get_label(CompilerState *state, const char *ident,
-                       const size_t ident_len);
-void state_insert_label(CompilerState *state, const char *ident,
-                        const size_t ident_len, Label *label);
+                         Symbol *symbol);
+int state_get_tag(CompilerState *state, const char *ident, Tag **out);
+void state_insert_tag(CompilerState *state, const char *ident, Tag *tag);
+Label *state_get_label(CompilerState *state, const char *ident);
+void state_insert_label(CompilerState *state, const char *ident, Label *label);
 size_t state_get_selection_id(CompilerState *state);
 size_t state_get_case_id(CompilerState *state);
 size_t state_get_control_reg(CompilerState *state);
@@ -69,10 +55,5 @@ void state_set_control_type(CompilerState *state, const Type *type);
 void state_push_break_id(CompilerState *state, size_t id);
 void state_push_continue_id(CompilerState *state, size_t id);
 void state_dec_jump_id_count(CompilerState *state);
-void state_set_function(CompilerState *state, const char *function_name,
-                        Symbol *function_symbol);
-Symbol *state_get_function(CompilerState *state);
-const char *state_get_function_name(CompilerState *state);
-void state_unset_function(CompilerState *state);
 
 #endif

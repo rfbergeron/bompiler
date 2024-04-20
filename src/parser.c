@@ -36,13 +36,11 @@ const char *parser_get_tname(int symbol) {
 
 BCC_YYSTATIC void make_va_list_type(void) {
   Tag *builtin_tag = tag_init(TAG_STRUCT);
-  state_insert_tag(state, VA_LIST_STRUCT_NAME, strlen(VA_LIST_STRUCT_NAME),
-                   builtin_tag);
-  state_push_table(state, builtin_tag->record.by_name);
+  state_insert_tag(state, VA_LIST_STRUCT_NAME, builtin_tag);
+  state_enter_record(state, builtin_tag);
   builtin_tag->record.alignment = X64_ALIGNOF_LONG;
   builtin_tag->record.width = 2 * X64_SIZEOF_LONG + 2 * X64_SIZEOF_INT;
   builtin_tag->record.defined = 1;
-  LinkedList *member_list = &builtin_tag->record.in_order;
   size_t i;
   ptrdiff_t displacement;
   for (i = 0, displacement = 0; i < 4; ++i) {
@@ -57,14 +55,11 @@ BCC_YYSTATIC void make_va_list_type(void) {
       Type *void_type = type_init_base(SPEC_FLAG_VOID);
       member_symbol->type = type_append(member_symbol->type, void_type, 0);
     }
-    int status = llist_push_back(member_list, member_symbol);
-    if (status) abort();
     const char *symname = VA_LIST_MEMBER_NAMES[i];
-    state_insert_member(state, symname, strlen(symname), member_symbol);
-    if (status) abort();
+    state_insert_member(state, symname, member_symbol);
   }
 
-  state_pop_table(state);
+  state_leave_record(state);
   Symbol *builtin_symbol = symbol_init(&LOC_EMPTY);
   builtin_symbol->storage = STORE_TYPEDEF;
   builtin_symbol->linkage = LINK_TYPEDEF;
@@ -73,8 +68,7 @@ BCC_YYSTATIC void make_va_list_type(void) {
   Type *struct_type =
       type_init_tag(STOR_FLAG_TYPEDEF, VA_LIST_STRUCT_NAME, builtin_tag);
   (void)type_append(builtin_symbol->type, struct_type, 0);
-  state_insert_symbol(state, VA_LIST_TYPEDEF_NAME, strlen(VA_LIST_TYPEDEF_NAME),
-                      builtin_symbol);
+  state_insert_symbol(state, VA_LIST_TYPEDEF_NAME, builtin_symbol);
   /* copy type info */
   Type *va_list_type_temp = type_copy(builtin_symbol->type, 1);
   /* convert to pointer and free array */
@@ -101,8 +95,8 @@ BCC_YYSTATIC ASTree *parser_make_empty(const Location loc) {
 void parser_init_globals(void) {
   parser_root = parser_make_root();
   PFDBG0('t', "Making symbol table");
-  parser_root->symbol_table = symbol_table_init(TABLE_TRANS_UNIT);
-  state_push_table(state, parser_root->symbol_table);
+  parser_root->scope = scope_init(SCOPE_FILE);
+  state_enter_file(state, parser_root);
   make_va_list_type();
 }
 
@@ -168,15 +162,9 @@ BCC_YYSTATIC ASTree *parser_make_declaration(ASTree *decl_specs) {
   return astree_adopt(declaration, 1, decl_specs);
 }
 
-BCC_YYSTATIC ASTree *parser_make_param_list(ASTree *left_paren,
-                                            ASTree *decl_specs,
-                                            ASTree *declarator) {
+BCC_YYSTATIC ASTree *parser_make_param_list(ASTree *left_paren) {
   /* all error handling done in validate_param */
-  ASTree *param_list =
-      validate_param_list(parser_new_sym(left_paren, TOK_PARAM_LIST));
-  /* create temporary type object on the heap to hold the parameter auxspec */
-  ASTree *declaration = parser_make_declaration(decl_specs);
-  return validate_param(param_list, declaration, declarator);
+  return validate_param_list(parser_new_sym(left_paren, TOK_PARAM_LIST));
 }
 
 /* For the sake of code reusability, the tree structure of a type name is the
