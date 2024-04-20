@@ -11,6 +11,7 @@
 #include "init.h"
 #include "lyutils.h"
 #include "regalloc.h"
+#include "scope.h"
 #include "state.h"
 #include "strset.h"
 #include "symtable.h"
@@ -32,6 +33,7 @@
 #define MAX_IDENT_LEN 31
 #define MAX_INSTR_DEBUG_LENGTH 4096
 #define MAX_OPERAND_DEBUG_LENGTH 1024
+#define DEFAULT_MAP_SIZE 100
 
 static const char LOCAL_FMT[] = ".L%lu$%s";
 static const char STATIC_FMT[] = "%s.%lu";
@@ -895,7 +897,7 @@ ASTree *translate_diff_conv(ASTree *diff_conv, ASTree *expr,
 ASTree *translate_ident(ASTree *ident) {
   Instruction *lea_instr = instr_init(OP_LEA);
   Symbol *symbol = NULL;
-  state_get_symbol(state, ident->lexinfo, strlen(ident->lexinfo), &symbol);
+  state_get_symbol(state, ident->lexinfo, &symbol);
   assert(symbol != NULL);
 
   if (symbol->storage == STORE_STAT) {
@@ -2287,8 +2289,8 @@ static void va_translate_params(ASTree *declarator) {
     ASTree *param = astree_get(fn_dirdecl, i);
     ASTree *param_decl = astree_get(param, 1);
     Symbol *param_symbol = NULL;
-    int in_current_scope = state_get_symbol(
-        state, param_decl->lexinfo, strlen(param_decl->lexinfo), &param_symbol);
+    int in_current_scope =
+        state_get_symbol(state, param_decl->lexinfo, &param_symbol);
 #ifdef NDEBUG
     (void)in_current_scope;
 #endif
@@ -2330,8 +2332,8 @@ static void translate_params(ASTree *declarator) {
     ASTree *param = astree_get(fn_dirdecl, i);
     ASTree *param_decl = astree_get(param, 1);
     Symbol *param_symbol = NULL;
-    int in_current_scope = state_get_symbol(
-        state, param_decl->lexinfo, strlen(param_decl->lexinfo), &param_symbol);
+    int in_current_scope =
+        state_get_symbol(state, param_decl->lexinfo, &param_symbol);
 #ifdef NDEBUG
     (void)in_current_scope;
 #endif
@@ -3028,8 +3030,7 @@ void translate_auto_literal_init(const Type *arr_type, ptrdiff_t arr_disp,
 
 static void translate_static_decl(ASTree *declarator, ASTree *initializer) {
   Symbol *symbol = NULL;
-  (void)state_get_symbol(state, (char *)declarator->lexinfo,
-                         strlen(declarator->lexinfo), &symbol);
+  (void)state_get_symbol(state, declarator->lexinfo, &symbol);
 
   const char *identifier =
       symbol->linkage == LINK_NONE
@@ -3120,8 +3121,7 @@ static ASTree *translate_static_local_init(ASTree *assignment,
 static ASTree *translate_auto_local_init(ASTree *assignment, ASTree *declarator,
                                          ASTree *initializer) {
   Symbol *symbol = NULL;
-  (void)state_get_symbol(state, (char *)declarator->lexinfo,
-                         strlen(declarator->lexinfo), &symbol);
+  (void)state_get_symbol(state, declarator->lexinfo, &symbol);
   symbol->disp = assign_stack_space(symbol->type);
 
   Instruction *lea_instr = instr_init(OP_LEA);
@@ -3145,8 +3145,7 @@ ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
   assert(assignment->first_instr == NULL && assignment->last_instr == NULL);
   PFDBG0('g', "Translating local initialization");
   Symbol *symbol = NULL;
-  int in_current_scope = state_get_symbol(state, (char *)declarator->lexinfo,
-                                          strlen(declarator->lexinfo), &symbol);
+  int in_current_scope = state_get_symbol(state, declarator->lexinfo, &symbol);
 #ifdef NDEBUG
   (void)in_current_scope;
 #endif
@@ -3191,11 +3190,9 @@ ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
   if (declarator->last_instr == NULL) abort();
 
   Symbol *symbol = NULL;
-  int in_current_scope = state_get_symbol(state, (char *)declarator->lexinfo,
-                                          strlen(declarator->lexinfo), &symbol);
+  int in_current_scope = state_get_symbol(state, declarator->lexinfo, &symbol);
   if (symbol == NULL)
-    state_get_member(state, (char *)declarator->lexinfo,
-                     strlen(declarator->lexinfo), &symbol);
+    in_current_scope = state_get_member(state, declarator->lexinfo, &symbol);
 
 #ifdef NDEBUG
   (void)in_current_scope;
@@ -3242,11 +3239,9 @@ ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
   PFDBG0('g', "Translating global declaration");
   assert(declarator->tok_kind == TOK_IDENT);
   Symbol *symbol = NULL;
-  int in_current_scope = state_get_symbol(state, (char *)declarator->lexinfo,
-                                          strlen(declarator->lexinfo), &symbol);
+  int in_current_scope = state_get_symbol(state, declarator->lexinfo, &symbol);
   if (symbol == NULL)
-    in_current_scope = state_get_member(state, (char *)declarator->lexinfo,
-                                        strlen(declarator->lexinfo), &symbol);
+    in_current_scope = state_get_member(state, declarator->lexinfo, &symbol);
 
 #ifdef NDEBUG
   (void)in_current_scope;
@@ -3277,8 +3272,7 @@ ASTree *begin_translate_fn(ASTree *declaration, ASTree *declarator,
   declaration->first_instr = llist_iter_last(instructions);
   if (declaration->first_instr == NULL) abort();
   Symbol *symbol = NULL;
-  state_get_symbol(state, declarator->lexinfo, strlen(declarator->lexinfo),
-                   &symbol);
+  state_get_symbol(state, declarator->lexinfo, &symbol);
   assert(symbol != NULL);
   assert(symbol->info != SYM_HIDDEN);
   if (symbol->linkage == LINK_EXT) {
@@ -3416,7 +3410,7 @@ void asmgen_init_globals(const char *filename) {
 
   static Tag tag_va_spill_region = {{TAG_STRUCT, 1,
                                      X64_SIZEOF_LONG * PARAM_REG_COUNT,
-                                     X64_ALIGNOF_LONG, NULL, BLIB_LLIST_EMPTY}};
+                                     X64_ALIGNOF_LONG, NULL}};
   static Type type_va_spill_region = {{TYPE_CODE_STRUCT, 0}};
   type_va_spill_region.tag.value = &tag_va_spill_region;
   TYPE_VA_SPILL_REGION = &type_va_spill_region;

@@ -26,8 +26,7 @@
   static ASTree *parser_join_strings(ASTree * joiner);
   static ASTree *parser_make_decl_specs(ASTree * first_specifier);
   static ASTree *parser_make_declaration(ASTree * decl_specs);
-  static ASTree *parser_make_param_list(
-      ASTree * left_paren, ASTree * decl_specs, ASTree * declarator);
+  static ASTree *parser_make_param_list(ASTree * left_paren);
   static ASTree *parser_make_type_name(void);
   static ASTree *parser_make_cast(ASTree * left_paren, ASTree * decl_specs,
                                   ASTree * type_name, ASTree * expr);
@@ -222,15 +221,15 @@ direct_decl         : '[' ']'                                           { ERRCHK
                     | fn_direct_decl                                    { ERRCHK; $$ = bcc_yyval = $1; }
                     | fn_direct_decl asm_spec                           { ERRCHK; $$ = bcc_yyval = $1; parser_cleanup(1, $2); }
                     ;
-fn_direct_decl      : param_list ')'                                    { ERRCHK; $$ = bcc_yyval = finalize_param_list($1, NULL); parser_cleanup(1, $2); } /* exit parameter table */
-                    | param_list ',' TOK_ELLIPSIS ')'                   { ERRCHK; $$ = bcc_yyval = finalize_param_list($1, $3); parser_cleanup(2, $2, $4); } /* exit parameter table */
-                    | '(' ')'                                           { ERRCHK; $$ = bcc_yyval = parser_new_sym($1, TOK_PARAM_LIST); parser_cleanup(1, $2); }
-                    | '(' TOK_VOID ')'                                  { ERRCHK; $$ = bcc_yyval = astree_adopt(parser_new_sym($1, TOK_PARAM_LIST), 1, $2); parser_cleanup(1, $3); }
+fn_direct_decl      : param_list ')'                                    { ERRCHK; $$ = bcc_yyval = finalize_param_list($1, NULL); parser_cleanup(1, $2); }
+                    | param_list ',' TOK_ELLIPSIS ')'                   { ERRCHK; $$ = bcc_yyval = finalize_param_list($1, $3); parser_cleanup(2, $2, $4); }
+                    | '(' ')'                                           { ERRCHK; $$ = bcc_yyval = finalize_param_list(parser_make_param_list($1), NULL); parser_cleanup(1, $2); }
+                    | '(' TOK_VOID ')'                                  { ERRCHK; $$ = bcc_yyval = finalize_param_list(parser_make_param_list($1), $2); parser_cleanup(1, $3); }
                     ;
-param_list          : '(' decl_specs declarator                         { ERRCHK; $$ = bcc_yyval = parser_make_param_list($1, $2, $3); } /* create param table; define_param */
-                    | '(' decl_specs abs_declarator                     { ERRCHK; $$ = bcc_yyval = parser_make_param_list($1, $2, $3); } /* create param table; define_param */
-                    | param_list ',' decl_specs declarator              { ERRCHK; $$ = bcc_yyval = validate_param($1, parser_make_declaration($3), $4); astree_destroy($2); } /* define_param */
-                    | param_list ',' decl_specs abs_declarator          { ERRCHK; $$ = bcc_yyval = validate_param($1, parser_make_declaration($3), $4); astree_destroy($2); } /* define_param */
+param_list          : '(' decl_specs declarator                         { ERRCHK; $$ = bcc_yyval = validate_param(parser_make_param_list($1), parser_make_declaration($2), $3); }
+                    | '(' decl_specs abs_declarator                     { ERRCHK; $$ = bcc_yyval = validate_param(parser_make_param_list($1), parser_make_declaration($2), $3); }
+                    | param_list ',' decl_specs declarator              { ERRCHK; $$ = bcc_yyval = validate_param($1, parser_make_declaration($3), $4); astree_destroy($2); }
+                    | param_list ',' decl_specs abs_declarator          { ERRCHK; $$ = bcc_yyval = validate_param($1, parser_make_declaration($3), $4); astree_destroy($2); }
                     ;
 block               : block_content '}'                                 { ERRCHK; $$ = bcc_yyval = finalize_block($1); astree_destroy($2); }
                     ;

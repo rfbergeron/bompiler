@@ -1,16 +1,38 @@
 #include "state.h"
 
 #include <assert.h>
+#include <stdlib.h>
 
-#include "stdlib.h"
+#include "astree.h"
 
 extern size_t next_vreg(void);
 CompilerState *state;
+
+DECLARE_STACK(size_t_stack, size_t)
 PROC_STACK(size_t_stack, size_t)
+typedef struct size_t_stack SizetStack;
+
+typedef struct switch_info {
+  size_t id;
+  size_t case_id;
+  size_t control_reg;
+  const Type *control_type;
+  int has_default;
+} SwitchInfo;
+
+struct compiler_state {
+  LinkedList scopes;
+  SizetStack break_stack;
+  SizetStack continue_stack;
+  LinkedList switch_stack;
+  Symbol *enclosing_function;
+  const char *enclosing_function_name;
+  size_t jump_id_count;
+};
 
 CompilerState *state_init(void) {
   CompilerState *state = malloc(sizeof(*state));
-  llist_init(&state->table_stack, NULL, NULL);
+  llist_init(&state->scopes, NULL, NULL);
   llist_init(&state->switch_stack, NULL, NULL);
   size_t_stack_init(&state->break_stack, 4);
   size_t_stack_init(&state->continue_stack, 4);
@@ -22,7 +44,7 @@ CompilerState *state_init(void) {
 
 void state_destroy(CompilerState *state) {
   if (state == NULL) return;
-  int status = llist_destroy(&state->table_stack);
+  int status = llist_destroy(&state->scopes);
   if (status) abort();
   status = llist_destroy(&state->switch_stack);
   if (status) abort();
@@ -31,32 +53,110 @@ void state_destroy(CompilerState *state) {
   free(state);
 }
 
-void state_push_table(CompilerState *state, SymbolTable *table) {
-  assert(llist_front(&state->table_stack) != table);
-  int status = llist_push_front(&state->table_stack, table);
+void state_enter_file(CompilerState *state, const ASTree *root) {
+  assert(llist_empty(&state->scopes));
+  assert(root->tok_kind == TOK_ROOT);
+  assert(root->scope != NULL);
+  assert(scope_get_kind(root->scope) == SCOPE_FILE);
+  int status = llist_push_front(&state->scopes, root->scope);
   if (status) abort();
 }
 
-void state_pop_table(CompilerState *state) {
-  assert(!llist_empty(&state->table_stack));
-  (void)llist_pop_front(&state->table_stack);
+void state_leave_file(CompilerState *state) {
+  assert(llist_size(&state->scopes) == 1);
+  assert(scope_get_kind(state_peek_scope(state)) == SCOPE_FILE);
+  (void)llist_pop_front(&state->scopes);
 }
 
-SymbolTable *state_peek_table(CompilerState *state) {
-  return llist_front(&state->table_stack);
+void state_enter_function(CompilerState *state, const ASTree *declarator,
+                          const ASTree *body) {
+  assert(llist_size(&state->scopes) == 1);
+  assert(scope_get_kind(state_peek_scope(state)) == SCOPE_FILE);
+  assert(declarator->tok_kind == TOK_IDENT);
+  assert(body->scope != NULL);
+  assert(scope_get_kind(body->scope) == SCOPE_FUNCTION);
+  assert(state->enclosing_function == NULL);
+  assert(state->enclosing_function_name == NULL);
+  (void)state_get_symbol(state, declarator->lexinfo,
+                         &state->enclosing_function);
+  assert(state->enclosing_function != NULL);
+  assert(type_is_function(state->enclosing_function->type));
+  state->enclosing_function_name = declarator->lexinfo;
+  int status = llist_push_front(&state->scopes, body->scope);
+  if (status) abort();
 }
 
-int state_get_symbol(CompilerState *state, const char *ident,
-                     const size_t ident_len, Symbol **out) {
+void state_leave_function(CompilerState *state) {
+  assert(!llist_empty(&state->scopes));
+  assert(scope_get_kind(state_peek_scope(state)) == SCOPE_FUNCTION);
+  assert(state->enclosing_function != NULL);
+  assert(state->enclosing_function_name != NULL);
+  state->enclosing_function = NULL;
+  state->enclosing_function_name = NULL;
+  (void)llist_pop_front(&state->scopes);
+}
+
+void state_enter_prototype(CompilerState *state, const ASTree *param_list) {
+  assert(!llist_empty(&state->scopes));
+  assert(param_list->scope != NULL);
+  assert(state_peek_scope(state) != param_list->scope);
+  assert(param_list->tok_kind == TOK_PARAM_LIST);
+  assert(scope_get_kind(param_list->scope) == SCOPE_FUNCTION);
+  int status = llist_push_front(&state->scopes, param_list->scope);
+  if (status) abort();
+}
+
+void state_leave_prototype(CompilerState *state) {
+  assert(!llist_empty(&state->scopes));
+  assert(scope_get_kind(state_peek_scope(state)) == SCOPE_FUNCTION);
+  (void)llist_pop_front(&state->scopes);
+}
+
+void state_enter_block(CompilerState *state, const ASTree *block) {
+  assert(!llist_empty(&state->scopes));
+  assert(block->scope != NULL);
+  assert(scope_get_kind(block->scope) == SCOPE_BLOCK);
+  assert(state_peek_scope(state) != block->scope);
+  int status = llist_push_front(&state->scopes, block->scope);
+  if (status) abort();
+}
+
+void state_leave_block(CompilerState *state) {
+  assert(!llist_empty(&state->scopes));
+  assert(scope_get_kind(state_peek_scope(state)) == SCOPE_BLOCK);
+  (void)llist_pop_front(&state->scopes);
+}
+
+void state_enter_record(CompilerState *state, const Tag *tag) {
+  assert(!llist_empty(&state->scopes));
+  assert(tag->record.kind != TAG_ENUM);
+  assert(tag->record.members != NULL);
+  assert(scope_get_kind(tag->record.members) == SCOPE_MEMBER);
+  assert(state_peek_scope(state) != tag->record.members);
+  int status = llist_push_front(&state->scopes, tag->record.members);
+  if (status) abort();
+}
+
+void state_leave_record(CompilerState *state) {
+  assert(!llist_empty(&state->scopes));
+  assert(scope_get_kind(state_peek_scope(state)) == SCOPE_MEMBER);
+  (void)llist_pop_front(&state->scopes);
+}
+
+Scope *state_peek_scope(CompilerState *state) {
+  return llist_front(&state->scopes);
+}
+
+int state_get_symbol(CompilerState *state, const char *ident, Symbol **out) {
   size_t i, skipped;
-  for (i = 0, skipped = 0; i < llist_size(&state->table_stack); ++i) {
-    SymbolTable *current = llist_get(&state->table_stack, i);
-    if (current->kind == TABLE_MEMBER) {
+  for (i = 0, skipped = 0; i < llist_size(&state->scopes); ++i) {
+    Scope *current = llist_get(&state->scopes, i);
+    if (scope_get_kind(current) == SCOPE_MEMBER) {
       ++skipped;
       continue;
     }
     /* TODO(Robert): rewrite symbol table functions */
-    *out = symbol_table_get(current, ident, ident_len);
+    *out = scope_get_symbol(current, ident);
     if (*out != NULL) break;
   }
 
@@ -65,15 +165,12 @@ int state_get_symbol(CompilerState *state, const char *ident,
 }
 
 void state_insert_symbol(CompilerState *state, const char *ident,
-                         const size_t ident_len, Symbol *symbol) {
+                         Symbol *symbol) {
   size_t i = 0;
-  SymbolTable *current;
-  do current = llist_get(&state->table_stack, i++);
-  while (current->kind == TABLE_MEMBER);
-
-  /* TODO(Robert): rewrite symbol table functions */
-  assert(symbol_table_get(current, ident, ident_len) == NULL);
-  symbol_table_insert(current, ident, ident_len, symbol);
+  Scope *current;
+  do current = llist_get(&state->scopes, i++);
+  while (scope_get_kind(current) == SCOPE_MEMBER);
+  scope_insert_symbol(current, ident, symbol);
 }
 
 /* as a quirk of the way symbols declared with the `extern` keyword at block
@@ -84,15 +181,15 @@ void state_insert_symbol(CompilerState *state, const char *ident,
  * class, this change will not be reflected in previously declared symbols.
  */
 int state_inheritance_valid(CompilerState *state, const char *ident,
-                            const size_t ident_len, Symbol *symbol) {
-  assert(llist_size(&state->table_stack) > 1);
+                            Symbol *symbol) {
+  assert(llist_size(&state->scopes) > 1);
   Symbol *benefactor;
   size_t i;
-  for (i = 0; i < llist_size(&state->table_stack); ++i) {
-    SymbolTable *current = llist_get(&state->table_stack, i);
-    if (current->kind == TABLE_MEMBER) continue;
+  for (i = 0; i < llist_size(&state->scopes); ++i) {
+    Scope *current = llist_get(&state->scopes, i);
+    if (scope_get_kind(current) == SCOPE_MEMBER) continue;
     /* TODO(Robert): rewrite symbol table functions */
-    benefactor = symbol_table_get(current, ident, ident_len);
+    benefactor = scope_get_symbol(current, ident);
     if (benefactor != NULL &&
         (types_equivalent(benefactor->type, symbol->type, 0, 1) ||
          type_complete_array(benefactor->type, symbol->type) ||
@@ -114,8 +211,7 @@ int state_inheritance_valid(CompilerState *state, const char *ident,
     benefactor->linkage = LINK_EXT;
     benefactor->storage = STORE_EXT;
     benefactor->info = SYM_HIDDEN;
-    symbol_table_insert(llist_back(&state->table_stack), ident, ident_len,
-                        benefactor);
+    scope_insert_symbol(llist_back(&state->scopes), ident, benefactor);
 
     symbol->linkage = LINK_EXT;
     symbol->storage = STORE_EXT;
@@ -127,17 +223,15 @@ int state_inheritance_valid(CompilerState *state, const char *ident,
   }
 }
 
-int state_get_member(CompilerState *state, const char *ident,
-                     const size_t ident_len, Symbol **out) {
+int state_get_member(CompilerState *state, const char *ident, Symbol **out) {
   size_t i;
-  for (i = 0; i < llist_size(&state->table_stack); ++i) {
-    SymbolTable *current = llist_get(&state->table_stack, i);
-    if (current->kind != TABLE_MEMBER) {
+  for (i = 0; i < llist_size(&state->scopes); ++i) {
+    Scope *current = llist_get(&state->scopes, i);
+    if (scope_get_kind(current) != SCOPE_MEMBER) {
       *out = NULL;
       return 0;
     }
-    /* TODO(Robert): rewrite symbol table functions */
-    *out = symbol_table_get_member(current, ident, ident_len);
+    *out = scope_get_member(current, ident);
     if (*out != NULL) break;
   }
 
@@ -145,29 +239,20 @@ int state_get_member(CompilerState *state, const char *ident,
 }
 
 void state_insert_member(CompilerState *state, const char *ident,
-                         const size_t ident_len, Symbol *symbol) {
-  SymbolTable *top_scope = llist_front(&state->table_stack);
-  /* TODO(Robert): rewrite symbol table functions */
-  assert(top_scope->kind == TABLE_MEMBER);
-  assert(symbol_table_get_member(top_scope, ident, ident_len) == NULL);
-  symbol_table_insert_member(top_scope, ident, ident_len, symbol);
+                         Symbol *symbol) {
+  Scope *top_scope = llist_front(&state->scopes);
+  scope_insert_member(top_scope, ident, symbol);
 }
 
-size_t state_get_sequence(CompilerState *state) {
-  return map_size(llist_front(&state->table_stack));
-}
-
-int state_get_tag(CompilerState *state, const char *ident,
-                  const size_t ident_len, Tag **out) {
+int state_get_tag(CompilerState *state, const char *ident, Tag **out) {
   size_t i, skipped;
-  for (i = 0, skipped = 0; i < llist_size(&state->table_stack); ++i) {
-    SymbolTable *current = llist_get(&state->table_stack, i);
-    if (current->kind == TABLE_MEMBER) {
+  for (i = 0, skipped = 0; i < llist_size(&state->scopes); ++i) {
+    Scope *current = llist_get(&state->scopes, i);
+    if (scope_get_kind(current) == SCOPE_MEMBER) {
       ++skipped;
       continue;
     }
-    /* TODO(Robert): rewrite symbol table functions */
-    *out = symbol_table_get_tag(current, ident, ident_len);
+    *out = scope_get_tag(current, ident);
     if (*out != NULL) break;
   }
 
@@ -175,36 +260,24 @@ int state_get_tag(CompilerState *state, const char *ident,
   return i == skipped;
 }
 
-void state_insert_tag(CompilerState *state, const char *ident,
-                      const size_t ident_len, Tag *tag) {
+void state_insert_tag(CompilerState *state, const char *ident, Tag *tag) {
   size_t i = 0;
-  SymbolTable *current;
-  do current = llist_get(&state->table_stack, i++);
-  while (current->kind == TABLE_MEMBER);
-
-  /* TODO(Robert): rewrite symbol table functions */
-  assert(current->tag_namespace != NULL);
-  assert(symbol_table_get_tag(current, ident, ident_len) == NULL);
-  symbol_table_insert_tag(current, ident, ident_len, tag);
+  Scope *current;
+  do current = llist_get(&state->scopes, i++);
+  while (scope_get_kind(current) == SCOPE_MEMBER);
+  scope_insert_tag(current, ident, tag);
 }
 
-Label *state_get_label(CompilerState *state, const char *ident,
-                       const size_t ident_len) {
-  SymbolTable *function_table =
-      llist_get(&state->table_stack, llist_size(&state->table_stack) - 2);
-  if (function_table == NULL || function_table->label_namespace == NULL) {
-    fprintf(stderr, "ERROR: attempt to get label at top level.\n");
-    return NULL;
-  }
-  return symbol_table_get_label(function_table, ident, ident_len);
+Label *state_get_label(CompilerState *state, const char *ident) {
+  Scope *function_scope =
+      llist_get(&state->scopes, llist_size(&state->scopes) - 2);
+  return scope_get_label(function_scope, ident);
 }
 
-void state_insert_label(CompilerState *state, const char *ident,
-                        const size_t ident_len, Label *label) {
-  SymbolTable *function_table =
-      llist_get(&state->table_stack, llist_size(&state->table_stack) - 2);
-  assert(function_table != NULL && function_table->label_namespace != NULL);
-  symbol_table_insert_label(function_table, ident, ident_len, label);
+void state_insert_label(CompilerState *state, const char *ident, Label *label) {
+  Scope *function_table =
+      llist_get(&state->scopes, llist_size(&state->scopes) - 2);
+  scope_insert_label(function_table, ident, label);
 }
 
 size_t state_get_selection_id(CompilerState *state) {
@@ -323,25 +396,10 @@ void state_push_continue_id(CompilerState *state, size_t id) {
 
 void state_dec_jump_id_count(CompilerState *state) { --state->jump_id_count; }
 
-void state_set_function(CompilerState *state, const char *function_name,
-                        Symbol *function_symbol) {
-  assert(state->enclosing_function == NULL &&
-         state->enclosing_function_name == NULL);
-  state->enclosing_function = function_symbol;
-  state->enclosing_function_name = function_name;
-}
-
 const char *state_get_function_name(CompilerState *state) {
   return state->enclosing_function_name;
 }
 
 Symbol *state_get_function(CompilerState *state) {
   return state->enclosing_function;
-}
-
-void state_unset_function(CompilerState *state) {
-  assert(state->enclosing_function != NULL &&
-         state->enclosing_function_name != NULL);
-  state->enclosing_function = NULL;
-  state->enclosing_function_name = NULL;
 }

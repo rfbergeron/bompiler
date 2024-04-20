@@ -341,9 +341,8 @@ ASTree *evaluate_stringcon(ASTree *stringcon) {
 
 ASTree *evaluate_ident(ASTree *ident) {
   const char *id_str = ident->lexinfo;
-  size_t id_str_len = strlen(id_str);
   Symbol *symbol = NULL;
-  (void)state_get_symbol(state, id_str, id_str_len, &symbol);
+  (void)state_get_symbol(state, id_str, &symbol);
   if (symbol->storage == STORE_EXT || symbol->storage == STORE_STAT) {
     ident->attributes |= ATTR_CONST_MAYBE;
     ident->constant.integral.signed_value = 0;
@@ -355,10 +354,8 @@ ASTree *evaluate_ident(ASTree *ident) {
     return ident;
   } else if (symbol->storage == STORE_ENUM_CONST) {
     ident->attributes |= ATTR_CONST_INT;
-    Tag *tag = ident->type->tag.value;
-    int *value = map_get(&tag->enumeration.by_name, (char *)ident->lexinfo,
-                         strlen(ident->lexinfo));
-    ident->constant.integral.signed_value = *value;
+    ident->constant.integral.signed_value =
+        tag_get_constant(ident->type->tag.value, ident->lexinfo);
     return ident;
   } else {
     return translate_ident(ident);

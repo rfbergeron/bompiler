@@ -104,9 +104,8 @@ ASTree *validate_stringcon(ASTree *stringcon) {
 ASTree *validate_ident(ASTree *ident) {
   PFDBG0('t', "Attempting to assign a type");
   const char *id_str = ident->lexinfo;
-  size_t id_str_len = strlen(id_str);
   Symbol *symbol = NULL;
-  (void)state_get_symbol(state, id_str, id_str_len, &symbol);
+  (void)state_get_symbol(state, id_str, &symbol);
   if (symbol != NULL && symbol->info != SYM_HIDDEN) {
     PFDBG1('t', "Assigning %s a symbol", id_str);
     ident->type = symbol->type;

@@ -5,6 +5,7 @@
 #include "badmap.h"
 #include "bcc_types.h"
 #include "debug.h"
+#include "scope.h"
 #include "stdint.h"
 #include "symtable.h"
 
@@ -21,9 +22,9 @@ enum attribute {
 };
 
 typedef struct astree {
-  Type *type;                /* type info */
-  const char *lexinfo;       /* lexical information */
-  SymbolTable *symbol_table; /* symbol table for scope, if applicable */
+  Type *type;          /* type info */
+  const char *lexinfo; /* lexical information */
+  Scope *scope;        /* symbol table for scope, if applicable */
   ListIter *first_instr;
   ListIter *last_instr;
   struct {
