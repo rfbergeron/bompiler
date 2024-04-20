@@ -2,7 +2,6 @@
 #define __STRING_SET__
 
 #include <stdio.h>
-#include <string.h>
 
 void string_set_init_globals();
 void string_set_free_globals();
