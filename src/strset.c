@@ -1,85 +1,82 @@
 #include "strset.h"
 
 #include <assert.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "badalist.h"
-#include "badmap.h"
 #include "debug.h"
+#include "murmur3/murmur3.h"
+#include "taboe_impl.h"
 
-#define MAX_TOKEN_LEN 4095
-
-static const size_t starting_size = 100;
-static Map string_set = {0};
-
-static int strncmp_wrapper(void *s1, void *s2) {
-  int ret = 0;
-  if (!s1 || !s2) {
-    ret = s1 == s2;
-  } else {
-    ret = !strncmp(s1, s2, MAX_TOKEN_LEN);
-  }
-  return ret;
-}
-
-/* the key and value will point to the same thing so only one of the destructors
- * should be set.
+/* neighborhood size and starting map size. if we started the map at a smaller
+ * size, virtual buckets would overlap, resulting in errors
  */
-void string_set_init_globals() {
-  int status =
-      map_init(&string_set, starting_size, free, NULL, strncmp_wrapper);
-  if (status) {
-    fprintf(stderr, "fuck you\n");
-    abort();
-  }
+#define DEFAULT_SIZE (sizeof(unsigned long) * CHAR_BIT)
+
+static unsigned long murmur_wrapper(const char *str) {
+  /* entirely unnecessary but i think it's funny */
+  static const unsigned int KNUTH_MAGIC = 0x9E3779B9U;
+  size_t len = strlen(str);
+  unsigned long out[2];
+  MurmurHash3_x64_128(str, len, KNUTH_MAGIC, out);
+  return out[0] ^ out[1];
 }
 
-void string_set_free_globals() { map_destroy(&string_set); }
+TABOE_TDEF(StringSet)
+TABOE_TYPE(StringSet, const char *, char *, unsigned long)
+TABOE_IMPL(DEFAULT_SIZE, StringSet, string_set, const char *, char *,
+           unsigned long, murmur_wrapper, strcmp)
+
+static StringSet *string_set;
+
+void string_set_init_globals() {
+  string_set = string_set_init(DEFAULT_SIZE);
+  assert(string_set != NULL);
+}
+
+void string_set_free_globals() {
+  size_t i, string_count = string_set_count(string_set);
+  for (i = 0; i < string_count; ++i) {
+    char *str;
+    (void)string_set_at(string_set, i, &str);
+    /* key and value are identical so we only need to free the value */
+    free(str);
+  }
+  string_set_destroy(string_set);
+}
 
 const char *string_set_intern(const char *string) {
-  const size_t len = strlen(string);
-  if (len <= 0) {
-    fprintf(stderr, "This string (%s) is too fucking short.\n", string);
-    abort();
-  }
-  char *ret = map_get(&string_set, (char *)string, len);
-  if (!ret) {
-    ret = malloc((len + 1) * sizeof(char));
-    memcpy(ret, string, len + 1);
+  assert(strlen(string) > 0);
+  char *val;
+  int exists = string_set_get(string_set, string, &val);
+  if (exists) {
+    assert(strcmp(string, val) == 0);
+    return val;
+  } else {
+    size_t len = strlen(string);
+    val = malloc((len + 1) * sizeof(char));
+    memcpy(val, string, len + 1);
     PFDBG3(
         's',
         "First apearance of string %s, length %lu; duplicated and stored in %p",
-        ret, len, ret);
-    map_insert(&string_set, ret, len, ret);
-  } else {
-    if (strcmp(string, ret) != 0) {
-      fprintf(stderr, "fuck you\n");
-      abort();
-    }
+        val, len, val);
+    string_set_put(string_set, val, val);
+    return val;
   }
-
-  return ret;
 }
 
 int string_set_print(FILE *out) {
   PFDBG0('s', "Printing string set");
-  ArrayList key_list;
-  int status = alist_init(&key_list, map_size(&string_set));
-  if (status) abort();
-  status = map_keys(&string_set, &key_list);
-  if (status) abort();
-
-  size_t i;
-  for (i = 0; i < alist_size(&key_list); ++i) {
-    char *key = alist_get(&key_list, i);
-    size_t map_location[] = {-1, -1};
-    map_find(&string_set, key, strlen(key), map_location);
-    fprintf(out, "string_set[%4lu,%4lu]: %p->\"%s\"\n", map_location[0],
-            map_location[1], (void *)key, key);
+  size_t string_index, string_count = string_set_count(string_set);
+  int total = 0;
+  for (string_index = 0; string_index < string_count; ++string_index) {
+    const char *str;
+    (void)string_set_key_at(string_set, string_index, &str);
+    int printed = fprintf(out, "%p->\"%s\"\n", (void *)str, str);
+    if (printed < 0)
+      return printed;
+    else
+      total += printed;
   }
-  status = alist_destroy(&key_list, NULL);
-  if (status) abort();
-  return 0;
+  return total;
 }
