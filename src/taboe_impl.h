@@ -316,6 +316,18 @@
     return table == NULL ? 0 : table->count;                                   \
   }                                                                            \
                                                                                \
+  size_t TABOE_FN(fn_pfx, hard_count)(const TABOE_NAME(tab_t) * table) {       \
+    if (table == NULL) return 0;                                               \
+    bit_t occupied_bits = TABOE_FN(fn_pfx, check)(table, 0);                   \
+    size_t i, count = 0;                                                       \
+    for (i = 0; i < table->size; ++i) {                                        \
+      assert(((occupied_bits >> 1) & table->neighbors[i]) == 0);               \
+      occupied_bits = (occupied_bits >> 1) | table->neighbors[i];              \
+      if (occupied_bits & 1) ++count;                                          \
+    }                                                                          \
+    return count;                                                              \
+  }                                                                            \
+                                                                               \
   void TABOE_FN(fn_pfx, keys)(const TABOE_NAME(tab_t) * table, key_t * out) {  \
     if (table == NULL || out == NULL) return;                                  \
     bit_t occupied_bits = TABOE_FN(fn_pfx, check)(table, 0);                   \
@@ -356,6 +368,13 @@
       }                                                                        \
     }                                                                          \
     return 0;                                                                  \
+  }                                                                            \
+                                                                               \
+  void TABOE_FN(fn_pfx, clear)(TABOE_NAME(tab_t) * table) {                    \
+    if (table == NULL) return;                                                 \
+    size_t i;                                                                  \
+    for (i = 0; i < table->size; ++i) table->neighbors[i] = 0;                 \
+    table->count = 0;                                                          \
   }                                                                            \
                                                                                \
   void TABOE_FN(fn_pfx, destroy)(TABOE_NAME(tab_t) * table) {                  \

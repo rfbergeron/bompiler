@@ -6,12 +6,10 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "badmap.h"
 #include "bblock.h"
 #include "instr.h"
 #include "symtable.h"
-
-#define DEFAULT_MAP_SIZE 100
+#include "taboe_impl.h"
 
 static struct reg_desc {
   size_t vreg_num;
@@ -30,11 +28,31 @@ static size_t vreg_descs_size;
 static size_t vreg_descs_cap;
 static const char *LEADER_COMMENT = "basic block leader";
 
-static Map bblock_table;
-static Map persist_table;
 static int in_function;
 static unsigned short regs_clobbered;
 static unsigned short used_volatile;
+
+/* hash by Thomas Wang https://gist.github.com/badboy/6267743 */
+static unsigned long hash64shift(unsigned long key) {
+  key = (~key) + (key << 21); /* key = (key << 21) - key - 1; */
+  key = key ^ (key >> 24);
+  key = (key + (key << 3)) + (key << 8); /* key * 265 */
+  key = key ^ (key >> 14);
+  key = (key + (key << 2)) + (key << 4); /* key * 21 */
+  key = key ^ (key >> 28);
+  key = key + (key << 31);
+  return key;
+}
+
+static size_t comp_size_t(size_t x, size_t y) { return y - x; }
+
+#define DEFAULT_SIZE (sizeof(unsigned long) * CHAR_BIT)
+TABOE_TDEF(LiveTable)
+TABOE_TYPE(LiveTable, size_t, Instruction *, unsigned long)
+TABOE_IMPL(DEFAULT_SIZE, LiveTable, live_table, size_t, Instruction *,
+           unsigned long, hash64shift, comp_size_t)
+static LiveTable *liveness_table;
+static LiveTable *persistence_table;
 
 /* TODO(Robert): this function is more complicated than it needs to be. while it
  * might make more since on a RISC architecture with 3-operand instructions, on
@@ -63,28 +81,20 @@ static void liveness_helper(size_t *vreg_num, Instruction **next_use_out,
                             int clear_persist, int set_persist) {
   /* new use info must be in `next_use_out` */
   Instruction *new_next_use = *next_use_out;
-  /* dummy variable for `map_find` */
-  size_t unused[2];
-  if (map_find(&bblock_table, vreg_num, sizeof(*vreg_num), unused)) {
-    /* use temporary liveness table if the vreg has an entry in there */
-    *next_use_out = map_get(&bblock_table, vreg_num, sizeof(*vreg_num));
-  } else {
-    *next_use_out = map_get(&persist_table, vreg_num, sizeof(*vreg_num));
-  }
+
+  int exists = live_table_get(liveness_table, *vreg_num, next_use_out);
+  if (!exists)
+    exists = live_table_get(persistence_table, *vreg_num, next_use_out);
+  if (!exists) *next_use_out = NULL;
 
   /* PERSIST_*_SET takes precedence over PERSIST_*_CLEAR */
   if (set_persist) {
-    int status =
-        map_insert(&persist_table, vreg_num, sizeof(*vreg_num), new_next_use);
-    if (status) abort();
+    live_table_put(persistence_table, *vreg_num, new_next_use);
   } else if (clear_persist) {
-    /* don't check return value; persist table may not have an entry */
-    (void)map_delete(&persist_table, vreg_num, sizeof(*vreg_num));
+    live_table_put(persistence_table, *vreg_num, NULL);
   }
 
-  int status =
-      map_insert(&bblock_table, vreg_num, sizeof(*vreg_num), new_next_use);
-  if (status) abort();
+  live_table_put(liveness_table, *vreg_num, new_next_use);
 }
 
 static void update_liveness(Instruction *instr, Operand *operand) {
@@ -169,21 +179,9 @@ static void liveness_bblock(BBlock *block) {
   free(current);
 }
 
-/* very simple compare function for badlib map */
-static int compare_regnums(size_t *r1, size_t *r2) {
-  if (r1 == NULL || r2 == NULL)
-    return r1 == r2;
-  else
-    return *r1 == *r2;
-}
-
 void liveness_sr(ListIter *first, ListIter *last) {
-  int status = map_init(&bblock_table, DEFAULT_MAP_SIZE, NULL, NULL,
-                        (BlibComparator)compare_regnums);
-  if (status) abort();
-  status = map_init(&persist_table, DEFAULT_MAP_SIZE, NULL, NULL,
-                    (BlibComparator)compare_regnums);
-  if (status) abort();
+  persistence_table = live_table_init(DEFAULT_SIZE);
+  liveness_table = live_table_init(DEFAULT_SIZE);
   BBlock **bblocks;
   size_t bblocks_size = bblock_partition(first, last, &bblocks);
   assert(bblocks_size > 0);
@@ -195,15 +193,13 @@ void liveness_sr(ListIter *first, ListIter *last) {
     liveness_bblock(block);
     Instruction *leader_instr = liter_get(block->leader);
     leader_instr->comment = LEADER_COMMENT;
-    if (map_clear(&bblock_table)) abort();
+    live_table_clear(liveness_table);
   }
 
   for (i = 0; i < bblocks_size; ++i) bblock_destroy(bblocks[i]);
   free(bblocks);
-  status = map_destroy(&bblock_table);
-  if (status) abort();
-  status = map_destroy(&persist_table);
-  if (status) abort();
+  live_table_destroy(persistence_table);
+  live_table_destroy(liveness_table);
 }
 
 static void assign_or_spill(size_t *vreg_num, size_t vreg_width,
