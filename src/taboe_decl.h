@@ -38,6 +38,7 @@
   int TABOE_FN(fn_pfx, find)(const tab_t *table, val_t *value,                \
                              int (*compar)(const void *, const void *),       \
                              key_t *out);                                     \
+  void TABOE_FN(fn_pfx, clear)(TABOE_NAME(tab_t) * table);                    \
   void TABOE_FN(fn_pfx, destroy)(tab_t * table);
 
 #endif
