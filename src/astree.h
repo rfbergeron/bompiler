@@ -38,7 +38,8 @@ typedef struct astree {
   size_t jump_id;
   size_t case_id;
   size_t spill_eightbytes;
-  LinkedList children;     /* children of this n-way node */
+  struct astree **children;
+  size_t children_len, children_cap;
   int tok_kind;            /* token code */
   unsigned int attributes; /* node-specific attributes */
 } ASTree;
@@ -48,9 +49,8 @@ void astree_destroy_globals(void);
 ASTree *astree_init(int tok_kind, const Location location, const char *lexinfo);
 void astree_destroy(ASTree *tree);
 ASTree *astree_adopt(ASTree *parent, const size_t count, ...);
-ASTree *astree_replace(ASTree *parent, const size_t index, ASTree *child);
 ASTree *astree_get(const ASTree *parent, const size_t index);
-ASTree *astree_remove(ASTree *parent, const size_t index);
+ASTree *astree_disown(ASTree *parent);
 size_t astree_count(const ASTree *parent);
 int astree_is_const_zero(const ASTree *tree);
 int astree_to_string(const ASTree *astree, char *buffer);

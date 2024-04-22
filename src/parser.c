@@ -117,7 +117,7 @@ BCC_YYSTATIC ASTree *parser_make_joiner(ASTree *stringcon) {
 BCC_YYSTATIC ASTree *parser_join_strings(ASTree *joiner) {
   assert(strcmp("_joiner", joiner->lexinfo) == 0 && astree_count(joiner) > 0);
   if (astree_count(joiner) == 1) {
-    ASTree *stringcon = astree_remove(joiner, 0);
+    ASTree *stringcon = astree_disown(joiner);
     astree_destroy(joiner);
     return stringcon;
   }

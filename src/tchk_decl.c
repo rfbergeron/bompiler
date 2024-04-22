@@ -529,7 +529,7 @@ ASTree *define_dirdecl(ASTree *declarator, ASTree *dirdecl) {
 
 ASTree *define_symbol(ASTree *decl_list, ASTree *equal_sign,
                       ASTree *initializer) {
-  ASTree *declarator = astree_remove(decl_list, astree_count(decl_list) - 1);
+  ASTree *declarator = astree_disown(decl_list);
   assert(declarator->tok_kind == TOK_IDENT);
 
   if (initializer->tok_kind != TOK_INIT_LIST &&
