@@ -2606,12 +2606,12 @@ ASTree *translate_do(ASTree *do_, ASTree *body, ASTree *condition) {
 
 ASTree *translate_block(ASTree *block) {
   PFDBG0('g', "Translating compound statement");
-  ASTree *first_stmt;
+  ASTree *first_stmt = NULL;
   size_t i, stmt_count = astree_count(block);
-  for (i = 0, first_stmt = astree_get(block, i);
-       i < stmt_count && first_stmt != NULL && first_stmt->first_instr == NULL;
-       first_stmt = astree_get(block, ++i))
-    ;
+  for (i = 0; i < stmt_count; ++i) {
+    first_stmt = astree_get(block, i);
+    if (first_stmt->first_instr != NULL) break;
+  }
 
   /* emit nop if block contains no instructions */
   if (first_stmt == NULL || first_stmt->first_instr == NULL) {
@@ -2623,21 +2623,21 @@ ASTree *translate_block(ASTree *block) {
     block->last_instr = liter_copy(block->first_instr);
     if (block->last_instr == NULL) abort();
     return block;
+  } else {
+    ASTree *last_stmt;
+    for (i = 1; i <= stmt_count; ++i) {
+      last_stmt = astree_get(block, stmt_count - i);
+      if (last_stmt->last_instr != NULL) break;
+    }
+
+    assert(last_stmt != NULL && last_stmt->last_instr != NULL);
+
+    block->first_instr = liter_copy(first_stmt->first_instr);
+    if (block->first_instr == NULL) abort();
+    block->last_instr = liter_copy(last_stmt->last_instr);
+    if (block->last_instr == NULL) abort();
+    return block;
   }
-
-  ASTree *last_stmt;
-  for (i = 1, last_stmt = astree_get(block, stmt_count - i);
-       i <= stmt_count && last_stmt != NULL && last_stmt->last_instr == NULL;
-       last_stmt = astree_get(block, stmt_count - (++i)))
-    ;
-
-  assert(last_stmt != NULL && last_stmt->last_instr != NULL);
-
-  block->first_instr = liter_copy(first_stmt->first_instr);
-  if (block->first_instr == NULL) abort();
-  block->last_instr = liter_copy(last_stmt->last_instr);
-  if (block->last_instr == NULL) abort();
-  return block;
 }
 
 static void return_scalar(ASTree *ret, ASTree *expr) {

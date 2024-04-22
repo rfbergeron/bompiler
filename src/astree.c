@@ -82,10 +82,9 @@ ASTree *astree_init(int tok_kind, const Location location, const char *info) {
   tree->first_instr = NULL;
   tree->last_instr = NULL;
   tree->spill_eightbytes = 0;
-  /* casting function pointers is undefined behavior but it seems like most
-   * compiler implementations make it work, and here we're just changing the
-   * type of a pointer argument */
-  llist_init(&tree->children, (void (*)(void *))(astree_destroy), NULL);
+  tree->children_len = 0;
+  tree->children_cap = 1;
+  tree->children = malloc(tree->children_cap * sizeof(*tree->children));
   tree->scope = NULL;
   tree->constant.integral.signed_value = 0L;
   tree->constant.label = NULL;
@@ -128,12 +127,9 @@ void astree_destroy(ASTree *tree) {
       break;
   }
 
-  /* llist should handle destruction of children */
-  int status = llist_destroy(&tree->children);
-  if (status) {
-    fprintf(stderr, "your datas structures library sucks\n");
-    abort();
-  }
+  size_t i;
+  for (i = 0; i < tree->children_len; ++i) astree_destroy(tree->children[i]);
+  free(tree->children);
 
   /* free symbol table if present */
   scope_destroy(tree->scope);
@@ -147,20 +143,23 @@ void astree_destroy(ASTree *tree) {
 }
 
 ASTree *astree_adopt(ASTree *parent, const size_t count, ...) {
+  if (parent->children_len + count > parent->children_cap) {
+    do parent->children_cap *= 2;
+    while (parent->children_len + count > parent->children_cap);
+    parent->children = realloc(
+        parent->children, parent->children_cap * sizeof(*parent->children));
+  }
+
   va_list args;
   va_start(args, count);
   size_t i;
   for (i = 0; i < count; ++i) {
     ASTree *child = va_arg(args, ASTree *);
     assert(child != NULL);
-    assert(llist_find(&parent->children, child) == (size_t)-1L);
     PFDBG2('t', "Tree %s adopts %s", parser_get_tname(parent->tok_kind),
            parser_get_tname(child->tok_kind));
-    int status = llist_push_back(&parent->children, child);
-    if (status) {
-      fprintf(stderr, "ERROR: your data structures library sucks.\n");
-      abort();
-    }
+    parent->children[parent->children_len++] = child;
+
     /* propogate size of spill area for nested calls */
     if (parent->spill_eightbytes < child->spill_eightbytes)
       parent->spill_eightbytes = child->spill_eightbytes;
@@ -170,26 +169,17 @@ ASTree *astree_adopt(ASTree *parent, const size_t count, ...) {
   return parent;
 }
 
-ASTree *astree_replace(ASTree *parent, const size_t index, ASTree *child) {
-  assert(child != NULL);
-  if (index >= astree_count(parent)) return NULL;
-  ASTree *old_child = llist_extract(&parent->children, index);
-  int status = llist_insert(&parent->children, child, index);
-  if (status) abort();
-  return old_child;
-}
-
 ASTree *astree_get(const ASTree *parent, const size_t index) {
-  return llist_get(&parent->children, index);
+  assert(index < parent->children_len);
+  return parent->children[index];
 }
 
-ASTree *astree_remove(ASTree *parent, const size_t index) {
-  return llist_extract(&parent->children, index);
+ASTree *astree_disown(ASTree *parent) {
+  assert(parent->children_len > 0);
+  return parent->children[--parent->children_len];
 }
 
-size_t astree_count(const ASTree *parent) {
-  return llist_size(&parent->children);
-}
+size_t astree_count(const ASTree *parent) { return parent->children_len; }
 
 int astree_is_const_zero(const ASTree *tree) {
   return (tree->attributes & ATTR_MASK_CONST) >= ATTR_CONST_INIT &&
@@ -261,8 +251,7 @@ int astree_print_tree(ASTree *tree, FILE *out, int depth) {
   static char indent[LINESIZE], nodestr[LINESIZE];
   /* print out the whole tree */
   PFDBG3('t', "Tree info: token: %s, lexinfo: %s, children: %u",
-         parser_get_tname(tree->tok_kind), tree->lexinfo,
-         llist_size(&tree->children));
+         parser_get_tname(tree->tok_kind), tree->lexinfo, tree->children_len);
 
   size_t numspaces = depth * 2;
   memset(indent, ' ', numspaces);
@@ -272,17 +261,14 @@ int astree_print_tree(ASTree *tree, FILE *out, int depth) {
   fprintf(out, "%s%s\n", indent, nodestr);
 
   size_t i;
-  for (i = 0; i < llist_size(&tree->children); ++i) {
-    PFDBG1('t', "    %p", llist_get(&tree->children, i));
+  for (i = 0; i < tree->children_len; ++i) {
+    PFDBG1('t', "    %p", tree->children[i]);
   }
 
-  for (i = 0; i < llist_size(&tree->children); ++i) {
-    ASTree *child = (ASTree *)llist_get(&tree->children, i);
-
-    if (child != NULL) {
-      int status = astree_print_tree(child, out, depth + 1);
-      if (status) return status;
-    }
+  for (i = 0; i < tree->children_len; ++i) {
+    assert(tree->children[i] != NULL);
+    int status = astree_print_tree(tree->children[i], out, depth + 1);
+    if (status) return status;
   }
   return 0;
 }
