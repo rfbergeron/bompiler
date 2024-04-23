@@ -20,7 +20,8 @@ Location lexer_loc = {0, 1, 0, 0};
 int lexer_interactive;
 ASTree *parser_root;
 ASTree *bcc_yyval;
-struct llist lexer_filenames;
+static char **lexer_filenames;
+size_t lexer_filenames_len, lexer_filenames_cap = 8;
 struct {
   size_t *data;
   size_t count;
@@ -30,7 +31,7 @@ const Location LOC_EMPTY = LOC_EMPTY_VALUE;
 static char error_buffer[1024];
 
 static int lexer_print_error(const char *message) {
-  assert(llist_size(&lexer_filenames) != 0);
+  assert(lexer_filenames_len != 0);
   return fprintf(stderr, "%s:%lu.%lu: %s\n", lexer_filename(lexer_loc.filenr),
                  lexer_loc.linenr, lexer_loc.offset, message);
 }
@@ -50,7 +51,8 @@ size_t lexer_get_filenr() { return lexer_loc.filenr; }
 Location lexer_get_loc(void) { return lexer_loc; }
 
 const char *lexer_filename(int filenr) {
-  return llist_get(&lexer_filenames, (size_t)filenr);
+  assert((size_t)filenr < lexer_filenames_len);
+  return lexer_filenames[filenr];
 }
 
 size_t lexer_include_linenr(int filenr) {
@@ -58,10 +60,13 @@ size_t lexer_include_linenr(int filenr) {
 }
 
 void lexer_new_filename(const char *filename) {
-  lexer_loc.filenr = llist_size(&lexer_filenames);
+  lexer_loc.filenr = lexer_filenames_len;
   char *filename_copy = malloc((strlen(filename) + 1) * sizeof(char *));
   strcpy(filename_copy, filename);
-  llist_push_front(&lexer_filenames, filename_copy);
+  if (lexer_filenames_len == lexer_filenames_cap)
+    lexer_filenames = realloc(
+        lexer_filenames, (lexer_filenames_cap *= 2) * sizeof(*lexer_filenames));
+  lexer_filenames[lexer_filenames_len++] = filename_copy;
   push_linenr(lexer_loc.linenr + 1);
 }
 
@@ -207,22 +212,22 @@ int lexer_bad_token(int tok_kind) {
 
 void lexer_dump_filenames(FILE *out) {
   size_t index;
-  for (index = 0; index < llist_size(&lexer_filenames); ++index) {
-    fprintf(out, "filenames[%2lu] = \"%s\"\n", index,
-            (const char *)llist_get(&lexer_filenames, index));
-  }
+  for (index = 0; index < lexer_filenames_len; ++index)
+    fprintf(out, "filenames[%2lu] = \"%s\"\n", index, lexer_filenames[index]);
 }
 
 void lexer_init_globals() {
   lexer_include_linenrs.data =
       malloc(lexer_include_linenrs.size * sizeof(size_t));
-  llist_init(&lexer_filenames, free, NULL);
+  lexer_filenames = malloc(lexer_filenames_cap * sizeof(*lexer_filenames));
 }
 
 void lexer_free_globals() {
-  llist_destroy(&lexer_filenames);
+  size_t index;
+  for (index = 0; index < lexer_filenames_len; ++index)
+    free(lexer_filenames[index]);
+  free(lexer_filenames);
   free(lexer_include_linenrs.data);
-  llist_destroy(&lexer_filenames);
 }
 
 void yyerror(const char *message) {
