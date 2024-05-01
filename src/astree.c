@@ -79,8 +79,7 @@ ASTree *astree_init(int tok_kind, const Location location, const char *info) {
   tree->loc = location;
   tree->type = NULL;
   tree->attributes = ATTR_NONE;
-  tree->first_instr = NULL;
-  tree->last_instr = NULL;
+  tree->instructions = instr_init(OP_SENTINEL);
   tree->spill_eightbytes = 0;
   tree->children_len = 0;
   tree->children_cap = 1;
@@ -134,9 +133,8 @@ void astree_destroy(ASTree *tree) {
   /* free symbol table if present */
   scope_destroy(tree->scope);
 
-  /* free instruction iterators */
-  free(tree->first_instr);
-  free(tree->last_instr);
+  /* free instructions */
+  instr_destroy(tree->instructions);
 
   exit_purgatory(tree);
   free(tree);

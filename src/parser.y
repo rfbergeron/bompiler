@@ -3,6 +3,7 @@
 /* clang-format on */
 #include <assert.h>
 
+#include "asmgen.h"
 #include "astree.h"
 #include "debug.h"
 #include "lyutils.h"
@@ -19,7 +20,7 @@
 #define ERRCHK \
   if (semantic_error || lexical_error) YYABORT
 
-  static ASTree *parser_make_root(void);
+  static ASTree *parser_make_root(const char *srcname);
   static ASTree *parser_make_empty(const Location loc);
   static ASTree *parser_new_sym(ASTree * tree, int new_symbol);
   static ASTree *parser_make_joiner(ASTree * stringcon);
@@ -101,7 +102,7 @@
  * are meant to be read.
  */
 %%
-program             : %empty                                            { parser_init_globals(); $$ = bcc_yyval = parser_root; }
+program             : %empty                                            { $$ = bcc_yyval = translate_unit(parser_root); }
                     | program topdecl                                   { ERRCHK; $$ = bcc_yyval = parser_root = validate_topdecl($1, finalize_declaration($2)); }
                     ;
 topdecl             : declarations ';'                                  { ERRCHK; $$ = bcc_yyval = $1; astree_destroy($2); }
@@ -113,13 +114,13 @@ function_def        : decl_specs declarator '{'                         { ERRCHK
                     ;
 declarations        : decl_specs                                        { ERRCHK; $$ = bcc_yyval = declare_symbol(parser_make_declaration($1), parser_make_type_name()); }
                     | declaration_list                                  { ERRCHK; $$ = bcc_yyval = $1; }
-                    | definition                                        { ERRCHK; $$ = bcc_yyval = $1; }
                     ;
 declaration_list    : decl_specs declarator                             { ERRCHK; $$ = bcc_yyval = declare_symbol(parser_make_declaration($1), $2); }
                     | declaration_list ',' declarator                   { ERRCHK; $$ = bcc_yyval = declare_symbol($1, $3); parser_cleanup(1, $2); }
-                    | definition ',' declarator                         { ERRCHK; $$ = bcc_yyval = declare_symbol($1, $3); parser_cleanup(1, $2); }
+                    | prepare_init '=' initializer                      { ERRCHK; $$ = bcc_yyval = define_symbol($1, $2, $3); }
                     ;
-definition          : declaration_list '=' initializer                  { ERRCHK; $$ = bcc_yyval = define_symbol($1, $2, $3); }
+prepare_init        : decl_specs declarator                             { ERRCHK; $$ = bcc_yyval = prepare_init(parser_make_declaration($1), $2); }
+                    | declaration_list ',' declarator                   { ERRCHK; $$ = bcc_yyval = prepare_init($1, $3); parser_cleanup(1, $2); }
                     ;
 decl_specs          : decl_specs decl_spec                              { ERRCHK; $$ = bcc_yyval = validate_decl_spec($1, $2); } /* validate_decl_spec */
                     | decl_spec                                         { ERRCHK; $$ = bcc_yyval = parser_make_decl_specs($1); } /* make_spec_list, validate_decl_spec */

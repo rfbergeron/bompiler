@@ -270,7 +270,8 @@ int main(int argc, char **argv) {
   lexer_init_globals();
   state = state_init();
   astree_init_globals();
-  asmgen_init_globals(srcname);
+  asmgen_init_globals();
+  parser_init_globals(srcname);
 
   int syntax_error = yyparse();
   if (syntax_error) goto cleanup;

@@ -79,21 +79,21 @@ BCC_YYSTATIC void make_va_list_type(void) {
   TYPE_VA_LIST_POINTER = TYPE_VA_LIST_POINTER_INTERNAL;
 }
 
-BCC_YYSTATIC ASTree *parser_make_root(void) {
+BCC_YYSTATIC ASTree *parser_make_root(const char *srcname) {
   PFDBG1('p', "Initializing AST, root token code: %d", TOK_ROOT);
   PFDBG1('p', "Translation of token code: %s", parser_get_tname(TOK_ROOT));
   Location root_loc = LOC_EMPTY_VALUE;
   /* assign filenr separately since its not an initializer constant */
   root_loc.filenr = lexer_get_filenr();
-  return astree_init(TOK_ROOT, root_loc, "_root");
+  return astree_init(TOK_ROOT, root_loc, srcname);
 }
 
 BCC_YYSTATIC ASTree *parser_make_empty(const Location loc) {
   return validate_empty_expr(astree_init(TOK_EMPTY, loc, "__empty"));
 }
 
-void parser_init_globals(void) {
-  parser_root = parser_make_root();
+void parser_init_globals(const char *srcname) {
+  parser_root = parser_make_root(srcname);
   PFDBG0('t', "Making symbol table");
   parser_root->scope = scope_init(SCOPE_FILE);
   state_enter_file(state, parser_root);

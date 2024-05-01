@@ -1,6 +1,7 @@
 #include "instr.h"
 
 #include <assert.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -71,7 +72,91 @@ static const char VREG_REG_TABLE[][5] = {
 Instruction *instr_init(Opcode opcode) {
   Instruction *ret = calloc(1, sizeof(Instruction));
   ret->opcode = opcode;
+  if (opcode == OP_SENTINEL) ret->next = ret->prev = ret;
   return ret;
+}
+
+void instr_destroy(Instruction *instr) {
+  if (instr->next == NULL || instr->next->prev != instr) {
+    assert(instr->prev == NULL || instr->prev->next != instr);
+    free(instr);
+  } else {
+    assert(instr->opcode == OP_SENTINEL);
+    Instruction *current = instr->next;
+    while (current != instr) {
+      Instruction *next = current->next;
+      free(current);
+      current = next;
+    }
+    free(instr);
+  }
+}
+
+Instruction *instr_prev(Instruction *instr) { return instr->prev; }
+
+Instruction *instr_next(Instruction *instr) { return instr->next; }
+
+Instruction *instr_append(Instruction *instr, size_t count, ...) {
+  Instruction *where = instr->opcode == OP_SENTINEL ? instr->prev : instr;
+  va_list args;
+  va_start(args, count);
+  size_t i;
+  for (i = 0; i < count; ++i) {
+    Instruction *to_append = va_arg(args, Instruction *);
+    if (to_append->opcode == OP_SENTINEL) {
+      Instruction *last = to_append->prev;
+      last->next = where->next;
+      last->next->prev = last;
+
+      Instruction *first = to_append->next;
+      where->next = first;
+      where->next->prev = where;
+
+      where = last;
+    } else {
+      to_append->next = where->next;
+      to_append->next->prev = to_append;
+      where->next = to_append;
+      where->next->prev = where;
+
+      where = to_append;
+    }
+  }
+  return where;
+}
+
+Instruction *instr_prepend(Instruction *instr, size_t count, ...) {
+  Instruction *where = instr->opcode == OP_SENTINEL ? instr->next : instr;
+  va_list args;
+  va_start(args, count);
+  size_t i;
+  for (i = 0; i < count; ++i) {
+    Instruction *to_prepend = va_arg(args, Instruction *);
+    if (to_prepend->opcode == OP_SENTINEL) {
+      Instruction *first = to_prepend->next;
+      first->prev = where->prev;
+      first->prev->next = first;
+
+      Instruction *last = to_prepend->prev;
+      where->prev = last;
+      where->prev->next = where;
+
+      where = first;
+    } else {
+      to_prepend->prev = where->prev;
+      to_prepend->prev->next = to_prepend;
+      where->prev = to_prepend;
+      where->prev->next = where;
+
+      where = to_prepend;
+    }
+  }
+  return where;
+}
+
+int instr_empty(Instruction *instr) {
+  assert(instr->opcode == OP_SENTINEL);
+  return instr->next == instr;
 }
 
 void set_op_sym(Operand *operand, Symbol *symbol) {
@@ -400,6 +485,7 @@ static int operand_debug(Operand *operand, char *str) {
 }
 
 int instr_debug(Instruction *instr, char *str) {
+  if (instr->opcode == OP_INVALID || instr->opcode == OP_SENTINEL) abort();
   static char src_buf[MAX_OPERAND_DEBUG_LENGTH],
       dest_buf[MAX_OPERAND_DEBUG_LENGTH];
   int status = operand_debug(&instr->src, src_buf);
@@ -417,6 +503,13 @@ int instr_debug(Instruction *instr, char *str) {
 }
 
 int instr_to_str(Instruction *instr, char *str) {
+  if (instr->opcode == OP_INVALID || instr->opcode == OP_SENTINEL) {
+    abort();
+  } else if (instr->opcode == OP_ERASED) {
+    str[0] = '\0';
+    return 0;
+  }
+
   int ret = 0;
   if (instr->label != NULL) {
     int pad_count;
@@ -435,6 +528,7 @@ int instr_to_str(Instruction *instr, char *str) {
     str[ret++] = '\t';
     str[ret] = '\0';
   }
+
   switch (optype_from_opcode(instr->opcode)) {
     int chars_written;
     case OPTYPE_DIRECTIVE:

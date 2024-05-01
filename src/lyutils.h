@@ -68,7 +68,7 @@ void lexer_free_globals();
 
 int location_to_string(const Location *loc, char *buf);
 const char *parser_get_tname(int tok_kind);
-void parser_init_globals(void);
+void parser_init_globals(const char *srcname);
 void parser_destroy_globals(void);
 
 #define YYSTYPE_IS_DECLARED
