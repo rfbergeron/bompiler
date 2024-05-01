@@ -4,6 +4,7 @@
 #include "badllist.h"
 #include "badmap.h"
 #include "bcc_types.h"
+#include "instr.h"
 #include "lyutils.h"
 #include "taboe_decl.h"
 
@@ -35,7 +36,7 @@ typedef enum symbol_info {
 typedef struct symbol {
   const Location *loc;
   Type *type;
-  ListIter *directive_iter;
+  Instruction *instructions;
   StorageClass storage;
   Linkage linkage;
   ptrdiff_t disp;

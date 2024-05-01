@@ -7,6 +7,8 @@
 #define FOREACH_OPCODE(GENERATOR)            \
   GENERATOR(INVALID, OPTYPE_INVALID, 0, 0)   \
   GENERATOR(NONE, OPTYPE_NULLARY, 0, 0)      \
+  GENERATOR(SENTINEL, OPTYPE_NULLARY, 0, 0)  \
+  GENERATOR(ERASED, OPTYPE_NULLARY, 0, 0)    \
   /* arithmetic */                           \
   GENERATOR(ADD, OPTYPE_BINARY, 1, 0)        \
   GENERATOR(SUB, OPTYPE_BINARY, 1, 0)        \
@@ -200,6 +202,7 @@ typedef union operand {
 struct instruction {
   Opcode opcode;
   unsigned int persist_flags;
+  Instruction *prev, *next;
   const char *label;
   const char *comment;
   Operand dest;
@@ -226,6 +229,13 @@ extern const size_t VOLATILE_REGS[9];
 OpType optype_from_opcode(Opcode opcode);
 int opcode_needs_width(Opcode opcode);
 Instruction *instr_init(Opcode opcode);
+void instr_destroy(Instruction *instr);
+Instruction *instr_prev(Instruction *instr);
+Instruction *instr_next(Instruction *instr);
+Instruction *instr_append(Instruction *instr, size_t count, ...);
+Instruction *instr_prepend(Instruction *instr, size_t count, ...);
+Instruction *instr_pop(Instruction *instr);
+int instr_empty(Instruction *instr);
 void set_op_sym(Operand *operand, struct symbol *symbol);
 void set_op_reg(Operand *operand, RegWidth width, size_t num);
 void set_op_imm(Operand *operand, unsigned long val, int is_signed);

@@ -5,7 +5,7 @@
 
 #include "instr.h"
 
-BBlock *bblock_init(ListIter *leader) {
+BBlock *bblock_init(Instruction *leader) {
   if (leader == NULL) return NULL;
   BBlock *bblock = malloc(sizeof(BBlock));
   bblock->leader = leader;
@@ -16,11 +16,10 @@ BBlock *bblock_init(ListIter *leader) {
 
 void bblock_destroy(BBlock *bblock) {
   if (bblock == NULL) return;
-  free(bblock->leader);
   free(bblock);
 }
 
-ListIter *bblock_get_leader(BBlock *bblock) {
+Instruction *bblock_get_leader(BBlock *bblock) {
   return bblock == NULL ? NULL : bblock->leader;
 }
 
@@ -67,14 +66,13 @@ static int instr_is_jump(Instruction *instr) {
 
 static int instr_has_label(Instruction *instr) { return instr->label != NULL; }
 
-size_t bblock_partition(ListIter *first, ListIter *last, BBlock ***out) {
+size_t bblock_partition(Instruction *instructions, BBlock ***out) {
   static const size_t BBLOCKS_START_CAP = 4;
-  ListIter *exit_leader = liter_prev(last, 1);
-  if (exit_leader == NULL) abort();
-  while (instr_is_directive(liter_get(exit_leader)))
-    if (liter_advance(exit_leader, -1) != 0) abort();
-  int status = liter_advance(exit_leader, 1);
-  if (status) abort();
+  Instruction *exit_leader = instructions;
+  while (instr_is_directive(instr_prev(exit_leader)))
+    exit_leader = instr_prev(exit_leader);
+  if (!instr_is_directive(exit_leader)) abort();
+
   BBlock *exit_block = bblock_init(exit_leader);
   if (exit_block == NULL) abort();
 
@@ -82,40 +80,35 @@ size_t bblock_partition(ListIter *first, ListIter *last, BBlock ***out) {
   size_t bblocks_size = 0;
   BBlock **bblocks = malloc(bblocks_cap * sizeof(BBlock *));
 
-  BBlock *enter_block = bblock_init(liter_copy(first));
+  BBlock *enter_block = bblock_init(instr_next(instructions));
   if (enter_block == NULL) abort();
   if (bblocks_size >= bblocks_cap)
     bblocks = realloc(bblocks, (bblocks_cap <<= 1) * sizeof(BBlock *));
   bblocks[bblocks_size++] = enter_block;
-  /* TODO(Robert): iterator comparison functions */
-  ListIter *current = liter_copy(first);
-  if (current == NULL) abort();
-  while (current->node != exit_leader->node &&
-         instr_is_directive(liter_get(current)))
-    if (liter_advance(current, 1) != 0) abort();
 
-  while (current->node != exit_leader->node) {
-    BBlock *block = bblock_init(liter_copy(current));
+  Instruction *current = instr_next(instructions);
+  do current = instr_next(current);
+  while (instr_is_directive(current));
+  if (current->opcode == OP_SENTINEL) abort();
+
+  while (current != exit_block->leader) {
+    BBlock *block = bblock_init(current);
     bblock_set_seq_follower(bblocks[bblocks_size - 1], block);
     if (bblocks_size >= bblocks_cap)
       bblocks = realloc(bblocks, (bblocks_cap <<= 1) * sizeof(BBlock *));
     bblocks[bblocks_size++] = block;
+
     for (;;) {
-      int status = liter_advance(current, 1);
-      if (status) {
-        abort();
-      } else if (current->node == exit_leader->node ||
-                 instr_has_label(liter_get(current))) {
+      current = instr_next(current);
+      if (current == exit_leader || instr_has_label(current)) {
         break;
-      } else if (instr_is_jump(liter_get(current))) {
-        int status = liter_advance(current, 1);
-        if (status) abort();
+      } else if (instr_is_jump(current)) {
+        current = instr_next(current);
         break;
       }
     }
   }
 
-  free(current);
   bblock_set_seq_follower(bblocks[bblocks_size - 1], exit_block);
   if (bblocks_size >= bblocks_cap)
     bblocks = realloc(bblocks, (bblocks_cap <<= 1) * sizeof(BBlock *));

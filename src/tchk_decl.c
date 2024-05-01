@@ -568,8 +568,7 @@ ASTree *define_symbol(ASTree *decl_list, ASTree *equal_sign,
                         astree_adopt(equal_sign, 2, declarator, initializer));
   } else if (symbol->storage == STORE_AUTO) {
     initializer = tchk_cexpr_conv(
-        tchk_scal_conv(tchk_rval_conv(initializer, NULL), declarator->type),
-        NULL);
+        tchk_scal_conv(tchk_rval_conv(initializer), declarator->type));
   } else {
     initializer = tchk_scal_conv(initializer, declarator->type);
   }
@@ -624,12 +623,10 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
   return begin_translate_fn(declaration, declarator, body);
 }
 
-ASTree *validate_fnbody_content(ASTree *function, ASTree *fnbody_content) {
-  if (fnbody_content->tok_kind == TOK_DECLARATION)
-    end_local_decls(fnbody_content);
-
-  ASTree *fnbody = astree_get(function, 2);
-  (void)astree_adopt(fnbody, 1, fnbody_content);
+ASTree *validate_fnbody_content(ASTree *function, ASTree *content) {
+  ASTree *body = astree_get(function, 2);
+  /* this function perfoms adoption */
+  (void)translate_block_content(body, content);
   return function;
 }
 
@@ -846,6 +843,19 @@ ASTree *define_record_member(ASTree *record_spec, ASTree *member) {
   return record_spec;
 }
 
+/* insert symbol into table in case it appears in its own initializer */
+ASTree *prepare_init(ASTree *declaration, ASTree *declarator) {
+  Symbol *symbol = validate_declaration(declaration, declarator);
+  /* emit a `nop` in case we just validated a type name */
+  if (symbol == NULL)
+    return scope_get_kind(state_peek_scope(state)) == SCOPE_FILE
+               ? astree_adopt(declaration, 1, declarator)
+               : astree_adopt(declaration, 1, translate_empty_expr(declarator));
+  assert(symbol->type = declarator->type);
+
+  return astree_adopt(declaration, 1, declarator);
+}
+
 ASTree *declare_symbol(ASTree *declaration, ASTree *declarator) {
   Symbol *symbol = validate_declaration(declaration, declarator);
   /* emit a `nop` in case we just validated a type name */
@@ -861,7 +871,6 @@ ASTree *declare_symbol(ASTree *declaration, ASTree *declarator) {
     return translate_global_decl(declaration, declarator);
 }
 
-ASTree *validate_topdecl(ASTree *root, ASTree *topdecl) {
-  end_global_decls(topdecl);
-  return astree_adopt(root, 1, topdecl);
+ASTree *validate_topdecl(ASTree *unit, ASTree *topdecl) {
+  return translate_topdecl(unit, topdecl);
 }

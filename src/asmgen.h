@@ -9,9 +9,9 @@
 const char *mk_static_label(const char *name, size_t unique_id);
 const char *asmgen_literal_label(const char *literal);
 void bulk_mzero(size_t dest_memreg, ptrdiff_t dest_disp, size_t skip_bytes,
-                const Type *type);
-void static_zero_pad(size_t count);
-ASTree *translate_cexpr_conv(ASTree *cexpr_conv, ASTree *expr, ListIter *where);
+                const Type *type, Instruction *where);
+void static_zero_pad(size_t count, Instruction *where);
+ASTree *translate_cexpr_conv(ASTree *cexpr_conv, ASTree *expr);
 ASTree *translate_scal_conv(ASTree *conv, ASTree *expr);
 ASTree *translate_ptr_conv(ASTree *conv, ASTree *expr);
 ASTree *translate_disp_conv(ASTree *conv, ASTree *expr,
@@ -31,7 +31,6 @@ ASTree *translate_reference(ASTree *reference, ASTree *struct_, ASTree *member);
 ASTree *translate_post_inc_dec(ASTree *post_inc_dec, ASTree *operand);
 ASTree *translate_inc_dec(ASTree *inc_dec, ASTree *operand);
 ASTree *translate_unop(ASTree *operator, ASTree * operand);
-ASTree *translate_sizeof(ASTree *sizeof_, ASTree *operand);
 ASTree *translate_addition(ASTree *operator, ASTree * left, ASTree *right);
 ASTree *translate_multiplication(ASTree *operator, ASTree * left,
                                  ASTree *right);
@@ -64,14 +63,15 @@ ASTree *translate_default(ASTree *default_, ASTree *stmt);
 ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
                              ASTree *declarator, ASTree *initializer);
 ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator);
-void end_local_decls(ASTree *declaration);
+ASTree *translate_block_content(ASTree *block, ASTree *content);
 ASTree *translate_global_init(ASTree *declaration, ASTree *assignment,
                               ASTree *declarator, ASTree *initializer);
 ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator);
-void end_global_decls(ASTree *declaration);
 ASTree *begin_translate_fn(ASTree *declaration, ASTree *declarator,
                            ASTree *body);
 ASTree *end_translate_fn(ASTree *declaration);
+ASTree *translate_topdecl(ASTree *unit, ASTree *topdecl);
+ASTree *translate_unit(ASTree *unit);
 void translate_static_scalar_init(const Type *type, ASTree *initializer);
 void translate_auto_scalar_init(const Type *type, ptrdiff_t disp,
                                 ASTree *initializer);
@@ -80,7 +80,7 @@ void translate_auto_literal_init(const Type *type, ptrdiff_t disp,
                                  ASTree *literal);
 int generator_print_il(FILE *out);
 int generator_debug_il(FILE *out);
-void asmgen_init_globals(const char *filename);
+void asmgen_init_globals(void);
 void asmgen_free_globals(void);
 
 #endif
