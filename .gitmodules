@@ -1,3 +1,0 @@
-[submodule "badlib"]
-	path = badlib
-	url = git@github.com:rfbergeron/badlib.git

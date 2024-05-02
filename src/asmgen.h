@@ -2,7 +2,6 @@
 #define __ASMGEN_H__
 
 #include "astree.h"
-#include "badllist.h"
 #include "instr.h"
 #include "lyutils.h"
 

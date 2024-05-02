@@ -1,6 +1,5 @@
 #ifndef __STATE_H__
 #define __STATE_H__
-#include "badllist.h"
 #include "scope.h"
 #include "simplestack.h"
 #include "symtable.h"

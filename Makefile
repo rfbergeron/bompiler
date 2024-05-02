@@ -1,5 +1,5 @@
-export CWARN ?= -Wall -Wextra -Wpedantic -Wno-shadow -Wno-declaration-after-statement -Wno-cast-function-type -Wbad-function-cast -Wc90-c99-compat
-export CFLAGS ?= -Isrc -Ibuild -Ibadlib -Ibadlib/murmur3 -ansi
+CWARN := -Wall -Wextra -Wpedantic -Wno-shadow -Wno-declaration-after-statement -Wno-cast-function-type -Wbad-function-cast -Wc90-c99-compat
+CFLAGS := -Isrc -Ibuild -Imurmur3 -ansi
 WRAP_ATTRS := -Wl,--wrap=auxspec_destroy,--wrap=typespec_destroy,--wrap=create_erraux_v,--wrap=typespec_append_auxspecs,--wrap=typespec_append_aux,--wrap=typespec_prepend_aux,--wrap=typespec_init,--wrap=typespec_get_aux
 WRAP_LYUTILS := -Wl,--wrap=parser_get_tname
 WRAP_STRSET := -Wl,--wrap=string_set_intern
@@ -19,13 +19,14 @@ GENSRC := yyparse.c yylex.c
 GENHDR := yyparse.h
 GENOBJ := ${GENSRC:.c=.o}
 # library files
-LIBHDR := badlib/badmap.h badlib/badllist.h badlib/badalist.h
-LIBOBJ := badmap.o badllist.o badalist.o murmur3.o
+LIBSRC := murmur3.c
+LIBHDR := murmur3.h
+LIBOBJ := ${LIBSRC:.c=.o}
 # convenient groups
-HDRFILES := ${HDR:%=src/%} ${GENHDR:%=build/%} ${LIBHDR}
+HDRFILES := ${HDR:%=src/%} ${GENHDR:%=build/%} ${LIBHDR:%=murmur3/%}
 OBJFILES := ${OBJ:%=build/%} ${GENOBJ:%=build/%} ${LIBOBJ:%=build/%}
 
-.PHONY: all debug sanitize units badlib test clean test_clean ci format units spotless selftest selftest_clean
+.PHONY: all debug sanitize units test clean test_clean ci format units spotless selftest selftest_clean
 
 all: CFLAGS += -O1
 all: ${EXE}
@@ -53,11 +54,7 @@ build/%_test: build/%.o build/%_test.o build/debug.o ${LIBOBJ:%=build/%}
 	${CC} ${CFLAGS} ${CWARN} ${LDFLAGS} $^ -o $@
 
 build:
-	[ -d build ] || mkdir build
-
-badlib:
-	git submodule update --init --recursive badlib
-	make -C badlib/ murmur3
+	mkdir -p build
 
 build/yylex.o: build/yylex.c
 	${CC} ${CFLAGS} -c $^ -o $@
@@ -65,12 +62,15 @@ build/yylex.o: build/yylex.c
 build/yyparse.o: build/yyparse.c build/yyparse.h
 	${CC} ${CFLAGS} -c $< -o $@
 
-${LIBOBJ:%=build/%}: build
-	make -e -C badlib/ ${@:build/%=%}
-	mv ${@:build/%=badlib/%} ./build/
+build/murmur3.o: murmur3/murmur3.c murmur3/murmur3.h build
+	${CC} ${CFLAGS} -c $< -o $@
 
 build/%.o: src/%.c ${HDRFILES} build
 	${CC} ${CFLAGS} ${CPPFLAGS} ${CWARN} -c $< -o $@
+
+murmur3/murmur3.h murmur3/murmur3.c&:
+	[ -d murmur3 ] || git clone https://github.com/PeterScott/murmur3.git
+	git apply --directory=murmur3 murmur3.patch
 
 build/yylex.c: src/lexer.l build
 	flex --outfile=$@ $<
@@ -89,7 +89,7 @@ check:
 ci: check
 	git add ${HDR:%=src/%} ${SRC:%=src/%} ${UNITSRC:%=src/%} ${MKFILE} \
 	README.md doc/*.md .gitignore .gitmodules \
-	src/parser.y src/parser.c src/lexer.l badlib
+	src/parser.y src/parser.c src/lexer.l murmur3.patch
 	make -C test ci
 
 test:
@@ -112,7 +112,6 @@ selftest:
 	fi
 
 clean:
-	make -C badlib/ clean
 	rm -f ${OBJFILES} ${UNITOBJ:%=build/%} ${GENSRC:%=build/%} \
 	${GENHDR:%=build/%} build/yyparse.output
 

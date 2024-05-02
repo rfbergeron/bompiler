@@ -1,8 +1,6 @@
 #ifndef __SYMTABLE_H__
 #define __SYMTABLE_H__
 
-#include "badllist.h"
-#include "badmap.h"
 #include "bcc_types.h"
 #include "instr.h"
 #include "lyutils.h"

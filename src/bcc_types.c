@@ -1,8 +1,6 @@
 #include "bcc_types.h"
 
 #include "assert.h"
-#include "badllist.h"
-#include "badmap.h"
 #include "scope.h"
 #include "stdint.h"
 #include "stdio.h"

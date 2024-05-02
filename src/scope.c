@@ -4,7 +4,7 @@
 
 #include "ctype.h"
 #include "debug.h"
-#include "murmur3/murmur3.h"
+#include "murmur3.h"
 #include "symtable.h"
 #include "taboe_impl.h"
 
