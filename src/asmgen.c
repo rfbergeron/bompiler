@@ -6,7 +6,6 @@
 
 #include "assert.h"
 #include "astree.h"
-#include "badalist.h"
 #include "debug.h"
 #include "init.h"
 #include "lyutils.h"

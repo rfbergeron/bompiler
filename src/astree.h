@@ -1,8 +1,6 @@
 #ifndef __ASTREE_H__
 #define __ASTREE_H__
 
-#include "badllist.h"
-#include "badmap.h"
 #include "bcc_types.h"
 #include "debug.h"
 #include "instr.h"

@@ -2,7 +2,6 @@
 
 #include "asmgen.h"
 #include "assert.h"
-#include "badalist.h"
 #include "bcc_err.h"
 #include "conversions.h"
 #include "lyutils.h"

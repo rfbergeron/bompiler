@@ -1,7 +1,5 @@
 #ifndef BCC_TYPES_H
 #define BCC_TYPES_H
-#include "badllist.h"
-#include "badmap.h"
 #include "stdio.h"
 
 #define X64_SIZEOF_LONG ((size_t)8UL)

@@ -9,7 +9,6 @@
 #include <string.h>
 
 #include "astree.h"
-#include "badllist.h"
 #include "debug.h"
 #include "state.h"
 #include "symtable.h"

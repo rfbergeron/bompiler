@@ -7,8 +7,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "badalist.h"
-#include "badllist.h"
 #include "debug.h"
 #include "evaluate.h"
 #include "lyutils.h"

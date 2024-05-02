@@ -1,4 +1,5 @@
 build/*
+murmur3/*
 **.str
 **.tok
 **.ast

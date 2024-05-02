@@ -5,7 +5,7 @@
 #include <string.h>
 
 #include "debug.h"
-#include "murmur3/murmur3.h"
+#include "murmur3.h"
 #include "taboe_impl.h"
 
 /* neighborhood size and starting map size. if we started the map at a smaller
