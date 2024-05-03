@@ -8,7 +8,7 @@ WRAP_STATE := -WL,--wrap=state_get_label
 MKFILE := Makefile
 EXE := build/bompiler
 SRC := debug.c bcc_err.c bcc_types.c strset.c lyutils.c astree.c symtable.c tchk_expr.c tchk_stmt.c tchk_decl.c asmgen.c state.c evaluate.c init.c regalloc.c instr.c bblock.c conversions.c scope.c main.c
-HDR := debug.h bcc_err.h bcc_types.h strset.h lyutils.h astree.h symtable.h tchk_expr.h tchk_stmt.h tchk_decl.h asmgen.h state.h evaluate.h init.h regalloc.h instr.h bblock.h conversions.h scope.h simplestack.h taboe_impl.h taboe_decl.h
+HDR := debug.h bcc_err.h bcc_types.h strset.h lyutils.h astree.h symtable.h tchk_expr.h tchk_stmt.h tchk_decl.h asmgen.h state.h evaluate.h init.h regalloc.h instr.h bblock.h conversions.h scope.h arrlist.h taboe_impl.h taboe_decl.h
 OBJ := ${SRC:.c=.o}
 # unit test files
 UNITS := build/astree_test

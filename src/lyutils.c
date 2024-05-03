@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "arrlist.h"
 #include "astree.h"
 #include "debug.h"
 #include "state.h"
@@ -19,30 +20,20 @@ Location lexer_loc = {0, 1, 0, 0};
 int lexer_interactive;
 ASTree *parser_root;
 ASTree *bcc_yyval;
-static char **lexer_filenames;
-size_t lexer_filenames_len, lexer_filenames_cap = 8;
-struct {
-  size_t *data;
-  size_t count;
-  size_t size;
-} lexer_include_linenrs = {NULL, 0, 10};
+
+ARR_STAT(char *, lexer_filenames);
+ARR_STAT(size_t, lexer_include_linenrs);
 const Location LOC_EMPTY = LOC_EMPTY_VALUE;
 static char error_buffer[1024];
 
 static int lexer_print_error(const char *message) {
-  assert(lexer_filenames_len != 0);
+  assert(!ARR_EMPTY(lexer_filenames));
   return fprintf(stderr, "%s:%lu.%lu: %s\n", lexer_filename(lexer_loc.filenr),
                  lexer_loc.linenr, lexer_loc.offset, message);
 }
 
 static void push_linenr(size_t linenr) {
-  if (lexer_include_linenrs.count >= lexer_include_linenrs.size) {
-    lexer_include_linenrs.size *= 2;
-    lexer_include_linenrs.data =
-        realloc(lexer_include_linenrs.data,
-                lexer_include_linenrs.size * sizeof(size_t));
-  }
-  lexer_include_linenrs.data[lexer_include_linenrs.count++] = linenr;
+  ARR_PUSH(lexer_include_linenrs, linenr);
 }
 
 size_t lexer_get_filenr() { return lexer_loc.filenr; }
@@ -50,22 +41,20 @@ size_t lexer_get_filenr() { return lexer_loc.filenr; }
 Location lexer_get_loc(void) { return lexer_loc; }
 
 const char *lexer_filename(int filenr) {
-  assert((size_t)filenr < lexer_filenames_len);
-  return lexer_filenames[filenr];
+  assert((size_t)filenr < ARR_LEN(lexer_filenames));
+  return ARR_GET(lexer_filenames, filenr);
 }
 
 size_t lexer_include_linenr(int filenr) {
-  return lexer_include_linenrs.data[(size_t)filenr];
+  assert((size_t)filenr < ARR_LEN(lexer_include_linenrs));
+  return ARR_GET(lexer_include_linenrs, filenr);
 }
 
 void lexer_new_filename(const char *filename) {
-  lexer_loc.filenr = lexer_filenames_len;
+  lexer_loc.filenr = ARR_LEN(lexer_filenames);
   char *filename_copy = malloc((strlen(filename) + 1) * sizeof(char *));
   strcpy(filename_copy, filename);
-  if (lexer_filenames_len == lexer_filenames_cap)
-    lexer_filenames = realloc(
-        lexer_filenames, (lexer_filenames_cap *= 2) * sizeof(*lexer_filenames));
-  lexer_filenames[lexer_filenames_len++] = filename_copy;
+  ARR_PUSH(lexer_filenames, filename_copy);
   push_linenr(lexer_loc.linenr + 1);
 }
 
@@ -211,22 +200,22 @@ int lexer_bad_token(int tok_kind) {
 
 void lexer_dump_filenames(FILE *out) {
   size_t index;
-  for (index = 0; index < lexer_filenames_len; ++index)
-    fprintf(out, "filenames[%2lu] = \"%s\"\n", index, lexer_filenames[index]);
+  for (index = 0; index < ARR_LEN(lexer_filenames); ++index)
+    fprintf(out, "filenames[%2lu] = \"%s\"\n", index,
+            ARR_GET(lexer_filenames, index));
 }
 
 void lexer_init_globals() {
-  lexer_include_linenrs.data =
-      malloc(lexer_include_linenrs.size * sizeof(size_t));
-  lexer_filenames = malloc(lexer_filenames_cap * sizeof(*lexer_filenames));
+  ARR_INIT(lexer_include_linenrs, 8);
+  ARR_INIT(lexer_filenames, 8);
 }
 
 void lexer_free_globals() {
   size_t index;
-  for (index = 0; index < lexer_filenames_len; ++index)
-    free(lexer_filenames[index]);
-  free(lexer_filenames);
-  free(lexer_include_linenrs.data);
+  for (index = 0; index < ARR_LEN(lexer_filenames); ++index)
+    free(ARR_GET(lexer_filenames, index));
+  ARR_DESTROY(lexer_filenames);
+  ARR_DESTROY(lexer_include_linenrs);
 }
 
 void yyerror(const char *message) {

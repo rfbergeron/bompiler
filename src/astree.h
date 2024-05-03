@@ -1,6 +1,7 @@
 #ifndef __ASTREE_H__
 #define __ASTREE_H__
 
+#include "arrlist.h"
 #include "bcc_types.h"
 #include "debug.h"
 #include "instr.h"
@@ -36,8 +37,7 @@ typedef struct astree {
   size_t jump_id;
   size_t case_id;
   size_t spill_eightbytes;
-  struct astree **children;
-  size_t children_len, children_cap;
+  ARR_DECL(struct astree *, children);
   int tok_kind;            /* token code */
   unsigned int attributes; /* node-specific attributes */
 } ASTree;

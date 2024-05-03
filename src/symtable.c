@@ -7,7 +7,6 @@
 #include "err.h"
 #include "murmur3.h"
 #include "scope.h"
-#include "simplestack.h"
 #include "state.h"
 #include "stdlib.h"
 #include "string.h"
