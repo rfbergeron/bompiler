@@ -1,7 +1,6 @@
 #ifndef __STATE_H__
 #define __STATE_H__
 #include "scope.h"
-#include "simplestack.h"
 #include "symtable.h"
 
 typedef struct compiler_state CompilerState;

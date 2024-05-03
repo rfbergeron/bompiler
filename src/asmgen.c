@@ -4,6 +4,7 @@
 #include <stdarg.h>
 #include <string.h>
 
+#include "arrlist.h"
 #include "assert.h"
 #include "astree.h"
 #include "debug.h"
@@ -77,15 +78,9 @@ static size_t param_reg_index;
 static ptrdiff_t param_stack_disp;
 ptrdiff_t window_size;
 
-static struct {
-  const char *literal;
-  const char *label;
-} *literals;
-static size_t literals_cap = 10;
-static size_t literals_size;
-
-static ptrdiff_t *spill_regions = NULL;
-static size_t spill_regions_count = 0;
+ARR_STAT(const char *, literal_tokens);
+ARR_STAT(const char *, literal_labels);
+ARR_STAT(ptrdiff_t, spill_regions);
 
 static size_t fn_count;
 
@@ -463,18 +458,16 @@ static const char *process_literal(const char *literal) {
 const char *asmgen_literal_label(const char *literal) {
   /* TODO(Robert): bad time complexity */
   size_t i;
-  for (i = 0; i < literals_size; ++i)
-    if (strcmp(literals[i].literal, literal) == 0) return literals[i].label;
-
-  if (literals_size >= literals_cap)
-    literals = realloc(literals, sizeof(*literals) * (literals_cap *= 2));
+  for (i = 0; i < ARR_LEN(literal_tokens); ++i)
+    if (strcmp(ARR_GET(literal_tokens, i), literal) == 0)
+      return ARR_GET(literal_labels, i);
 
   Instruction *section_instr = instr_init(OP_SECTION);
   set_op_dir(&section_instr->dest, ".rodata");
 
   /* TODO(Robert): determine when alignment needs to be set, if ever */
   Instruction *label_instr = instr_init(OP_NONE);
-  label_instr->label = mk_literal_label(literals_size);
+  label_instr->label = mk_literal_label(ARR_LEN(literal_labels));
 
   Instruction *string_instr = instr_init(OP_ASCIZ);
   set_op_dir(&string_instr->dest, process_literal(literal));
@@ -483,8 +476,9 @@ const char *asmgen_literal_label(const char *literal) {
   (void)instr_append(parser_root->instructions, 3, section_instr, label_instr,
                      string_instr);
 
-  literals[literals_size].literal = literal;
-  return literals[literals_size++].label = label_instr->label;
+  ARR_PUSH(literal_tokens, literal);
+  ARR_PUSH(literal_labels, label_instr->label);
+  return label_instr->label;
 }
 
 static ptrdiff_t assign_stack_space(const Type *type) {
@@ -1667,22 +1661,16 @@ static void save_call_subexprs(ASTree *call) {
       call->spill_eightbytes = subexpr->spill_eightbytes + i + 1;
   }
 
-  if (spill_regions_count < call->spill_eightbytes) {
-    size_t old_count = spill_regions_count;
-    spill_regions = realloc(spill_regions,
-                            sizeof(*spill_regions) *
-                                (spill_regions_count = call->spill_eightbytes));
-    if (spill_regions == NULL) abort();
-    for (i = old_count; i < spill_regions_count; ++i) {
-      spill_regions[i] = assign_stack_space(TYPE_LONG);
-    }
-  }
+  if (ARR_LEN(spill_regions) < call->spill_eightbytes)
+    ARR_RESIZE(spill_regions, call->spill_eightbytes,
+               assign_stack_space(TYPE_LONG));
 
   for (i = 0; i < astree_count(call); ++i) {
     ASTree *subexpr = astree_get(call, i);
     Instruction *spill_instr = instr_init(OP_MOV);
     set_op_ind(&spill_instr->dest,
-               spill_regions[call->spill_eightbytes - (i + 1)], RBP_VREG);
+               ARR_GET(spill_regions, call->spill_eightbytes - (i + 1)),
+               RBP_VREG);
     spill_instr->persist_flags |= PERSIST_SRC_SET;
     Instruction *subexpr_instr = instr_prev(subexpr->instructions);
 
@@ -2642,9 +2630,9 @@ void translate_static_literal_init(const Type *arr_type, ASTree *literal) {
 
   /* TODO(Robert): use a map here. this is ugly. */
   size_t i;
-  for (i = 0; i < literals_size; ++i) {
-    if (literals[i].label == literal->constant.label) {
-      const char *str = literals[i].literal;
+  for (i = 0; i < ARR_LEN(literal_labels); ++i) {
+    if (ARR_GET(literal_labels, i) == literal->constant.label) {
+      const char *str = ARR_GET(literal_tokens, i);
       size_t arr_width = type_get_width(arr_type);
       size_t literal_length = type_get_width(literal->type);
       assert(literal_length - 1 <= arr_width);
@@ -2925,7 +2913,7 @@ ASTree *begin_translate_fn(ASTree *declaration, ASTree *declarator,
                            ASTree *body) {
   PFDBG0('g', "Translating function prologue");
   ++fn_count;
-  spill_regions = realloc(spill_regions, (spill_regions_count = 0));
+  ARR_RESIZE(spill_regions, 0, 0);
 
   Instruction *text_instr = instr_init(OP_TEXT);
 
@@ -3051,7 +3039,9 @@ int generator_debug_il(FILE *out) {
 }
 
 void asmgen_init_globals(void) {
-  literals = malloc(sizeof(*literals) * literals_cap);
+  ARR_INIT(literal_tokens, 16);
+  ARR_INIT(literal_labels, 16);
+  ARR_INIT(spill_regions, 2);
   static Tag tag_va_spill_region = {{TAG_STRUCT, 1,
                                      X64_SIZEOF_LONG * PARAM_REG_COUNT,
                                      X64_ALIGNOF_LONG, NULL}};
@@ -3060,4 +3050,8 @@ void asmgen_init_globals(void) {
   TYPE_VA_SPILL_REGION = &type_va_spill_region;
 }
 
-void asmgen_free_globals(void) { free(literals); }
+void asmgen_free_globals(void) {
+  ARR_DESTROY(literal_tokens);
+  ARR_DESTROY(literal_labels);
+  ARR_DESTROY(spill_regions);
+}

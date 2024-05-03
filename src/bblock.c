@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stdlib.h>
 
+#include "arrlist.h"
 #include "instr.h"
 
 BBlock *bblock_init(Instruction *leader) {
@@ -67,7 +68,6 @@ static int instr_is_jump(Instruction *instr) {
 static int instr_has_label(Instruction *instr) { return instr->label != NULL; }
 
 size_t bblock_partition(Instruction *instructions, BBlock ***out) {
-  static const size_t BBLOCKS_START_CAP = 4;
   Instruction *exit_leader = instructions;
   while (instr_is_directive(instr_prev(exit_leader)))
     exit_leader = instr_prev(exit_leader);
@@ -76,15 +76,8 @@ size_t bblock_partition(Instruction *instructions, BBlock ***out) {
   BBlock *exit_block = bblock_init(exit_leader);
   if (exit_block == NULL) abort();
 
-  size_t bblocks_cap = BBLOCKS_START_CAP;
-  size_t bblocks_size = 0;
-  BBlock **bblocks = malloc(bblocks_cap * sizeof(BBlock *));
-
-  BBlock *enter_block = bblock_init(instr_next(instructions));
-  if (enter_block == NULL) abort();
-  if (bblocks_size >= bblocks_cap)
-    bblocks = realloc(bblocks, (bblocks_cap <<= 1) * sizeof(BBlock *));
-  bblocks[bblocks_size++] = enter_block;
+  ARR_DEFN(BBlock *, bblocks, 4);
+  ARR_PUSH(bblocks, bblock_init(instr_next(instructions)));
 
   Instruction *current = instr_next(instructions);
   do current = instr_next(current);
@@ -93,10 +86,8 @@ size_t bblock_partition(Instruction *instructions, BBlock ***out) {
 
   while (current != exit_block->leader) {
     BBlock *block = bblock_init(current);
-    bblock_set_seq_follower(bblocks[bblocks_size - 1], block);
-    if (bblocks_size >= bblocks_cap)
-      bblocks = realloc(bblocks, (bblocks_cap <<= 1) * sizeof(BBlock *));
-    bblocks[bblocks_size++] = block;
+    bblock_set_seq_follower(ARR_PEEK(bblocks), block);
+    ARR_PUSH(bblocks, block);
 
     for (;;) {
       current = instr_next(current);
@@ -109,10 +100,8 @@ size_t bblock_partition(Instruction *instructions, BBlock ***out) {
     }
   }
 
-  bblock_set_seq_follower(bblocks[bblocks_size - 1], exit_block);
-  if (bblocks_size >= bblocks_cap)
-    bblocks = realloc(bblocks, (bblocks_cap <<= 1) * sizeof(BBlock *));
-  bblocks[bblocks_size++] = exit_block;
+  bblock_set_seq_follower(ARR_PEEK(bblocks), exit_block);
+  ARR_PUSH(bblocks, exit_block);
   *out = bblocks;
-  return bblocks_size;
+  return ARR_LEN(bblocks);
 }

@@ -6,26 +6,23 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "arrlist.h"
 #include "bblock.h"
 #include "instr.h"
 #include "symtable.h"
 #include "taboe_impl.h"
 
-static struct reg_desc {
+static struct {
   size_t vreg_num;
-  Instruction *next_use;
-} *reg_descs[REAL_REG_COUNT];
-typedef struct reg_desc RegDesc;
-static size_t reg_descs_sizes[REAL_REG_COUNT];
-static size_t reg_descs_caps[REAL_REG_COUNT];
+  const Instruction *next_use;
+} reg_descs[REAL_REG_COUNT];
+
 /* locations of 8-byte region for contents of unspilled registers */
 extern const ptrdiff_t UNSPILL_REGIONS[];
 extern const size_t UNSPILL_REGIONS_SIZE;
 extern ptrdiff_t window_size;
 
-static ptrdiff_t *vreg_descs;
-static size_t vreg_descs_size;
-static size_t vreg_descs_cap;
+ARR_STAT(ptrdiff_t, vreg_descs);
 static const char *LEADER_COMMENT = "basic block leader";
 
 static int in_function;
@@ -207,74 +204,45 @@ static void assign_or_spill(size_t *vreg_num, size_t vreg_width,
   }
 
   size_t vreg_index = *vreg_num - REAL_REG_COUNT;
-  if (vreg_index >= vreg_descs_size) {
-    if (vreg_descs_cap <= vreg_index) {
-      while (vreg_descs_cap <= vreg_index) vreg_descs_cap <<= 1;
-      vreg_descs = realloc(vreg_descs, sizeof(ptrdiff_t) * vreg_descs_cap);
-      if (vreg_descs == NULL) abort();
-    }
-    size_t i;
-    for (i = vreg_descs_size; i <= vreg_index; ++i)
-      vreg_descs[i] = REAL_REG_COUNT;
-    vreg_descs_size = vreg_index + 1;
-  }
+  if (vreg_index >= ARR_LEN(vreg_descs))
+    ARR_RESIZE(vreg_descs, vreg_index + 1, REAL_REG_COUNT);
 
-  if (vreg_descs[vreg_index] == (ptrdiff_t)REAL_REG_COUNT) {
-    size_t i, next_available = REAL_REG_COUNT;
-    for (i = 0; i < REAL_REG_COUNT; ++i) {
-      /* the last entry in each descriptor should be the only live variable,
-       * if any of them are live at all
-       */
-      if ((reg_descs_sizes[i] == 0 ||
-           reg_descs[i][reg_descs_sizes[i] - 1].next_use == NULL) &&
-          (*used_volatile & 1 << i) == 0) {
-        next_available = i;
+  if (ARR_GET(vreg_descs, vreg_index) == (ptrdiff_t)REAL_REG_COUNT) {
+    size_t dead_reg;
+    for (dead_reg = 0; dead_reg < REAL_REG_COUNT; ++dead_reg)
+      if (reg_descs[dead_reg].next_use == NULL &&
+          (*used_volatile & (1 << dead_reg)) == 0)
         break;
-      }
-    }
 
-    if (next_available < REAL_REG_COUNT) {
-      /* resize register descriptor if necessary */
-      if (reg_descs_sizes[next_available] == reg_descs_caps[next_available]) {
-        reg_descs[next_available] =
-            realloc(reg_descs[next_available],
-                    sizeof(RegDesc) * (reg_descs_caps[next_available] <<= 1));
-      }
+    if (dead_reg < REAL_REG_COUNT) {
       /* set vreg number */
-      reg_descs[next_available][reg_descs_sizes[next_available]].vreg_num =
-          *vreg_num;
-      ++reg_descs_sizes[next_available];
+      reg_descs[dead_reg].vreg_num = *vreg_num;
       /* set vreg descriptor */
-      vreg_descs[vreg_index] = next_available;
+      ARR_PUT(vreg_descs, vreg_index, dead_reg);
     } else {
       /* spill */
       ptrdiff_t padding = window_size % vreg_width == 0
                               ? 0
                               : vreg_width - window_size % vreg_width;
       window_size += padding + vreg_width;
-      vreg_descs[vreg_index] = -window_size;
+      ARR_PUT(vreg_descs, vreg_index, -window_size);
     }
-  } else {
-    ptrdiff_t location = vreg_descs[vreg_index];
-    if (location >= 0)
-      assert(location < (ptrdiff_t)REAL_REG_COUNT &&
-             reg_descs[location][reg_descs_sizes[location] - 1].next_use !=
-                 NULL);
+  } else if (ARR_GET(vreg_descs, vreg_index) >= 0) {
+    ptrdiff_t location = ARR_GET(vreg_descs, vreg_index);
+    assert(location < (ptrdiff_t)REAL_REG_COUNT &&
+           reg_descs[location].next_use != NULL);
+    *used_volatile |= 1 << ARR_GET(vreg_descs, vreg_index);
   }
-
-  if (vreg_descs[vreg_index] >= 0)
-    *used_volatile |= 1 << vreg_descs[vreg_index];
 }
 
 static void select_reg(Instruction *instr, size_t *vreg_num, size_t vreg_width,
                        Instruction *next_use, unsigned short *used_volatile) {
   assert(instr->opcode != OP_SENTINEL);
   if (*vreg_num < REAL_REG_COUNT) return;
-  ptrdiff_t location = vreg_descs[*vreg_num - REAL_REG_COUNT];
+  ptrdiff_t location = ARR_GET(vreg_descs, *vreg_num - REAL_REG_COUNT);
   if (location >= 0) {
-    assert(reg_descs[location][reg_descs_sizes[location] - 1].vreg_num ==
-           *vreg_num);
-    reg_descs[location][reg_descs_sizes[location] - 1].next_use = next_use;
+    assert(reg_descs[location].vreg_num == *vreg_num);
+    reg_descs[location].next_use = next_use;
     *vreg_num = location;
   } else {
     /* choose unspill reg */
@@ -380,8 +348,9 @@ static void src_thunk_in_fn(Instruction *instr, unsigned short *used_volatile) {
   }
 
   size_t vreg_index = instr->src.reg.num - REAL_REG_COUNT;
-  ptrdiff_t location = vreg_descs[vreg_index];
-  if (vreg_descs_size <= vreg_index || location == (ptrdiff_t)REAL_REG_COUNT) {
+  ptrdiff_t location = ARR_GET(vreg_descs, vreg_index);
+  if (ARR_LEN(vreg_descs) <= vreg_index ||
+      location == (ptrdiff_t)REAL_REG_COUNT) {
     /* bulk_mtom vreg -> use rax no matter what */
     instr->src.reg.num = 0;
   } else if (location < 0) {
@@ -400,8 +369,7 @@ static void src_thunk_in_fn(Instruction *instr, unsigned short *used_volatile) {
     }
   } else if (regs_clobbered & 1 << location) {
     /* value already clobbered -> load from stack, rsp-relative */
-    assert(reg_descs[location][reg_descs_sizes[location] - 1].vreg_num ==
-           instr->src.reg.num);
+    assert(reg_descs[location].vreg_num == instr->src.reg.num);
     ptrdiff_t volatile_index = 0;
     while ((size_t)volatile_index < VOLATILE_REG_COUNT &&
            VOLATILE_REGS[volatile_index] != (size_t)location)
@@ -423,8 +391,7 @@ static void src_thunk_in_fn(Instruction *instr, unsigned short *used_volatile) {
       regs_clobbered |= 1 << 0;
     }
     /* remember to set next use information */
-    reg_descs[location][reg_descs_sizes[location] - 1].next_use =
-        instr->src.reg.next_use;
+    reg_descs[location].next_use = instr->src.reg.next_use;
   } else {
     /* replace register normally */
     reg_thunk(instr, &instr->src, used_volatile);
@@ -439,26 +406,27 @@ static void dest_thunk_in_fn(Instruction *instr,
   } else if (instr->dest.reg.num < REAL_REG_COUNT) {
     /* setting argument register; mark it as clobbered */
     if (instr->opcode != OP_PUSH) regs_clobbered |= 1 << instr->dest.reg.num;
-  } else if (instr->dest.reg.num - REAL_REG_COUNT >= vreg_descs_size ||
-             vreg_descs[instr->dest.reg.num - REAL_REG_COUNT] ==
+  } else if (instr->dest.reg.num - REAL_REG_COUNT >= ARR_LEN(vreg_descs) ||
+             ARR_GET(vreg_descs, instr->dest.reg.num - REAL_REG_COUNT) ==
                  (ptrdiff_t)REAL_REG_COUNT) {
     /* unmapped virtual register; use rax */
     instr->dest.reg.num = 0;
     regs_clobbered |= 1 << 0;
-  } else if (vreg_descs[instr->dest.reg.num - REAL_REG_COUNT] < 0) {
+  } else if (ARR_GET(vreg_descs, instr->dest.reg.num - REAL_REG_COUNT) < 0) {
     /* spilled mapped virtual register; we should be at the call instruction */
     /* replace with an indirect mode operand */
     assert(instr->opcode == OP_CALL);
-    set_op_ind(&instr->dest, vreg_descs[instr->dest.reg.num - REAL_REG_COUNT],
+    set_op_ind(&instr->dest,
+               ARR_GET(vreg_descs, instr->dest.reg.num - REAL_REG_COUNT),
                RBP_VREG);
   } else if (regs_clobbered &
-             1 << vreg_descs[instr->dest.reg.num - REAL_REG_COUNT]) {
+             1 << ARR_GET(vreg_descs, instr->dest.reg.num - REAL_REG_COUNT)) {
     /* clobbered mapped virtual register; should be at call */
     /* replace with rsp-relative indirect mode operand */
-    ptrdiff_t location = vreg_descs[instr->dest.reg.num - REAL_REG_COUNT];
+    ptrdiff_t location =
+        ARR_GET(vreg_descs, instr->dest.reg.num - REAL_REG_COUNT);
     assert(instr->opcode == OP_CALL);
-    assert(reg_descs[location][reg_descs_sizes[location] - 1].vreg_num ==
-           instr->dest.reg.num);
+    assert(reg_descs[location].vreg_num == instr->dest.reg.num);
     ptrdiff_t volatile_index = 0;
     while ((size_t)volatile_index < VOLATILE_REG_COUNT &&
            VOLATILE_REGS[volatile_index] != (size_t)location)
@@ -466,8 +434,7 @@ static void dest_thunk_in_fn(Instruction *instr,
     assert((size_t)volatile_index < VOLATILE_REG_COUNT);
     set_op_ind(&instr->dest, volatile_index * X64_SIZEOF_LONG, RSP_VREG);
     /* remember to set next use information */
-    reg_descs[location][reg_descs_sizes[location] - 1].next_use =
-        instr->src.reg.next_use;
+    reg_descs[location].next_use = instr->src.reg.next_use;
   } else {
     reg_thunk(instr, &instr->dest, used_volatile);
   }
@@ -496,25 +463,14 @@ static void select_regs(Instruction *instr) {
 }
 
 void allocate_regs(Instruction *instructions) {
-  static const size_t INIT_VREG_DESCS_CAP = 8;
   size_t i;
-  for (i = 0; i < REAL_REG_COUNT; ++i) {
-    static const size_t INIT_REG_DESCS_CAP = 2;
-    reg_descs_sizes[i] = 0;
-    reg_descs_caps[i] = INIT_REG_DESCS_CAP;
-    reg_descs[i] = malloc(sizeof(**reg_descs) * reg_descs_caps[i]);
-  }
-  /* dummy entries for rsp and rbp since those aren't really general purpose */
-  ++reg_descs_sizes[RSP_VREG];
-  reg_descs[RSP_VREG][1].vreg_num = SIZE_MAX;
-  reg_descs[RSP_VREG][1].next_use = instructions;
-  ++reg_descs_sizes[RBP_VREG];
-  reg_descs[RBP_VREG][1].vreg_num = SIZE_MAX;
-  reg_descs[RBP_VREG][1].next_use = instructions;
-  vreg_descs_size = 0;
-  vreg_descs_cap = INIT_VREG_DESCS_CAP;
-  vreg_descs = malloc(sizeof(ptrdiff_t) * vreg_descs_cap);
+  ARR_INIT(vreg_descs, 8);
   Instruction *current = instr_next(instructions);
+
+  /* dummy entries for rsp and rbp since those aren't really general purpose */
+  for (i = 0; i < REAL_REG_COUNT; ++i)
+    reg_descs[i].next_use =
+        (i == RBP_VREG || i == RSP_VREG) ? instructions : NULL;
 
   /* save window_size before spilling registers so that we know how many bytes
    * have been spilled for debugging purposes
@@ -530,6 +486,5 @@ void allocate_regs(Instruction *instructions) {
     current = instr_next(current);
   }
 
-  for (i = 0; i < REAL_REG_COUNT; ++i) free(reg_descs[i]);
-  free(vreg_descs);
+  ARR_DESTROY(vreg_descs);
 }

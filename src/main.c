@@ -10,6 +10,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "arrlist.h"
 #include "asmgen.h"
 #include "astree.h"
 #include "bcc_err.h"
@@ -57,10 +58,7 @@ FILE *ilfile;
 FILE *asmfile;
 FILE *errfile;
 
-static char **cpp_args;
-static size_t cpp_args_cap = 1;
-static size_t cpp_args_size =
-    sizeof(CPP_BUILTIN_ARGS) / sizeof(*CPP_BUILTIN_ARGS);
+ARR_STAT(char *, cpp_args);
 
 int skip_asm = 0;
 int skip_allocator = 0;
@@ -69,12 +67,6 @@ int skip_diagnostics = 0;
 int semantic_error = 0;
 int lexical_error = 0;
 int stdin_tmp_fileno;
-
-void destroy_cpp_args(void) {
-  size_t i;
-  for (i = 0; i < cpp_args_size; ++i) free(cpp_args[i]);
-  free(cpp_args);
-}
 
 void scan_options(int argc, char **argv) {
   opterr = 0;
@@ -90,16 +82,12 @@ void scan_options(int argc, char **argv) {
         /* fallthrough */
       case 'I':
         PFDBG2('c', "Preprocessor argument: -%c%s", option, optarg);
-        /* leave two slots empty for file name and NULL pointer */
-        if (cpp_args_size >= cpp_args_cap - 2)
-          cpp_args = realloc(cpp_args, sizeof(*cpp_args) * (cpp_args_cap *= 2));
         /* add one for nul terminator and two for dash and option */
-        cpp_args[cpp_args_size] =
-            malloc(sizeof(**cpp_args) * (strlen(optarg) + 3));
-        cpp_args[cpp_args_size][0] = '-';
-        cpp_args[cpp_args_size][1] = option;
-        cpp_args[cpp_args_size][2] = '\0';
-        strcat(cpp_args[cpp_args_size++], optarg);
+        ARR_PUSH(cpp_args, malloc(sizeof(**cpp_args) * (strlen(optarg) + 3)));
+        ARR_PEEK(cpp_args)[0] = '-';
+        ARR_PEEK(cpp_args)[1] = option;
+        ARR_PEEK(cpp_args)[2] = '\0';
+        strcat(ARR_PEEK(cpp_args), optarg);
         break;
       case 'l':
         PFDBG0('c', "flex debug output enabled");
@@ -137,18 +125,18 @@ int main(int argc, char **argv) {
   yydebug = 0;
   yy_flex_debug = 0;
 
-  while (cpp_args_cap < cpp_args_size + 2) cpp_args_cap *= 2;
-  cpp_args = malloc(cpp_args_cap * sizeof(*cpp_args));
+  ARR_INIT(cpp_args, 8);
 
   size_t i;
-  for (i = 0; i < cpp_args_size; ++i) {
-    cpp_args[i] = malloc((strlen(CPP_BUILTIN_ARGS[i]) + 1) * sizeof(char));
-    strcpy(cpp_args[i], CPP_BUILTIN_ARGS[i]);
+  for (i = 0; i < sizeof(CPP_BUILTIN_ARGS) / sizeof(*CPP_BUILTIN_ARGS); ++i) {
+    char *arg_copy = malloc((strlen(CPP_BUILTIN_ARGS[i]) + 1) * sizeof(char));
+    strcpy(arg_copy, CPP_BUILTIN_ARGS[i]);
+    ARR_PUSH(cpp_args, arg_copy);
   }
 
   scan_options(argc, argv);
 
-  /* allocate space so that srcpath can be freed in `destroy_cpp_args` */
+  /* allocate space so that srcpath can be freed with other args */
   char *srcpath = malloc(strlen(argv[optind]) + 1);
   strcpy(srcpath, argv[optind]);
   char *srcname = basename(srcpath);
@@ -190,8 +178,8 @@ int main(int argc, char **argv) {
   strcat(errname, ERR_EXT);
 
   /* add path argument and NULL element to exec line */
-  cpp_args[cpp_args_size++] = srcpath;
-  cpp_args[cpp_args_size++] = NULL;
+  ARR_PUSH(cpp_args, srcpath);
+  ARR_PUSH(cpp_args, NULL);
 
   PFDBG0('m', "Opening preprocessor pipe");
   /* this is way more complicated than it would normally be since -ansi does
@@ -301,7 +289,9 @@ cleanup:
   fclose(asmfile);
   fclose(errfile);
 
-  destroy_cpp_args();
+  for (i = 0; i < ARR_LEN(cpp_args); ++i) free(ARR_GET(cpp_args, i));
+  ARR_DESTROY(cpp_args);
+
   PFDBG0('m', "syntax tree cleanup");
   astree_destroy_globals();
   PFDBG0('m', "global state cleanup");

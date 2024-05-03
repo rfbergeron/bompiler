@@ -35,26 +35,22 @@ const char *SCOPE_KIND_STRS[] = {"MEMBER SCOPE", "BLOCK SCOPE",
                                  "FUNCTION SCOPE", "FILE SCOPE"};
 
 /* TODO(Robert): this is bad and slower than it needs to be. */
-static ASTree **purgatory;
-static size_t purgatory_cap = 16;
+ARR_STAT(ASTree *, purgatory);
 
 static void exit_purgatory(const ASTree *tree) {
   size_t i;
-  for (i = 0; i < purgatory_cap; ++i)
-    if (purgatory[i] == tree) purgatory[i] = NULL;
+  for (i = 0; i < ARR_LEN(purgatory); ++i)
+    if (ARR_GET(purgatory, i) == tree) ARR_PUT(purgatory, i, NULL);
 }
 
-void astree_init_globals(void) {
-  purgatory = calloc(purgatory_cap, sizeof(*purgatory));
-}
+void astree_init_globals(void) { ARR_INIT(purgatory, 16); }
 
 void astree_destroy_globals(void) {
-  size_t i;
-  /* iterate in reverse so that root is destroyed last */
-  for (i = 1; i <= purgatory_cap; ++i)
-    if (purgatory[purgatory_cap - i] != NULL)
-      astree_destroy(purgatory[purgatory_cap - i]);
-  free(purgatory);
+  while (!ARR_EMPTY(purgatory)) {
+    astree_destroy(ARR_PEEK(purgatory));
+    ARR_POP(purgatory);
+  }
+  ARR_DESTROY(purgatory);
 }
 
 ASTree *astree_init(int tok_kind, const Location location, const char *info) {
@@ -62,16 +58,15 @@ ASTree *astree_init(int tok_kind, const Location location, const char *info) {
          parser_get_tname(tok_kind), info);
 
   size_t i;
-  for (i = 0; i < purgatory_cap; ++i)
-    if (purgatory[i] == NULL) break;
+  for (i = 0; i < ARR_LEN(purgatory); ++i)
+    if (ARR_GET(purgatory, i) == NULL) break;
 
-  if (i == purgatory_cap) {
-    purgatory = realloc(purgatory, (purgatory_cap <<= 1) * sizeof(*purgatory));
-    size_t j;
-    for (j = i; j < purgatory_cap; ++j) purgatory[j] = NULL;
-  }
+  ASTree *tree = malloc(sizeof(ASTree));
+  if (i == ARR_LEN(purgatory))
+    ARR_PUSH(purgatory, tree);
+  else
+    ARR_PUT(purgatory, i, tree);
 
-  ASTree *tree = purgatory[i] = malloc(sizeof(ASTree));
   tree->tok_kind = tok_kind;
   tree->lexinfo = string_set_intern(info);
   tree->loc = location;
@@ -79,9 +74,7 @@ ASTree *astree_init(int tok_kind, const Location location, const char *info) {
   tree->attributes = ATTR_NONE;
   tree->instructions = instr_init(OP_SENTINEL);
   tree->spill_eightbytes = 0;
-  tree->children_len = 0;
-  tree->children_cap = 1;
-  tree->children = malloc(tree->children_cap * sizeof(*tree->children));
+  ARR_INIT(tree->children, 1);
   tree->scope = NULL;
   tree->constant.integral.signed_value = 0L;
   tree->constant.label = NULL;
@@ -124,9 +117,11 @@ void astree_destroy(ASTree *tree) {
       break;
   }
 
-  size_t i;
-  for (i = 0; i < tree->children_len; ++i) astree_destroy(tree->children[i]);
-  free(tree->children);
+  while (!ARR_EMPTY(tree->children)) {
+    astree_destroy(ARR_PEEK(tree->children));
+    ARR_POP(tree->children);
+  }
+  ARR_DESTROY(tree->children);
 
   /* free symbol table if present */
   scope_destroy(tree->scope);
@@ -139,13 +134,6 @@ void astree_destroy(ASTree *tree) {
 }
 
 ASTree *astree_adopt(ASTree *parent, const size_t count, ...) {
-  if (parent->children_len + count > parent->children_cap) {
-    do parent->children_cap *= 2;
-    while (parent->children_len + count > parent->children_cap);
-    parent->children = realloc(
-        parent->children, parent->children_cap * sizeof(*parent->children));
-  }
-
   va_list args;
   va_start(args, count);
   size_t i;
@@ -154,7 +142,7 @@ ASTree *astree_adopt(ASTree *parent, const size_t count, ...) {
     assert(child != NULL);
     PFDBG2('t', "Tree %s adopts %s", parser_get_tname(parent->tok_kind),
            parser_get_tname(child->tok_kind));
-    parent->children[parent->children_len++] = child;
+    ARR_PUSH(parent->children, child);
 
     /* propogate size of spill area for nested calls */
     if (parent->spill_eightbytes < child->spill_eightbytes)
@@ -166,16 +154,17 @@ ASTree *astree_adopt(ASTree *parent, const size_t count, ...) {
 }
 
 ASTree *astree_get(const ASTree *parent, const size_t index) {
-  assert(index < parent->children_len);
-  return parent->children[index];
+  assert(index < ARR_LEN(parent->children));
+  return ARR_GET(parent->children, index);
 }
 
 ASTree *astree_disown(ASTree *parent) {
-  assert(parent->children_len > 0);
-  return parent->children[--parent->children_len];
+  ASTree *disowned = ARR_PEEK(parent->children);
+  ARR_POP(parent->children);
+  return disowned;
 }
 
-size_t astree_count(const ASTree *parent) { return parent->children_len; }
+size_t astree_count(const ASTree *parent) { return ARR_LEN(parent->children); }
 
 int astree_is_const_zero(const ASTree *tree) {
   return (tree->attributes & ATTR_MASK_CONST) >= ATTR_CONST_INIT &&
@@ -247,7 +236,8 @@ int astree_print_tree(ASTree *tree, FILE *out, int depth) {
   static char indent[LINESIZE], nodestr[LINESIZE];
   /* print out the whole tree */
   PFDBG3('t', "Tree info: token: %s, lexinfo: %s, children: %u",
-         parser_get_tname(tree->tok_kind), tree->lexinfo, tree->children_len);
+         parser_get_tname(tree->tok_kind), tree->lexinfo,
+         ARR_LEN(tree->children));
 
   size_t numspaces = depth * 2;
   memset(indent, ' ', numspaces);
@@ -257,13 +247,13 @@ int astree_print_tree(ASTree *tree, FILE *out, int depth) {
   fprintf(out, "%s%s\n", indent, nodestr);
 
   size_t i;
-  for (i = 0; i < tree->children_len; ++i) {
-    PFDBG1('t', "    %p", tree->children[i]);
+  for (i = 0; i < ARR_LEN(tree->children); ++i) {
+    PFDBG1('t', "    %p", ARR_GET(tree->children, i));
   }
 
-  for (i = 0; i < tree->children_len; ++i) {
-    assert(tree->children[i] != NULL);
-    int status = astree_print_tree(tree->children[i], out, depth + 1);
+  for (i = 0; i < ARR_LEN(tree->children); ++i) {
+    assert(ARR_GET(tree->children, i) != NULL);
+    int status = astree_print_tree(ARR_GET(tree->children, i), out, depth + 1);
     if (status) return status;
   }
   return 0;
