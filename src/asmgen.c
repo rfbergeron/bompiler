@@ -2896,7 +2896,8 @@ ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
 #endif
   assert(in_current_scope && symbol);
 
-  if (symbol->storage == STORE_STAT && !type_is_function(declarator->type)) {
+  if (symbol->storage == STORE_STAT && !type_is_function(declarator->type) &&
+      symbol->info != SYM_DEFINED) {
     translate_static_decl(declarator, symbol);
     if (instr_prev(symbol->instructions)->opcode != OP_ZERO) {
       Instruction *zero_instr = instr_init(OP_ZERO);
