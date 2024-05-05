@@ -41,7 +41,7 @@ static const char STATIC_FMT[] = "%s.%lu";
 static const char COND_FMT[] = ".LC%lu";
 static const char END_FMT[] = ".LE%lu";
 static const char STMT_FMT[] = ".LS%lu";
-static const char REINIT_FMT[] = ".LR%lu";
+static const char FOR_FMT[] = ".LR%lu";
 static const char TRUE_FMT[] = ".LT%lu";
 static const char FALSE_FMT[] = ".LF%lu";
 static const char DEF_FMT[] = ".LD%lu";
@@ -110,7 +110,7 @@ const char *mk_generic_label(const char *fmt, size_t unique_id) {
 #define mk_stmt_label(id) mk_generic_label(STMT_FMT, id)
 #define mk_cond_label(id) mk_generic_label(COND_FMT, id)
 #define mk_end_label(id) mk_generic_label(END_FMT, id)
-#define mk_reinit_label(id) mk_generic_label(REINIT_FMT, id)
+#define mk_for_label(id) mk_generic_label(FOR_FMT, id)
 #define mk_true_label(id) mk_generic_label(TRUE_FMT, id)
 #define mk_false_label(id) mk_generic_label(FALSE_FMT, id)
 #define mk_literal_label(id) mk_generic_label(STR_FMT, id)
@@ -2260,6 +2260,9 @@ ASTree *translate_for(ASTree *for_, ASTree *initializer, ASTree *condition,
   SEMCHK(initializer);
   SEMCHK(condition);
   SEMCHK(reinitializer);
+  assert(!instr_empty(initializer->instructions));
+  assert(!instr_empty(condition->instructions));
+  assert(!instr_empty(reinitializer->instructions));
 
   size_t saved_break = SIZE_MAX, saved_continue = SIZE_MAX;
   if (state_get_break_id(state) != for_->jump_id)
@@ -2272,52 +2275,46 @@ ASTree *translate_for(ASTree *for_, ASTree *initializer, ASTree *condition,
   assert(state_get_continue_id(state) == for_->jump_id);
   state_pop_continue_id(state);
 
-  Instruction *condition_start_instr = instr_next(condition->instructions);
-  condition_start_instr->label = mk_cond_label(for_->jump_id);
-
-  assert(!instr_empty(reinitializer->instructions));
-
-  /* add unconditional jump to function body, skipping reinitializer */
-  Instruction *body_jmp_instr = instr_init(OP_JMP);
-  set_op_dir(&body_jmp_instr->dest, mk_stmt_label(for_->jump_id));
-
-  /* emit loop exit jump if condition is not empty */
-  Instruction *test_instr, *test_jmp_instr;
-  if (condition->tok_kind != TOK_EMPTY) {
-    Instruction *condition_instr = instr_prev(condition->instructions);
-    REGCHK(condition_instr);
-
-    test_instr = instr_init(OP_TEST);
-    test_instr->dest = test_instr->src = condition_instr->dest;
-    test_instr->persist_flags |= PERSIST_DEST_SET;
-
-    test_jmp_instr = instr_init(OP_JZ);
-    set_op_dir(&test_jmp_instr->dest, mk_end_label(for_->jump_id));
-  } else {
-    test_instr = instr_init(OP_NOP);
-    test_jmp_instr = instr_init(OP_NOP);
-  }
-
+  /* unfortunately, due to the name being used and the way `for`-loops are
+   * structured, the "condition" label is attached to the reinitializer
+   * expression, which then jumps to the actual condition, which does not have
+   * a condition label, but has a special `for`-loop label
+   */
   Instruction *reinit_start_instr = instr_next(reinitializer->instructions);
-  reinit_start_instr->label = mk_reinit_label(for_->jump_id);
+  assert(reinit_start_instr->label == NULL);
+  reinit_start_instr->label = mk_cond_label(for_->jump_id);
+
+  Instruction *cond_start_instr = instr_next(condition->instructions);
+  assert(cond_start_instr->label == NULL);
+  cond_start_instr->label = mk_for_label(for_->jump_id);
 
   Instruction *cond_jmp_instr = instr_init(OP_JMP);
-  set_op_dir(&cond_jmp_instr->dest, mk_cond_label(for_->jump_id));
-
-  Instruction *body_label = instr_init(OP_NONE);
-  body_label->label = mk_stmt_label(for_->jump_id);
-
-  Instruction *reinit_jmp_instr = instr_init(OP_JMP);
-  set_op_dir(&reinit_jmp_instr->dest, mk_reinit_label(for_->jump_id));
+  set_op_dir(&cond_jmp_instr->dest, cond_start_instr->label);
 
   Instruction *end_label = instr_init(OP_NONE);
   end_label->label = mk_end_label(for_->jump_id);
 
-  (void)instr_append(for_->instructions, 11, initializer->instructions,
-                     condition->instructions, test_instr, test_jmp_instr,
-                     body_jmp_instr, reinitializer->instructions,
-                     cond_jmp_instr, body_label, body->instructions,
-                     reinit_jmp_instr, end_label);
+  /* emit loop exit jump if condition is not empty */
+  if (condition->tok_kind != TOK_EMPTY) {
+    Instruction *condition_instr = instr_prev(condition->instructions);
+    REGCHK(condition_instr);
+
+    Instruction *test_instr = instr_init(OP_TEST);
+    test_instr->dest = test_instr->src = condition_instr->dest;
+    test_instr->persist_flags |= PERSIST_DEST_SET;
+
+    Instruction *test_jmp_instr = instr_init(OP_JZ);
+    set_op_dir(&test_jmp_instr->dest, mk_end_label(for_->jump_id));
+
+    (void)instr_append(for_->instructions, 8, initializer->instructions,
+                       condition->instructions, test_instr, test_jmp_instr,
+                       body->instructions, reinitializer->instructions,
+                       cond_jmp_instr, end_label);
+  } else {
+    (void)instr_append(for_->instructions, 6, initializer->instructions,
+                       condition->instructions, body->instructions,
+                       reinitializer->instructions, cond_jmp_instr, end_label);
+  }
 
   if (saved_break != SIZE_MAX) state_push_break_id(state, saved_break);
   if (saved_continue != SIZE_MAX) state_push_continue_id(state, saved_continue);
