@@ -30,19 +30,12 @@
 
 #define TABOE_IMPL(NEIGHBORHOOD_SIZE, tab_t, fn_pfx, key_t, val_t, bit_t,      \
                    hash_fn, key_comp)                                          \
-  static size_t TABOE_FN(fn_pfx, hash)(key_t key, size_t size) {               \
-    int power = 0;                                                             \
-    while (1UL << power < size) ++power;                                       \
-    bit_t result = hash_fn(key);                                               \
-    return (result ^ (result >> (64 - power))) & (size - 1);                   \
-  }                                                                            \
-                                                                               \
   static bit_t TABOE_FN(fn_pfx, check)(const TABOE_NAME(tab_t) * table,        \
                                        size_t home_index) {                    \
     bit_t is_occupied = 0;                                                     \
     size_t offset;                                                             \
     for (offset = 1; offset <= (NEIGHBORHOOD_SIZE); ++offset) {                \
-      size_t current_index = (home_index - offset) % table->size;              \
+      size_t current_index = (home_index - offset) & (table->size - 1);        \
       bit_t adj_neighborhood =                                                 \
           table->neighbors[current_index] >> (offset - 1);                     \
       assert((adj_neighborhood & is_occupied) == 0);                           \
@@ -54,8 +47,9 @@
   static bit_t TABOE_FN(fn_pfx, mask)(const TABOE_NAME(tab_t) * table,         \
                                       size_t home_index,                       \
                                       size_t neighbor_index) {                 \
-    assert((neighbor_index - home_index) % table->size < (NEIGHBORHOOD_SIZE)); \
-    return 1UL << ((neighbor_index - home_index) % table->size);               \
+    assert(((neighbor_index - home_index) & (table->size - 1)) <               \
+           (NEIGHBORHOOD_SIZE));                                               \
+    return 1UL << ((neighbor_index - home_index) & (table->size - 1));         \
   }                                                                            \
                                                                                \
   static size_t TABOE_FN(fn_pfx, target)(const TABOE_NAME(tab_t) * table,      \
@@ -64,7 +58,7 @@
     bit_t occupied_bits = TABOE_FN(fn_pfx, check)(table, start_index);         \
     size_t i;                                                                  \
     for (i = 0; i < table->size; ++i) {                                        \
-      size_t current_index = (start_index + i) % table->size;                  \
+      size_t current_index = (start_index + i) & (table->size - 1);            \
       assert(((occupied_bits >> 1) & table->neighbors[current_index]) == 0);   \
       occupied_bits = (occupied_bits >> 1) | table->neighbors[current_index];  \
       if (i < (NEIGHBORHOOD_SIZE)) {                                           \
@@ -94,62 +88,59 @@
                                                                                \
   static void TABOE_FN(fn_pfx, resize)(TABOE_NAME(tab_t) * table) {            \
     bit_t occupied_bits = TABOE_FN(fn_pfx, check)(table, 0);                   \
-    size_t old_size = table->size;                                             \
-    size_t *old_indices = table->indices;                                      \
-    bit_t *old_neighbors = table->neighbors;                                   \
+    size_t new_size = table->size << 1;                                        \
+    table->keys = realloc(table->keys, new_size * sizeof(key_t));              \
+    table->values = realloc(table->values, new_size * sizeof(val_t));          \
+    table->indices = realloc(table->indices, new_size * sizeof(size_t));       \
+    table->neighbors = realloc(table->neighbors, new_size * sizeof(bit_t));    \
                                                                                \
-    table->size <<= 1;                                                         \
-    table->keys = realloc(table->keys, table->size * sizeof(key_t));           \
-    table->values = realloc(table->values, table->size * sizeof(val_t));       \
-    table->indices = malloc(table->size * sizeof(size_t));                     \
-    table->neighbors = calloc(table->size, sizeof(bit_t));                     \
-                                                                               \
+    (void)memset(table->neighbors + table->size, 0,                            \
+                 table->size * sizeof(size_t));                                \
     size_t i;                                                                  \
-    for (i = 0; i < old_size; ++i) {                                           \
-      assert(((occupied_bits >> 1) & old_neighbors[i]) == 0);                  \
-      occupied_bits = (occupied_bits >> 1) | old_neighbors[i];                 \
-      if (occupied_bits & 1) {                                                 \
-        key_t key = table->keys[old_indices[i]];                               \
-        size_t proper_index = TABOE_FN(fn_pfx, hash)(key, table->size);        \
-        size_t target_index =                                                  \
-            TABOE_FN(fn_pfx, target)(table, key, proper_index);                \
-                                                                               \
-        while (target_index == SIZE_MAX) {                                     \
-          TABOE_FN(fn_pfx, resize)(table);                                     \
-          proper_index = TABOE_FN(fn_pfx, hash)(key, table->size);             \
-          target_index = TABOE_FN(fn_pfx, target)(table, key, proper_index);   \
-        }                                                                      \
-        TABOE_FN(fn_pfx, put_index)                                            \
-        (table, target_index, proper_index, old_indices[i]);                   \
-      }                                                                        \
+    for (i = 0; i < table->size; ++i) {                                        \
+      assert(((occupied_bits >> 1) & table->neighbors[i]) == 0);               \
+      occupied_bits = (occupied_bits >> 1) | table->neighbors[i];              \
+      if (!(occupied_bits & 1)) continue;                                      \
+      size_t new_home =                                                        \
+          (hash_fn)(table->keys[table->indices[i]]) & (new_size - 1);          \
+      if (new_home <= table->size - NEIGHBORHOOD_SIZE) continue;               \
+      size_t old_home = new_home & (table->size - 1);                          \
+      assert(((old_home ^ new_home) & ((old_home ^ new_home) - 1)) == 0);      \
+      bit_t neighbor_bit = TABOE_FN(fn_pfx, mask)(table, old_home, i);         \
+      assert(table->neighbors[old_home] & neighbor_bit);                       \
+      table->neighbors[old_home] ^= neighbor_bit;                              \
+      assert(!(table->neighbors[new_home] & neighbor_bit));                    \
+      table->neighbors[new_home] ^= neighbor_bit;                              \
+      size_t offset = (i - old_home) & (table->size - 1);                      \
+      size_t new_bucket = (new_home + offset) & (new_size - 1);                \
+      table->indices[new_bucket] = table->indices[i];                          \
     }                                                                          \
                                                                                \
-    free(old_indices);                                                         \
-    free(old_neighbors);                                                       \
+    table->size <<= 1;                                                         \
   }                                                                            \
                                                                                \
   static size_t TABOE_FN(fn_pfx, helper)(                                      \
       TABOE_NAME(tab_t) * table, size_t empty_index, size_t start_offset) {    \
     assert(start_offset > 0);                                                  \
-    size_t neighbor_index = (empty_index - start_offset) % table->size;        \
+    size_t neighbor_index = (empty_index - start_offset) & (table->size - 1);  \
     size_t offset;                                                             \
     for (offset = start_offset; offset < (NEIGHBORHOOD_SIZE); ++offset) {      \
-      size_t home_index = (empty_index - offset) % table->size;                \
+      size_t home_index = (empty_index - offset) & (table->size - 1);          \
       size_t sequence_index = table->indices[neighbor_index];                  \
       if (table->neighbors[home_index] &                                       \
           TABOE_FN(fn_pfx, mask)(table, home_index, neighbor_index)) {         \
         assert(table->neighbors[home_index] &                                  \
                TABOE_FN(fn_pfx, mask)(table, home_index, neighbor_index));     \
-        assert(TABOE_FN(fn_pfx, hash)(table->keys[sequence_index],             \
-                                      table->size) == home_index);             \
+        assert(((hash_fn)(table->keys[sequence_index]) & (table->size - 1)) == \
+               home_index);                                                    \
         if (neighbor_index != home_index)                                      \
           assert(!(table->neighbors[neighbor_index] & 1));                     \
         return home_index;                                                     \
       } else {                                                                 \
         assert(!(table->neighbors[home_index] &                                \
                  TABOE_FN(fn_pfx, mask)(table, home_index, neighbor_index)));  \
-        assert(TABOE_FN(fn_pfx, hash)(table->keys[sequence_index],             \
-                                      table->size) != home_index);             \
+        assert(((hash_fn)(table->keys[sequence_index]) & (table->size - 1)) != \
+               home_index);                                                    \
       }                                                                        \
     }                                                                          \
     return SIZE_MAX;                                                           \
@@ -162,7 +153,7 @@
     for (offset = (NEIGHBORHOOD_SIZE)-1; offset > 0; --offset) {               \
       home_index = TABOE_FN(fn_pfx, helper)(table, empty_index, offset);       \
       if (home_index != SIZE_MAX) {                                            \
-        neighbor_index = (empty_index - offset) % table->size;                 \
+        neighbor_index = (empty_index - offset) & (table->size - 1);           \
         break;                                                                 \
       }                                                                        \
     }                                                                          \
@@ -174,7 +165,7 @@
     size_t sequence_index = table->indices[neighbor_index];                    \
     assert(table->neighbors[home_index] &                                      \
            TABOE_FN(fn_pfx, mask)(table, home_index, neighbor_index));         \
-    assert(TABOE_FN(fn_pfx, hash)(table->keys[sequence_index], table->size) == \
+    assert(((hash_fn)(table->keys[sequence_index]) & (table->size - 1)) ==     \
            home_index);                                                        \
     assert(!(table->neighbors[home_index] &                                    \
              TABOE_FN(fn_pfx, mask)(table, home_index, empty_index)));         \
@@ -195,18 +186,18 @@
       TABOE_NAME(tab_t) * table, size_t target_index, size_t proper_index,     \
       size_t sequence_index) {                                                 \
     assert(target_index != SIZE_MAX);                                          \
-    assert((target_index - proper_index) % table->size >=                      \
+    assert(((target_index - proper_index) & (table->size - 1)) >=              \
                (NEIGHBORHOOD_SIZE) ||                                          \
            !(table->neighbors[proper_index] &                                  \
              TABOE_FN(fn_pfx, mask)(table, proper_index, target_index)));      \
                                                                                \
-    while ((target_index - proper_index) % table->size >=                      \
+    while (((target_index - proper_index) & (table->size - 1)) >=              \
            (NEIGHBORHOOD_SIZE)) {                                              \
       target_index = TABOE_FN(fn_pfx, relocate)(table, target_index);          \
       if (target_index == SIZE_MAX) {                                          \
         TABOE_FN(fn_pfx, resize)(table);                                       \
         proper_index =                                                         \
-            TABOE_FN(fn_pfx, hash)(table->keys[sequence_index], table->size);  \
+            (hash_fn)(table->keys[sequence_index]) & (table->size - 1);        \
         target_index = TABOE_FN(fn_pfx, target)(                               \
             table, table->keys[sequence_index], proper_index);                 \
         TABOE_FN(fn_pfx, put_index)                                            \
@@ -236,16 +227,17 @@
   void TABOE_FN(fn_pfx, put)(TABOE_NAME(tab_t) * table, key_t key,             \
                              val_t value) {                                    \
     if (table == NULL) abort();                                                \
-    size_t proper_index = TABOE_FN(fn_pfx, hash)(key, table->size);            \
+    size_t proper_index = (hash_fn)(key) & (table->size - 1);                  \
     size_t target_index = TABOE_FN(fn_pfx, target)(table, key, proper_index);  \
                                                                                \
     while (target_index == SIZE_MAX) {                                         \
       TABOE_FN(fn_pfx, resize)(table);                                         \
-      proper_index = TABOE_FN(fn_pfx, hash)(key, table->size);                 \
+      proper_index = (hash_fn)(key) & (table->size - 1);                       \
       target_index = TABOE_FN(fn_pfx, target)(table, key, proper_index);       \
     }                                                                          \
                                                                                \
-    if ((target_index - proper_index) % table->size < (NEIGHBORHOOD_SIZE) &&   \
+    if (((target_index - proper_index) & (table->size - 1)) <                  \
+            (NEIGHBORHOOD_SIZE) &&                                             \
         (table->neighbors[proper_index] &                                      \
          TABOE_FN(fn_pfx, mask)(table, proper_index, target_index))) {         \
       size_t sequence_index = table->indices[target_index];                    \
@@ -263,10 +255,10 @@
   int TABOE_FN(fn_pfx, get)(const TABOE_NAME(tab_t) * table, key_t key,        \
                             val_t * out) {                                     \
     if (table == NULL) return 0;                                               \
-    size_t start_index = TABOE_FN(fn_pfx, hash)(key, table->size);             \
+    size_t start_index = (hash_fn)(key) & (table->size - 1);                   \
     size_t i;                                                                  \
     for (i = 0; i < (NEIGHBORHOOD_SIZE); ++i) {                                \
-      size_t current_index = (start_index + i) % table->size;                  \
+      size_t current_index = (start_index + i) & (table->size - 1);            \
       size_t sequence_index = table->indices[current_index];                   \
       if ((table->neighbors[start_index] & (1UL << i)) &&                      \
           key_comp(table->keys[sequence_index], key) == 0) {                   \
@@ -280,10 +272,10 @@
   int TABOE_FN(fn_pfx, get_key)(const TABOE_NAME(tab_t) * table, key_t key,    \
                                 key_t * out) {                                 \
     if (table == NULL) return 0;                                               \
-    size_t start_index = TABOE_FN(fn_pfx, hash)(key, table->size);             \
+    size_t start_index = (hash_fn)(key) & (table->size - 1);                   \
     size_t i;                                                                  \
     for (i = 0; i < (NEIGHBORHOOD_SIZE); ++i) {                                \
-      size_t current_index = (start_index + i) % table->size;                  \
+      size_t current_index = (start_index + i) & (table->size - 1);            \
       size_t sequence_index = table->indices[current_index];                   \
       if ((table->neighbors[start_index] & (1UL << i)) &&                      \
           key_comp(table->keys[sequence_index], key) == 0) {                   \
