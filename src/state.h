@@ -18,7 +18,7 @@ void state_enter_prototype(CompilerState *state,
 void state_leave_prototype(CompilerState *state);
 void state_enter_block(CompilerState *state, const struct astree *block);
 void state_leave_block(CompilerState *state);
-void state_enter_record(CompilerState *state, const Tag *record_tag);
+void state_enter_record(CompilerState *state, Tag *tag);
 void state_leave_record(CompilerState *state);
 Scope *state_peek_scope(CompilerState *state);
 Symbol *state_get_function(CompilerState *state);

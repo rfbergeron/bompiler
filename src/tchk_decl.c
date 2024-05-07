@@ -778,50 +778,20 @@ ASTree *define_enumerator(ASTree *enum_spec, ASTree *enum_id,
   return enum_spec;
 }
 
-ASTree *define_record_member(ASTree *record_spec, ASTree *member) {
-  (void)finalize_declaration(member);
-  ASTree *left_brace = astree_get(record_spec, 1);
-
-  Tag *tag = record_spec->type->tag.value;
-  size_t i;
-  /* skip first child, which is the typespec list */
-  for (i = 1; i < astree_count(member); ++i) {
-    ASTree *declarator = astree_get(member, i);
-    Symbol *symbol;
-    int is_member = state_get_member(state, declarator->lexinfo, &symbol);
-#ifdef NDEBUG
-    (void)is_member;
-#endif
-    assert(is_member);
-    assert(symbol != NULL);
-
-    if (type_is_incomplete(symbol->type)) {
-      (void)semerr_incomplete_type(declarator, symbol->type);
-      (void)astree_adopt(left_brace, 1, member);
-      return record_spec;
-    } else if (type_is_function(symbol->type)) {
-      (void)semerr_fn_member(declarator);
-      (void)astree_adopt(left_brace, 1, member);
-      return record_spec;
-    }
-
-    size_t member_alignment = type_get_alignment(declarator->type);
-    size_t member_width = type_get_width(declarator->type);
-    if (tag->record.alignment < member_alignment) {
-      tag->record.alignment = member_alignment;
-    }
-    if (tag->record.kind == TAG_STRUCT) {
-      size_t padding =
-          member_alignment - (tag->record.width % member_alignment);
-      if (padding != member_alignment) tag->record.width += padding;
-      symbol->disp = tag->record.width;
-      tag->record.width += member_width;
-    } else if (tag->record.width < member_width) {
-      tag->record.width = member_width;
-    }
+ASTree *declare_member(ASTree *struct_decl, ASTree *declarator) {
+  Symbol *symbol = validate_declaration(struct_decl, declarator);
+  if (symbol == NULL) {
+    return astree_adopt(struct_decl, 1, declarator);
+  } else if (type_is_incomplete(symbol->type)) {
+    /* member declaration with incomplete type */
+    (void)semerr_incomplete_type(declarator, symbol->type);
+    return astree_adopt(struct_decl, 1, declarator);
+  } else if (type_is_function(symbol->type)) {
+    (void)semerr_fn_member(declarator);
+    return astree_adopt(struct_decl, 1, declarator);
+  } else {
+    return astree_adopt(struct_decl, 1, declarator);
   }
-  astree_adopt(left_brace, 1, member);
-  return record_spec;
 }
 
 /* insert symbol into table in case it appears in its own initializer */

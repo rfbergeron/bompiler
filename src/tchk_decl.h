@@ -26,7 +26,7 @@ ASTree *validate_tag_def(ASTree *tag_spec, ASTree *ident, ASTree *left_brace);
 ASTree *finalize_tag_def(ASTree *tag_spec);
 ASTree *define_enumerator(ASTree *enum_spec, ASTree *ident, ASTree *equal_sign,
                           ASTree *expr);
-ASTree *define_record_member(ASTree *record_spec, ASTree *member);
+ASTree *declare_member(ASTree *struct_decl, ASTree *declarator);
 ASTree *prepare_init(ASTree *declaration, ASTree *declarator);
 ASTree *declare_symbol(ASTree *declaration, ASTree *declarator);
 ASTree *validate_topdecl(ASTree *root, ASTree *topdecl);
