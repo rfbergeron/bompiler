@@ -153,15 +153,15 @@ struct_spec         : struct_def '}'                                    { ERRCHK
                     ;
 struct_def          : struct_or_union any_ident '{'                     { ERRCHK; $$ = bcc_yyval = validate_tag_def($1, $2, $3); }
                     | struct_or_union '{'                               { ERRCHK; $$ = bcc_yyval = validate_tag_def($1, parser_make_unique($1), $2); }
-                    | struct_def struct_decl ';'                        { ERRCHK; $$ = bcc_yyval = define_record_member($1, $2); parser_cleanup(1, $3); } /* define struct member */
+                    | struct_def struct_decl ';'                        { ERRCHK; $$ = bcc_yyval = $1; (void)astree_adopt(astree_get($1, 1), 1, finalize_declaration($2)); parser_cleanup(1, $3); } /* define struct member */
                     ;
 struct_or_union     : TOK_STRUCT                                        { ERRCHK; $$ = bcc_yyval = $1; }
                     | TOK_UNION                                         { ERRCHK; $$ = bcc_yyval = $1; }
                     ;
-struct_decl         : struct_decl ',' declarator                        { ERRCHK; $$ = bcc_yyval = declare_symbol($1, $3); astree_destroy($2); } /* define struct member */
-                    | struct_decl ',' abs_declarator                    { ERRCHK; $$ = bcc_yyval = declare_symbol($1, $3); astree_destroy($2); } /* define struct member */
-                    | decl_specs declarator                             { ERRCHK; $$ = bcc_yyval = declare_symbol(parser_make_declaration($1), $2); } /* define struct member */
-                    | decl_specs abs_declarator                         { ERRCHK; $$ = bcc_yyval = declare_symbol(parser_make_declaration($1), $2); } /* define struct member */
+struct_decl         : struct_decl ',' declarator                        { ERRCHK; $$ = bcc_yyval = declare_member($1, $3); astree_destroy($2); } /* define struct member */
+                    | struct_decl ',' abs_declarator                    { ERRCHK; $$ = bcc_yyval = declare_member($1, $3); astree_destroy($2); } /* define struct member */
+                    | decl_specs declarator                             { ERRCHK; $$ = bcc_yyval = declare_member(parser_make_declaration($1), $2); } /* define struct member */
+                    | decl_specs abs_declarator                         { ERRCHK; $$ = bcc_yyval = declare_member(parser_make_declaration($1), $2); } /* define struct member */
                     ;
 enum_spec           : enum_def '}'                                      { ERRCHK; $$ = bcc_yyval = finalize_tag_def($1); parser_cleanup(1, $2); } /* create tag and iterate over enums */
                     | enum_def ',' '}'                                  { ERRCHK; $$ = bcc_yyval = finalize_tag_def($1); parser_cleanup(2, $2, $3); } /* create tag and iterate over enums */

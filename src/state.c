@@ -22,6 +22,7 @@ struct compiler_state {
   ARR_DECL(SwitchInfo *, switches);
   ARR_DECL(size_t, break_stack);
   ARR_DECL(size_t, continue_stack);
+  ARR_DECL(Tag *, record_stack);
   Symbol *enclosing_function;
   const char *enclosing_function_name;
   size_t jump_id_count;
@@ -33,6 +34,7 @@ CompilerState *state_init(void) {
   ARR_INIT(state->switches, 2);
   ARR_INIT(state->break_stack, 2);
   ARR_INIT(state->continue_stack, 2);
+  ARR_INIT(state->record_stack, 2);
   state->enclosing_function = NULL;
   state->enclosing_function_name = NULL;
   state->jump_id_count = 0;
@@ -45,6 +47,7 @@ void state_destroy(CompilerState *state) {
   ARR_DESTROY(state->switches);
   ARR_DESTROY(state->break_stack);
   ARR_DESTROY(state->continue_stack);
+  ARR_DESTROY(state->record_stack);
   free(state);
 }
 
@@ -127,7 +130,7 @@ void state_leave_block(CompilerState *state) {
   ARR_POP(state->scopes);
 }
 
-void state_enter_record(CompilerState *state, const Tag *tag) {
+void state_enter_record(CompilerState *state, Tag *tag) {
   assert(!ARR_EMPTY(state->scopes));
   assert(tag->record.kind != TAG_ENUM);
   assert(tag->record.members != NULL);
@@ -135,6 +138,7 @@ void state_enter_record(CompilerState *state, const Tag *tag) {
   assert(state_peek_scope(state) != tag->record.members);
 
   ARR_PUSH(state->scopes, tag->record.members);
+  ARR_PUSH(state->record_stack, tag);
 }
 
 void state_leave_record(CompilerState *state) {
@@ -142,6 +146,7 @@ void state_leave_record(CompilerState *state) {
   assert(scope_get_kind(state_peek_scope(state)) == SCOPE_MEMBER);
 
   ARR_POP(state->scopes);
+  ARR_POP(state->record_stack);
 }
 
 Scope *state_peek_scope(CompilerState *state) {
@@ -239,8 +244,24 @@ int state_get_member(CompilerState *state, const char *ident, Symbol **out) {
 }
 
 void state_insert_member(CompilerState *state, const char *ident,
-                         Symbol *symbol) {
-  scope_insert_member(ARR_PEEK(state->scopes), ident, symbol);
+                         Symbol *member) {
+  scope_insert_member(ARR_PEEK(state->scopes), ident, member);
+  size_t member_alignment = type_get_alignment(member->type);
+  size_t member_width = type_get_width(member->type);
+
+  Tag *tag = ARR_PEEK(state->record_stack);
+  if (tag->record.alignment < member_alignment) {
+    tag->record.alignment = member_alignment;
+  }
+
+  if (tag->record.kind == TAG_STRUCT) {
+    size_t padding = member_alignment - (tag->record.width % member_alignment);
+    if (padding != member_alignment) tag->record.width += padding;
+    member->disp = tag->record.width;
+    tag->record.width += member_width;
+  } else if (tag->record.width < member_width) {
+    tag->record.width = member_width;
+  }
 }
 
 int state_get_tag(CompilerState *state, const char *ident, Tag **out) {
