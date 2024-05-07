@@ -420,3 +420,25 @@ int semerr_not_assignable(const ASTree *where, const Type *type) {
                  lexer_filename(where->loc.filenr), where->loc.linenr,
                  where->loc.offset, type_buffer1);
 }
+
+int semerr_fndef_typedef(const ASTree *where) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(astree_to_string(where, ast_buffer1), BUFFER_SIZE);
+  return fprintf(stderr,
+                 "%s:%lu.%lu: attempt to define function using typedef at node "
+                 "%s\n",
+                 lexer_filename(where->loc.filenr), where->loc.linenr,
+                 where->loc.offset, ast_buffer1);
+}
+
+int semerr_fn_member(const ASTree *where) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(astree_to_string(where, ast_buffer1), BUFFER_SIZE);
+  return fprintf(stderr,
+                 "%s:%lu.%lu: attempt to define record member with function "
+                 "type at node %s\n",
+                 lexer_filename(where->loc.filenr), where->loc.linenr,
+                 where->loc.offset, ast_buffer1);
+}

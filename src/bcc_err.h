@@ -47,4 +47,6 @@ int semerr_sizeof_incomplete(const ASTree *sizeof_, const Type *type);
 int semerr_expected_record_ptr(const ASTree *where, const Type *type);
 int semerr_expected_record(const ASTree *where, const Type *type);
 int semerr_not_assignable(const ASTree *where, const Type *type);
+int semerr_fndef_typedef(const ASTree *where);
+int semerr_fn_member(const ASTree *where);
 #endif
