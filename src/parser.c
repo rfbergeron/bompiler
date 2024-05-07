@@ -24,11 +24,39 @@ extern size_t YYTRANSLATE(int symbol);
 #endif
 
 static const char *VA_LIST_TYPEDEF_NAME = "__builtin_va_list";
-static const char *VA_LIST_STRUCT_NAME = "__builtin_0_0_0_struct";
+static const char *VA_LIST_STRUCT_NAME = "0_0_0_struct";
 static const char *VA_LIST_MEMBER_NAMES[] = {
     "gp_offset", "fp_offset", "overflow_arg_area", "reg_save_area"};
 const Type *TYPE_VA_LIST_POINTER;
 Type *TYPE_VA_LIST_POINTER_INTERNAL;
+
+BCC_YYSTATIC ASTree *parser_make_unique(ASTree *tree) {
+  const char *node_str;
+  switch (tree->tok_kind) {
+    case TOK_TYPE_NAME:
+      node_str = "type_name";
+      break;
+    case TOK_STRUCT:
+      node_str = "struct";
+      break;
+    case TOK_ENUM:
+      node_str = "enum";
+      break;
+    case TOK_UNION:
+      node_str = "union";
+      break;
+    default:
+      fprintf(stderr, "ERROR: unable to create unique name for token %s\n",
+              parser_get_tname(tree->tok_kind));
+      abort();
+  }
+
+  char name[1024];
+  sprintf(name, "%lu_%lu_%lu_%s", tree->loc.filenr, tree->loc.linenr,
+          tree->loc.offset, node_str);
+  assert(strlen(name) < sizeof(name) / sizeof(*name));
+  return astree_init(TOK_IDENT, tree->loc, gen_string_intern(name));
+}
 
 const char *parser_get_tname(int symbol) {
   return yytname[YYTRANSLATE(symbol)];

@@ -93,10 +93,6 @@ Scope *scope_init(ScopeKind kind) {
   }
 }
 
-static void destroy_unique_name(const char *str) {
-  if (isdigit(str[0])) free((char *)str);
-}
-
 void scope_destroy(Scope *scope) {
   PFDBG0('t', "Freeing scope");
   if (scope == NULL) return;
@@ -104,15 +100,12 @@ void scope_destroy(Scope *scope) {
   Tag *tag;
   Symbol *symbol;
   Label *label;
-  const char *ident;
   switch (scope->member.kind) {
     case SCOPE_MEMBER:
       count = member_table_count(scope->member.members);
       for (index = 0; index < count; ++index) {
         (void)member_table_at(scope->member.members, index, &symbol);
         symbol_destroy(symbol);
-        (void)member_table_key_at(scope->member.members, index, &ident);
-        destroy_unique_name(ident);
       }
       member_table_destroy(scope->member.members);
       break;
@@ -121,16 +114,12 @@ void scope_destroy(Scope *scope) {
       for (index = 0; index < count; ++index) {
         (void)tag_table_at(scope->block.tags, index, &tag);
         tag_destroy(tag);
-        (void)tag_table_key_at(scope->block.tags, index, &ident);
-        destroy_unique_name(ident);
       }
       tag_table_destroy(scope->block.tags);
       count = symbol_table_count(scope->block.symbols);
       for (index = 0; index < count; ++index) {
         (void)symbol_table_at(scope->block.symbols, index, &symbol);
         symbol_destroy(symbol);
-        (void)symbol_table_key_at(scope->block.symbols, index, &ident);
-        destroy_unique_name(ident);
       }
       symbol_table_destroy(scope->block.symbols);
       break;
@@ -145,16 +134,12 @@ void scope_destroy(Scope *scope) {
       for (index = 0; index < count; ++index) {
         (void)tag_table_at(scope->function.tags, index, &tag);
         tag_destroy(tag);
-        (void)tag_table_key_at(scope->function.tags, index, &ident);
-        destroy_unique_name(ident);
       }
       tag_table_destroy(scope->function.tags);
       count = symbol_table_count(scope->function.symbols);
       for (index = 0; index < count; ++index) {
         (void)symbol_table_at(scope->function.symbols, index, &symbol);
         symbol_destroy(symbol);
-        (void)symbol_table_key_at(scope->function.symbols, index, &ident);
-        destroy_unique_name(ident);
       }
       symbol_table_destroy(scope->function.symbols);
       break;
@@ -163,16 +148,12 @@ void scope_destroy(Scope *scope) {
       for (index = 0; index < count; ++index) {
         (void)tag_table_at(scope->file.tags, index, &tag);
         tag_destroy(tag);
-        (void)tag_table_key_at(scope->file.tags, index, &ident);
-        destroy_unique_name(ident);
       }
       tag_table_destroy(scope->file.tags);
       count = symbol_table_count(scope->file.symbols);
       for (index = 0; index < count; ++index) {
         (void)symbol_table_at(scope->file.symbols, index, &symbol);
         symbol_destroy(symbol);
-        (void)symbol_table_key_at(scope->file.symbols, index, &ident);
-        destroy_unique_name(ident);
       }
       symbol_table_destroy(scope->file.symbols);
       break;

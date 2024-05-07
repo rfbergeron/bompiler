@@ -272,41 +272,6 @@ static int linkage_valid(const Symbol *existing, Linkage linkage) {
   }
 }
 
-static const char *create_unique_name(ASTree *tree) {
-  const char *node_str;
-  switch (tree->tok_kind) {
-    case TOK_TYPE_NAME:
-      node_str = "type_name";
-      break;
-    case TOK_STRUCT:
-      node_str = "struct";
-      break;
-    case TOK_ENUM:
-      node_str = "enum";
-      break;
-    case TOK_UNION:
-      node_str = "union";
-      break;
-    default:
-      fprintf(stderr, "ERROR: unable to create unique name for symbol %s\n",
-              parser_get_tname(tree->tok_kind));
-      abort();
-  }
-
-  char filenr_str[32], linenr_str[32], offset_str[32];
-  sprintf(filenr_str, "%lu", tree->loc.filenr);
-  sprintf(linenr_str, "%lu", tree->loc.linenr);
-  sprintf(offset_str, "%lu", tree->loc.offset);
-  size_t name_len = strlen(filenr_str) + strlen(linenr_str) +
-                    strlen(offset_str) + strlen(node_str) + 3;
-  char *name = malloc(sizeof(char) * (name_len + 1));
-  /* gcc doesn't like the printf below unless we make check malloc */
-  if (name == NULL) abort();
-
-  sprintf(name, "%s_%s_%s_%s", filenr_str, linenr_str, offset_str, node_str);
-  return name;
-}
-
 /*
  * Combines type specifier and declarator information and inserts symbol value
  * into the table at the current scope. Sets source location of the declaration
@@ -335,9 +300,7 @@ static Symbol *validate_declaration(ASTree *declaration, ASTree *declarator) {
     return NULL;
   }
 
-  const char *identifier = declarator->tok_kind == TOK_TYPE_NAME
-                               ? create_unique_name(declarator)
-                               : declarator->lexinfo;
+  const char *identifier = declarator->lexinfo;
   Symbol *exists = NULL;
   int is_redeclaration = scope_get_kind(state_peek_scope(state)) == SCOPE_MEMBER
                              ? state_get_member(state, identifier, &exists)
@@ -685,17 +648,6 @@ static TagKind tag_from_tok_kind(int tok_kind) {
   }
 }
 
-ASTree *validate_unique_tag(ASTree *tag_spec, ASTree *left_brace) {
-  const char *id_str = create_unique_name(tag_spec);
-  TagKind kind = tag_from_tok_kind(tag_spec->tok_kind);
-  Tag *tag = tag_init(kind);
-  state_insert_tag(state, id_str, tag);
-  tag_spec->type = type_init_tag(QUAL_FLAG_NONE | STOR_FLAG_NONE, id_str, tag);
-
-  if (kind == TAG_STRUCT || kind == TAG_UNION) state_enter_record(state, tag);
-  return astree_adopt(tag_spec, 1, left_brace);
-}
-
 ASTree *validate_tag_decl(ASTree *tag_spec, ASTree *tag_id) {
   const char *id_str = tag_id->lexinfo;
   Tag *exists = NULL;
@@ -786,8 +738,7 @@ ASTree *finalize_tag_def(ASTree *tag_spec) {
 
 ASTree *define_enumerator(ASTree *enum_spec, ASTree *enum_id,
                           ASTree *equal_sign, ASTree *expr) {
-  ASTree *left_brace =
-      astree_get(enum_spec, astree_count(enum_spec) == 2 ? 1 : 0);
+  ASTree *left_brace = astree_get(enum_spec, 1);
   if (equal_sign == NULL)
     (void)astree_adopt(left_brace, 1, enum_id);
   else
@@ -829,8 +780,7 @@ ASTree *define_enumerator(ASTree *enum_spec, ASTree *enum_id,
 
 ASTree *define_record_member(ASTree *record_spec, ASTree *member) {
   (void)finalize_declaration(member);
-  ASTree *left_brace =
-      astree_get(record_spec, astree_count(record_spec) == 2 ? 1 : 0);
+  ASTree *left_brace = astree_get(record_spec, 1);
 
   Tag *tag = record_spec->type->tag.value;
   size_t i;

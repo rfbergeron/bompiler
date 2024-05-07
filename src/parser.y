@@ -39,6 +39,7 @@
   static ASTree *parse_va_arg(ASTree * va_arg_, ASTree * expr,
                               ASTree * decl_specs, ASTree * declarator);
   static void parser_cleanup(size_t count, ...);
+  static ASTree *parser_make_unique(ASTree * tree);
   /* clang-format off */
 %}
 
@@ -151,7 +152,7 @@ struct_spec         : struct_def '}'                                    { ERRCHK
                     | struct_or_union any_ident                         { ERRCHK; $$ = bcc_yyval = validate_tag_decl($1, $2); } /* declare tag if necessary */
                     ;
 struct_def          : struct_or_union any_ident '{'                     { ERRCHK; $$ = bcc_yyval = validate_tag_def($1, $2, $3); }
-                    | struct_or_union '{'                               { ERRCHK; $$ = bcc_yyval = validate_unique_tag($1, $2); }
+                    | struct_or_union '{'                               { ERRCHK; $$ = bcc_yyval = validate_tag_def($1, parser_make_unique($1), $2); }
                     | struct_def struct_decl ';'                        { ERRCHK; $$ = bcc_yyval = define_record_member($1, $2); parser_cleanup(1, $3); } /* define struct member */
                     ;
 struct_or_union     : TOK_STRUCT                                        { ERRCHK; $$ = bcc_yyval = $1; }
@@ -168,8 +169,8 @@ enum_spec           : enum_def '}'                                      { ERRCHK
                     ;
 enum_def            : TOK_ENUM any_ident '{' any_ident                  { ERRCHK; $$ = bcc_yyval = define_enumerator(validate_tag_def($1, $2, $3), $4, NULL, NULL); }
                     | TOK_ENUM any_ident '{' any_ident '=' cond_expr    { ERRCHK; $$ = bcc_yyval = define_enumerator(validate_tag_def($1, $2, $3), $4, $5, $6); }
-                    | TOK_ENUM '{' any_ident                            { ERRCHK; $$ = bcc_yyval = define_enumerator(validate_unique_tag($1, $2), $3, NULL, NULL); }
-                    | TOK_ENUM '{' any_ident '=' cond_expr              { ERRCHK; $$ = bcc_yyval = define_enumerator(validate_unique_tag($1, $2), $3, $4, $5); }
+                    | TOK_ENUM '{' any_ident                            { ERRCHK; $$ = bcc_yyval = define_enumerator(validate_tag_def($1, parser_make_unique($1), $2), $3, NULL, NULL); }
+                    | TOK_ENUM '{' any_ident '=' cond_expr              { ERRCHK; $$ = bcc_yyval = define_enumerator(validate_tag_def($1, parser_make_unique($1), $2), $3, $4, $5); }
                     | enum_def ',' any_ident                            { ERRCHK; $$ = bcc_yyval = define_enumerator($1, $3, NULL, NULL); parser_cleanup(1, $2); }
                     | enum_def ',' any_ident '=' cond_expr              { ERRCHK; $$ = bcc_yyval = define_enumerator($1, $3, $4, $5); parser_cleanup(1, $2); }
                     ;
