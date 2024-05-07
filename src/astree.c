@@ -98,7 +98,7 @@ void astree_destroy(ASTree *tree) {
     case TOK_ENUM:
       /* fallthrough */
     case TOK_SPEC_LIST:
-      free(tree->type);
+      type_destroy(tree->type);
       break;
     case '?':
       if (tree->type == NULL || !type_is_pointer(tree->type)) break;

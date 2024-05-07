@@ -349,6 +349,10 @@ static Symbol *validate_declaration(ASTree *declaration, ASTree *declarator) {
     (void)semerr_invalid_linkage(declarator, symbol);
     symbol_destroy(symbol);
     return NULL;
+  } else if (symbol->storage != STORE_TYPEDEF && type_is_void(symbol->type)) {
+    (void)semerr_incomplete_type(declarator, symbol->type);
+    symbol_destroy(symbol);
+    return NULL;
   } else if (!is_redeclaration) {
     if (symbol->linkage == LINK_MEMBER)
       state_insert_member(state, identifier, symbol);
@@ -549,6 +553,11 @@ ASTree *define_symbol(ASTree *decl_list, ASTree *equal_sign,
     (void)semerr_define_extern(declarator);
     return astree_adopt(decl_list, 1,
                         astree_adopt(equal_sign, 2, declarator, initializer));
+  } else if (type_is_incomplete(symbol->type) &&
+             !type_is_deduced_array(symbol->type)) {
+    (void)semerr_not_assignable(equal_sign, symbol->type);
+    return astree_adopt(decl_list, 1,
+                        astree_adopt(equal_sign, 2, declarator, initializer));
   } else if (initializer->tok_kind == TOK_INIT_LIST ||
              initializer->tok_kind == TOK_STRINGCON) {
     /*
@@ -592,7 +601,16 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
   assert(type_is_function(symbol->type));
   assert(symbol->type == declarator->type);
 
-  if (symbol->info == SYM_DEFINED) {
+  Type *return_type = type_strip_declarator(declarator->type);
+  if (type_is_incomplete(return_type) && !type_is_void(return_type)) {
+    (void)semerr_incomplete_type(declarator, return_type);
+    return astree_adopt(declaration, 2, declarator, body);
+  } else if (astree_count(declarator) == 0 ||
+             astree_get(declarator, 0)->tok_kind != TOK_PARAM_LIST) {
+    /* achieved function type through typedef name; not allowed */
+    (void)semerr_fndef_typedef(declarator);
+    return astree_adopt(declaration, 2, declarator, body);
+  } else if (symbol->info == SYM_DEFINED) {
     (void)semerr_redefine_symbol(declarator, symbol);
     return astree_adopt(declaration, 2, declarator, body);
   }
@@ -601,14 +619,20 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
   assert(symbol->info != SYM_INHERITOR);
   symbol->info = SYM_NONE;
 
-  /* param list should be first child for properly defined functions */
   ASTree *param_list = astree_get(declarator, 0);
-  assert(param_list->tok_kind == TOK_PARAM_LIST);
-  size_t i;
-  for (i = 0; i < astree_count(param_list); ++i) {
-    ASTree *param = astree_get(param_list, i);
-    if (param->tok_kind == TOK_TYPE_NAME) {
-      (void)semerr_expected_ident(declarator, param);
+  size_t i, param_count = type_param_count(declarator->type);
+  assert(astree_count(param_list) == param_count ||
+         (type_is_variadic_function(declarator->type) &&
+          astree_count(param_list) - 1 == param_count) ||
+         (astree_count(param_list) == 1 &&
+          astree_get(param_list, 0)->tok_kind == TOK_VOID && param_count == 0));
+  for (i = 0; i < param_count; ++i) {
+    ASTree *param_declarator = astree_get(astree_get(param_list, i), 1);
+    if (param_declarator->tok_kind == TOK_TYPE_NAME) {
+      (void)semerr_expected_ident(declarator, param_declarator);
+      return astree_adopt(declaration, 2, declarator, body);
+    } else if (type_is_incomplete(param_declarator->type)) {
+      (void)semerr_incomplete_type(declarator, param_declarator->type);
       return astree_adopt(declaration, 2, declarator, body);
     }
   }
@@ -803,9 +827,6 @@ ASTree *define_enumerator(ASTree *enum_spec, ASTree *enum_id,
   return enum_spec;
 }
 
-/* TODO(Robert): report an error when a record with a member of function type
- * is declared and replace the check for function types here with an assert
- */
 ASTree *define_record_member(ASTree *record_spec, ASTree *member) {
   (void)finalize_declaration(member);
   ASTree *left_brace =
@@ -823,6 +844,17 @@ ASTree *define_record_member(ASTree *record_spec, ASTree *member) {
 #endif
     assert(is_member);
     assert(symbol != NULL);
+
+    if (type_is_incomplete(symbol->type)) {
+      (void)semerr_incomplete_type(declarator, symbol->type);
+      (void)astree_adopt(left_brace, 1, member);
+      return record_spec;
+    } else if (type_is_function(symbol->type)) {
+      (void)semerr_fn_member(declarator);
+      (void)astree_adopt(left_brace, 1, member);
+      return record_spec;
+    }
+
     size_t member_alignment = type_get_alignment(declarator->type);
     size_t member_width = type_get_width(declarator->type);
     if (tag->record.alignment < member_alignment) {
@@ -858,10 +890,17 @@ ASTree *prepare_init(ASTree *declaration, ASTree *declarator) {
 ASTree *declare_symbol(ASTree *declaration, ASTree *declarator) {
   Symbol *symbol = validate_declaration(declaration, declarator);
   /* emit a `nop` in case we just validated a type name */
-  if (symbol == NULL)
+  if (symbol == NULL) {
     return scope_get_kind(state_peek_scope(state)) == SCOPE_FILE
                ? astree_adopt(declaration, 1, declarator)
                : astree_adopt(declaration, 1, translate_empty_expr(declarator));
+  } else if (type_is_incomplete(symbol->type) &&
+             symbol->storage != STORE_TYPEDEF && symbol->linkage == LINK_NONE) {
+    /* local object declaration with incomplete type */
+    (void)semerr_incomplete_type(declarator, symbol->type);
+    assert(scope_get_kind(state_peek_scope(state)) != SCOPE_FILE);
+    return astree_adopt(declaration, 1, translate_empty_expr(declarator));
+  }
   assert(symbol->type = declarator->type);
 
   if (symbol->linkage == LINK_NONE || symbol->info == SYM_INHERITOR)
