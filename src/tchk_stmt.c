@@ -44,7 +44,14 @@ ASTree *validate_ifelse(ASTree *ifelse, ASTree *condition, ASTree *if_body,
 }
 
 ASTree *validate_switch(ASTree *switch_, ASTree *expr, ASTree *stmt) {
-  return translate_switch(switch_, expr, stmt);
+  assert(state_get_selection_id(state) == switch_->jump_id);
+  assert(state_get_break_id(state) == switch_->jump_id);
+  int has_default = state_get_selection_default(state);
+  /* fake case id for final fallthrough */
+  switch_->case_id = state_get_case_id(state);
+  state_pop_selection_id(state);
+  state_pop_break_id(state);
+  return translate_switch(switch_, expr, stmt, has_default);
 }
 
 ASTree *validate_switch_expr(ASTree *expr) {
@@ -56,15 +63,16 @@ ASTree *validate_switch_expr(ASTree *expr) {
     Type *promoted_type =
         type_arithmetic_conversions(expr->type, (Type *)TYPE_INT);
     state_set_control_type(state, promoted_type);
-    expr = tchk_cexpr_conv(tchk_scal_conv(expr, promoted_type));
-    return expr;
+    return translate_switch_expr(
+        tchk_cexpr_conv(tchk_scal_conv(expr, promoted_type)));
   }
 }
 
 ASTree *validate_while(ASTree *while_, ASTree *condition, ASTree *stmt) {
-  /* TODO(Robert): safely process flow control statements before checking error
-   * codes so that more things are cleaned up in the event of an error.
-   */
+  assert(state_get_continue_id(state) == while_->jump_id);
+  assert(state_get_break_id(state) == while_->jump_id);
+  state_pop_continue_id(state);
+  state_pop_break_id(state);
   condition = TCHK_STD_CONV(condition, 1);
   if (!type_is_scalar(condition->type)) {
     (void)semerr_expected_scalar(while_, condition->type);
@@ -76,6 +84,10 @@ ASTree *validate_while(ASTree *while_, ASTree *condition, ASTree *stmt) {
 }
 
 ASTree *validate_do(ASTree *do_, ASTree *stmt, ASTree *condition) {
+  assert(state_get_continue_id(state) == do_->jump_id);
+  assert(state_get_break_id(state) == do_->jump_id);
+  state_pop_continue_id(state);
+  state_pop_break_id(state);
   condition = TCHK_STD_CONV(condition, 1);
   if (!type_is_scalar(condition->type)) {
     (void)semerr_expected_scalar(do_, condition->type);
@@ -88,6 +100,10 @@ ASTree *validate_do(ASTree *do_, ASTree *stmt, ASTree *condition) {
 
 ASTree *validate_for(ASTree *for_, ASTree *init_expr, ASTree *pre_iter_expr,
                      ASTree *reinit_expr, ASTree *body) {
+  assert(state_get_continue_id(state) == for_->jump_id);
+  assert(state_get_break_id(state) == for_->jump_id);
+  state_pop_continue_id(state);
+  state_pop_break_id(state);
   if (reinit_expr->tok_kind != TOK_EMPTY)
     reinit_expr = TCHK_STD_CONV(reinit_expr, 1);
   if (pre_iter_expr->tok_kind != TOK_EMPTY)
@@ -167,6 +183,7 @@ ASTree *validate_goto(ASTree *goto_, ASTree *ident) {
 }
 
 ASTree *validate_continue(ASTree *continue_) {
+  continue_->jump_id = state_get_continue_id(state);
   if (continue_->jump_id == SIZE_MAX) {
     (void)semerr_unexpected_stmt(continue_);
     return continue_;
@@ -176,6 +193,7 @@ ASTree *validate_continue(ASTree *continue_) {
 }
 
 ASTree *validate_break(ASTree *break_) {
+  break_->jump_id = state_get_break_id(state);
   if (break_->jump_id == SIZE_MAX) {
     (void)semerr_unexpected_stmt(break_);
     return break_;

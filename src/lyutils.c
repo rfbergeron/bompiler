@@ -128,68 +128,6 @@ int lexer_ident(void) {
   }
 }
 
-int lexer_iteration(int tok_kind) {
-  (void)lexer_token(tok_kind);
-  size_t id = state_next_jump_id(state);
-  PFDBG2('l', "Using id %lu for iteration token %s", id, yytext);
-  yylval->jump_id = id;
-  state_push_break_id(state, id);
-  state_push_continue_id(state, id);
-  return tok_kind;
-}
-
-int lexer_switch(void) {
-  (void)lexer_token(TOK_SWITCH);
-  size_t id = state_next_jump_id(state);
-  PFDBG2('l', "Using id %lu for switch token %s", id, yytext);
-  yylval->jump_id = id;
-  state_push_break_id(state, id);
-  state_push_selection_id(state, id);
-  return TOK_SWITCH;
-}
-
-int lexer_case(void) {
-  (void)lexer_token(TOK_CASE);
-  size_t case_id = state_get_case_id(state);
-  size_t jump_id = state_get_selection_id(state);
-  state_inc_case_id(state);
-  PFDBG3('l', "Applying jump id %lu and case id %lu to token %s", jump_id,
-         case_id, yytext);
-  yylval->jump_id = jump_id;
-  yylval->case_id = case_id;
-  return TOK_CASE;
-}
-
-int lexer_default(void) {
-  (void)lexer_token(TOK_DEFAULT);
-  size_t id = state_get_selection_id(state);
-  PFDBG2('l', "Applying jump id %lu to default token %s", id, yytext);
-  yylval->jump_id = id;
-  return TOK_DEFAULT;
-}
-
-int lexer_break(void) {
-  (void)lexer_token(TOK_BREAK);
-  size_t id = state_get_break_id(state);
-  PFDBG2('l', "Applying jump id %lu to break token %s", id, yytext);
-  yylval->jump_id = id;
-  return TOK_BREAK;
-}
-
-int lexer_continue(void) {
-  (void)lexer_token(TOK_CONTINUE);
-  size_t id = state_get_continue_id(state);
-  PFDBG2('l', "Applying jump id %lu to continue token %s", id, yytext);
-  yylval->jump_id = id;
-  return TOK_CONTINUE;
-}
-
-int lexer_if(void) {
-  (void)lexer_token(TOK_IF);
-  yylval->jump_id = state_next_jump_id(state);
-  return TOK_IF;
-}
-
 int lexer_bad_token(int tok_kind) {
   lexical_error = 1;
   (void)sprintf(error_buffer, "Invalid token %s (%s)",

@@ -46,7 +46,9 @@ ASTree *translate_va_end(ASTree *va_end_, ASTree *expr);
 ASTree *translate_va_arg(ASTree *va_arg_, ASTree *expr, ASTree *type_name);
 ASTree *translate_ifelse(ASTree *ifelse, ASTree *condition, ASTree *if_body,
                          ASTree *else_body);
-ASTree *translate_switch(ASTree *switch_, ASTree *condition, ASTree *body);
+ASTree *translate_switch(ASTree *switch_, ASTree *condition, ASTree *body,
+                         int has_default);
+ASTree *translate_switch_expr(ASTree *expr);
 ASTree *translate_while(ASTree *while_, ASTree *condition, ASTree *body);
 ASTree *translate_for(ASTree *for_, ASTree *initializer, ASTree *condition,
                       ASTree *reinitializer, ASTree *body);
