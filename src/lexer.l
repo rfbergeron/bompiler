@@ -59,18 +59,18 @@ NOTSTRING       (\"[^"]*)
 "register"      { return lexer_token (TOK_REGISTER); }
 "const"         { return lexer_token (TOK_CONST); }
 "volatile"      { return lexer_token (TOK_VOLATILE); }
-"if"            { return lexer_if (); }
+"if"            { return lexer_token (TOK_IF); }
 "else"          { return lexer_token (TOK_ELSE); }
-"switch"        { return lexer_switch(); }
-"do"            { return lexer_iteration (TOK_DO); }
-"while"         { return lexer_iteration (TOK_WHILE); }
-"for"           { return lexer_iteration (TOK_FOR); }
+"switch"        { return lexer_token (TOK_SWITCH); }
+"do"            { return lexer_token (TOK_DO); }
+"while"         { return lexer_token (TOK_WHILE); }
+"for"           { return lexer_token (TOK_FOR); }
 "return"        { return lexer_token (TOK_RETURN); }
-"break"         { return lexer_break(); }
-"continue"      { return lexer_continue(); }
+"break"         { return lexer_token (TOK_BREAK); }
+"continue"      { return lexer_token (TOK_CONTINUE); }
 "goto"          { return lexer_token (TOK_GOTO); }
-"case"          { return lexer_case(); }
-"default"       { return lexer_default(); }
+"case"          { return lexer_token (TOK_CASE); }
+"default"       { return lexer_token (TOK_DEFAULT); }
 "struct"        { return lexer_token (TOK_STRUCT); }
 "union"         { return lexer_token (TOK_UNION); }
 "enum"          { return lexer_token (TOK_ENUM); }

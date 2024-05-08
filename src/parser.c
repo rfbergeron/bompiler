@@ -258,6 +258,47 @@ BCC_YYSTATIC ASTree *parse_va_arg(ASTree *va_arg_, ASTree *expr,
       finalize_declaration(declare_symbol(declaration, declarator)));
 }
 
+BCC_YYSTATIC ASTree *parse_if(ASTree *if_) {
+  if_->jump_id = state_next_jump_id(state);
+  return if_;
+}
+
+BCC_YYSTATIC ASTree *parse_iteration(ASTree *keyword) {
+  size_t id = state_next_jump_id(state);
+  PFDBG2('l', "Using id %lu for iteration token %s", id, keyword->lexinfo);
+  keyword->jump_id = id;
+  state_push_break_id(state, id);
+  state_push_continue_id(state, id);
+  return keyword;
+}
+
+BCC_YYSTATIC ASTree *parse_switch(ASTree *switch_) {
+  size_t id = state_next_jump_id(state);
+  PFDBG2('l', "Using id %lu for switch token %s", id, switch_->lexinfo);
+  switch_->jump_id = id;
+  state_push_break_id(state, id);
+  state_push_selection_id(state, id);
+  return switch_;
+}
+
+BCC_YYSTATIC ASTree *parse_case(ASTree *case_) {
+  size_t case_id = state_get_case_id(state);
+  size_t jump_id = state_get_selection_id(state);
+  state_inc_case_id(state);
+  PFDBG3('l', "Applying jump id %lu and case id %lu to token %s", jump_id,
+         case_id, yytext);
+  case_->jump_id = jump_id;
+  case_->case_id = case_id;
+  return case_;
+}
+
+BCC_YYSTATIC ASTree *parse_default(ASTree *default_) {
+  size_t id = state_get_selection_id(state);
+  PFDBG2('l', "Applying jump id %lu to default token %s", id, yytext);
+  default_->jump_id = id;
+  return default_;
+}
+
 BCC_YYSTATIC void parser_cleanup(size_t count, ...) {
   PFDBG1('p', "Cleaning up %lu astree nodes", count);
   va_list args;

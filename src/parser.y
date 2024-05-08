@@ -38,6 +38,11 @@
                               ASTree * declarator);
   static ASTree *parse_va_arg(ASTree * va_arg_, ASTree * expr,
                               ASTree * decl_specs, ASTree * declarator);
+  static ASTree *parse_if(ASTree * if_);
+  static ASTree *parse_iteration(ASTree * keyword);
+  static ASTree *parse_switch(ASTree * switch_);
+  static ASTree *parse_case(ASTree * case_);
+  static ASTree *parse_default(ASTree * default_);
   static void parser_cleanup(size_t count, ...);
   static ASTree *parser_make_unique(ASTree * tree);
   /* clang-format off */
@@ -240,7 +245,7 @@ block_content       : '{'                                               { ERRCHK
                     | block_content declarations ';'                    { ERRCHK; $$ = bcc_yyval = validate_block_content($1, finalize_declaration($2)); parser_cleanup(1, $3); }
                     ;
 stmt                : block                                             { ERRCHK; $$ = bcc_yyval = $1; }
-                    | dowhile                                           { ERRCHK; $$ = bcc_yyval = $1; }
+                    | do                                                { ERRCHK; $$ = bcc_yyval = $1; }
                     | while                                             { ERRCHK; $$ = bcc_yyval = $1; }
                     | for                                               { ERRCHK; $$ = bcc_yyval = $1; }
                     | ifelse                                            { ERRCHK; $$ = bcc_yyval = $1; }
@@ -255,9 +260,15 @@ stmt                : block                                             { ERRCHK
 stmt_expr           : expr ';'                                          { ERRCHK; $$ = bcc_yyval = validate_stmt_expr($1); astree_destroy($2); }
                     | ';'                                               { ERRCHK; $$ = bcc_yyval = parser_make_empty($1->loc); astree_destroy($1); }
                     ;
+default_term        : TOK_DEFAULT                                       { ERRCHK; $$ = bcc_yyval = parse_default($1); }
+                    ;
+case_term           : TOK_CASE                                          { ERRCHK; $$ = bcc_yyval = parse_case($1); }
+                    ;
 labelled_stmt       : any_ident ':' stmt                                { ERRCHK; $$ = bcc_yyval = validate_label(parser_make_label($1), $1, $3); parser_cleanup(1, $2); }
-                    | TOK_DEFAULT ':' stmt                              { ERRCHK; $$ = bcc_yyval = validate_default($1, $3); parser_cleanup(1, $2); }
-                    | TOK_CASE cond_expr   ':' stmt                     { ERRCHK; $$ = bcc_yyval = validate_case($1, $2, $4); parser_cleanup(1, $3); }
+                    | default_term ':' stmt                             { ERRCHK; $$ = bcc_yyval = validate_default($1, $3); parser_cleanup(1, $2); }
+                    | case_term cond_expr   ':' stmt                    { ERRCHK; $$ = bcc_yyval = validate_case($1, $2, $4); parser_cleanup(1, $3); }
+                    ;
+for_term            : TOK_FOR                                           { ERRCHK; $$ = bcc_yyval = parse_iteration($1); }
                     ;
 for_init            : expr ';'                                          { ERRCHK; $$ = bcc_yyval = $1; parser_cleanup(1, $2); }
                     | ';'                                               { ERRCHK; $$ = bcc_yyval = parser_make_empty($1->loc); parser_cleanup(1, $1); }
@@ -268,18 +279,26 @@ for_cond            : expr ';'                                          { ERRCHK
 for_reinit          : expr ')'                                          { ERRCHK; $$ = bcc_yyval = $1; parser_cleanup(1, $2); }
                     | ')'                                               { ERRCHK; $$ = bcc_yyval = parser_make_empty($1->loc); parser_cleanup(1, $1); }
                     ;
-for                 : TOK_FOR '(' for_init for_cond for_reinit stmt     { ERRCHK; $$ = bcc_yyval = validate_for($1, $3, $4, $5, $6); parser_cleanup(1, $2); }
+for                 : for_term '(' for_init for_cond for_reinit stmt    { ERRCHK; $$ = bcc_yyval = validate_for($1, $3, $4, $5, $6); parser_cleanup(1, $2); }
                     ;
-dowhile             : TOK_DO stmt TOK_WHILE '(' expr ')' ';'            { ERRCHK; $$ = bcc_yyval = validate_do($1, $2, $5); parser_cleanup (4, $3, $4, $6, $7); }
+do_term             : TOK_DO                                            { ERRCHK; $$ = bcc_yyval = parse_iteration($1); }
                     ;
-while               : TOK_WHILE '(' expr ')' stmt                       { ERRCHK; $$ = bcc_yyval = validate_while($1, $3, $5); parser_cleanup (2, $2, $4); }
+do                  : do_term stmt TOK_WHILE '(' expr ')' ';'           { ERRCHK; $$ = bcc_yyval = validate_do($1, $2, $5); parser_cleanup (4, $3, $4, $6, $7); }
                     ;
-ifelse              : TOK_IF '(' expr ')' stmt TOK_ELSE stmt            { ERRCHK; $$ = bcc_yyval = validate_ifelse($1, $3, $5, $7); parser_cleanup (3, $2, $4, $6); }
-                    | TOK_IF '(' expr ')' stmt %prec TOK_ELSE           { ERRCHK; $$ = bcc_yyval = validate_ifelse($1, $3, $5, parser_make_empty(lexer_get_loc())); parser_cleanup (2, $2, $4); }
+while_term          : TOK_WHILE                                         { ERRCHK; $$ = bcc_yyval = parse_iteration($1); }
                     ;
-switch              : TOK_SWITCH '(' switch_expr ')' stmt               { ERRCHK; $$ = bcc_yyval = validate_switch($1, $3, $5); parser_cleanup(2, $2, $4); }
+while               : while_term '(' expr ')' stmt                      { ERRCHK; $$ = bcc_yyval = validate_while($1, $3, $5); parser_cleanup (2, $2, $4); }
+                    ;
+if_term             : TOK_IF                                            { ERRCHK; $$ = bcc_yyval = parse_if($1); }
+                    ;
+ifelse              : if_term '(' expr ')' stmt TOK_ELSE stmt           { ERRCHK; $$ = bcc_yyval = validate_ifelse($1, $3, $5, $7); parser_cleanup (3, $2, $4, $6); }
+                    | if_term '(' expr ')' stmt %prec TOK_ELSE          { ERRCHK; $$ = bcc_yyval = validate_ifelse($1, $3, $5, parser_make_empty(lexer_get_loc())); parser_cleanup (2, $2, $4); }
+                    ;
+switch_term         : TOK_SWITCH                                        { ERRCHK; $$ = bcc_yyval = parse_switch($1); }
                     ;
 switch_expr         : expr                                              { ERRCHK; $$ = bcc_yyval = validate_switch_expr($1); }
+                    ;
+switch              : switch_term '(' switch_expr ')' stmt              { ERRCHK; $$ = bcc_yyval = validate_switch($1, $3, $5); parser_cleanup(2, $2, $4); }
                     ;
 return              : TOK_RETURN expr ';'                               { ERRCHK; $$ = bcc_yyval = validate_return($1, $2); parser_cleanup (1, $3); }
                     | TOK_RETURN ';'                                    { ERRCHK; $$ = bcc_yyval = validate_return($1, parser_make_empty($2->loc)); parser_cleanup (1, $2); }

@@ -2150,35 +2150,11 @@ ASTree *translate_ifelse(ASTree *ifelse, ASTree *condition, ASTree *if_body,
   return astree_adopt(ifelse, 3, condition, if_body, else_body);
 }
 
-ASTree *translate_switch(ASTree *switch_, ASTree *condition, ASTree *body) {
+ASTree *translate_switch(ASTree *switch_, ASTree *condition, ASTree *body,
+                         int has_default) {
   SEMCHK(condition);
-  size_t saved_break = SIZE_MAX, saved_selection = SIZE_MAX;
-  if (state_get_break_id(state) != switch_->jump_id)
-    saved_break = state_get_break_id(state), state_pop_break_id(state);
-  assert(state_get_break_id(state) == switch_->jump_id);
-  state_pop_break_id(state);
-
-  if (state_get_selection_id(state) != switch_->jump_id)
-    saved_selection = state_get_selection_id(state),
-    state_pop_selection_id(state);
-  assert(state_get_selection_id(state) == switch_->jump_id);
-  /* save switch statement info before popping from stack */
-  int has_default_stmt = state_get_selection_default(state);
-  const Type *control_type = state_get_control_type(state);
-  size_t fake_case_id = state_get_case_id(state);
-  size_t control_vreg = state_get_control_reg(state);
-  state_pop_selection_id(state);
-
-  Instruction *cond_instr = instr_prev(condition->instructions);
-  REGCHK(cond_instr);
 
   /* switch prologue */
-  Instruction *mov_instr = instr_init(OP_MOV);
-  mov_instr->src = cond_instr->dest;
-  set_op_reg(&mov_instr->dest, type_get_width(control_type), control_vreg);
-  /* clear control vreg from persistence data; persist condition expression */
-  mov_instr->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
-
   Instruction *jmp_case1_instr = instr_init(OP_JMP);
   set_op_dir(&jmp_case1_instr->dest, mk_case_label(switch_->jump_id, 0));
 
@@ -2190,42 +2166,38 @@ ASTree *translate_switch(ASTree *switch_, ASTree *condition, ASTree *body) {
   set_op_dir(&jmp_end_instr->dest, end_label->label);
 
   Instruction *dummy_case_label = instr_init(OP_NONE);
-  dummy_case_label->label = mk_case_label(switch_->jump_id, fake_case_id);
+  dummy_case_label->label = mk_case_label(switch_->jump_id, switch_->case_id);
 
-  if (has_default_stmt) {
+  if (has_default) {
     Instruction *jmp_def_instr = instr_init(OP_JMP);
     set_op_dir(&jmp_def_instr->dest, mk_def_label(switch_->jump_id));
 
-    (void)instr_append(switch_->instructions, 8, condition->instructions,
-                       mov_instr, jmp_case1_instr, body->instructions,
-                       jmp_end_instr, dummy_case_label, jmp_def_instr,
-                       end_label);
-  } else {
     (void)instr_append(switch_->instructions, 7, condition->instructions,
-                       mov_instr, jmp_case1_instr, body->instructions,
-                       jmp_end_instr, dummy_case_label, end_label);
+                       jmp_case1_instr, body->instructions, jmp_end_instr,
+                       dummy_case_label, jmp_def_instr, end_label);
+  } else {
+    (void)instr_append(switch_->instructions, 6, condition->instructions,
+                       jmp_case1_instr, body->instructions, jmp_end_instr,
+                       dummy_case_label, end_label);
   }
-
-  if (saved_break != SIZE_MAX) state_push_break_id(state, saved_break);
-  if (saved_selection != SIZE_MAX)
-    state_push_selection_id(state, saved_selection);
 
   return astree_adopt(switch_, 2, condition, body);
 }
 
+ASTree *translate_switch_expr(ASTree *expr) {
+  Instruction *expr_instr = instr_prev(expr->instructions);
+  Instruction *mov_instr = instr_init(OP_MOV);
+  mov_instr->src = expr_instr->dest;
+  size_t control_vreg = state_get_control_reg(state);
+  set_op_reg(&mov_instr->dest, type_get_width(expr->type), control_vreg);
+  /* clear control vreg from persistence data; persist condition expression */
+  mov_instr->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
+  (void)instr_append(expr->instructions, 1, mov_instr);
+  return expr;
+}
+
 ASTree *translate_while(ASTree *while_, ASTree *condition, ASTree *body) {
   SEMCHK(condition);
-  size_t saved_break = SIZE_MAX, saved_continue = SIZE_MAX;
-  if (state_get_break_id(state) != while_->jump_id)
-    saved_break = state_get_break_id(state), state_pop_break_id(state);
-  assert(state_get_break_id(state) == while_->jump_id);
-  state_pop_break_id(state);
-
-  if (state_get_continue_id(state) != while_->jump_id)
-    saved_continue = state_get_continue_id(state), state_pop_continue_id(state);
-  assert(state_get_continue_id(state) == while_->jump_id);
-  state_pop_continue_id(state);
-
   Instruction *condition_label = instr_init(OP_NONE);
   condition_label->label = mk_cond_label(while_->jump_id);
 
@@ -2249,9 +2221,6 @@ ASTree *translate_while(ASTree *while_, ASTree *condition, ASTree *body) {
                      condition->instructions, test_instr, test_jmp_instr,
                      body->instructions, cond_jmp_instr, end_label);
 
-  if (saved_break != SIZE_MAX) state_push_break_id(state, saved_break);
-  if (saved_continue != SIZE_MAX) state_push_continue_id(state, saved_continue);
-
   return astree_adopt(while_, 2, condition, body);
 }
 
@@ -2263,17 +2232,6 @@ ASTree *translate_for(ASTree *for_, ASTree *initializer, ASTree *condition,
   assert(!instr_empty(initializer->instructions));
   assert(!instr_empty(condition->instructions));
   assert(!instr_empty(reinitializer->instructions));
-
-  size_t saved_break = SIZE_MAX, saved_continue = SIZE_MAX;
-  if (state_get_break_id(state) != for_->jump_id)
-    saved_break = state_get_break_id(state), state_pop_break_id(state);
-  assert(state_get_break_id(state) == for_->jump_id);
-  state_pop_break_id(state);
-
-  if (state_get_continue_id(state) != for_->jump_id)
-    saved_continue = state_get_continue_id(state), state_pop_continue_id(state);
-  assert(state_get_continue_id(state) == for_->jump_id);
-  state_pop_continue_id(state);
 
   /* unfortunately, due to the name being used and the way `for`-loops are
    * structured, the "condition" label is attached to the reinitializer
@@ -2316,33 +2274,11 @@ ASTree *translate_for(ASTree *for_, ASTree *initializer, ASTree *condition,
                        reinitializer->instructions, cond_jmp_instr, end_label);
   }
 
-  if (saved_break != SIZE_MAX) state_push_break_id(state, saved_break);
-  if (saved_continue != SIZE_MAX) state_push_continue_id(state, saved_continue);
-
   return astree_adopt(for_, 4, initializer, condition, reinitializer, body);
 }
 
 ASTree *translate_do(ASTree *do_, ASTree *body, ASTree *condition) {
   SEMCHK(condition);
-  /* fix bogus jump id information created by TOK_WHILE */
-  size_t saved_break = state_get_break_id(state);
-  state_pop_break_id(state);
-  if (state_get_break_id(state) == do_->jump_id)
-    saved_break = SIZE_MAX;
-  else
-    state_pop_break_id(state);
-  assert(state_get_break_id(state) == do_->jump_id);
-  state_pop_break_id(state);
-
-  size_t saved_continue = state_get_continue_id(state);
-  state_pop_continue_id(state);
-  if (state_get_continue_id(state) == do_->jump_id)
-    saved_continue = SIZE_MAX;
-  else
-    state_pop_continue_id(state);
-  assert(state_get_continue_id(state) == do_->jump_id);
-  state_pop_continue_id(state);
-
   Instruction *body_label = instr_init(OP_NONE);
   body_label->label = mk_stmt_label(do_->jump_id);
 
@@ -2365,9 +2301,6 @@ ASTree *translate_do(ASTree *do_, ASTree *body, ASTree *condition) {
   (void)instr_append(do_->instructions, 7, body_label, body->instructions,
                      condition_label, condition->instructions, test_instr,
                      test_jmp_instr, end_label);
-
-  if (saved_break != SIZE_MAX) state_push_break_id(state, saved_break);
-  if (saved_continue != SIZE_MAX) state_push_continue_id(state, saved_continue);
 
   return astree_adopt(do_, 2, body, condition);
 }
