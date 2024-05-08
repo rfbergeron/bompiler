@@ -351,7 +351,7 @@ ASTree *finalize_declaration(ASTree *declaration) {
   ASTree *decl_specs = astree_get(declaration, 0);
   type_destroy(decl_specs->type);
   decl_specs->type = NULL;
-  return declaration;
+  return end_translate_declaration(declaration);
 }
 
 ASTree *validate_array_size(ASTree *array, ASTree *expr) {
@@ -797,31 +797,22 @@ ASTree *declare_member(ASTree *struct_decl, ASTree *declarator) {
 /* insert symbol into table in case it appears in its own initializer */
 ASTree *prepare_init(ASTree *declaration, ASTree *declarator) {
   Symbol *symbol = validate_declaration(declaration, declarator);
-  /* emit a `nop` in case we just validated a type name */
-  if (symbol == NULL)
-    return scope_get_kind(state_peek_scope(state)) == SCOPE_FILE
-               ? astree_adopt(declaration, 1, declarator)
-               : astree_adopt(declaration, 1, translate_empty_expr(declarator));
-  assert(symbol->type = declarator->type);
-
+  assert(symbol == NULL || symbol->type == declarator->type);
   return astree_adopt(declaration, 1, declarator);
 }
 
 ASTree *declare_symbol(ASTree *declaration, ASTree *declarator) {
   Symbol *symbol = validate_declaration(declaration, declarator);
-  /* emit a `nop` in case we just validated a type name */
   if (symbol == NULL) {
-    return scope_get_kind(state_peek_scope(state)) == SCOPE_FILE
-               ? astree_adopt(declaration, 1, declarator)
-               : astree_adopt(declaration, 1, translate_empty_expr(declarator));
+    return astree_adopt(declaration, 1, declarator);
   } else if (type_is_incomplete(symbol->type) &&
              symbol->storage != STORE_TYPEDEF && symbol->linkage == LINK_NONE) {
     /* local object declaration with incomplete type */
     (void)semerr_incomplete_type(declarator, symbol->type);
     assert(scope_get_kind(state_peek_scope(state)) != SCOPE_FILE);
-    return astree_adopt(declaration, 1, translate_empty_expr(declarator));
+    return astree_adopt(declaration, 1, declarator);
   }
-  assert(symbol->type = declarator->type);
+  assert(symbol->type == declarator->type);
 
   if (symbol->linkage == LINK_NONE || symbol->info == SYM_INHERITOR)
     return translate_local_decl(declaration, declarator);

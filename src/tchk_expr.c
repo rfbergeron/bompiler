@@ -213,7 +213,6 @@ ASTree *validate_va_end(ASTree *va_end_, ASTree *expr) {
 
 ASTree *validate_va_arg(ASTree *va_arg_, ASTree *expr, ASTree *type_name) {
   ASTree *abs_decl = astree_get(type_name, 1);
-  assert(!instr_empty(abs_decl->instructions));
   expr = tchk_cexpr_conv(TCHK_STD_CONV(expr, 1));
   Type *arg_type = abs_decl->type;
   if (type_is_incomplete(arg_type)) {

@@ -2586,12 +2586,10 @@ void translate_static_scalar_init(const Type *type, ASTree *initializer) {
     set_op_imm(&instr->dest, initializer->constant.integral.signed_value, 0);
   }
 
-  if (state_get_function(state) == NULL) {
+  if (state_get_function(state) == NULL)
     (void)instr_append(initializer->instructions, 1, instr);
-  } else {
+  else
     (void)instr_append(parser_root->instructions, 1, instr);
-    (void)instr_append(initializer->instructions, 1, instr_init(OP_NOP));
-  }
 }
 
 void translate_auto_scalar_init(const Type *type, ptrdiff_t disp,
@@ -2652,8 +2650,6 @@ void translate_static_literal_init(const Type *arr_type, ASTree *literal) {
         if (arr_width > literal_length)
           static_zero_pad(arr_width - literal_length + 1,
                           parser_root->instructions);
-
-        (void)instr_append(literal->instructions, 1, instr_init(OP_NOP));
       }
 
       return;
@@ -2734,7 +2730,6 @@ static void translate_static_decl(ASTree *declarator, Symbol *symbol) {
   } else if (symbol->linkage == LINK_NONE) {
     (void)instr_append(parser_root->instructions, 5, section_instr, align_instr,
                        type_instr, size_instr, label_instr);
-    (void)instr_append(declarator->instructions, 1, instr_init(OP_NOP));
   } else { /* symbol->linkage == LINK_INT */
     assert(symbol->linkage == LINK_INT);
     (void)instr_append(declarator->instructions, 5, section_instr, align_instr,
@@ -2762,9 +2757,6 @@ ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
     (void)traverse_initializer(symbol->type, symbol->disp, initializer);
     /* append directives directly to root node */
     (void)instr_append(parser_root->instructions, 1, initializer->instructions);
-    /* propogate nop */
-    (void)instr_append(assignment->instructions, 1, declarator->instructions);
-    (void)instr_append(declaration->instructions, 1, assignment->instructions);
     return astree_adopt(declaration, 1,
                         astree_adopt(assignment, 2, declarator, initializer));
   } else if (initializer->tok_kind != TOK_INIT_LIST &&
@@ -2814,11 +2806,6 @@ ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
   if (type_is_function(declarator->type) || symbol->info == SYM_INHERITOR ||
       declarator->tok_kind == TOK_TYPE_NAME || symbol->linkage == LINK_EXT ||
       symbol->linkage == LINK_TYPEDEF) {
-    if (state_get_function(state) != NULL) {
-      (void)instr_append(declarator->instructions, 1, instr_init(OP_NOP));
-      (void)instr_append(declaration->instructions, 1,
-                         declarator->instructions);
-    }
     return astree_adopt(declaration, 1, declarator);
   } else if (symbol->storage == STORE_STAT) {
     symbol->static_id = next_static_id();
@@ -2827,14 +2814,9 @@ ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
     set_op_sym(&zero_instr->dest, symbol);
     /* append directives directly to root node */
     (void)instr_append(parser_root->instructions, 1, zero_instr);
-    /* propogate nop */
-    (void)instr_append(declaration->instructions, 1, declarator->instructions);
     return astree_adopt(declaration, 1, declarator);
   } else { /* symbol->storage == STORE_AUTO */
     assert(symbol->storage == STORE_AUTO);
-    Instruction *nop_instr = instr_init(OP_NOP);
-    (void)instr_append(declarator->instructions, 1, nop_instr);
-    (void)instr_append(declaration->instructions, 1, declarator->instructions);
     symbol->disp = assign_stack_space(symbol->type);
     return astree_adopt(declaration, 1, declarator);
   }
@@ -2843,6 +2825,12 @@ ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
 ASTree *translate_block_content(ASTree *block, ASTree *content) {
   (void)instr_append(block->instructions, 1, content->instructions);
   return astree_adopt(block, 1, content);
+}
+
+ASTree *translate_stmt_expr(ASTree *stmt_expr) {
+  if (instr_empty(stmt_expr->instructions))
+    (void)instr_append(stmt_expr->instructions, 1, instr_init(OP_NOP));
+  return stmt_expr;
 }
 
 ASTree *translate_global_init(ASTree *declaration, ASTree *assignment,
@@ -2905,6 +2893,14 @@ ASTree *translate_global_decl(ASTree *declaration, ASTree *declarator) {
   }
 
   return astree_adopt(declaration, 1, declarator);
+}
+
+ASTree *end_translate_declaration(ASTree *declaration) {
+  if (instr_empty(declaration->instructions) &&
+      scope_get_kind(state_peek_scope(state)) != SCOPE_FILE &&
+      scope_get_kind(state_peek_scope(state)) != SCOPE_MEMBER)
+    (void)instr_append(declaration->instructions, 1, instr_init(OP_NOP));
+  return declaration;
 }
 
 ASTree *begin_translate_fn(ASTree *declaration, ASTree *declarator,
