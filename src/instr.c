@@ -104,6 +104,7 @@ Instruction *instr_append(Instruction *instr, size_t count, ...) {
   for (i = 0; i < count; ++i) {
     Instruction *to_append = va_arg(args, Instruction *);
     if (to_append->opcode == OP_SENTINEL) {
+      if (instr_empty(to_append)) continue;
       Instruction *last = to_append->prev;
       last->next = where->next;
       last->next->prev = last;
@@ -114,6 +115,7 @@ Instruction *instr_append(Instruction *instr, size_t count, ...) {
 
       where = last;
     } else {
+      assert(to_append->next == NULL && to_append->prev == NULL);
       to_append->next = where->next;
       to_append->next->prev = to_append;
       where->next = to_append;

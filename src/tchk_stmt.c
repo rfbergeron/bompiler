@@ -21,7 +21,7 @@ ASTree *validate_return(ASTree *ret, ASTree *expr) {
       return translate_return(ret, expr);
     } else {
       (void)semerr_incompatible_types(ret, return_type, expr->type);
-      return translate_empty_expr(astree_adopt(ret, 1, expr));
+      return astree_adopt(ret, 1, expr);
     }
   } else if (type_is_void(return_type)) {
     return translate_return(ret, expr);
@@ -182,6 +182,10 @@ ASTree *validate_break(ASTree *break_) {
   } else {
     return translate_break(break_);
   }
+}
+
+ASTree *validate_stmt_expr(ASTree *stmt_expr) {
+  return translate_stmt_expr(stmt_expr);
 }
 
 ASTree *validate_block(ASTree *block) {

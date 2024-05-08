@@ -18,6 +18,7 @@ ASTree *validate_default(ASTree *default_, ASTree *stmt);
 ASTree *validate_goto(ASTree *goto_, ASTree *ident);
 ASTree *validate_continue(ASTree *continue_);
 ASTree *validate_break(ASTree *break_);
+ASTree *validate_stmt_expr(ASTree *stmt_expr);
 ASTree *validate_block(ASTree *block);
 ASTree *validate_block_content(ASTree *block, ASTree *block_content);
 ASTree *finalize_block(ASTree *block);
