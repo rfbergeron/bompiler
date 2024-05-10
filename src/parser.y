@@ -11,6 +11,7 @@
 #include "symtable.h"
 #include "tchk_decl.h"
 #include "tchk_expr.h"
+#include "tchk_init.h"
 #include "tchk_stmt.h"
 /* TODO(Robert): redo `init.c` (again) to allow it to insert semantic nodes;
  * either that or live with the fact that initializers work a little funny

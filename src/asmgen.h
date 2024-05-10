@@ -61,6 +61,7 @@ ASTree *translate_goto(ASTree *goto_, ASTree *ident);
 ASTree *translate_label(ASTree *label, ASTree *ident, ASTree *stmt);
 ASTree *translate_case(ASTree *case_, ASTree *expr, ASTree *stmt);
 ASTree *translate_default(ASTree *default_, ASTree *stmt);
+ASTree *translate_prepare_init(ASTree *declaration, ASTree *declarator);
 ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
                              ASTree *declarator, ASTree *initializer);
 ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator);

@@ -9,21 +9,7 @@
 #include "stdlib.h"
 
 /* TODO(Robert): make naming consistent */
-/* TODO(Robert): because init lists are hard to type check, all type checking
- * for initializers should occur in `init.c`, not here, and occurrs
- * simultaneously with code generation. currently, `traverse_initializer`
- * can't handle struct/union assignment when the initializer is not an
- * initializer list.
- *
- * in short, initialization is a mess and the code that performs it is all
- * over the place. it would be nice if it was all togther so that i don't
- * forget to do any type checking, like i did before
- */
 
-/* tags will need two passes to define their members: the first for inserting
- * the symbols into the symbol table, and the second to swipe the symbols from
- * the members and put them into an auxspec
- */
 ASTree *validate_tag_spec(ASTree *decl_specs, ASTree *tag_spec) {
   if (type_add_flags(tag_spec->type, type_get_flags(decl_specs->type))) {
     (void)semerr_incompatible_spec(decl_specs, tag_spec);
@@ -493,68 +479,6 @@ ASTree *define_dirdecl(ASTree *declarator, ASTree *dirdecl) {
   }
 }
 
-ASTree *define_symbol(ASTree *decl_list, ASTree *equal_sign,
-                      ASTree *initializer) {
-  ASTree *declarator = astree_disown(decl_list);
-  assert(declarator->tok_kind == TOK_IDENT);
-
-  if (initializer->tok_kind != TOK_INIT_LIST &&
-      (!type_is_char_array(declarator->type) ||
-       initializer->tok_kind != TOK_STRINGCON))
-    initializer = tchk_ptr_conv(initializer, 1);
-
-  Symbol *symbol;
-  (void)state_get_symbol(state, declarator->lexinfo, &symbol);
-  assert(symbol != NULL);
-  assert(symbol->type = declarator->type);
-  assert(symbol->linkage != LINK_MEMBER);
-  if (symbol->info == SYM_DEFINED) {
-    (void)semerr_redefine_symbol(declarator, symbol);
-    return astree_adopt(decl_list, 1,
-                        astree_adopt(equal_sign, 2, declarator, initializer));
-  } else if (symbol->storage == STORE_EXT) {
-    (void)semerr_define_extern(declarator);
-    return astree_adopt(decl_list, 1,
-                        astree_adopt(equal_sign, 2, declarator, initializer));
-  } else if (type_is_incomplete(symbol->type) &&
-             !type_is_deduced_array(symbol->type)) {
-    (void)semerr_not_assignable(equal_sign, symbol->type);
-    return astree_adopt(decl_list, 1,
-                        astree_adopt(equal_sign, 2, declarator, initializer));
-  } else if (initializer->tok_kind == TOK_INIT_LIST ||
-             initializer->tok_kind == TOK_STRINGCON) {
-    /*
-     * nothing to be done; let `init.c` type check
-     */
-  } else if (symbol->storage == STORE_STAT &&
-             (initializer->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT) {
-    (void)semerr_expected_init(initializer);
-    return astree_adopt(decl_list, 1,
-                        astree_adopt(equal_sign, 2, declarator, initializer));
-  } else if (!types_assignable(declarator->type, initializer->type,
-                               astree_is_const_zero(initializer))) {
-    (void)semerr_incompatible_types(equal_sign, declarator->type,
-                                    initializer->type);
-    return astree_adopt(decl_list, 1,
-                        astree_adopt(equal_sign, 2, declarator, initializer));
-  } else if (symbol->storage == STORE_AUTO) {
-    initializer = tchk_cexpr_conv(
-        tchk_scal_conv(tchk_rval_conv(initializer), declarator->type));
-  } else {
-    initializer = tchk_scal_conv(initializer, declarator->type);
-  }
-
-  assert(symbol->info == SYM_NONE);
-  symbol->info = SYM_DEFINED;
-  equal_sign->type = declarator->type;
-
-  if (symbol->linkage == LINK_NONE || symbol->info == SYM_INHERITOR)
-    return translate_local_init(decl_list, equal_sign, declarator, initializer);
-  else
-    return translate_global_init(decl_list, equal_sign, declarator,
-                                 initializer);
-}
-
 ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
   assert(declarator->tok_kind == TOK_IDENT);
   Symbol *symbol = validate_declaration(declaration, declarator);
@@ -797,8 +721,26 @@ ASTree *declare_member(ASTree *struct_decl, ASTree *declarator) {
 /* insert symbol into table in case it appears in its own initializer */
 ASTree *prepare_init(ASTree *declaration, ASTree *declarator) {
   Symbol *symbol = validate_declaration(declaration, declarator);
-  assert(symbol == NULL || symbol->type == declarator->type);
-  return astree_adopt(declaration, 1, declarator);
+
+  if (symbol == NULL) {
+    return astree_adopt(declaration, 1, declarator);
+  } else if (symbol->info == SYM_DEFINED) {
+    (void)semerr_redefine_symbol(declarator, symbol);
+    return astree_adopt(declaration, 1, declarator);
+  } else if (symbol->storage == STORE_EXT) {
+    (void)semerr_define_extern(declarator);
+    return astree_adopt(declaration, 1, declarator);
+  } else if (type_is_incomplete(symbol->type) &&
+             !type_is_deduced_array(symbol->type)) {
+    (void)semerr_not_assignable(declarator, symbol->type);
+    return astree_adopt(declaration, 1, declarator);
+  } else {
+    assert(symbol->type == declarator->type);
+    assert(symbol->info == SYM_NONE);
+    symbol->info = SYM_DEFINED;
+    /* assign stack space or generate directives */
+    return translate_prepare_init(declaration, declarator);
+  }
 }
 
 ASTree *declare_symbol(ASTree *declaration, ASTree *declarator) {

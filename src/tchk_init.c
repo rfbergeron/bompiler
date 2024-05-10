@@ -1,10 +1,11 @@
-#include "init.h"
+#include "tchk_init.h"
 
 #include "asmgen.h"
 #include "assert.h"
 #include "bcc_err.h"
+#include "bcc_types.h"
+#include "conversions.h"
 #include "state.h"
-#include "tchk_decl.h"
 
 #define MIN(x, y) ((y) < (x) ? (y) : (x))
 
@@ -14,14 +15,6 @@
 /* TODO(Robert): do not allow string literals or initializer lists to exceed
  * capacity for fixed size arrays, either here or in tchk_decl.c
  */
-/* TODO(Robert): check for excess initializers in init lists */
-/* TODO(Robert): We need a way to determine if braces have been elided from an
- * initializer. This is necessary for trying to determine if too many
- * initializers have been provided.
- */
-/* TODO(Robert): do not call `translate_empty_expr` when the initializer already
- * has its iterators set
- */
 static int init_agg_member(Type *member_type, ptrdiff_t disp, ASTree *init_list,
                            size_t *init_index);
 
@@ -30,11 +23,6 @@ static int init_scalar(const Type *type, ptrdiff_t disp, ASTree *initializer) {
   if (initializer->tok_kind == TOK_INIT_LIST) {
     if (astree_count(initializer) > 1) {
       (void)semerr_excess_init(initializer, type);
-      /* we need to get back to the parser before it is aware of the semantic
-       * error, so we need to set some iterators to make the code generator
-       * happy. this function emits a single nop and sets iterators.
-       */
-      (void)translate_empty_expr(initializer);
       return 1;
     } else {
       ASTree *real_initializer = astree_get(initializer, 0);
@@ -47,14 +35,12 @@ static int init_scalar(const Type *type, ptrdiff_t disp, ASTree *initializer) {
                                astree_is_const_zero(initializer)) &&
              !type_is_pointer(type) && initializer->tok_kind != TOK_STRINGCON) {
     (void)semerr_compat_init(initializer, type);
-    (void)translate_empty_expr(initializer);
     return 1;
   } else if (disp < 0) {
     translate_auto_scalar_init(type, disp, initializer);
     return 0;
   } else if ((initializer->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT) {
     (void)semerr_expected_init(initializer);
-    (void)translate_empty_expr(initializer);
     return 1;
   } else {
     translate_static_scalar_init(type, initializer);
@@ -73,7 +59,6 @@ static int init_literal(Type *arr_type, ptrdiff_t arr_disp, ASTree *literal) {
     arr_type->array.length = literal_length;
   } else if (literal_length - 1 > type_get_width(arr_type)) {
     (void)semerr_excess_init(literal, arr_type);
-    (void)translate_empty_expr(literal);
     return 1;
   }
 
@@ -107,10 +92,7 @@ static int init_array(Type *arr_type, ptrdiff_t arr_disp, ASTree *init_list,
   } else if (arr_disp >= 0) {
     size_t zero_count =
         (type_member_count(arr_type) - init_count) * type_get_width(elem_type);
-    if (state_get_function(state) == NULL)
-      static_zero_pad(zero_count, init_list->instructions);
-    else
-      static_zero_pad(zero_count, parser_root->instructions);
+    static_zero_pad(zero_count, init_list->instructions);
   } else {
     size_t zero_count =
         (type_member_count(arr_type) - init_count) * type_get_width(elem_type);
@@ -128,12 +110,8 @@ static int init_union(const Type *union_type, ptrdiff_t union_disp,
   int member_err =
       init_agg_member(member_type, union_disp, init_list, init_index);
   size_t zero_count = type_get_width(union_type) - type_get_width(member_type);
-  if (union_disp >= 0 && zero_count > 0) {
-    if (state_get_function(state) == NULL)
-      static_zero_pad(zero_count, init_list->instructions);
-    else
-      static_zero_pad(zero_count, parser_root->instructions);
-  }
+  if (union_disp >= 0 && zero_count > 0)
+    static_zero_pad(zero_count, init_list->instructions);
   return member_err;
 }
 
@@ -150,12 +128,8 @@ static int init_struct(const Type *struct_type, ptrdiff_t struct_disp,
     Type *member_type = member_symbol->type;
     size_t member_padding = type_get_padding(member_type, bytes_initialized);
     ptrdiff_t member_disp = struct_disp + member_symbol->disp;
-    if (member_disp >= 0 && member_padding > 0) {
-      if (state_get_function(state) == NULL)
-        static_zero_pad(member_padding, init_list->instructions);
-      else
-        static_zero_pad(member_padding, parser_root->instructions);
-    }
+    if (member_disp >= 0 && member_padding > 0)
+      static_zero_pad(member_padding, init_list->instructions);
     member_err |=
         init_agg_member(member_type, member_disp, init_list, init_index);
     bytes_initialized += member_padding + type_get_width(member_type);
@@ -166,10 +140,7 @@ static int init_struct(const Type *struct_type, ptrdiff_t struct_disp,
     return member_err;
   } else if (struct_disp >= 0) {
     size_t zero_count = type_get_width(struct_type) - bytes_initialized;
-    if (state_get_function(state) == NULL)
-      static_zero_pad(zero_count, init_list->instructions);
-    else
-      static_zero_pad(zero_count, parser_root->instructions);
+    static_zero_pad(zero_count, init_list->instructions);
   } else {
     bulk_mzero(RBP_VREG, struct_disp, bytes_initialized, struct_type,
                init_list->instructions);
@@ -178,13 +149,44 @@ static int init_struct(const Type *struct_type, ptrdiff_t struct_disp,
   return member_err;
 }
 
+static int traverse_initializer(Type *type, ptrdiff_t disp,
+                                ASTree *initializer) {
+  if (type_is_scalar(type)) {
+    return init_scalar(type, disp, initializer);
+  } else if (type_is_char_array(type) &&
+             initializer->tok_kind == TOK_STRINGCON) {
+    return init_literal(type, disp, initializer);
+  } else if (initializer->tok_kind != TOK_INIT_LIST) {
+    (void)semerr_compat_init(initializer, type);
+    return 1;
+  }
+
+  size_t init_index = 0;
+  int status;
+  if (type_is_array(type)) {
+    status = init_array(type, disp, initializer, &init_index);
+  } else if (type_is_struct(type)) {
+    status = init_struct(type, disp, initializer, &init_index);
+  } else if (type_is_union(type)) {
+    status = init_union(type, disp, initializer, &init_index);
+  } else {
+    abort();
+  }
+
+  if (status || init_index >= astree_count(initializer)) {
+    return status;
+  } else {
+    (void)semerr_excess_init(initializer, type);
+    return 1;
+  }
+}
+
 static int init_agg_member(Type *member_type, ptrdiff_t disp, ASTree *init_list,
                            size_t *init_index) {
   ASTree *initializer = astree_get(init_list, *init_index);
   if (initializer->tok_kind != TOK_INIT_LIST &&
       (initializer->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT) {
     (void)semerr_expected_init(initializer);
-    (void)translate_empty_expr(initializer);
     (void)instr_append(init_list->instructions, 1, initializer->instructions);
     ++*init_index;
     return 1;
@@ -212,41 +214,49 @@ static int init_agg_member(Type *member_type, ptrdiff_t disp, ASTree *init_list,
     return init_union(member_type, disp, init_list, init_index);
   } else {
     (void)semerr_compat_init(initializer, member_type);
-    (void)translate_empty_expr(initializer);
     ++*init_index;
     return 1;
   }
 }
 
-int traverse_initializer(Type *type, ptrdiff_t disp, ASTree *initializer) {
-  if (type_is_scalar(type)) {
-    return init_scalar(type, disp, initializer);
-  } else if (type_is_char_array(type) &&
-             initializer->tok_kind == TOK_STRINGCON) {
-    return init_literal(type, disp, initializer);
-  } else if (initializer->tok_kind != TOK_INIT_LIST) {
-    (void)semerr_compat_init(initializer, type);
-    (void)translate_empty_expr(initializer);
-    return 1;
+ASTree *define_symbol(ASTree *decl_list, ASTree *equal_sign,
+                      ASTree *initializer) {
+  ASTree *declarator = astree_disown(decl_list);
+  assert(declarator->tok_kind == TOK_IDENT);
+  equal_sign->type = declarator->type;
+
+  if (initializer->tok_kind != TOK_INIT_LIST &&
+      (!type_is_char_array(declarator->type) ||
+       initializer->tok_kind != TOK_STRINGCON))
+    initializer = tchk_ptr_conv(initializer, 1);
+
+  Symbol *symbol;
+  (void)state_get_symbol(state, declarator->lexinfo, &symbol);
+  assert(symbol != NULL);
+  assert(symbol->type = declarator->type);
+  assert(symbol->linkage != LINK_MEMBER);
+  if ((initializer->attributes & ATTR_MASK_CONST) >= ATTR_CONST_INIT ||
+      initializer->tok_kind == TOK_INIT_LIST) {
+    if (traverse_initializer(symbol->type, symbol->disp, initializer))
+      return astree_adopt(decl_list, 1,
+                          astree_adopt(equal_sign, 2, declarator, initializer));
+  } else if (symbol->storage == STORE_STAT) {
+    (void)semerr_expected_init(initializer);
+    return astree_adopt(decl_list, 1,
+                        astree_adopt(equal_sign, 2, declarator, initializer));
+  } else if (!types_assignable(declarator->type, initializer->type,
+                               astree_is_const_zero(initializer))) {
+    (void)semerr_incompatible_types(equal_sign, declarator->type,
+                                    initializer->type);
+    return astree_adopt(decl_list, 1,
+                        astree_adopt(equal_sign, 2, declarator, initializer));
+  } else {
+    initializer = tchk_scal_conv(tchk_rval_conv(initializer), declarator->type);
   }
 
-  size_t init_index = 0;
-  int status;
-  if (type_is_array(type)) {
-    status = init_array(type, disp, initializer, &init_index);
-  } else if (type_is_struct(type)) {
-    status = init_struct(type, disp, initializer, &init_index);
-  } else if (type_is_union(type)) {
-    status = init_union(type, disp, initializer, &init_index);
-  } else {
-    abort();
-  }
-
-  if (status || init_index >= astree_count(initializer)) {
-    return status;
-  } else {
-    (void)semerr_excess_init(initializer, type);
-    (void)translate_empty_expr(initializer);
-    return 1;
-  }
+  if (symbol->linkage == LINK_NONE || symbol->info == SYM_INHERITOR)
+    return translate_local_init(decl_list, equal_sign, declarator, initializer);
+  else
+    return translate_global_init(decl_list, equal_sign, declarator,
+                                 initializer);
 }

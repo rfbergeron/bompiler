@@ -15,8 +15,6 @@ ASTree *define_params(ASTree *declarator, ASTree *param_list);
 ASTree *define_array(ASTree *declarator, ASTree *array);
 ASTree *define_pointer(ASTree *declarator, ASTree *pointer);
 ASTree *define_dirdecl(ASTree *declarator, ASTree *dirdecl);
-ASTree *define_symbol(ASTree *decl_list, ASTree *equal_sign,
-                      ASTree *initializer);
 ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body);
 ASTree *validate_fnbody_content(ASTree *function, ASTree *fnbody_content);
 ASTree *finalize_function(ASTree *function);

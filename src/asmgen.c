@@ -8,7 +8,6 @@
 #include "assert.h"
 #include "astree.h"
 #include "debug.h"
-#include "init.h"
 #include "lyutils.h"
 #include "regalloc.h"
 #include "scope.h"
@@ -2519,10 +2518,7 @@ void translate_static_scalar_init(const Type *type, ASTree *initializer) {
     set_op_imm(&instr->dest, initializer->constant.integral.signed_value, 0);
   }
 
-  if (state_get_function(state) == NULL)
-    (void)instr_append(initializer->instructions, 1, instr);
-  else
-    (void)instr_append(parser_root->instructions, 1, instr);
+  (void)instr_append(initializer->instructions, 1, instr);
 }
 
 void translate_auto_scalar_init(const Type *type, ptrdiff_t disp,
@@ -2570,21 +2566,11 @@ void translate_static_literal_init(const Type *arr_type, ASTree *literal) {
                                      : instr_init(OP_ASCII);
       set_op_dir(&ascii_instr->dest, str);
 
-      if (state_get_function(state) == NULL) {
-        (void)instr_append(literal->instructions, 1, ascii_instr);
+      (void)instr_append(literal->instructions, 1, ascii_instr);
 
-        if (arr_width > literal_length)
-          /* add one for null terminator since we used `.ascii` above */
-          static_zero_pad(arr_width - literal_length + 1,
-                          literal->instructions);
-      } else {
-        (void)instr_append(parser_root->instructions, 1, ascii_instr);
-
-        if (arr_width > literal_length)
-          static_zero_pad(arr_width - literal_length + 1,
-                          parser_root->instructions);
-      }
-
+      if (arr_width > literal_length)
+        /* add one for null terminator since we used `.ascii` above */
+        static_zero_pad(arr_width - literal_length + 1, literal->instructions);
       return;
     }
   }
@@ -2660,20 +2646,47 @@ static void translate_static_decl(ASTree *declarator, Symbol *symbol) {
 
     (void)instr_append(declarator->instructions, 6, globl_instr, section_instr,
                        align_instr, type_instr, size_instr, label_instr);
-  } else if (symbol->linkage == LINK_NONE) {
-    (void)instr_append(parser_root->instructions, 5, section_instr, align_instr,
-                       type_instr, size_instr, label_instr);
-  } else { /* symbol->linkage == LINK_INT */
-    assert(symbol->linkage == LINK_INT);
+  } else { /* symbol->linkage == LINK_INT || symbol->linkage == LINK_NONE */
+    assert(symbol->linkage == LINK_INT || symbol->linkage == LINK_NONE);
     (void)instr_append(declarator->instructions, 5, section_instr, align_instr,
                        type_instr, size_instr, label_instr);
   }
 }
 
+ASTree *translate_prepare_init(ASTree *declaration, ASTree *declarator) {
+  assert(instr_empty(declarator->instructions));
+  Symbol *symbol = NULL;
+  int in_current_scope = state_get_symbol(state, declarator->lexinfo, &symbol);
+  if (symbol == NULL)
+    in_current_scope = state_get_member(state, declarator->lexinfo, &symbol);
+
+#ifdef NDEBUG
+  (void)in_current_scope;
+#endif
+  assert(symbol && in_current_scope);
+
+  if (type_is_function(declarator->type) || symbol->info == SYM_INHERITOR ||
+      declarator->tok_kind == TOK_TYPE_NAME || symbol->storage == STORE_EXT ||
+      symbol->linkage == LINK_TYPEDEF) {
+    return astree_adopt(declaration, 1, declarator);
+  } else if (symbol->storage == STORE_AUTO) {
+    assert(symbol->linkage == LINK_NONE);
+    symbol->disp = assign_stack_space(symbol->type);
+    return astree_adopt(declaration, 1, declarator);
+  } else {
+    assert(symbol->storage == STORE_STAT);
+    /* assign static id if this symbol has not appeared previously */
+    if (symbol->linkage == LINK_NONE && symbol->instructions == NULL)
+      symbol->static_id = next_static_id();
+    translate_static_decl(declarator, symbol);
+    return astree_adopt(declaration, 1, declarator);
+  }
+}
+
 ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
                              ASTree *declarator, ASTree *initializer) {
-  assert(instr_empty(declarator->instructions));
   assert(instr_empty(assignment->instructions));
+  assert(!instr_empty(initializer->instructions));
   PFDBG0('g', "Translating local initialization");
   Symbol *symbol = NULL;
   int in_current_scope = state_get_symbol(state, declarator->lexinfo, &symbol);
@@ -2683,20 +2696,19 @@ ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
   assert(in_current_scope && symbol);
   assert(symbol->linkage == LINK_NONE);
   assert(symbol->info == SYM_DEFINED);
-  assert(symbol->instructions == NULL);
 
   if (symbol->storage == STORE_STAT) {
-    translate_static_decl(declarator, symbol);
-    (void)traverse_initializer(symbol->type, symbol->disp, initializer);
+    assert(!instr_empty(declarator->instructions));
     /* append directives directly to root node */
-    (void)instr_append(parser_root->instructions, 1, initializer->instructions);
+    (void)instr_append(parser_root->instructions, 2, declarator->instructions,
+                       initializer->instructions);
     return astree_adopt(declaration, 1,
                         astree_adopt(assignment, 2, declarator, initializer));
   } else if (initializer->tok_kind != TOK_INIT_LIST &&
              initializer->tok_kind != TOK_STRINGCON &&
              (initializer->attributes & ATTR_MASK_CONST) == ATTR_CONST_NONE) {
-    symbol->disp = assign_stack_space(symbol->type);
-
+    assert(instr_empty(declarator->instructions));
+    assert(symbol->instructions == NULL);
     Instruction *lea_instr = instr_init(OP_LEA);
     set_op_ind(&lea_instr->src, symbol->disp, RBP_VREG);
     set_op_reg(&lea_instr->dest, REG_QWORD, next_vreg());
@@ -2709,12 +2721,9 @@ ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
     return astree_adopt(declaration, 1, assignment);
   } else {
     assert((initializer->attributes & ATTR_MASK_CONST) != ATTR_CONST_MAYBE);
-    symbol->disp = assign_stack_space(symbol->type);
+    assert(instr_empty(declarator->instructions));
+    assert(symbol->instructions == NULL);
 
-    (void)traverse_initializer(declarator->type, symbol->disp, initializer);
-    assert(!instr_empty(initializer->instructions));
-
-    /* declarator should have no instructions */
     (void)instr_append(assignment->instructions, 1, initializer->instructions);
     (void)instr_append(declaration->instructions, 1, assignment->instructions);
     return astree_adopt(declaration, 1,
@@ -2737,7 +2746,7 @@ ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
   assert(symbol && in_current_scope);
 
   if (type_is_function(declarator->type) || symbol->info == SYM_INHERITOR ||
-      declarator->tok_kind == TOK_TYPE_NAME || symbol->linkage == LINK_EXT ||
+      declarator->tok_kind == TOK_TYPE_NAME || symbol->storage == STORE_EXT ||
       symbol->linkage == LINK_TYPEDEF) {
     return astree_adopt(declaration, 1, declarator);
   } else if (symbol->storage == STORE_STAT) {
@@ -2746,7 +2755,8 @@ ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
     Instruction *zero_instr = instr_init(OP_ZERO);
     set_op_sym(&zero_instr->dest, symbol);
     /* append directives directly to root node */
-    (void)instr_append(parser_root->instructions, 1, zero_instr);
+    (void)instr_append(parser_root->instructions, 2, declarator->instructions,
+                       zero_instr);
     return astree_adopt(declaration, 1, declarator);
   } else { /* symbol->storage == STORE_AUTO */
     assert(symbol->storage == STORE_AUTO);
@@ -2769,16 +2779,13 @@ ASTree *translate_stmt_expr(ASTree *stmt_expr) {
 ASTree *translate_global_init(ASTree *declaration, ASTree *assignment,
                               ASTree *declarator, ASTree *initializer) {
   PFDBG0('g', "Translating global initialization");
-  assert(instr_empty(declarator->instructions));
-  assert(instr_empty(initializer->instructions));
+  assert(!instr_empty(initializer->instructions));
   Symbol *symbol = NULL;
   (void)state_get_symbol(state, declarator->lexinfo, &symbol);
 
   assert(symbol->linkage == LINK_EXT || symbol->linkage == LINK_INT);
   assert(symbol->storage == STORE_STAT);
-
-  translate_static_decl(declarator, symbol);
-  (void)traverse_initializer(symbol->type, NO_DISP, initializer);
+  assert(symbol->instructions != NULL);
 
   if (instr_prev(symbol->instructions)->opcode == OP_ZERO) {
     /* previous declaration; rewrite it */
@@ -2792,6 +2799,7 @@ ASTree *translate_global_init(ASTree *declaration, ASTree *assignment,
       assert(section_instr->opcode == OP_SECTION);
     (void)instr_append(symbol->instructions, 1, initializer->instructions);
   } else {
+    assert(!instr_empty(declarator->instructions));
     (void)instr_append(assignment->instructions, 2, declarator->instructions,
                        initializer->instructions);
     (void)instr_append(declaration->instructions, 1, assignment->instructions);
