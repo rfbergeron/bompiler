@@ -71,7 +71,6 @@ typedef struct label {
 Symbol *symbol_init(const Location *loc);
 void symbol_destroy(Symbol *symbol);
 int symbol_print(const Symbol *symbol, char *buffer);
-int symbol_is_lvalue(const Symbol *symbol);
 
 Tag *tag_init(TagKind kind);
 void tag_destroy(Tag *tag);

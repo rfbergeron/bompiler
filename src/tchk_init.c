@@ -39,7 +39,7 @@ static int init_scalar(const Type *type, ptrdiff_t disp, ASTree *initializer) {
   } else if (disp < 0) {
     translate_auto_scalar_init(type, disp, initializer);
     return 0;
-  } else if ((initializer->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT) {
+  } else if (initializer->cexpr_kind < CEXPR_INIT) {
     (void)semerr_expected_init(initializer);
     return 1;
   } else {
@@ -49,7 +49,7 @@ static int init_scalar(const Type *type, ptrdiff_t disp, ASTree *initializer) {
 }
 
 static int init_literal(Type *arr_type, ptrdiff_t arr_disp, ASTree *literal) {
-  assert((literal->attributes & ATTR_MASK_CONST) == ATTR_CONST_INIT);
+  assert(literal->cexpr_kind == CEXPR_INIT);
   assert(type_is_char_array(literal->type));
   /* size adjusted in tchk_expr */
   size_t literal_length = type_get_width(literal->type);
@@ -185,7 +185,7 @@ static int init_agg_member(Type *member_type, ptrdiff_t disp, ASTree *init_list,
                            size_t *init_index) {
   ASTree *initializer = astree_get(init_list, *init_index);
   if (initializer->tok_kind != TOK_INIT_LIST &&
-      (initializer->attributes & ATTR_MASK_CONST) < ATTR_CONST_INIT) {
+      initializer->cexpr_kind < CEXPR_INIT) {
     (void)semerr_expected_init(initializer);
     (void)instr_append(init_list->instructions, 1, initializer->instructions);
     ++*init_index;
@@ -235,7 +235,7 @@ ASTree *define_symbol(ASTree *decl_list, ASTree *equal_sign,
   assert(symbol != NULL);
   assert(symbol->type = declarator->type);
   assert(symbol->linkage != LINK_MEMBER);
-  if ((initializer->attributes & ATTR_MASK_CONST) >= ATTR_CONST_INIT ||
+  if (initializer->cexpr_kind >= CEXPR_INIT ||
       initializer->tok_kind == TOK_INIT_LIST) {
     if (traverse_initializer(symbol->type, symbol->disp, initializer))
       return astree_adopt(decl_list, 1,

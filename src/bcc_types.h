@@ -182,7 +182,6 @@ int type_is_scalar(const Type *type);
 int type_is_array(const Type *type);
 int type_is_deduced_array(const Type *type);
 int type_is_function(const Type *type);
-int type_is_object(const Type *type);
 int type_is_variadic_function(const Type *type);
 int type_is_old_style_function(const Type *type);
 int type_is_prototyped_function(const Type *type);

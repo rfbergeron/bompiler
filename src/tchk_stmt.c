@@ -149,8 +149,7 @@ ASTree *validate_case(ASTree *case_, ASTree *expr, ASTree *stmt) {
   assert(case_->case_id != SIZE_MAX);
 
   Type *case_const_spec = expr->type;
-  if (!type_is_integral(case_const_spec) ||
-      (expr->attributes & ATTR_MASK_CONST) != ATTR_CONST_INT) {
+  if (!type_is_integral(case_const_spec) || expr->cexpr_kind != CEXPR_INT) {
     (void)semerr_expected_intconst(case_, expr);
     return astree_adopt(case_, 2, expr, stmt);
   }

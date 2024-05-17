@@ -88,9 +88,9 @@ const Type *TYPE_VA_SPILL_REGION;
 extern int skip_allocator;
 extern int skip_liveness;
 
-#define SEMCHK(tree)                                                  \
-  assert(((tree)->attributes & ATTR_MASK_CONST) == ATTR_CONST_NONE && \
-         !((tree)->attributes & ATTR_EXPR_LVAL))
+#define SEMCHK(tree)                          \
+  assert((tree)->cexpr_kind == CEXPR_FALSE && \
+         astree_is_lvalue((tree)) == LVAL_FALSE)
 #define TYPCHK(left, right) assert(types_equivalent(left, right, 1, 1))
 #define WIDCHK(left, right)                         \
   assert((left)->dest.all.mode == MODE_REGISTER &&  \
@@ -556,7 +556,7 @@ ASTree *translate_empty_expr(ASTree *empty_expr) {
 }
 
 ASTree *translate_cexpr_conv(ASTree *cexpr_conv, ASTree *expr) {
-  assert((expr->attributes & ATTR_MASK_CONST) != ATTR_CONST_NONE);
+  assert(expr->cexpr_kind != CEXPR_FALSE);
   assert(instr_empty(expr->instructions) || expr->tok_kind == TOK_SIZEOF);
   Instruction *load_instr;
   if (type_is_void(expr->type)) {
@@ -596,8 +596,8 @@ static Instruction *convert_rval(const Instruction *instr, const Type *type) {
 }
 
 ASTree *translate_rval_conv(ASTree *rval_conv, ASTree *expr) {
-  assert(expr->attributes & ATTR_EXPR_LVAL);
-  assert((expr->attributes & ATTR_MASK_CONST) == ATTR_CONST_NONE);
+  assert(astree_is_lvalue(expr) != LVAL_FALSE);
+  assert(expr->cexpr_kind == CEXPR_FALSE);
   assert(!instr_empty(expr->instructions));
 
   if (type_is_scalar(expr->type))
@@ -611,8 +611,7 @@ ASTree *translate_rval_conv(ASTree *rval_conv, ASTree *expr) {
 }
 
 ASTree *translate_ptr_conv(ASTree *ptr_conv, ASTree *expr) {
-  assert(!type_is_object(expr->type));
-  assert((expr->attributes & ATTR_MASK_CONST) == ATTR_CONST_NONE);
+  assert(expr->cexpr_kind == CEXPR_FALSE);
   (void)instr_append(ptr_conv->instructions, 1, expr->instructions);
   return astree_adopt(ptr_conv, 1, expr);
 }
@@ -1531,8 +1530,8 @@ static void assign_scalar(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
 ASTree *translate_assignment(ASTree *assignment, ASTree *lvalue,
                              ASTree *rvalue) {
   SEMCHK(rvalue);
-  assert(lvalue->attributes & ATTR_EXPR_LVAL);
-  assert((lvalue->attributes & ATTR_MASK_CONST) == ATTR_CONST_NONE);
+  assert(astree_is_lvalue(lvalue) == LVAL_MODABLE);
+  assert(lvalue->cexpr_kind == CEXPR_FALSE);
   PFDBG0('g', "Translating assignment");
   if (type_is_union(assignment->type) || type_is_struct(assignment->type)) {
     assign_aggregate(assignment, lvalue, rvalue);
@@ -2524,7 +2523,7 @@ void translate_static_scalar_init(const Type *type, ASTree *initializer) {
 void translate_auto_scalar_init(const Type *type, ptrdiff_t disp,
                                 ASTree *initializer) {
   assert(instr_empty(initializer->instructions));
-  assert((initializer->attributes & ATTR_MASK_CONST) >= ATTR_CONST_INIT);
+  assert(initializer->cexpr_kind >= CEXPR_INIT);
   Instruction *load_instr;
   if (initializer->constant.label != NULL) {
     load_instr = instr_init(OP_LEA);
@@ -2706,7 +2705,7 @@ ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
                         astree_adopt(assignment, 2, declarator, initializer));
   } else if (initializer->tok_kind != TOK_INIT_LIST &&
              initializer->tok_kind != TOK_STRINGCON &&
-             (initializer->attributes & ATTR_MASK_CONST) == ATTR_CONST_NONE) {
+             initializer->cexpr_kind == CEXPR_FALSE) {
     assert(instr_empty(declarator->instructions));
     assert(symbol->instructions == NULL);
     Instruction *lea_instr = instr_init(OP_LEA);
@@ -2720,7 +2719,7 @@ ASTree *translate_local_init(ASTree *declaration, ASTree *assignment,
     /* `translate_assignment` performs adoption for subtree */
     return astree_adopt(declaration, 1, assignment);
   } else {
-    assert((initializer->attributes & ATTR_MASK_CONST) != ATTR_CONST_MAYBE);
+    assert(initializer->cexpr_kind != CEXPR_MAYBE);
     assert(instr_empty(declarator->instructions));
     assert(symbol->instructions == NULL);
 

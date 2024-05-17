@@ -102,6 +102,10 @@ ASTree *validate_stringcon(ASTree *stringcon) {
 }
 
 ASTree *validate_ident(ASTree *ident) {
+  /* TODO(Robert): ensure that it is syntactically impossible for typedef names
+   * to be used as primary expressions
+   */
+  assert(ident->tok_kind == TOK_IDENT);
   PFDBG0('t', "Attempting to assign a type");
   const char *id_str = ident->lexinfo;
   Symbol *symbol = NULL;
@@ -109,7 +113,6 @@ ASTree *validate_ident(ASTree *ident) {
   if (symbol != NULL && symbol->info != SYM_HIDDEN) {
     PFDBG1('t', "Assigning %s a symbol", id_str);
     ident->type = symbol->type;
-    if (symbol_is_lvalue(symbol)) ident->attributes |= ATTR_EXPR_LVAL;
     return evaluate_ident(ident);
   } else {
     (void)semerr_symbol_not_found(ident);
@@ -467,7 +470,7 @@ ASTree *validate_bitwise(ASTree *operator, ASTree * left, ASTree *right) {
 
 ASTree *validate_increment(ASTree *operator, ASTree * operand) {
   operand = tchk_ptr_conv(operand, 0);
-  if (!(operand->attributes & ATTR_EXPR_LVAL)) {
+  if (astree_is_lvalue(operand) != LVAL_MODABLE) {
     (void)semerr_expected_lvalue(operator, operand);
     return astree_adopt(operator, 1, operand);
   } else if (type_is_pointer(operand->type)) {
@@ -534,8 +537,6 @@ static ASTree *validate_indirection(ASTree *indirection, ASTree *operand) {
   operand = TCHK_STD_CONV(operand, 1);
   if (type_is_pointer(operand->type)) {
     indirection->type = type_strip_declarator(operand->type);
-    if (type_is_object(indirection->type))
-      indirection->attributes |= ATTR_EXPR_LVAL;
     operand = tchk_cexpr_conv(operand);
     return translate_indirection(indirection, operand);
   } else {
@@ -545,14 +546,14 @@ static ASTree *validate_indirection(ASTree *indirection, ASTree *operand) {
 }
 
 static ASTree *validate_addrof(ASTree *addrof, ASTree *operand) {
-  if (type_is_object(operand->type) &&
-      !(operand->attributes & ATTR_EXPR_LVAL)) {
-    (void)semerr_expected_lvalue(addrof, operand);
-    return astree_adopt(addrof, 1, operand);
-  } else {
+  if (astree_is_lvalue(operand) != LVAL_FALSE ||
+      type_is_function(operand->type)) {
     addrof->type = type_init_pointer(QUAL_FLAG_NONE);
     (void)type_append(addrof->type, operand->type, 0);
     return evaluate_addrof(addrof, operand);
+  } else {
+    (void)semerr_expected_lvalue(addrof, operand);
+    return astree_adopt(addrof, 1, operand);
   }
 }
 
@@ -612,8 +613,6 @@ ASTree *validate_subscript(ASTree *subscript, ASTree *pointer, ASTree *index) {
   } else {
     index = tchk_disp_conv(index, pointer->type);
     subscript->type = type_strip_declarator(pointer->type);
-    if (type_is_object(subscript->type))
-      subscript->attributes |= ATTR_EXPR_LVAL;
     return evaluate_subscript(subscript, pointer, index);
   }
 }
@@ -641,8 +640,6 @@ ASTree *validate_reference(ASTree *reference, ASTree *struct_, ASTree *member) {
     return astree_adopt(reference, 2, struct_, member);
   } else {
     reference->type = member_symbol->type;
-    if (type_is_object(reference->type))
-      reference->attributes |= ATTR_EXPR_LVAL;
     return evaluate_reference(reference, struct_, member);
   }
 }
@@ -653,11 +650,8 @@ ASTree *validate_assignment(ASTree *assignment, ASTree *dest, ASTree *src) {
    */
   src = TCHK_STD_CONV(src, 1);
   dest = tchk_ptr_conv(dest, 0);
-  if (type_is_incomplete(dest->type) || type_is_const(dest->type)) {
+  if (astree_is_lvalue(dest) != LVAL_MODABLE) {
     (void)semerr_not_assignable(assignment, dest->type);
-    return astree_adopt(assignment, 2, dest, src);
-  } else if (!(dest->attributes & ATTR_EXPR_LVAL)) {
-    (void)semerr_expected_lvalue(assignment, dest);
     return astree_adopt(assignment, 2, dest, src);
   } else {
     switch (assignment->tok_kind) {

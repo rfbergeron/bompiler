@@ -307,7 +307,6 @@ static Symbol *validate_declaration(ASTree *declaration, ASTree *declarator) {
       state_insert_member(state, identifier, symbol);
     else
       state_insert_symbol(state, identifier, symbol);
-    if (symbol_is_lvalue(symbol)) declarator->attributes |= ATTR_EXPR_LVAL;
     /* reassign type information in case it was replaced */
     if (symbol->info == SYM_INHERITOR) declarator->type = symbol->type;
     return symbol;
@@ -341,8 +340,7 @@ ASTree *finalize_declaration(ASTree *declaration) {
 }
 
 ASTree *validate_array_size(ASTree *array, ASTree *expr) {
-  if (!type_is_integral(expr->type) ||
-      (expr->attributes & ATTR_MASK_CONST) != ATTR_CONST_INT ||
+  if (!type_is_integral(expr->type) || expr->cexpr_kind != CEXPR_INT ||
       astree_is_const_zero(expr))
     (void)semerr_invalid_arr_size(array, expr);
   return astree_adopt(array, 1, expr);
@@ -691,7 +689,7 @@ ASTree *define_enumerator(ASTree *enum_spec, ASTree *enum_id,
   Tag *tag = symbol->type->tag.value;
   if (equal_sign == NULL) {
     tag_add_constant(tag, id_str, tag_last_constant(tag) + 1);
-  } else if ((expr->attributes & ATTR_MASK_CONST) != ATTR_CONST_INT) {
+  } else if (expr->cexpr_kind != CEXPR_INT) {
     (void)semerr_expected_const(equal_sign, expr);
   } else if (type_is_unsigned(expr->type)) {
     tag_add_constant(tag, id_str, expr->constant.integral.unsigned_value);

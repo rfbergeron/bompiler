@@ -354,10 +354,6 @@ int type_is_function(const Type *type) {
   return type->any.code == TYPE_CODE_FUNCTION;
 }
 
-int type_is_object(const Type *type) {
-  return !type_is_function(type) && !type_is_array(type);
-}
-
 int type_is_variadic_function(const Type *type) {
   return type->any.code == TYPE_CODE_FUNCTION && type->function.is_variadic;
 }

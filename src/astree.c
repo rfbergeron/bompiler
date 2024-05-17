@@ -10,6 +10,7 @@
 #include "debug.h"
 #include "evaluate.h"
 #include "lyutils.h"
+#include "state.h"
 #include "strset.h"
 #include "symtable.h"
 #include "yyparse.h"
@@ -26,8 +27,9 @@ extern void mock_assert(const int result, const char *const expression,
 #define assert(expression) \
   mock_assert((int)(expression), #expression, __FILE__, __LINE__);
 #else
-static const char attr_map[][16] = {"LVAL", "DEFAULT", "CONST", "INITIALIZER",
-                                    "ADDRESS"};
+static const char *const cexpr_map[] = {"FALSE", "MAYBE", "INITIALIZER",
+                                        "INTEGRAL"};
+static const char *const lval_map[] = {"FALSE", "TRUE", "MODIFIABLE", "N/A"};
 #endif
 
 /* extern int skip_type_check; */
@@ -71,7 +73,7 @@ ASTree *astree_init(int tok_kind, const Location location, const char *info) {
   tree->lexinfo = string_set_intern(info);
   tree->loc = location;
   tree->type = NULL;
-  tree->attributes = ATTR_NONE;
+  tree->cexpr_kind = CEXPR_FALSE;
   tree->instructions = instr_init(OP_SENTINEL);
   tree->spill_eightbytes = 0;
   ARR_INIT(tree->children, 1);
@@ -167,30 +169,34 @@ ASTree *astree_disown(ASTree *parent) {
 size_t astree_count(const ASTree *parent) { return ARR_LEN(parent->children); }
 
 int astree_is_const_zero(const ASTree *tree) {
-  return (tree->attributes & ATTR_MASK_CONST) >= ATTR_CONST_INIT &&
-         type_is_integral(tree->type) &&
+  return tree->cexpr_kind >= CEXPR_INIT && type_is_integral(tree->type) &&
          (type_is_signed(tree->type) || type_is_enum(tree->type)
               ? tree->constant.integral.signed_value == 0
               : tree->constant.integral.unsigned_value == 0);
 }
 
-#ifndef UNIT_TESTING
-static int attributes_to_string(const unsigned int attributes, char *buf) {
-  if (attributes == ATTR_NONE) {
-    buf[0] = 0;
-    return 0;
+LValKind astree_is_lvalue(const ASTree *tree) {
+  if (tree->type == NULL) {
+    return LVAL_FALSE;
+  } else if (tree->cexpr_kind >= CEXPR_INIT) {
+    return LVAL_FALSE;
+  } else if (tree->tok_kind == TOK_CEXPR_CONV) {
+    return astree_is_lvalue(astree_get(tree, 0));
+  } else if (tree->tok_kind != TOK_IDENT && tree->tok_kind != TOK_INDIRECTION &&
+             tree->tok_kind != TOK_SUBSCRIPT && tree->tok_kind != TOK_IDENT &&
+             tree->tok_kind != TOK_ARROW && tree->tok_kind != '.') {
+    return LVAL_FALSE;
+  } else if (type_is_function(tree->type)) {
+    return LVAL_FALSE;
+  } else if (type_is_array(tree->type) || type_is_incomplete(tree->type) ||
+             type_is_const(tree->type)) {
+    return LVAL_TRUE;
+  } else {
+    return LVAL_MODABLE;
   }
-
-  size_t i, buf_index = 0;
-  for (i = 0; i < NUM_ATTRIBUTES; ++i) {
-    if (attributes & (1 << i))
-      buf_index += sprintf(buf + buf_index, "%s ", attr_map[i]);
-  }
-
-  if (buf_index > 0) buf[buf_index - 1] = 0;
-  return 0;
 }
 
+#ifndef UNIT_TESTING
 int astree_to_string(const ASTree *tree, char *buffer) {
   static char locstr[LINESIZE], attrstr[LINESIZE], typestr[LINESIZE];
   /* print token name, lexinfo in quotes, the location, block number,
@@ -201,13 +207,16 @@ int astree_to_string(const ASTree *tree, char *buffer) {
   const char *tname = parser_get_tname(tree->tok_kind);
   int characters_printed = location_to_string(&tree->loc, locstr);
   if (characters_printed < 0) return characters_printed;
-  characters_printed = attributes_to_string(tree->attributes, attrstr);
+  characters_printed =
+      sprintf(attrstr, "CEXPR: %s LVAL: %s", cexpr_map[tree->cexpr_kind],
+              lval_map[astree_is_lvalue(tree)]);
+
   if (characters_printed < 0) return characters_printed;
   characters_printed = type_to_str(tree->type, typestr);
   if (characters_printed < 0) return characters_printed;
 
   if (strlen(tname) > 4) tname += 4;
-  if ((tree->attributes & ATTR_MASK_CONST) >= ATTR_CONST_INIT) {
+  if (tree->cexpr_kind >= CEXPR_INIT) {
     if (tree->constant.label != NULL) {
       return sprintf(buffer, "%s \"%s\" {%s} {%s} {%s} { %s%+li }", tname,
                      tree->lexinfo, locstr, typestr, attrstr,

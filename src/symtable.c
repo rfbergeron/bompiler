@@ -92,11 +92,6 @@ int symbol_print(const Symbol *symbol, char *buffer) {
 }
 #endif
 
-int symbol_is_lvalue(const Symbol *symbol) {
-  return type_is_object(symbol->type) && symbol->linkage < LINK_TYPEDEF &&
-         symbol->storage < STORE_TYPEDEF;
-}
-
 /* neighborhood size and starting map size. if we started the map at a smaller
  * size, virtual buckets would overlap, resulting in errors
  */
