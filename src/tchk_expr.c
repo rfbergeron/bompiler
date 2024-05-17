@@ -301,17 +301,27 @@ ASTree *validate_comma(ASTree *comma, ASTree *left, ASTree *right) {
   return evaluate_comma(comma, left, right);
 }
 
-/* TODO(Robert): allow casting void to void */
 ASTree *validate_cast(ASTree *cast, ASTree *declaration, ASTree *expr) {
   expr = TCHK_STD_CONV(expr, 1);
   ASTree *type_name = astree_get(declaration, 1);
-  if (!(type_is_scalar(type_name->type) || type_is_void(type_name->type)) ||
-      !type_is_scalar(expr->type)) {
-    (void)semerr_incompatible_types(cast, type_name->type, expr->type);
+  if (type_is_incomplete(type_name->type) && !type_is_void(type_name->type)) {
+    (void)semerr_incomplete_type(cast, type_name->type);
     return astree_adopt(cast, 2, declaration, expr);
-  } else {
+  } else if (type_is_incomplete(expr->type) && !type_is_void(expr->type)) {
+    (void)semerr_incomplete_type(cast, expr->type);
+    return astree_adopt(cast, 2, declaration, expr);
+  } else if ((type_is_integral(expr->type) &&
+              type_is_scalar(type_name->type)) ||
+             (type_is_pointer(expr->type) &&
+              type_is_integral(type_name->type)) ||
+             (type_is_pointer(expr->type) &&
+              type_is_pointer(type_name->type)) ||
+             type_is_void(type_name->type)) {
     cast->type = type_name->type;
     return evaluate_cast(astree_adopt(cast, 1, declaration), expr);
+  } else {
+    (void)semerr_incompatible_types(cast, type_name->type, expr->type);
+    return astree_adopt(cast, 2, declaration, expr);
   }
 }
 

@@ -47,7 +47,10 @@ union astree {
 };
 
 int main(int argc, char **argv) {
-  argc;
-  argv;
+  static char balls[69];
+  static struct typespec tspec;
+  (void)argc, (void)argv;
+  static union astree foo = {{2, balls, ((void*)0), 0, &tspec, 0 }};
+  (void)foo;
   return 0;
 }

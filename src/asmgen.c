@@ -624,17 +624,14 @@ ASTree *translate_ptr_conv(ASTree *ptr_conv, ASTree *expr) {
  * any unsigned int -> any wider int: movz
  * any int -> any narrower int: simple mov
  * any int -> any int of same width: nop
- */
-/* NOTE: all casts are semantically valid unless one of the following is true:
- * - the source type is a struct, union, or function
- * - the destination type is a struct, union, function or array
- * - the source type is void and the destination type is not void
+ * anything -> void: nop
+ *
+ * also, this function is poorly named; it can also "convert" aggregates to void
  */
 static Instruction *convert_scalar(const Instruction *instr,
                                    const Type *to_type, const Type *from_type) {
-  assert(type_is_scalar(from_type) ||
-         (type_is_void(from_type) && type_is_void(from_type)));
-  assert(type_is_scalar(to_type) || type_is_void(to_type));
+  assert((type_is_scalar(from_type) && type_is_scalar(to_type)) ||
+         type_is_void(to_type));
   assert(instr->dest.all.mode == MODE_REGISTER);
 
   size_t from_width = type_get_width(from_type);
