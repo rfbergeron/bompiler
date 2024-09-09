@@ -18,6 +18,8 @@
 #define X64_SIZEOF_LONG_DOUBLE ((size_t)16UL)
 #define X64_ALIGNOF_LONG_DOUBLE ((size_t)16UL)
 
+#define BCC_DEDUCE_ARR ((size_t)0UL)
+
 typedef enum type_code {
   TYPE_CODE_NONE,
   TYPE_CODE_BASE,
@@ -120,14 +122,12 @@ union type {
   } pointer;
   struct {
     TypeCode code;
-    int deduce_length;
     Type *next;
     size_t length;
   } array;
   struct {
     TypeCode code;
-    short is_variadic;
-    short is_old_style;
+    int variadic;
     Type *next;
     size_t parameters_size;
     Type **parameters;
@@ -160,9 +160,9 @@ void type_init_globals(void);
 
 Type *type_init_none(unsigned int flags);
 Type *type_init_pointer(unsigned int qualifiers);
-Type *type_init_array(size_t length, int deduce_length);
+Type *type_init_array(size_t length);
 Type *type_init_function(size_t parameters_size, Type **parameters,
-                         int is_variadic, int is_old_style);
+                         int variadic);
 Type *type_init_tag(unsigned int flags, const char *tag_name, union tag *tag);
 Type *type_init_base(unsigned int flags);
 
@@ -183,8 +183,6 @@ int type_is_array(const Type *type);
 int type_is_deduced_array(const Type *type);
 int type_is_function(const Type *type);
 int type_is_variadic_function(const Type *type);
-int type_is_old_style_function(const Type *type);
-int type_is_prototyped_function(const Type *type);
 int type_is_void_pointer(const Type *type);
 int type_is_function_pointer(const Type *type);
 int type_is_struct(const Type *type);
@@ -213,8 +211,7 @@ size_t type_elem_width(const Type *type);
 size_t type_get_eightbytes(const Type *type);
 size_t type_get_padding(const Type *type, size_t to_pad);
 unsigned int type_get_flags(const Type *type);
-int types_equivalent(const Type *type1, const Type *type2,
-                     int ignore_qualifiers, int ignore_storage_class);
+int types_compatible(const Type *type1, const Type *type2, int qualified);
 int types_assignable(const Type *dest, const Type *src, int is_const_zero);
 
 Type *type_strip_declarator(const Type *type);
@@ -227,7 +224,6 @@ int type_normalize(Type *type);
 int type_validate(const Type *type);
 Type *type_pointer_conversions(Type *type);
 Type *type_arithmetic_conversions(Type *type1, Type *type2);
-int type_complete_array(Type *type1, Type *type2);
-int type_prototype_function(Type *type1, Type *type2);
+int type_compose(Type *dest, Type *src, int qualified);
 
 #endif

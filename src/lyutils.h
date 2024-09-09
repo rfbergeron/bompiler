@@ -19,8 +19,7 @@ typedef struct location {
   size_t blocknr;
 } Location;
 
-#define LOC_EMPTY_VALUE \
-  { 0, 0, 0, 0 }
+#define LOC_EMPTY_VALUE {0, 0, 0, 0}
 
 extern const Location LOC_EMPTY;
 

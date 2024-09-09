@@ -310,11 +310,12 @@ static Symbol *validate_declaration(ASTree *declaration, ASTree *declarator) {
     /* reassign type information in case it was replaced */
     if (symbol->info == SYM_INHERITOR) declarator->type = symbol->type;
     return symbol;
-  } else if (!linkage_valid(exists, symbol->linkage) ||
-             !(types_equivalent(exists->type, declarator->type, 0, 1) ||
-               type_complete_array(exists->type, declarator->type) ||
-               type_prototype_function(exists->type, declarator->type))) {
+  } else if (!linkage_valid(exists, symbol->linkage)) {
     (void)semerr_incompatible_linkage(declarator, exists, symbol);
+    symbol_destroy(symbol);
+    return NULL;
+  } else if (type_compose(exists->type, declarator->type, 1)) {
+    (void)semerr_incompatible_types(declarator, exists->type, declarator->type);
     symbol_destroy(symbol);
     return NULL;
   } else {
@@ -395,17 +396,17 @@ ASTree *finalize_param_list(ASTree *param_list, ASTree *optional) {
 
 ASTree *define_params(ASTree *declarator, ASTree *param_list) {
   size_t parameters_size = astree_count(param_list);
-  int is_variadic = 0, is_old_style = 0;
+  int variadic = 0;
   Type **parameters;
   if (parameters_size == 0) {
-    is_variadic = 1, is_old_style = 1, parameters = NULL;
+    variadic = 1, parameters = NULL;
   } else if (astree_get(param_list, 0)->tok_kind == TOK_VOID) {
     parameters = NULL, parameters_size = 0;
   } else {
     parameters = malloc(parameters_size * sizeof(Type *));
     if (astree_get(param_list, parameters_size - 1)->tok_kind == TOK_ELLIPSIS) {
       --parameters_size;
-      is_variadic = 1;
+      variadic = 1;
     }
     size_t i;
     for (i = 0; i < parameters_size; ++i) {
@@ -415,8 +416,8 @@ ASTree *define_params(ASTree *declarator, ASTree *param_list) {
     }
   }
 
-  Type *function_type = type_init_function(parameters_size, parameters,
-                                           is_variadic, is_old_style);
+  Type *function_type =
+      type_init_function(parameters_size, parameters, variadic);
   if (declarator->type != NULL) {
     (void)type_append(declarator->type, function_type, 0);
   } else {
@@ -428,13 +429,13 @@ ASTree *define_params(ASTree *declarator, ASTree *param_list) {
 ASTree *define_array(ASTree *declarator, ASTree *array) {
   Type *array_type;
   if (astree_count(array) == 0)
-    array_type = type_init_array(0, 1);
+    array_type = type_init_array(BCC_DEDUCE_ARR);
   else if (type_is_unsigned(astree_get(array, 0)->type))
-    array_type = type_init_array(
-        astree_get(array, 0)->constant.integral.unsigned_value, 0);
+    array_type =
+        type_init_array(astree_get(array, 0)->constant.integral.unsigned_value);
   else
-    array_type = type_init_array(
-        astree_get(array, 0)->constant.integral.signed_value, 0);
+    array_type =
+        type_init_array(astree_get(array, 0)->constant.integral.signed_value);
 
   if (declarator->type != NULL) {
     (void)type_append(declarator->type, array_type, 0);

@@ -150,7 +150,7 @@
                                            size_t empty_index) {               \
     size_t neighbor_index = SIZE_MAX, home_index = SIZE_MAX;                   \
     size_t offset;                                                             \
-    for (offset = (NEIGHBORHOOD_SIZE)-1; offset > 0; --offset) {               \
+    for (offset = (NEIGHBORHOOD_SIZE) - 1; offset > 0; --offset) {             \
       home_index = TABOE_FN(fn_pfx, helper)(table, empty_index, offset);       \
       if (home_index != SIZE_MAX) {                                            \
         neighbor_index = (empty_index - offset) & (table->size - 1);           \

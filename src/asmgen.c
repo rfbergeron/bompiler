@@ -91,7 +91,8 @@ extern int skip_liveness;
 #define SEMCHK(tree)                          \
   assert((tree)->cexpr_kind == CEXPR_FALSE && \
          astree_is_lvalue((tree)) == LVAL_FALSE)
-#define TYPCHK(left, right) assert(types_equivalent(left, right, 1, 1))
+#define TYPCHK(left, right) \
+  assert(types_compatible(left, right, 0) || types_assignable(left, right, 0))
 #define WIDCHK(left, right)                         \
   assert((left)->dest.all.mode == MODE_REGISTER &&  \
          (right)->dest.all.mode == MODE_REGISTER && \
@@ -1095,9 +1096,9 @@ ASTree *translate_addition(ASTree *operator, ASTree * left, ASTree *right) {
  */
 static void multiply_helper(ASTree *operator, ASTree * left, ASTree *right) {
   Instruction *lvalue_instr, *conv_instr, *left_instr;
-  if (operator->tok_kind == TOK_MULEQ ||
-      operator->tok_kind == TOK_DIVEQ ||
-      operator->tok_kind == TOK_REMEQ) {
+  if (operator->tok_kind ==
+      TOK_MULEQ || operator->tok_kind == TOK_DIVEQ || operator->tok_kind ==
+      TOK_REMEQ) {
     lvalue_instr = instr_prev(left->instructions);
     assert(lvalue_instr->dest.all.mode == MODE_REGISTER);
     assert(lvalue_instr->dest.reg.width == REG_QWORD);

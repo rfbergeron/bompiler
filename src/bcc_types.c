@@ -66,23 +66,21 @@ Type *type_init_pointer(unsigned int qualifiers) {
   return type;
 }
 
-Type *type_init_array(size_t length, int deduce_length) {
+Type *type_init_array(size_t length) {
   Type *type = malloc(sizeof(Type));
   type->array.code = TYPE_CODE_ARRAY;
   type->array.length = length;
-  type->array.deduce_length = deduce_length;
   type->array.next = NULL;
   return type;
 }
 
 Type *type_init_function(size_t parameters_size, Type **parameters,
-                         int is_variadic, int is_old_style) {
+                         int variadic) {
   Type *type = malloc(sizeof(Type));
   type->function.code = TYPE_CODE_FUNCTION;
   type->function.parameters_size = parameters_size;
   type->function.parameters = parameters;
-  type->function.is_variadic = is_variadic;
-  type->function.is_old_style = is_old_style;
+  type->function.variadic = variadic;
   type->function.next = NULL;
   return type;
 }
@@ -265,9 +263,9 @@ int type_to_str(const Type *type, char *buf) {
         current = NULL;
         break;
       case TYPE_CODE_FUNCTION:
-        if (current->function.is_variadic)
+        if (current->function.variadic)
           ret += sprintf(buf + ret, "variadic function with parameters (");
-        else if (!current->function.is_old_style &&
+        else if (!current->function.variadic &&
                  current->function.parameters_size == 0)
           ret += sprintf(buf + ret, "function with parameters (void");
         else
@@ -281,9 +279,8 @@ int type_to_str(const Type *type, char *buf) {
         current = current->function.next;
         break;
       case TYPE_CODE_ARRAY:
-        if (current->array.deduce_length)
-          ret += sprintf(buf + ret, "array of deduced size %lu of ",
-                         current->array.length);
+        if (current->array.length == BCC_DEDUCE_ARR)
+          ret += sprintf(buf + ret, "array of deduced size of ");
         else
           ret += sprintf(buf + ret, "array of size %lu of ",
                          current->array.length);
@@ -347,7 +344,8 @@ int type_is_array(const Type *type) {
 }
 
 int type_is_deduced_array(const Type *type) {
-  return type->any.code == TYPE_CODE_ARRAY && type->array.deduce_length;
+  return type->any.code == TYPE_CODE_ARRAY &&
+         type->array.length == BCC_DEDUCE_ARR;
 }
 
 int type_is_function(const Type *type) {
@@ -355,28 +353,18 @@ int type_is_function(const Type *type) {
 }
 
 int type_is_variadic_function(const Type *type) {
-  return type->any.code == TYPE_CODE_FUNCTION && type->function.is_variadic;
+  return type->any.code == TYPE_CODE_FUNCTION && type->function.variadic;
 }
 
-int type_is_old_style_function(const Type *type) {
-  return type->any.code == TYPE_CODE_FUNCTION && type->function.is_old_style;
-}
-
-/* determines (in a roundabout way) whether or not a function has a prototype
- * yet. this exists so that the compiler can check to see if a function that
- * was at first declared without a prototype has since been given one.
- *
- * the logic is as follows:
- * - unprototyped functions initially have the `is_variadic` and `is_old_style`
- *   flags set, with zero parameters. this is the only way for a function to be
- *   variadic with no parameters
- * - when the function is given a prototype, either the `is_variadic` flag will
- *   be cleared, or the function will have parameters
+/* according to the standard, variadic functions must have at least one named
+ * parameter. unprototyped functions can accept any number of parameters of any
+ * type; they are effectively variadic functions with zero named parameters,
+ * which is how they are represented internally here and is also how we identify
+ * unprototyped functions
  */
-int type_is_prototyped_function(const Type *type) {
-  return type->any.code == TYPE_CODE_FUNCTION &&
-         (!type->function.is_old_style || !type->function.is_variadic ||
-          type_param_count(type) > 0);
+int type_is_old_function(const Type *type) {
+  return type->any.code == TYPE_CODE_FUNCTION && type->function.variadic &&
+         type->function.parameters_size == 0;
 }
 
 int type_is_void_pointer(const Type *type) {
@@ -480,7 +468,7 @@ int type_is_none(const Type *type) { return type->any.code == TYPE_CODE_NONE; }
 int type_is_incomplete(const Type *type) {
   if (type_is_void(type) || type_is_none(type)) {
     return 1;
-  } else if (type_is_deduced_array(type) && type->array.length == 0) {
+  } else if (type_is_deduced_array(type)) {
     return 1;
   } else if ((type_is_union(type) || type_is_struct(type)) &&
              !type->tag.value->record.defined) {
@@ -510,7 +498,7 @@ size_t type_member_count(const Type *type) {
     case TYPE_CODE_STRUCT:
       return scope_member_count(type->tag.value->record.members);
     case TYPE_CODE_ARRAY:
-      if (type->array.deduce_length && type->array.length == 0)
+      if (type->array.length == BCC_DEDUCE_ARR)
         return SIZE_MAX;
       else
         return type->array.length;
@@ -687,82 +675,68 @@ unsigned int type_get_flags(const Type *type) {
   }
 }
 
-static int params_equivalent(const Type *type1, const Type *type2) {
+static int params_compatible(const Type *type1, const Type *type2) {
   assert(type_is_function(type1) && type_is_function(type2));
-  if (type1->function.parameters_size != type2->function.parameters_size)
+  if ((type1->function.parameters_size == 0 && type1->function.variadic) ||
+      (type2->function.parameters_size == 0 && type2->function.variadic))
+    return 1;
+  else if (type1->function.parameters_size != type2->function.parameters_size)
     return 0;
-  else if (type1->function.is_variadic != type2->function.is_variadic)
+  else if (type1->function.variadic != type2->function.variadic)
     return 0;
   size_t i;
-  for (i = 0; i < type1->function.parameters_size; ++i) {
-    if (!types_equivalent(type1->function.parameters[i],
-                          type2->function.parameters[i], 0, 1))
+  for (i = 0; i < type1->function.parameters_size; ++i)
+    if (!types_compatible(type1->function.parameters[i],
+                          type2->function.parameters[i], 0))
       return 0;
-  }
   return 1;
 }
 
-int types_equivalent(const Type *type1, const Type *type2,
-                     int ignore_qualifiers, int ignore_storage_class) {
+int types_compatible(const Type *type1, const Type *type2, int qualified) {
   if (type1->any.code != type2->any.code) return 0;
   switch (type1->any.code) {
-    Type *stripped_type1, *stripped_type2;
-    unsigned int flags_diff;
     case TYPE_CODE_NONE:
       /* fallthrough */
     case TYPE_CODE_BASE:
-      flags_diff = type1->base.flags ^ type2->base.flags;
-      if (ignore_qualifiers) flags_diff &= ~QUAL_FLAG_MASK;
-      if (ignore_storage_class) flags_diff &= ~STOR_FLAG_MASK;
-      return !flags_diff;
+      return ((type1->base.flags ^ type2->base.flags) &
+              (qualified ? ~STOR_FLAG_MASK : SPEC_FLAG_MASK)) == 0;
     case TYPE_CODE_STRUCT:
       /* fallthrough */
     case TYPE_CODE_UNION:
       /* fallthrough */
     case TYPE_CODE_ENUM:
-      flags_diff = type1->tag.flags ^ type2->tag.flags;
-      if (ignore_qualifiers) flags_diff &= ~QUAL_FLAG_MASK;
-      if (ignore_storage_class) flags_diff &= ~STOR_FLAG_MASK;
-      return !flags_diff && type1->tag.name == type2->tag.name &&
+      return (!qualified ||
+              ((type1->tag.flags ^ type2->tag.flags) & SPEC_FLAG_MASK) == 0) &&
              type1->tag.value == type2->tag.value;
     case TYPE_CODE_POINTER:
-      stripped_type1 = type_strip_declarator(type1);
-      stripped_type2 = type_strip_declarator(type2);
-      if (!ignore_qualifiers &&
-          type1->pointer.qualifiers != type2->pointer.qualifiers)
-        return 0;
-      else
-        return types_equivalent(stripped_type1, stripped_type2,
-                                ignore_qualifiers, ignore_storage_class);
+      return (!qualified ||
+              type1->pointer.qualifiers == type2->pointer.qualifiers) &&
+             types_compatible(type_strip_declarator(type1),
+                              type_strip_declarator(type2), 1);
     case TYPE_CODE_ARRAY:
-      stripped_type1 = type_strip_declarator(type1);
-      stripped_type2 = type_strip_declarator(type2);
-      return type1->array.deduce_length == type2->array.deduce_length &&
-             type1->array.length == type2->array.length &&
-             types_equivalent(stripped_type1, stripped_type2, ignore_qualifiers,
-                              ignore_storage_class);
+      return (type1->array.length == 0 || type2->array.length == 0 ||
+              type1->array.length == type2->array.length) &&
+             types_compatible(type_strip_declarator(type1),
+                              type_strip_declarator(type2), 1);
     case TYPE_CODE_FUNCTION:
-      stripped_type1 = type_strip_declarator(type1);
-      stripped_type2 = type_strip_declarator(type2);
-      return types_equivalent(stripped_type1, stripped_type2, ignore_qualifiers,
-                              ignore_storage_class) &&
-             params_equivalent(type1, type2);
+      return types_compatible(type_strip_declarator(type1),
+                              type_strip_declarator(type2), 1) &&
+             params_compatible(type1, type2);
     default:
       abort();
   }
 }
 
-/* TODO(Robert): consider checking to make sure that the destination is not
- * const-qualified here instead of elsewhere
- */
 int types_assignable(const Type *dest, const Type *src, int is_const_zero) {
   if (type_is_arithmetic(dest) && type_is_arithmetic(src)) {
     return 1;
   } else if ((type_is_struct(dest) && type_is_struct(src)) ||
-             (type_is_union(dest) && type_is_union(src))) {
-    return types_equivalent(dest, src, 1, 1);
+             (type_is_union(dest) && type_is_union(src)) ||
+             (type_is_function(dest) && type_is_function(src))) {
+    return types_compatible(dest, src, 0);
   } else if (type_is_pointer(dest) && type_is_pointer(src)) {
-    if (types_equivalent(dest, src, 1, 1)) {
+    if (types_assignable(type_strip_declarator(dest),
+                         type_strip_declarator(src), 0)) {
       return 1;
     } else if (type_is_void_pointer(dest) || type_is_void_pointer(src)) {
       return 1;
@@ -1139,65 +1113,78 @@ Type *type_arithmetic_conversions(Type *type1, Type *type2) {
   }
 }
 
-int type_complete_array(Type *old_type, Type *new_type) {
-  if (!(type_is_array(old_type) && type_is_array(new_type))) {
+static int compose_arrays(Type *dest, Type *src) {
+  if (!types_compatible(type_strip_declarator(dest), type_strip_declarator(src),
+                        1)) {
+    /* incompatible element types */
+    return -1;
+  } else if (src->array.length == BCC_DEDUCE_ARR) {
+    /* source type incomplete; nothing to do */
     return 0;
-  } else if (!types_equivalent(type_strip_declarator(old_type),
-                               type_strip_declarator(new_type), 0, 1)) {
-    return 0;
-  } else if (!old_type->array.deduce_length && !new_type->array.deduce_length) {
-    /* neither array has deduced length and this function should only be called
-     * when the types are not equivalent, so they must have differing lengths,
-     * which indicates a semantic error
-     */
-    return 0;
-  } else if (old_type->array.length != 0 && new_type->array.length != 0 &&
-             old_type->array.length != new_type->array.length) {
-    /* at least one type has deduced length, both the length of both arrays is
-     * known and differs, which indicates a semantic error
-     */
+  } else if (dest->array.length == BCC_DEDUCE_ARR) {
+    /* complete destination type */
+    dest->array.length = src->array.length;
     return 0;
   } else {
-    /* give old type a length if the new type has one */
-    if (old_type->array.length < new_type->array.length) {
-      old_type->array.length = new_type->array.length;
-      old_type->array.deduce_length = new_type->array.deduce_length;
-    }
-    return 1;
+    /* both types complete; error if known lengths don't match */
+    return dest->array.length == src->array.length ? 0 : -1;
   }
 }
 
-int type_prototype_function(Type *old_type, Type *new_type) {
-  if (!(type_is_function(old_type) && type_is_function(new_type))) {
+static int compose_functions(Type *dest, Type *src) {
+  if (!types_compatible(type_strip_declarator(dest), type_strip_declarator(src),
+                        1)) {
+    /* incompatible return type */
+    return -1;
+  } else if (dest->function.variadic && dest->function.parameters_size == 0) {
+    /* dest unprototyped; use param info from new type; keep return type */
+    dest->function.parameters = src->function.parameters;
+    dest->function.parameters_size = src->function.parameters_size;
+    dest->function.variadic = src->function.variadic;
+    /* erase params from new type so that they don't get destroyed with it */
+    src->function.parameters = NULL;
+    src->function.parameters_size = 0;
+    src->function.variadic = 1;
     return 0;
-  } else if (!types_equivalent(type_strip_declarator(old_type),
-                               type_strip_declarator(new_type), 0, 1)) {
+  } else if (src->function.variadic && src->function.parameters_size == 0) {
+    /* nothing do do; move on */
     return 0;
-  } else if (!type_is_prototyped_function(new_type)) {
-    /* new function type has no prototype; nothing to do here */
-    return 1;
-  } else if (type_is_prototyped_function(old_type)) {
-    /* both functions have a prototype; this function should only be called
-     * when it has been determined that the types are not equivalent, so at
-     * this point it is definitely a semantic error
-     */
-    return 0;
+  } else if (dest->function.variadic != src->function.variadic ||
+             dest->function.parameters_size != src->function.parameters_size) {
+    /* different param count or one function is variadic and the other is not */
+    return -1;
   } else {
-    /* existing type may have already been used elsewhere so we have to replace
-     * its contents in-place; all this means is moving some parameter info from
-     * the new type to the old one
-     */
-    old_type->function.parameters = new_type->function.parameters;
-    old_type->function.parameters_size = new_type->function.parameters_size;
-    old_type->function.is_variadic = new_type->function.is_variadic;
-    old_type->function.is_old_style = new_type->function.is_old_style;
-    /* make old definition look like an old style declaration for the type
-     * checker's sake
-     */
-    new_type->function.parameters = NULL;
-    new_type->function.parameters_size = 0;
-    new_type->function.is_old_style = 1;
-    new_type->function.is_variadic = 1;
-    return 1;
+    size_t i;
+    for (i = 0; i < dest->function.parameters_size; ++i) {
+      Type *dest_param = dest->function.parameters[i];
+      Type *src_param = src->function.parameters[i];
+      if (type_compose(dest_param, src_param, 0)) return -1;
+    }
+    return 0;
+  }
+}
+
+int type_compose(Type *dest, Type *src, int qualified) {
+  if (dest->any.code != src->any.code) return -1;
+
+  switch (dest->any.code) {
+    case TYPE_CODE_NONE:
+      return -1;
+    case TYPE_CODE_BASE:
+      /* fallthrough */
+    case TYPE_CODE_STRUCT:
+      /* fallthrough */
+    case TYPE_CODE_UNION:
+      /* fallthrough */
+    case TYPE_CODE_ENUM:
+      /* fallthrough */
+    case TYPE_CODE_POINTER:
+      return types_compatible(dest, src, qualified) ? 0 : -1;
+    case TYPE_CODE_ARRAY:
+      return compose_arrays(dest, src);
+    case TYPE_CODE_FUNCTION:
+      return compose_functions(dest, src);
+    default:
+      abort();
   }
 }
