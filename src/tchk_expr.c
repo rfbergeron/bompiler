@@ -94,9 +94,9 @@ static size_t real_literal_len(const char *str) {
 
 ASTree *validate_stringcon(ASTree *stringcon) {
   /* subtract 2 for quotes, add one for terminating nul */
-  Type *arr_type = type_init_array(real_literal_len(stringcon->lexinfo), 0);
-  Type *char_type = type_init_base(SPEC_FLAG_CHAR);
-  (void)type_append(arr_type, char_type, 0);
+  Type *arr_type = type_init_array(real_literal_len(stringcon->lexinfo));
+  Type *char_type = type_copy(TYPE_CHAR);
+  (void)type_append(arr_type, char_type);
   stringcon->type = arr_type;
   return evaluate_stringcon(stringcon);
 }
@@ -124,13 +124,13 @@ ASTree *finalize_call(ASTree *call) {
   ASTree *designator = astree_get(call, 0);
   /* first type node is pointer; second is function */
   Type *function_type = type_strip_declarator(designator->type);
-  assert(function_type->any.code == TYPE_CODE_FUNCTION);
+  assert(type_is_function(function_type));
   /* strip function */
   Type *return_type = type_strip_declarator(function_type);
   call->type = return_type;
 
   /* subtract one since function expression is also a child */
-  if (astree_count(call) - 1 < function_type->function.parameters_size) {
+  if (astree_count(call) - 1 < type_get_param_count(function_type)) {
     (void)semerr_insufficient_args(call);
     return call;
   }
@@ -144,10 +144,10 @@ ASTree *validate_arg(ASTree *call, ASTree *arg) {
   ASTree *designator = astree_get(call, 0);
   /* first type should be pointer; next should be function */
   Type *function_type = type_strip_declarator(designator->type);
-  assert(function_type->any.code == TYPE_CODE_FUNCTION);
+  assert(type_is_function(function_type));
   /* subtract one since function expression is also a child */
   size_t param_index = astree_count(call) - 1;
-  if (param_index >= function_type->function.parameters_size) {
+  if (param_index >= type_get_param_count(function_type)) {
     if (type_is_variadic_function(function_type)) {
       PFDBG1('t', "Found variadic function parameter number %lu", param_index);
       arg = tchk_cexpr_conv(arg);
@@ -158,7 +158,7 @@ ASTree *validate_arg(ASTree *call, ASTree *arg) {
     }
   }
   PFDBG1('t', "Validating argument %d", param_index);
-  Type *param_type = type_param_index(function_type, param_index);
+  Type *param_type = type_get_param(function_type, param_index);
   PFDBG0('t', "Comparing types");
   if (types_assignable(param_type, arg->type, astree_is_const_zero(arg))) {
     arg = tchk_cexpr_conv(tchk_scal_conv(arg, param_type));
@@ -259,7 +259,7 @@ ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
               type_is_union(false_expr->type)) ||
              (type_is_void(true_expr->type) &&
               type_is_void(false_expr->type))) {
-    if (types_equivalent(true_expr->type, false_expr->type, 1, 1)) {
+    if (types_equivalent(true_expr->type, false_expr->type, 1)) {
       qmark->type = true_expr->type;
     } else {
       (void)semerr_incompatible_types(qmark, true_expr->type, false_expr->type);
@@ -269,19 +269,21 @@ ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
              astree_is_const_zero(false_expr)) {
     false_expr = tchk_scal_conv(false_expr, true_expr->type);
     /* duplicate only the pointer type information */
-    qmark->type = malloc(sizeof(*qmark->type));
-    *(qmark->type) = *(true_expr->type);
+    qmark->type = type_copy(true_expr->type);
+    type_destroy(type_detach(qmark->type));
+    type_append(qmark->type, type_strip_declarator(true_expr->type));
   } else if (astree_is_const_zero(true_expr) &&
              type_is_pointer(false_expr->type)) {
     true_expr = tchk_scal_conv(true_expr, false_expr->type);
     /* duplicate only the pointer type information */
-    qmark->type = malloc(sizeof(*qmark->type));
-    *(qmark->type) = *(false_expr->type);
+    qmark->type = type_copy(false_expr->type);
+    type_destroy(type_detach(qmark->type));
+    type_append(qmark->type, type_strip_declarator(false_expr->type));
   } else if ((type_is_pointer(true_expr->type) &&
               type_is_pointer(false_expr->type)) &&
              (type_is_void_pointer(true_expr->type) ||
               type_is_void_pointer(false_expr->type) ||
-              types_equivalent(true_expr->type, false_expr->type, 1, 1))) {
+              types_equivalent(true_expr->type, false_expr->type, 1))) {
     qmark->type =
         type_common_qualified_pointer(true_expr->type, false_expr->type);
     true_expr = tchk_scal_conv(true_expr, qmark->type);
@@ -350,7 +352,7 @@ ASTree *validate_addition(ASTree *operator, ASTree * left, ASTree *right) {
     operator->type = right->type;
     return evaluate_binop(operator, left, right);
   } else if (operator->tok_kind == '-' && type_is_pointer(left->type) &&
-             types_equivalent(left->type, right->type, 1, 1)) {
+             types_equivalent(left->type, right->type, 1)) {
     operator->type =(Type *) TYPE_LONG;
     return tchk_diff_conv(evaluate_binop(operator, left, right), left->type);
   } else {
@@ -384,7 +386,7 @@ ASTree *validate_relational(ASTree *operator, ASTree * left, ASTree *right) {
     right = tchk_scal_conv(right, conv_type);
     return evaluate_binop(operator, left, right);
   } else if (type_is_pointer(left->type) &&
-             types_equivalent(left->type, right->type, 1, 1)) {
+             types_equivalent(left->type, right->type, 1)) {
     return evaluate_binop(operator, left, right);
   } else {
     (void)semerr_incompatible_types(operator, left->type, right->type);
@@ -409,7 +411,7 @@ ASTree *validate_equality(ASTree *operator, ASTree * left, ASTree *right) {
     right = tchk_scal_conv(right, left->type);
     return evaluate_binop(operator, left, right);
   } else if (type_is_pointer(left->type) &&
-             types_equivalent(left->type, right->type, 1, 1)) {
+             types_equivalent(left->type, right->type, 1)) {
     return evaluate_binop(operator, left, right);
   } else if (type_is_pointer(left->type) && type_is_void_pointer(right->type)) {
     left = tchk_scal_conv(left, right->type);
@@ -558,8 +560,8 @@ static ASTree *validate_indirection(ASTree *indirection, ASTree *operand) {
 static ASTree *validate_addrof(ASTree *addrof, ASTree *operand) {
   if (astree_is_lvalue(operand) != LVAL_FALSE ||
       type_is_function(operand->type)) {
-    addrof->type = type_init_pointer(QUAL_FLAG_NONE);
-    (void)type_append(addrof->type, operand->type, 0);
+    addrof->type = type_init_pointer();
+    (void)type_append(addrof->type, operand->type);
     return evaluate_addrof(addrof, operand);
   } else {
     (void)semerr_expected_lvalue(addrof, operand);
@@ -643,7 +645,7 @@ ASTree *validate_reference(ASTree *reference, ASTree *struct_, ASTree *member) {
   Type *tag_type = reference->tok_kind == TOK_ARROW
                        ? type_strip_declarator(struct_->type)
                        : struct_->type;
-  Symbol *member_symbol = type_member_name(tag_type, member->lexinfo);
+  Symbol *member_symbol = type_get_member_name(tag_type, member->lexinfo);
 
   if (member_symbol == NULL) {
     (void)semerr_symbol_not_found(member);

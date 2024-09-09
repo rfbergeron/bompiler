@@ -354,7 +354,7 @@ ASTree *evaluate_ident(ASTree *ident) {
   } else if (symbol->storage == STORE_ENUM_CONST) {
     ident->cexpr_kind = CEXPR_INT;
     ident->constant.integral.signed_value =
-        tag_get_constant(ident->type->tag.value, ident->lexinfo);
+        tag_get_constant(type_get_tag(ident->type), ident->lexinfo);
     return ident;
   } else {
     return translate_ident(ident);
@@ -623,7 +623,7 @@ ASTree *evaluate_disp_conv(ASTree *disp_conv, ASTree *expr,
   assert(type_is_integral(expr->type));
   assert(astree_is_lvalue(expr) == LVAL_FALSE);
   if (expr->cexpr_kind >= CEXPR_INIT && expr->constant.label == NULL) {
-    ptrdiff_t stride = type_elem_width(pointer_type);
+    ptrdiff_t stride = type_get_elem_width(pointer_type);
     disp_conv->cexpr_kind = expr->cexpr_kind;
     if (type_is_unsigned(expr->type))
       disp_conv->constant.integral.signed_value =
@@ -642,7 +642,7 @@ ASTree *evaluate_disp_conv(ASTree *disp_conv, ASTree *expr,
 ASTree *evaluate_diff_conv(ASTree *diff_conv, ASTree *expr,
                            const Type *pointer_type) {
   if (expr->cexpr_kind >= CEXPR_INIT && expr->constant.label == NULL) {
-    ptrdiff_t stride = type_elem_width(pointer_type);
+    ptrdiff_t stride = type_get_elem_width(pointer_type);
     diff_conv->cexpr_kind = expr->cexpr_kind;
     diff_conv->constant.integral.signed_value =
         expr->constant.integral.signed_value / stride;
@@ -727,7 +727,7 @@ ASTree *evaluate_reference(ASTree *reference, ASTree *struct_, ASTree *member) {
                          ? type_strip_declarator(struct_->type)
                          : struct_->type;
 
-    Symbol *symbol = type_member_name(tag_type, member->lexinfo);
+    Symbol *symbol = type_get_member_name(tag_type, member->lexinfo);
     assert(symbol);
     reference->constant.integral.signed_value =
         struct_->constant.integral.signed_value + symbol->disp;

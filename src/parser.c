@@ -63,7 +63,7 @@ const char *parser_get_tname(int symbol) {
 }
 
 BCC_YYSTATIC void make_va_list_type(void) {
-  Tag *builtin_tag = tag_init(TAG_STRUCT);
+  Tag *builtin_tag = tag_init(TAG_STRUCT, VA_LIST_STRUCT_NAME);
   state_insert_tag(state, VA_LIST_STRUCT_NAME, builtin_tag);
   state_enter_record(state, builtin_tag);
   builtin_tag->record.alignment = X64_ALIGNOF_LONG;
@@ -76,12 +76,12 @@ BCC_YYSTATIC void make_va_list_type(void) {
     member_symbol->disp = displacement;
     if (i < 2) {
       displacement += X64_SIZEOF_INT;
-      member_symbol->type = type_init_base(SPEC_FLAGS_UINT);
+      member_symbol->type = type_copy(TYPE_UNSIGNED_INT);
     } else {
       displacement += X64_SIZEOF_LONG;
-      member_symbol->type = type_init_pointer(QUAL_FLAG_NONE);
-      Type *void_type = type_init_base(SPEC_FLAG_VOID);
-      member_symbol->type = type_append(member_symbol->type, void_type, 0);
+      member_symbol->type = type_init_pointer();
+      Type *void_type = type_copy(TYPE_VOID);
+      member_symbol->type = type_append(member_symbol->type, void_type);
     }
     const char *symname = VA_LIST_MEMBER_NAMES[i];
     state_insert_member(state, symname, member_symbol);
@@ -92,16 +92,15 @@ BCC_YYSTATIC void make_va_list_type(void) {
   builtin_symbol->storage = STORE_TYPEDEF;
   builtin_symbol->linkage = LINK_TYPEDEF;
   builtin_symbol->info = SYM_DEFINED;
-  builtin_symbol->type = type_init_array(1, 0);
-  Type *struct_type =
-      type_init_tag(STOR_FLAG_TYPEDEF, VA_LIST_STRUCT_NAME, builtin_tag);
-  (void)type_append(builtin_symbol->type, struct_type, 0);
+  builtin_symbol->type = type_init_array(1);
+  Type *struct_type = type_init_tag(builtin_tag);
+  (void)type_append(builtin_symbol->type, struct_type);
   state_insert_symbol(state, VA_LIST_TYPEDEF_NAME, builtin_symbol);
   /* copy type info */
-  Type *va_list_type_temp = type_copy(builtin_symbol->type, 1);
+  Type *va_list_type_temp = type_copy(builtin_symbol->type);
   /* convert to pointer and free array */
   TYPE_VA_LIST_POINTER_INTERNAL = type_pointer_conversions(va_list_type_temp);
-  va_list_type_temp->array.next = NULL;
+  (void)type_detach(va_list_type_temp);
   type_destroy(va_list_type_temp);
   assert(type_is_pointer(TYPE_VA_LIST_POINTER_INTERNAL));
   TYPE_VA_LIST_POINTER = TYPE_VA_LIST_POINTER_INTERNAL;
@@ -180,7 +179,7 @@ BCC_YYSTATIC ASTree *parser_join_strings(ASTree *joiner) {
 BCC_YYSTATIC ASTree *parser_make_decl_specs(ASTree *first_specifier) {
   ASTree *decl_specs =
       astree_init(TOK_SPEC_LIST, first_specifier->loc, "_decl_specs");
-  decl_specs->type = type_init_none(0);
+  decl_specs->type = type_init_basic();
   return validate_decl_spec(decl_specs, first_specifier);
 }
 

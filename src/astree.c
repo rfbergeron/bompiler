@@ -110,7 +110,7 @@ void astree_destroy(ASTree *tree) {
     case TOK_ADDROF:
       if (tree->type == NULL) break;
       assert(type_is_pointer(tree->type));
-      tree->type->pointer.next = NULL;
+      (void)type_detach(tree->type);
       /* fallthrough */
     case TOK_TYPE_NAME:
       /* fallthrough */

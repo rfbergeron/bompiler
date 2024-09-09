@@ -55,8 +55,7 @@ static int init_literal(Type *arr_type, ptrdiff_t arr_disp, ASTree *literal) {
   size_t literal_length = type_get_width(literal->type);
 
   if (type_is_deduced_array(arr_type)) {
-    assert(arr_type->array.length == 0);
-    arr_type->array.length = literal_length;
+    type_set_elem_count(arr_type, literal_length);
   } else if (literal_length - 1 > type_get_width(arr_type)) {
     (void)semerr_excess_init(literal, arr_type);
     return 1;
@@ -74,10 +73,11 @@ static int init_literal(Type *arr_type, ptrdiff_t arr_disp, ASTree *literal) {
 static int init_array(Type *arr_type, ptrdiff_t arr_disp, ASTree *init_list,
                       size_t *init_index) {
   Type *elem_type = type_strip_declarator(arr_type);
+  size_t elem_count = type_get_elem_count(arr_type);
+  if (elem_count == 0) elem_count = SIZE_MAX;
   size_t elem_width = type_get_width(elem_type);
   size_t elem_index;
-  size_t init_count =
-      MIN(type_member_count(arr_type), astree_count(init_list) - *init_index);
+  size_t init_count = MIN(elem_count, astree_count(init_list) - *init_index);
 
   int member_err = 0;
   for (elem_index = 0; elem_index < init_count; ++elem_index) {
@@ -85,17 +85,15 @@ static int init_array(Type *arr_type, ptrdiff_t arr_disp, ASTree *init_list,
     member_err |= init_agg_member(elem_type, elem_disp, init_list, init_index);
   }
 
-  if (type_member_count(arr_type) <= init_count) {
+  if (elem_count <= init_count) {
     return member_err;
   } else if (type_is_deduced_array(arr_type)) {
-    arr_type->array.length = init_count;
+    type_set_elem_count(arr_type, init_count);
   } else if (arr_disp >= 0) {
-    size_t zero_count =
-        (type_member_count(arr_type) - init_count) * type_get_width(elem_type);
+    size_t zero_count = (elem_count - init_count) * type_get_width(elem_type);
     static_zero_pad(zero_count, init_list->instructions);
   } else {
-    size_t zero_count =
-        (type_member_count(arr_type) - init_count) * type_get_width(elem_type);
+    size_t zero_count = (elem_count - init_count) * type_get_width(elem_type);
     bulk_mzero(RBP_VREG, arr_disp, type_get_width(arr_type) - zero_count,
                arr_type, init_list->instructions);
   }
@@ -105,7 +103,7 @@ static int init_array(Type *arr_type, ptrdiff_t arr_disp, ASTree *init_list,
 
 static int init_union(const Type *union_type, ptrdiff_t union_disp,
                       ASTree *init_list, size_t *init_index) {
-  Symbol *member_symbol = type_member_index(union_type, 0);
+  Symbol *member_symbol = type_get_member_index(union_type, 0);
   Type *member_type = member_symbol->type;
   int member_err =
       init_agg_member(member_type, union_disp, init_list, init_index);
@@ -117,14 +115,14 @@ static int init_union(const Type *union_type, ptrdiff_t union_disp,
 
 static int init_struct(const Type *struct_type, ptrdiff_t struct_disp,
                        ASTree *init_list, size_t *init_index) {
-  size_t init_count = MIN(type_member_count(struct_type),
+  size_t init_count = MIN(type_get_member_count(struct_type),
                           astree_count(init_list) - *init_index);
   size_t bytes_initialized = 0;
   size_t member_index;
   int member_err = 0;
 
   for (member_index = 0; member_index < init_count; ++member_index) {
-    Symbol *member_symbol = type_member_index(struct_type, member_index);
+    Symbol *member_symbol = type_get_member_index(struct_type, member_index);
     Type *member_type = member_symbol->type;
     size_t member_padding = type_get_padding(member_type, bytes_initialized);
     ptrdiff_t member_disp = struct_disp + member_symbol->disp;

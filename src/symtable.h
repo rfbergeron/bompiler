@@ -52,6 +52,7 @@ typedef union tag {
     int defined;
     size_t width;
     size_t alignment;
+    const char *name;
     union scope *members;
   } record;
   struct {
@@ -59,6 +60,7 @@ typedef union tag {
     int defined;
     size_t width;
     size_t alignment;
+    const char *name;
     EnumTable *constants;
   } enumeration;
 } Tag;
@@ -72,9 +74,12 @@ Symbol *symbol_init(const Location *loc);
 void symbol_destroy(Symbol *symbol);
 int symbol_print(const Symbol *symbol, char *buffer);
 
-Tag *tag_init(TagKind kind);
+Tag *tag_init(TagKind kind, const char *name);
 void tag_destroy(Tag *tag);
 int tag_print(const Tag *tag, char *buffer, size_t size);
+TagKind tag_get_kind(const Tag *tag);
+size_t tag_get_width(const Tag *tag);
+size_t tag_get_alignment(const Tag *tag);
 int tag_get_constant(const Tag *enum_tag, const char *enum_id);
 int tag_last_constant(const Tag *enum_tag);
 void tag_add_constant(Tag *enum_tag, const char *enum_id, int value);

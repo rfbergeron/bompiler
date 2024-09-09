@@ -196,7 +196,7 @@ int state_inheritance_valid(CompilerState *state, const char *ident,
     /* TODO(Robert): rewrite symbol table functions */
     benefactor = scope_get_symbol(current, ident);
     if (benefactor != NULL &&
-        (types_equivalent(benefactor->type, symbol->type, 0, 1) ||
+        (types_equivalent(benefactor->type, symbol->type, 0) ||
          type_complete_array(benefactor->type, symbol->type) ||
          type_prototype_function(benefactor->type, symbol->type))) {
       type_destroy(symbol->type);
@@ -281,6 +281,7 @@ int state_get_tag(CompilerState *state, const char *ident, Tag **out) {
 }
 
 void state_insert_tag(CompilerState *state, const char *ident, Tag *tag) {
+  assert(tag->record.name != NULL);
   size_t i = 1, scope_count = ARR_LEN(state->scopes);
   Scope *current;
   do current = ARR_GET(state->scopes, scope_count - (i++));

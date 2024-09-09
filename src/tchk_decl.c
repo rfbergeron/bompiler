@@ -11,13 +11,13 @@
 /* TODO(Robert): make naming consistent */
 
 ASTree *validate_tag_spec(ASTree *decl_specs, ASTree *tag_spec) {
-  if (type_add_flags(tag_spec->type, type_get_flags(decl_specs->type))) {
-    (void)semerr_incompatible_spec(decl_specs, tag_spec);
-    return astree_adopt(decl_specs, 1, tag_spec);
-  }
+  Type *merged_type = type_merge(tag_spec->type, decl_specs->type);
+
+  if (merged_type == NULL) (void)semerr_incompatible_spec(decl_specs, tag_spec);
 
   type_destroy(decl_specs->type);
-  decl_specs->type = tag_spec->type;
+  decl_specs->type = merged_type;
+  type_destroy(tag_spec->type);
   tag_spec->type = NULL;
 
   return astree_adopt(decl_specs, 1, tag_spec);
@@ -31,80 +31,23 @@ ASTree *validate_typedef_name(ASTree *decl_specs, ASTree *typedef_name) {
     (void)semerr_symbol_not_found(typedef_name);
   } else if (symbol->linkage != LINK_TYPEDEF) {
     (void)semerr_expected_typedef_name(typedef_name, symbol);
-  } else if (!type_is_none(decl_specs->type) ||
-             (type_is_declarator(symbol->type) &&
-              !type_is_pointer(symbol->type) &&
-              type_is_qualified(decl_specs->type))) {
+  } else if (!type_is_none(decl_specs->type)) {
+    /* declaration specifier list already contains type specifiers */
+    (void)semerr_incompatible_spec(decl_specs, typedef_name);
+  } else if (type_is_declarator(symbol->type) &&
+             !type_is_pointer(symbol->type) &&
+             type_is_qualified(decl_specs->type)) {
+    /* attempt to qualify a function or array type */
     (void)semerr_incompatible_spec(decl_specs, typedef_name);
   } else {
-    unsigned int old_flags = type_get_flags(decl_specs->type);
-    type_destroy(decl_specs->type);
-    decl_specs->type = type_copy(symbol->type, 1);
-
-    if (type_is_pointer(decl_specs->type)) {
-      /* apply qualifiers to the pointer */
-      if (type_add_flags(decl_specs->type, old_flags & QUAL_FLAG_MASK)) {
-        (void)semerr_incompatible_spec(decl_specs, typedef_name);
-        return astree_adopt(decl_specs, 1, typedef_name);
-      } else {
-        old_flags &= ~QUAL_FLAG_MASK;
-      }
-    }
-
-    if (type_add_flags(type_get_decl_specs(decl_specs->type), old_flags))
+    Type *merged_type = type_merge(symbol->type, decl_specs->type);
+    if (merged_type == NULL) /* declaration specifiers otherwise incompatible */
       (void)semerr_incompatible_spec(decl_specs, typedef_name);
+    free(decl_specs->type);
+    decl_specs->type = merged_type;
   }
 
   return astree_adopt(decl_specs, 1, typedef_name);
-}
-
-static unsigned int type_flag_from_tok_kind(int tok_kind) {
-  switch (tok_kind) {
-    case TOK_VOID:
-      return SPEC_FLAG_VOID;
-    case TOK_CHAR:
-      return SPEC_FLAG_CHAR;
-    case TOK_INT:
-      return SPEC_FLAG_INTEGRAL;
-    case TOK_SHORT:
-      return SPEC_FLAG_SHORT;
-    case TOK_LONG:
-      return SPEC_FLAG_LONG;
-    case TOK_SIGNED:
-      return SPEC_FLAG_SIGNED;
-    case TOK_UNSIGNED:
-      return SPEC_FLAG_UNSIGNED;
-    case TOK_FLOAT:
-      return SPEC_FLAG_FLOAT;
-    case TOK_DOUBLE:
-      return SPEC_FLAG_DOUBLE;
-    case TOK_CONST:
-      return QUAL_FLAG_CONST;
-    case TOK_VOLATILE:
-      return QUAL_FLAG_VOLATILE;
-    case TOK_RESTRICT:
-      return QUAL_FLAG_NONE; /* C90: no restrict */
-    case TOK_TYPEDEF:
-      return STOR_FLAG_TYPEDEF;
-    case TOK_AUTO:
-      return STOR_FLAG_AUTO;
-    case TOK_REGISTER:
-      return STOR_FLAG_REGISTER;
-    case TOK_STATIC:
-      return STOR_FLAG_STATIC;
-    case TOK_EXTERN:
-      return STOR_FLAG_EXTERN;
-    case TOK_UNION:
-      /* fallthrough */
-    case TOK_STRUCT:
-      /* fallthrough */
-    case TOK_ENUM:
-      /* fallthrough */
-    case TOK_TYPEDEF_NAME:
-      /* fallthrough */
-    default:
-      abort();
-  }
 }
 
 ASTree *validate_decl_spec(ASTree *decl_specs, ASTree *decl_spec) {
@@ -119,8 +62,7 @@ ASTree *validate_decl_spec(ASTree *decl_specs, ASTree *decl_spec) {
     return validate_tag_spec(decl_specs, decl_spec);
   } else if (decl_spec->tok_kind == TOK_TYPEDEF_NAME) {
     return validate_typedef_name(decl_specs, decl_spec);
-  } else if (type_add_flags(decl_specs->type,
-                            type_flag_from_tok_kind(decl_spec->tok_kind))) {
+  } else if (type_add_decl_spec(decl_specs->type, decl_spec->tok_kind)) {
     (void)semerr_incompatible_spec(decl_specs, decl_spec);
     return astree_adopt(decl_specs, 1, decl_spec);
   } else {
@@ -139,10 +81,10 @@ static int location_is_empty(Location *loc) {
 
 static int set_symbol_qualifiers(const char *ident, Symbol *symbol) {
   ScopeKind kind = scope_get_kind(state_peek_scope(state));
-  unsigned int decl_flags = type_get_flags(type_get_decl_specs(symbol->type));
+  int tok_storage = type_retrieve_storage_specifier(symbol->type);
 
   if (kind == SCOPE_MEMBER) {
-    if ((decl_flags & STOR_FLAG_MASK) != STOR_FLAG_NONE) {
+    if (tok_storage != TOK_NONE) {
       return -1;
     } else {
       symbol->linkage = LINK_MEMBER;
@@ -150,27 +92,27 @@ static int set_symbol_qualifiers(const char *ident, Symbol *symbol) {
       return 0;
     }
   } else if (kind == SCOPE_FILE) {
-    switch (decl_flags & STOR_FLAG_MASK) {
-      case STOR_FLAG_AUTO:
+    switch (tok_storage) {
+      case TOK_AUTO:
         /* fallthrough */
-      case STOR_FLAG_REGISTER:
+      case TOK_REGISTER:
         return -1;
-      case STOR_FLAG_EXTERN:
+      case TOK_EXTERN:
         symbol->linkage = LINK_EXT;
         symbol->storage = STORE_EXT;
         return 0;
-      case STOR_FLAG_NONE:
+      case TOK_NONE:
         symbol->linkage = LINK_EXT;
         if (type_is_function(symbol->type))
           symbol->storage = STORE_EXT;
         else
           symbol->storage = STORE_STAT;
         return 0;
-      case STOR_FLAG_STATIC:
+      case TOK_STATIC:
         symbol->linkage = LINK_INT;
         symbol->storage = STORE_STAT;
         return 0;
-      case STOR_FLAG_TYPEDEF:
+      case TOK_TYPEDEF:
         symbol->linkage = LINK_TYPEDEF;
         symbol->storage = STORE_TYPEDEF;
         return 0;
@@ -178,11 +120,11 @@ static int set_symbol_qualifiers(const char *ident, Symbol *symbol) {
         abort();
     }
   } else {
-    switch (decl_flags & STOR_FLAG_MASK) {
+    switch (tok_storage) {
       int heritable;
-      case STOR_FLAG_AUTO:
+      case TOK_AUTO:
         /* fallthrough */
-      case STOR_FLAG_REGISTER:
+      case TOK_REGISTER: /* TODO(Robert): separate `register` storage class */
         if (type_is_function(symbol->type)) {
           return -1;
         } else {
@@ -190,7 +132,7 @@ static int set_symbol_qualifiers(const char *ident, Symbol *symbol) {
           symbol->storage = STORE_AUTO;
           return 0;
         }
-      case STOR_FLAG_STATIC:
+      case TOK_STATIC:
         if (type_is_function(symbol->type)) {
           return -1;
         } else {
@@ -198,14 +140,14 @@ static int set_symbol_qualifiers(const char *ident, Symbol *symbol) {
           symbol->storage = STORE_STAT;
           return 0;
         }
-      case STOR_FLAG_NONE:
+      case TOK_NONE:
         if (!type_is_function(symbol->type)) {
           symbol->linkage = LINK_NONE;
           symbol->storage = STORE_AUTO;
           return 0;
         }
         /* fallthrough */
-      case STOR_FLAG_EXTERN:
+      case TOK_EXTERN:
         heritable = state_inheritance_valid(state, ident, symbol);
         if (heritable) {
           /* call above should set linkage and storage class */
@@ -213,7 +155,7 @@ static int set_symbol_qualifiers(const char *ident, Symbol *symbol) {
         } else {
           return -1;
         }
-      case STOR_FLAG_TYPEDEF:
+      case TOK_TYPEDEF:
         symbol->linkage = LINK_TYPEDEF;
         symbol->storage = STORE_TYPEDEF;
         return 0;
@@ -272,9 +214,9 @@ static Symbol *validate_declaration(ASTree *declaration, ASTree *declarator) {
 
   ASTree *decl_specs = astree_get(declaration, 0);
   if (declarator->type == NULL) {
-    declarator->type = type_copy(decl_specs->type, 0);
+    declarator->type = type_copy(decl_specs->type);
   } else {
-    (void)type_append(declarator->type, decl_specs->type, 1);
+    (void)type_append(declarator->type, type_copy(decl_specs->type));
   }
 
   if (declarator->tok_kind == TOK_TYPE_NAME) return NULL;
@@ -311,7 +253,7 @@ static Symbol *validate_declaration(ASTree *declaration, ASTree *declarator) {
     if (symbol->info == SYM_INHERITOR) declarator->type = symbol->type;
     return symbol;
   } else if (!linkage_valid(exists, symbol->linkage) ||
-             !(types_equivalent(exists->type, declarator->type, 0, 1) ||
+             !(types_equivalent(exists->type, declarator->type, 0) ||
                type_complete_array(exists->type, declarator->type) ||
                type_prototype_function(exists->type, declarator->type))) {
     (void)semerr_incompatible_linkage(declarator, exists, symbol);
@@ -354,15 +296,10 @@ ASTree *validate_param_list(ASTree *param_list) {
 
 static void replace_param_dirdecl(ASTree *declarator) {
   assert(type_is_array(declarator->type) || type_is_function(declarator->type));
-  Type *pointer_type = type_init_pointer(SPEC_FLAG_NONE);
-  Type *stripped_type = type_strip_declarator(declarator->type);
-  if (type_is_function(declarator->type))
-    declarator->type->function.next = NULL;
-  else
-    declarator->type->array.next = NULL;
+  Type *pointer_type = type_init_pointer();
+  Type *stripped_type = type_detach(declarator->type);
   type_destroy(declarator->type);
-  (void)type_append(pointer_type, stripped_type, 0);
-  declarator->type = pointer_type;
+  declarator->type = type_append(pointer_type, stripped_type);
 }
 
 ASTree *validate_param(ASTree *param_list, ASTree *declaration,
@@ -395,30 +332,35 @@ ASTree *finalize_param_list(ASTree *param_list, ASTree *optional) {
 
 ASTree *define_params(ASTree *declarator, ASTree *param_list) {
   size_t parameters_size = astree_count(param_list);
-  int is_variadic = 0, is_old_style = 0;
+  int variadic;
   Type **parameters;
+
   if (parameters_size == 0) {
-    is_variadic = 1, is_old_style = 1, parameters = NULL;
+    variadic = 1;
   } else if (astree_get(param_list, 0)->tok_kind == TOK_VOID) {
-    parameters = NULL, parameters_size = 0;
+    variadic = 0;
+    parameters_size = 0;
+  } else if (astree_get(param_list, parameters_size - 1)->tok_kind ==
+             TOK_ELLIPSIS) {
+    variadic = 1;
+    --parameters_size;
   } else {
-    parameters = malloc(parameters_size * sizeof(Type *));
-    if (astree_get(param_list, parameters_size - 1)->tok_kind == TOK_ELLIPSIS) {
-      --parameters_size;
-      is_variadic = 1;
-    }
-    size_t i;
-    for (i = 0; i < parameters_size; ++i) {
-      ASTree *param_declaration = astree_get(param_list, i);
-      ASTree *param_declarator = astree_get(param_declaration, 1);
-      parameters[i] = param_declarator->type;
-    }
+    variadic = 0;
   }
 
-  Type *function_type = type_init_function(parameters_size, parameters,
-                                           is_variadic, is_old_style);
+  /* `parameters` must always have at least one element to store return type */
+  parameters = malloc((parameters_size + 1) * sizeof(Type *));
+  size_t i;
+  for (i = 0; i < parameters_size; ++i) {
+    ASTree *param_declaration = astree_get(param_list, i);
+    ASTree *param_declarator = astree_get(param_declaration, 1);
+    parameters[i] = param_declarator->type;
+  }
+
+  Type *function_type =
+      type_init_function(parameters_size, parameters, variadic);
   if (declarator->type != NULL) {
-    (void)type_append(declarator->type, function_type, 0);
+    (void)type_append(declarator->type, function_type);
   } else {
     declarator->type = function_type;
   }
@@ -428,16 +370,16 @@ ASTree *define_params(ASTree *declarator, ASTree *param_list) {
 ASTree *define_array(ASTree *declarator, ASTree *array) {
   Type *array_type;
   if (astree_count(array) == 0)
-    array_type = type_init_array(0, 1);
+    array_type = type_init_array(0);
   else if (type_is_unsigned(astree_get(array, 0)->type))
-    array_type = type_init_array(
-        astree_get(array, 0)->constant.integral.unsigned_value, 0);
+    array_type =
+        type_init_array(astree_get(array, 0)->constant.integral.unsigned_value);
   else
-    array_type = type_init_array(
-        astree_get(array, 0)->constant.integral.signed_value, 0);
+    array_type =
+        type_init_array(astree_get(array, 0)->constant.integral.signed_value);
 
   if (declarator->type != NULL) {
-    (void)type_append(declarator->type, array_type, 0);
+    (void)type_append(declarator->type, array_type);
   } else {
     declarator->type = array_type;
   }
@@ -445,21 +387,16 @@ ASTree *define_array(ASTree *declarator, ASTree *array) {
 }
 
 ASTree *define_pointer(ASTree *declarator, ASTree *pointer) {
-  unsigned int qual_flags = QUAL_FLAG_NONE;
+  Type *pointer_type = type_init_pointer();
   size_t i;
   for (i = 0; i < astree_count(pointer); ++i) {
     ASTree *qualifier = astree_get(pointer, i);
-    if (qual_flags & type_flag_from_tok_kind(qualifier->tok_kind)) {
+    if (type_add_decl_spec(pointer_type, qualifier->tok_kind))
       (void)semerr_incompatible_spec(pointer, qualifier);
-      return astree_adopt(declarator, 1, pointer);
-    } else {
-      qual_flags |= type_flag_from_tok_kind(qualifier->tok_kind);
-    }
   }
 
-  Type *pointer_type = type_init_pointer(qual_flags);
   if (declarator->type != NULL) {
-    (void)type_append(declarator->type, pointer_type, 0);
+    (void)type_append(declarator->type, pointer_type);
   } else {
     declarator->type = pointer_type;
   }
@@ -505,7 +442,7 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
   symbol->info = SYM_NONE;
 
   ASTree *param_list = astree_get(declarator, 0);
-  size_t i, param_count = type_param_count(declarator->type);
+  size_t i, param_count = type_get_param_count(declarator->type);
   assert(astree_count(param_list) == param_count ||
          (type_is_variadic_function(declarator->type) &&
           astree_count(param_list) - 1 == param_count) ||
@@ -582,28 +519,25 @@ ASTree *validate_tag_decl(ASTree *tag_spec, ASTree *tag_id) {
         (void)semerr_redefine_tag(tag_spec, tag_id, exists);
         return astree_adopt(tag_spec, 1, tag_id);
       } else {
-        tag_spec->type =
-            type_init_tag(QUAL_FLAG_NONE | STOR_FLAG_NONE, id_str, exists);
+        tag_spec->type = type_init_tag(exists);
         return astree_adopt(tag_spec, 1, tag_id);
       }
     } else {
       Tag *tag;
       if (kind != exists->record.kind) {
-        tag = tag_init(kind);
+        tag = tag_init(kind, id_str);
         state_insert_tag(state, id_str, tag);
       } else {
         tag = exists;
       }
 
-      tag_spec->type =
-          type_init_tag(QUAL_FLAG_NONE | STOR_FLAG_NONE, id_str, tag);
+      tag_spec->type = type_init_tag(tag);
       return astree_adopt(tag_spec, 1, tag_id);
     }
   } else if (kind != TAG_ENUM) {
-    Tag *tag = tag_init(kind);
+    Tag *tag = tag_init(kind, id_str);
     state_insert_tag(state, id_str, tag);
-    tag_spec->type =
-        type_init_tag(QUAL_FLAG_NONE | STOR_FLAG_NONE, id_str, tag);
+    tag_spec->type = type_init_tag(tag);
     return astree_adopt(tag_spec, 1, tag_id);
   } else {
     /* do not insert enum tag; enum must declare their constants */
@@ -626,13 +560,12 @@ ASTree *validate_tag_def(ASTree *tag_spec, ASTree *tag_id, ASTree *left_brace) {
     if (exists && is_redeclaration) {
       tag = exists;
     } else {
-      tag = tag_init(kind);
+      tag = tag_init(kind, id_str);
       if (tag == NULL) abort();
       state_insert_tag(state, id_str, tag);
     }
 
-    tag_spec->type =
-        type_init_tag(QUAL_FLAG_NONE | STOR_FLAG_NONE, id_str, tag);
+    tag_spec->type = type_init_tag(tag);
 
     if (kind == TAG_STRUCT || kind == TAG_UNION) state_enter_record(state, tag);
     return astree_adopt(tag_spec, 2, tag_id, left_brace);
@@ -640,7 +573,7 @@ ASTree *validate_tag_def(ASTree *tag_spec, ASTree *tag_id, ASTree *left_brace) {
 }
 
 ASTree *finalize_tag_def(ASTree *tag_spec) {
-  Tag *tag = tag_spec->type->tag.value;
+  Tag *tag = type_get_tag(tag_spec->type);
   tag->record.defined = 1;
 
   if (tag->record.kind == TAG_STRUCT || tag->record.kind == TAG_UNION) {
@@ -681,12 +614,12 @@ ASTree *define_enumerator(ASTree *enum_spec, ASTree *enum_id,
   symbol->storage = STORE_ENUM_CONST;
   symbol->info = SYM_DEFINED;
   /* copy type info from tag node */
-  symbol->type = type_copy(enum_spec->type, 0);
+  symbol->type = type_copy(enum_spec->type);
 
   state_insert_symbol(state, id_str, symbol);
   enum_id->type = symbol->type;
 
-  Tag *tag = symbol->type->tag.value;
+  Tag *tag = type_get_tag(symbol->type);
   if (equal_sign == NULL) {
     tag_add_constant(tag, id_str, tag_last_constant(tag) + 1);
   } else if (expr->cexpr_kind != CEXPR_INT) {

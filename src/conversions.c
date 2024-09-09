@@ -10,7 +10,7 @@
 ASTree *tchk_scal_conv(ASTree *expr, Type *type) {
   assert(expr->type != NULL && type != NULL);
   assert(astree_is_lvalue(expr) == LVAL_FALSE);
-  if (types_equivalent(type, expr->type, 1, 1)) {
+  if (types_equivalent(type, expr->type, 1)) {
     return expr;
   } else {
     assert(type_is_scalar(type) && type_is_scalar(expr->type));

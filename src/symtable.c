@@ -112,13 +112,14 @@ TABOE_IMPL(DEFAULT_SIZE, EnumTable, enum_table, const char *, int,
 /*
  * Tag functions
  */
-Tag *tag_init(TagKind kind) {
+Tag *tag_init(TagKind kind, const char *name) {
   Tag *tag = malloc(sizeof(*tag));
   if (kind == TAG_STRUCT || kind == TAG_UNION) {
     tag->record.kind = kind;
     tag->record.defined = 0;
     tag->record.width = 0;
     tag->record.alignment = 0;
+    tag->record.name = name;
     tag->record.members = scope_init(SCOPE_MEMBER);
   } else {
     assert(kind == TAG_ENUM);
@@ -126,6 +127,7 @@ Tag *tag_init(TagKind kind) {
     tag->enumeration.defined = 0;
     tag->enumeration.width = X64_SIZEOF_INT;
     tag->enumeration.alignment = X64_ALIGNOF_INT;
+    tag->enumeration.name = name;
     tag->enumeration.constants = enum_table_init(DEFAULT_SIZE);
   }
   return tag;
@@ -174,6 +176,12 @@ int tag_print(const Tag *tag, char *buffer, size_t size) {
   return sprintf(buffer + buffer_offset, "}");
 }
 #endif
+
+TagKind tag_get_kind(const Tag *tag) { return tag->record.kind; }
+
+size_t tag_get_width(const Tag *tag) { return tag->record.width; }
+
+size_t tag_get_alignment(const Tag *tag) { return tag->record.alignment; }
 
 int tag_get_constant(const Tag *enum_tag, const char *enum_id) {
   assert(enum_tag->enumeration.kind == TAG_ENUM);

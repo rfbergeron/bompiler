@@ -83,15 +83,13 @@ ARR_STAT(ptrdiff_t, spill_regions);
 
 static size_t fn_count;
 
-const Type *TYPE_VA_SPILL_REGION;
-
 extern int skip_allocator;
 extern int skip_liveness;
 
 #define SEMCHK(tree)                          \
   assert((tree)->cexpr_kind == CEXPR_FALSE && \
          astree_is_lvalue((tree)) == LVAL_FALSE)
-#define TYPCHK(left, right) assert(types_equivalent(left, right, 1, 1))
+#define TYPCHK(left, right) assert(types_equivalent(left, right, 1))
 #define WIDCHK(left, right)                         \
   assert((left)->dest.all.mode == MODE_REGISTER &&  \
          (right)->dest.all.mode == MODE_REGISTER && \
@@ -695,7 +693,7 @@ ASTree *translate_disp_conv(ASTree *disp_conv, ASTree *expr,
 
   /* use two-operand imul because it is more convenient */
   Instruction *imul_instr = instr_init(OP_IMUL);
-  set_op_imm(&imul_instr->src, type_elem_width(pointer_type), IMM_SIGNED);
+  set_op_imm(&imul_instr->src, type_get_elem_width(pointer_type), IMM_SIGNED);
   imul_instr->persist_flags = PERSIST_DEST_SET | PERSIST_DEST_CLEAR;
 
   imul_instr->dest = conv_instr->dest;
@@ -747,7 +745,7 @@ ASTree *translate_diff_conv(ASTree *diff_conv, ASTree *expr,
   assert(expr_instr->dest.all.mode == MODE_REGISTER &&
          expr_instr->dest.reg.width == REG_QWORD);
 
-  size_t stride = type_elem_width(pointer_type);
+  size_t stride = type_get_elem_width(pointer_type);
   assert(stride != 0);
   int shift_amount = 0;
   while (!(stride & 0x1)) {
@@ -963,7 +961,7 @@ ASTree *translate_reference(ASTree *reference, ASTree *struct_,
   }
 
   Instruction *struct_instr = instr_prev(struct_->instructions);
-  Symbol *member_symbol = type_member_name(record_type, member->lexinfo);
+  Symbol *member_symbol = type_get_member_name(record_type, member->lexinfo);
   assert(member_symbol);
   REGCHK(struct_instr);
 
@@ -1095,9 +1093,9 @@ ASTree *translate_addition(ASTree *operator, ASTree * left, ASTree *right) {
  */
 static void multiply_helper(ASTree *operator, ASTree * left, ASTree *right) {
   Instruction *lvalue_instr, *conv_instr, *left_instr;
-  if (operator->tok_kind == TOK_MULEQ ||
-      operator->tok_kind == TOK_DIVEQ ||
-      operator->tok_kind == TOK_REMEQ) {
+  if (operator->tok_kind ==
+      TOK_MULEQ || operator->tok_kind == TOK_DIVEQ || operator->tok_kind ==
+      TOK_REMEQ) {
     lvalue_instr = instr_prev(left->instructions);
     assert(lvalue_instr->dest.all.mode == MODE_REGISTER);
     assert(lvalue_instr->dest.reg.width == REG_QWORD);
@@ -2038,7 +2036,7 @@ static void va_translate_params(ASTree *declarator, ASTree *body) {
   /* offset to account for return address and saved rbp */
   param_stack_disp = PROLOGUE_EIGHTBYTES * X64_SIZEOF_LONG;
   window_size = VA_INIT_WINDOW_SIZE;
-  size_t i, param_count = type_param_count(declarator->type);
+  size_t i, param_count = type_get_param_count(declarator->type);
   for (i = 0; i < param_count; ++i) {
     ASTree *param = astree_get(fn_dirdecl, i);
     ASTree *param_decl = astree_get(param, 1);
@@ -2083,7 +2081,7 @@ static void translate_params(ASTree *declarator, ASTree *body) {
   /* offset to account for return address and saved rbp */
   param_stack_disp = PROLOGUE_EIGHTBYTES * X64_SIZEOF_LONG;
   window_size = INIT_WINDOW_SIZE;
-  size_t i, param_count = type_param_count(declarator->type);
+  size_t i, param_count = type_get_param_count(declarator->type);
   for (i = 0; i < param_count; ++i) {
     ASTree *param = astree_get(fn_dirdecl, i);
     ASTree *param_decl = astree_get(param, 1);
@@ -2494,7 +2492,7 @@ void translate_static_scalar_init(const Type *type, ASTree *initializer) {
     case X64_SIZEOF_INT:
       directive = OP_LONG;
       break;
-    case X64_SIZEOF_SHORT:
+    case X64_SIZEOF_SHRT:
       directive = OP_VALUE;
       break;
     case X64_SIZEOF_CHAR:
@@ -2973,12 +2971,6 @@ void asmgen_init_globals(void) {
   ARR_INIT(literal_tokens, 16);
   ARR_INIT(literal_labels, 16);
   ARR_INIT(spill_regions, 2);
-  static Tag tag_va_spill_region = {{TAG_STRUCT, 1,
-                                     X64_SIZEOF_LONG * PARAM_REG_COUNT,
-                                     X64_ALIGNOF_LONG, NULL}};
-  static Type type_va_spill_region = {{TYPE_CODE_STRUCT, 0}};
-  type_va_spill_region.tag.value = &tag_va_spill_region;
-  TYPE_VA_SPILL_REGION = &type_va_spill_region;
 }
 
 void asmgen_free_globals(void) {
