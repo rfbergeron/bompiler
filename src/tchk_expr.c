@@ -259,7 +259,7 @@ ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
               type_is_union(false_expr->type)) ||
              (type_is_void(true_expr->type) &&
               type_is_void(false_expr->type))) {
-    if (types_equivalent(true_expr->type, false_expr->type, 1)) {
+    if (types_compatible(true_expr->type, false_expr->type, 0)) {
       qmark->type = true_expr->type;
     } else {
       (void)semerr_incompatible_types(qmark, true_expr->type, false_expr->type);
@@ -283,7 +283,8 @@ ASTree *validate_conditional(ASTree *qmark, ASTree *condition,
               type_is_pointer(false_expr->type)) &&
              (type_is_void_pointer(true_expr->type) ||
               type_is_void_pointer(false_expr->type) ||
-              types_equivalent(true_expr->type, false_expr->type, 1))) {
+              types_compatible(type_strip_declarator(true_expr->type),
+                               type_strip_declarator(false_expr->type), 0))) {
     qmark->type =
         type_common_qualified_pointer(true_expr->type, false_expr->type);
     true_expr = tchk_scal_conv(true_expr, qmark->type);
@@ -352,7 +353,7 @@ ASTree *validate_addition(ASTree *operator, ASTree * left, ASTree *right) {
     operator->type = right->type;
     return evaluate_binop(operator, left, right);
   } else if (operator->tok_kind == '-' && type_is_pointer(left->type) &&
-             types_equivalent(left->type, right->type, 1)) {
+             types_compatible(left->type, right->type, 0)) {
     operator->type =(Type *) TYPE_LONG;
     return tchk_diff_conv(evaluate_binop(operator, left, right), left->type);
   } else {
@@ -386,7 +387,7 @@ ASTree *validate_relational(ASTree *operator, ASTree * left, ASTree *right) {
     right = tchk_scal_conv(right, conv_type);
     return evaluate_binop(operator, left, right);
   } else if (type_is_pointer(left->type) &&
-             types_equivalent(left->type, right->type, 1)) {
+             types_compatible(left->type, right->type, 0)) {
     return evaluate_binop(operator, left, right);
   } else {
     (void)semerr_incompatible_types(operator, left->type, right->type);
@@ -410,14 +411,15 @@ ASTree *validate_equality(ASTree *operator, ASTree * left, ASTree *right) {
   } else if (type_is_pointer(left->type) && astree_is_const_zero(right)) {
     right = tchk_scal_conv(right, left->type);
     return evaluate_binop(operator, left, right);
-  } else if (type_is_pointer(left->type) &&
-             types_equivalent(left->type, right->type, 1)) {
-    return evaluate_binop(operator, left, right);
   } else if (type_is_pointer(left->type) && type_is_void_pointer(right->type)) {
     left = tchk_scal_conv(left, right->type);
     return evaluate_binop(operator, left, right);
   } else if (type_is_void_pointer(left->type) && type_is_pointer(right->type)) {
     right = tchk_scal_conv(right, left->type);
+    return evaluate_binop(operator, left, right);
+  } else if (type_is_pointer(left->type) && type_is_pointer(right->type) &&
+             types_compatible(type_strip_declarator(left->type),
+                              type_strip_declarator(right->type), 0)) {
     return evaluate_binop(operator, left, right);
   } else {
     (void)semerr_incompatible_types(operator, left->type, right->type);

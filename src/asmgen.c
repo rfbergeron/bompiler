@@ -89,7 +89,8 @@ extern int skip_liveness;
 #define SEMCHK(tree)                          \
   assert((tree)->cexpr_kind == CEXPR_FALSE && \
          astree_is_lvalue((tree)) == LVAL_FALSE)
-#define TYPCHK(left, right) assert(types_equivalent(left, right, 1))
+#define TYPCHK(left, right) \
+  assert(types_compatible(left, right, 0) || types_assignable(left, right, 0))
 #define WIDCHK(left, right)                         \
   assert((left)->dest.all.mode == MODE_REGISTER &&  \
          (right)->dest.all.mode == MODE_REGISTER && \

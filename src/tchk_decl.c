@@ -252,11 +252,12 @@ static Symbol *validate_declaration(ASTree *declaration, ASTree *declarator) {
     /* reassign type information in case it was replaced */
     if (symbol->info == SYM_INHERITOR) declarator->type = symbol->type;
     return symbol;
-  } else if (!linkage_valid(exists, symbol->linkage) ||
-             !(types_equivalent(exists->type, declarator->type, 0) ||
-               type_complete_array(exists->type, declarator->type) ||
-               type_prototype_function(exists->type, declarator->type))) {
+  } else if (!linkage_valid(exists, symbol->linkage)) {
     (void)semerr_incompatible_linkage(declarator, exists, symbol);
+    symbol_destroy(symbol);
+    return NULL;
+  } else if (type_compose(exists->type, declarator->type, 1)) {
+    (void)semerr_incompatible_types(declarator, exists->type, declarator->type);
     symbol_destroy(symbol);
     return NULL;
   } else {
@@ -370,7 +371,7 @@ ASTree *define_params(ASTree *declarator, ASTree *param_list) {
 ASTree *define_array(ASTree *declarator, ASTree *array) {
   Type *array_type;
   if (astree_count(array) == 0)
-    array_type = type_init_array(0);
+    array_type = type_init_array(BCC_DEDUCE_ARR);
   else if (type_is_unsigned(astree_get(array, 0)->type))
     array_type =
         type_init_array(astree_get(array, 0)->constant.integral.unsigned_value);

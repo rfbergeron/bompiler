@@ -44,6 +44,10 @@ CompilerState *state_init(void) {
 void state_destroy(CompilerState *state) {
   if (state == NULL) return;
   ARR_DESTROY(state->scopes);
+  /* free switch info in case of error */
+  size_t i;
+  for (i = 0; i < ARR_LEN(state->switches); ++i)
+    free(ARR_GET(state->switches, i));
   ARR_DESTROY(state->switches);
   ARR_DESTROY(state->break_stack);
   ARR_DESTROY(state->continue_stack);
@@ -196,9 +200,7 @@ int state_inheritance_valid(CompilerState *state, const char *ident,
     /* TODO(Robert): rewrite symbol table functions */
     benefactor = scope_get_symbol(current, ident);
     if (benefactor != NULL &&
-        (types_equivalent(benefactor->type, symbol->type, 0) ||
-         type_complete_array(benefactor->type, symbol->type) ||
-         type_prototype_function(benefactor->type, symbol->type))) {
+        !type_compose(benefactor->type, symbol->type, 1)) {
       type_destroy(symbol->type);
       symbol->type = benefactor->type;
       symbol->linkage = benefactor->linkage;

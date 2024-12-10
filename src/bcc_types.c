@@ -353,7 +353,7 @@ int type_to_str(const Type *type, char *buf) {
         current = current->function.next[param_count];
         break;
       case TYPE_KIND_ARR:
-        if (GET_ARRAY_LEN(current) == 0)
+        if (GET_ARRAY_LEN(current) == BCC_DEDUCE_ARR)
           ret += sprintf(buf + ret, "array of unknown size of ");
         else
           ret += sprintf(buf + ret, "array of size %lu of ",
@@ -418,7 +418,7 @@ int type_is_array(const Type *type) {
 }
 
 int type_is_deduced_array(const Type *type) {
-  return type_is_array(type) && GET_ARRAY_LEN(type) == 0;
+  return type_is_array(type) && GET_ARRAY_LEN(type) == BCC_DEDUCE_ARR;
 }
 
 int type_is_function(const Type *type) {
@@ -426,14 +426,7 @@ int type_is_function(const Type *type) {
 }
 
 int type_is_variadic_function(const Type *type) {
-  return type_is_function(type) && type->function.flags & TYPE_FLAG_VARIADIC;
-}
-
-int type_is_prototyped_function(const Type *type) {
-  /* a prototyped function must either have at least one named argument or not
-   * be variadic
-   */
-  return !type_is_variadic_function(type) && GET_PARAM_COUNT(type) != 0;
+  return type_is_function(type) && (type->function.flags & TYPE_FLAG_VARIADIC);
 }
 
 int type_is_void_pointer(const Type *type) {
@@ -538,7 +531,7 @@ size_t type_get_elem_count(const Type *type) {
 }
 
 void type_set_elem_count(Type *type, size_t count) {
-  assert(type_is_array(type) && GET_ARRAY_LEN(type) == 0);
+  assert(type_is_array(type) && GET_ARRAY_LEN(type) == BCC_DEDUCE_ARR);
   type->array.flags |= count << 2;
 }
 
@@ -738,70 +731,64 @@ Tag *type_get_tag(const Type *type) {
   return type->decl_specs.tag;
 }
 
-static int params_equivalent(const Type *type1, const Type *type2) {
+static int params_compatible(const Type *type1, const Type *type2) {
   assert(type_is_function(type1) && type_is_function(type2));
-  if (GET_PARAM_COUNT(type1) != GET_PARAM_COUNT(type2))
+  if ((GET_PARAM_COUNT(type1) == 0 &&
+       (type1->function.flags & TYPE_FLAG_VARIADIC)) ||
+      (GET_PARAM_COUNT(type2) == 0 &&
+       (type2->function.flags & TYPE_FLAG_VARIADIC)))
+    return 1;
+  else if (GET_PARAM_COUNT(type1) != GET_PARAM_COUNT(type2))
     return 0;
   else if (((type1->function.flags ^ type2->function.flags) &
             TYPE_FLAG_VARIADIC))
     return 0;
   size_t i, param_count = GET_PARAM_COUNT(type1);
-  for (i = 0; i < param_count; ++i) {
-    if (!types_equivalent(type1->function.next[i], type2->function.next[i], 0))
+  for (i = 0; i < param_count; ++i)
+    if (!types_compatible(type1->function.next[i], type2->function.next[i], 0))
       return 0;
-  }
   return 1;
 }
 
-int types_equivalent(const Type *type1, const Type *type2,
-                     int ignore_qualifiers) {
-  if ((type1->decl_specs.flags & TYPE_KIND_MASK) !=
-      (type2->decl_specs.flags & TYPE_KIND_MASK))
+int types_compatible(const Type *type1, const Type *type2, int qualified) {
+  if ((type1->decl_specs.flags ^ type2->decl_specs.flags) & TYPE_KIND_MASK)
     return 0;
+
   switch (type1->decl_specs.flags & TYPE_KIND_MASK) {
-    Type *stripped_type1, *stripped_type2;
-    unsigned int flags_diff;
     case TYPE_KIND_SPECS:
-      flags_diff = (type1->decl_specs.flags ^ type2->decl_specs.flags) &
-                   (ignore_qualifiers ? TYPE_SPEC_MASK
-                                      : TYPE_SPEC_MASK | TYPE_QUAL_MASK);
-      return !flags_diff && type1->decl_specs.tag == type2->decl_specs.tag;
+      return !((type1->decl_specs.flags ^ type2->decl_specs.flags) &
+               (qualified ? TYPE_SPEC_MASK | TYPE_QUAL_MASK
+                          : TYPE_SPEC_MASK)) &&
+             type1->decl_specs.tag == type2->decl_specs.tag;
     case TYPE_KIND_PTR:
-      stripped_type1 = type_strip_declarator(type1);
-      stripped_type2 = type_strip_declarator(type2);
-      if (!ignore_qualifiers && type1->pointer.flags != type2->pointer.flags)
-        return 0;
-      else
-        return types_equivalent(stripped_type1, stripped_type2,
-                                ignore_qualifiers);
+      return !(qualified && ((type1->pointer.flags ^ type2->pointer.flags) &
+                             TYPE_QUAL_MASK)) &&
+             types_compatible(type_strip_declarator(type1),
+                              type_strip_declarator(type2), 1);
     case TYPE_KIND_ARR:
-      stripped_type1 = type_strip_declarator(type1);
-      stripped_type2 = type_strip_declarator(type2);
-      return type1->array.flags == type2->array.flags &&
-             types_equivalent(stripped_type1, stripped_type2,
-                              ignore_qualifiers);
+      return (GET_ARRAY_LEN(type1) == 0 || GET_ARRAY_LEN(type2) == 0 ||
+              GET_ARRAY_LEN(type1) == GET_ARRAY_LEN(type2)) &&
+             types_compatible(type_strip_declarator(type1),
+                              type_strip_declarator(type2), 1);
     case TYPE_KIND_FN:
-      stripped_type1 = type_strip_declarator(type1);
-      stripped_type2 = type_strip_declarator(type2);
-      return types_equivalent(stripped_type1, stripped_type2,
-                              ignore_qualifiers) &&
-             params_equivalent(type1, type2);
+      return types_compatible(type_strip_declarator(type1),
+                              type_strip_declarator(type2), 1) &&
+             params_compatible(type1, type2);
     default:
       abort();
   }
 }
 
-/* TODO(Robert): consider checking to make sure that the destination is not
- * const-qualified here instead of elsewhere
- */
 int types_assignable(const Type *dest, const Type *src, int is_const_zero) {
   if (type_is_arithmetic(dest) && type_is_arithmetic(src)) {
     return 1;
   } else if ((type_is_struct(dest) && type_is_struct(src)) ||
-             (type_is_union(dest) && type_is_union(src))) {
-    return types_equivalent(dest, src, 1);
+             (type_is_union(dest) && type_is_union(src)) ||
+             (type_is_function(dest) && type_is_function(src))) {
+    return types_compatible(dest, src, 0);
   } else if (type_is_pointer(dest) && type_is_pointer(src)) {
-    if (types_equivalent(dest, src, 1)) {
+    if (types_assignable(type_strip_declarator(dest),
+                         type_strip_declarator(src), 0)) {
       return 1;
     } else if (type_is_void_pointer(dest) || type_is_void_pointer(src)) {
       return 1;
@@ -1205,49 +1192,74 @@ Type *type_arithmetic_conversions(Type *type1, Type *type2) {
   }
 }
 
-int type_complete_array(Type *old_type, Type *new_type) {
-  if (!(type_is_array(old_type) && type_is_array(new_type))) {
+static int compose_arrays(Type *dest, Type *src) {
+  if (!types_compatible(type_strip_declarator(dest), type_strip_declarator(src),
+                        1)) {
+    /* incompatible element types */
+    return -1;
+  } else if (GET_ARRAY_LEN(src) == BCC_DEDUCE_ARR) {
+    /* source type incomplete; nothing to do */
     return 0;
-  } else if (!types_equivalent(type_strip_declarator(old_type),
-                               type_strip_declarator(new_type), 0)) {
+  } else if (GET_ARRAY_LEN(dest) == BCC_DEDUCE_ARR) {
+    /* complete destination type */
+    dest->array.flags = src->array.flags;
     return 0;
-  } else if (GET_ARRAY_LEN(old_type) == 0) {
-    /* apply length of new type to existing type */
-    old_type->array.flags = new_type->array.flags;
-    return 1;
   } else {
-    /* if new array type is incomplete, it can be discarded */
-    return GET_ARRAY_LEN(new_type) == 0;
+    /* both types complete; error if known lengths don't match */
+    return dest->array.flags == src->array.flags ? 0 : -1;
   }
 }
 
-int type_prototype_function(Type *old_type, Type *new_type) {
-  assert(!types_equivalent(old_type, new_type, 0));
-  if (!(type_is_function(old_type) && type_is_function(new_type))) {
+static int compose_functions(Type *dest, Type *src) {
+  if (!types_compatible(type_strip_declarator(dest), type_strip_declarator(src),
+                        1)) {
+    /* incompatible return type */
+    return -1;
+  } else if ((dest->function.flags & TYPE_FLAG_VARIADIC) &&
+             GET_PARAM_COUNT(dest) == 0) {
+    /* dest unprototyped; use param info from new type; keep return type */
+    dest->function.flags = src->function.flags;
+    /* swap return types... */
+    SWAP(Type *, dest->function.next[0],
+         src->function.next[GET_PARAM_COUNT(src)]);
+    /* ... and then the `next` field, preserving the return type memory; this
+     * ensures that the resulting composite type uses the memory associated with
+     * the original return type, which is important because it may have already
+     * been used
+     */
+    SWAP(Type **, dest->function.next, src->function.next);
+    /* set src flags to that of an unprototyped function (variadic, 0 params) */
+    src->function.flags = TYPE_KIND_FN | TYPE_FLAG_VARIADIC;
     return 0;
-  } else if (!types_equivalent(type_strip_declarator(old_type),
-                               type_strip_declarator(new_type), 0)) {
+  } else if ((src->function.flags & TYPE_FLAG_VARIADIC) &&
+             GET_PARAM_COUNT(src) == 0) {
+    /* nothing do do; move on */
     return 0;
-  } else if (!type_is_prototyped_function(new_type)) {
-    /* new function type has no prototype; nothing to do here */
-    return 1;
-  } else if (type_is_prototyped_function(old_type)) {
-    /* two functions with different prototypes; semantic error */
-    return 0;
+  } else if (dest->function.flags ^ src->function.flags) {
+    /* different param count or one function is variadic and the other is not */
+    return -1;
   } else {
-    /* existing type may have already been used elsewhere so we have to replace
-     * its contents in-place; all this means is moving some parameter info from
-     * the new type to the old one
-     */
-    SWAP(Type *, old_type->function.next[GET_PARAM_COUNT(old_type)],
-         new_type->function.next[GET_PARAM_COUNT(new_type)]);
-    SWAP(Type **, old_type->function.next, new_type->function.next);
-    old_type->function.flags = new_type->function.flags;
+    size_t i, param_count = GET_PARAM_COUNT(dest);
+    for (i = 0; i < param_count; ++i)
+      if (type_compose(dest->function.next[i], src->function.next[i], 0))
+        return -1;
+    return 0;
+  }
+}
 
-    /* make old definition look like an old style declaration for the type
-     * checker's sake
-     */
-    new_type->function.flags = TYPE_KIND_FN | TYPE_FLAG_VARIADIC;
-    return 1;
+int type_compose(Type *dest, Type *src, int qualified) {
+  if ((dest->decl_specs.flags ^ src->decl_specs.flags) & TYPE_KIND_MASK)
+    return -1;
+  switch (dest->decl_specs.flags & TYPE_KIND_MASK) {
+    case TYPE_KIND_SPECS:
+      /* fallthrough */
+    case TYPE_KIND_PTR:
+      return types_compatible(dest, src, qualified) ? 0 : -1;
+    case TYPE_KIND_ARR:
+      return compose_arrays(dest, src);
+    case TYPE_KIND_FN:
+      return compose_functions(dest, src);
+    default:
+      abort();
   }
 }
