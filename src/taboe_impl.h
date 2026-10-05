@@ -287,14 +287,14 @@
   }                                                                            \
                                                                                \
   int TABOE_FN(fn_pfx, at)(const TABOE_NAME(tab_t) * table, size_t index,      \
-                           val_t * out) {                                      \
+                           val_t *out) {                                       \
     if (table == NULL || table->count <= index) return 0;                      \
     if (out != NULL) *out = table->values[index];                              \
     return 1;                                                                  \
   }                                                                            \
                                                                                \
   int TABOE_FN(fn_pfx, key_at)(const TABOE_NAME(tab_t) * table, size_t index,  \
-                               key_t * out) {                                  \
+                               key_t *out) {                                   \
     if (table == NULL || table->count <= index) return 0;                      \
     if (out != NULL) *out = table->keys[index];                                \
     return 1;                                                                  \

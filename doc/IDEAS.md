@@ -2518,3 +2518,375 @@ return the name of the register the result was placed into.
 
 The contents of source lines to be written out will be tracked in a struct with
 fields for label, instruction, left/right operands, and comment.
+
+## Type Representation
+
+The type representation is already very efficient, but I could make it even
+better (worse). In particular, we could make only the least significant bit
+determine whether the type is an array or not, with a special exception. Arrays
+of length zero are not allowed by ANSI C; however it is a GUN extension. Even
+without the GNU extension, it is possible to have arrays of undefined size, and
+flexible array members in C99, as well as dynamically allocated arrays.
+
+I think the best overall solution would be:
+
+1. Use only the least significant bit to indicate array yes/no.
+2. Store `array length - 1` in the remaining bits.
+3. Create another special representation for different array kinds.
+
+This allows us to use all but one bit to store the size of an array, giving us
+half of the range of whatever integer size we choose (plus 1) as the maximum
+number of elements in an array.
+
+However, I would like the type flags to fit inside 16 bits, and the current
+representation uses 16 bits. This new array representation costs us an extra
+bit if all else is left the same, so we need to get it from somewhere.
+
+- 1 bit reserved for indicating array.
+- Type qualifiers require 4 bits unconditionally; one for each qualifier.
+- Storage class specifiers require 3; each of the 5 specifiers is mutually
+  exclusive with the others, but we also need to know whether or not we've seen
+  one at all, so zero/none is also a valid value, giving us 6 states, requiring
+  3 bits, wasting two values. These could be used for special case arrays.
+
+This leaves us with 8 bits to represent all other valid combinations of type
+information, which includes:
+
+- void
+- 26 int and char variants, including reserved representations for 'long long'
+- float, double and long double
+- arrays of indeterminate size
+- reserved space for bool
+- struct, union and enum
+
+to make it somewhat nice and neat, lets group the array flag and the 7 bits for
+type qualifiers and storage class specifiers into the first byte of the flag
+field.
+
+the second byte will consist of the following:
+- a 2-bit selector for basic type info
+
+the first 2-bit selector will have values for arithmetic values, pointers,
+functions and an 'other' category. the 'other' category will be used for
+tags, 'void', 'bool' and any other special cases.
+
+the arithmetic values we need to represent include:
+
+- char, signed char, unsigned char (3)
+- int, signed, signed int (3)
+- short, short int, signed short, signed short int (4)
+- long, long int, signed long, signed long int (4)
+- long long, long long int, signed long long, signed long long int (4)
+- unsigned, unsigned int (2)
+- unsigned short, unsigned short int (2)
+- unsigned long, unsigned long int (2)
+- unsigned long long, unsigned long long int (2)
+- float, double and long double (3)
+
+for a total of 29 valid combinations, which should easily fit in 6 bits.
+
+int, char, float and double are all mutually exclusive, so we could use one
+portion of the range to define them.
+
+using a 2 bit integer to represent none, short, long and long long seems
+reasonable since these keywords/states are all mutually incompatible and both
+int and double need to be able to coexist with the long keyword.
+
+this leaves us with 4 bits and the following combinations:
+
+- none (1)
+- char, signed char, unsigned char (3)
+- int, signed, signed int (3)
+- unsigned, unsigned int (2)
+- float, double (2)
+
+which comes out to 11 values
+
+we cant just break it up into a two bit integer and two bit flags; if we
+did that we'd have [char, int, float, double] and one flag each for signed
+and unsigned, but this would make 'long int' and 'int' ambiguous.
+
+```
+ARTH_NONE = 0,
+ARTH_FLOAT = 1,    /* 0b0001 */
+ARTH_DOUBLE = 2,   /* 0b0010 */
+/* 3 unused */
+/* setting bit 3 indicates an integral specifier */
+ARTH_CHAR = 4,     /* 0b0100 -> unsigned char */
+ARTH_INT = 5,      /* 0b0101 -> signed int */
+ARTH_SIGNED = 6,   /* 0b0110 -> signed char */
+ARTH_UNSIGNED = 7, /* 0b0111 -> unsigned int */
+/* 8, 9, 10 and 11 unused */
+ARTH_FLAG_COMPOUND = 8, /* 0b1000 -> set when multiple specifiers present */
+/* setting the top bit indicates a compound value */
+ARTH_UNSIGNED_CHAR = 12 /* 0b1100 */
+ARTH_SIGNED_INT = 13, /* 0b1101 */
+ARTH_SIGNED_CHAR = 14, /* 0b1110 */
+ARTH_UNSIGNED_INT = 15, /* 0b1111 */
+```
+
+The place we need to make savings is for the integers; 'void' uses only the
+'lo' bits (3) and 'float' and 'tag' use only an additional two bits on top of
+that - bits 12 and 13 (5). Integers, on the other hand, use the 'lo' bits,
+bits 12 and 13 for 'signed'/'unsigned' and bit 14 and 15 for 'short' and
+'long' (7).
+
+Say we reduce the 'lo' part to just two bits with values 'int', 'float' and
+'special.' We only get three because we want to be able to just zero initialize
+this struct before use and have all bits zero have a useful meaning: no type
+specifier information read yet. 'Special' includes all tags (struct, union,
+enum) as well as 'void' and 'bool'.
+
+We've got a maximum of 5 bits to fit integers into. There are a handful of
+tokens we have to worry about: 'int', 'long', 'short', 'signed', 'unsigned'
+and 'char'. Only a handful of combinations of these keywords are valid:
+
+- char, signed char, unsigned char (3)
+- int, signed, signed int (3)
+- short, short int, signed short, signed short int (4)
+- long, long int, signed long, signed long int (4)
+- long long, long long int, signed long long, signed long long int (4)
+- unsigned, unsigned int (2)
+- unsigned short, unsigned short int (2)
+- unsigned long, unsigned long int (2)
+- unsigned long long, unsigned long long int (2)
+
+If we wanted to group these all pretty-like, we could observe the following:
+
+- Plain 'char' is the odd one out, as it is not necessarily signed or
+  unsigned. However, plain 'int' also does not match the pattern of the other
+  integer specifiers. So, we group 'int' in with the 'char' variants and turn
+  it into a 2-bit integer. The remaining three bits must hold the remaining
+  values.
+- There are 8 unsigned types.
+- There are 14 signed types, excluding 'int' on its own
+- The last 4 possibilities are 'int', 'char', 'signed char' and 'unsigned char'
+
+This leaves us with 26 values total.
+
+The most effective representation of this is pretty simple:
+
+- one bit to indicate char/int
+- two bit flag to indicate signed/unsigned
+- two bit integer to indicate none/short/long/long long
+
+actually no that doesn't quite work because we need to know if we've seen the
+'int' keyword or not.
+
+we have to turn int/char/signed/unsigned into a 3 bit integer:
+
+- first four values are each individual keyword
+- next/last four are 'signed int', 'unsigned int', 'signed char',
+  'unsigned char'
+
+this gets us our 5 bit integer representation.
+
+The 'none' and character options make 4 nicely rounded options, so they
+should be grouped together. They could potentially be extracted out and put
+under 'special'.
+
+The distinct bits for signed/unsigned can be reduced to a two-bit integer
+with values none/signed/unsigned, leaving one unused value for another
+purpose.
+
+The problem is that none/short/long/long long make for a nice two bit value, as
+do none/signed/unsigned. This gives us four bits to work with, but we also need
+a way to know whether or not we've seen 'int'. The lo bits are not enough on
+their own since those will have to be set if any of these keywords are read
+by the type checker.
+
+We've also got an extra value in TYPE_KIND since arrays get their own bit. It
+may actually make the most sense to put integers here; giving us TYPE_KIND
+values of 'none', 'pointer', 'integer', and 'other'.
+
+Hang on a moment, why not make TYPE_KIND_OTHER the default/zero type? this may
+give us some more room to work with for the arithmetic types, since values of
+zero become valid.
+
+we can cram int, char, float and double into a two bit integer this way, since
+we now have the full four values to work with. this leaves us with two bits to
+use for signed and unsigned. this lets us represent all of the standard
+arithmetic types in 6 bits with no awkward spaces.
+
+overall, this works out nicely and gives us a lot of room for extra types
+under the "other" kind. there's even the possibility of implementing things
+like the gnu 0-length array extension. incomplete arrays are going to be
+annoying to deal with but otherwise it should be fine.
+
+there's actually something we need to do to make the switch statements used
+when inspecting types still work. because the 'other' type is used to
+represent deduced size arrays, matching the type with a switch statement is
+difficult.
+
+in order to still make this work, we'll say that one of the 6 most significant
+bits is used to indicate a deduced size array when the type kind is set to
+"other", and include this bit in the type kind mask. this way we can still
+check for arrays with just a bit mask, get as much range as possible out of
+the array type representation, and still have 31 (32 - 1 for empty type info)
+possible values for the "other" types. to make this less cumbersome, pointers
+and functions should be represented such that this bit is always zero so that
+we do not have to account for it.
+
+the best way to do this would be to put it in bit 3, actually. the type kind
+mask then becomes the first four bits. come up with some throwaway enum like
+TYPE_FLAG_BIT_3 to use with TYPE_KIND_ARTH. move type qualifiers and storage
+class specifier to the most significant bits. then, our switch statement cases
+become:
+
+- TYPE_KIND_ARTH, TYPE_KIND_ARTH | TYPE_FLAG_BIT_3, TYPE_KIND_OTHER all share
+  a case statement (usually)
+- TYPE_KIND_PTR gets its own statement
+- TYPE_KIND_FN and TYPE_KIND_FN | TYPE_FLAG_VARIADIC share a case statement
+- TYPE_KIND_OTHER | TYPE_FLAG_INC_ARRAY and default (TYPE_FLAG_ARRAY)
+
+TYPE_KIND_PTR doesn't need a second case since the 6 bits used by
+TYPE_KIND_OTHER and TYPE_KIND_ARTH are not used by pointers.
+
+Creating macros for these so I don't have to write them out every single time
+may not be the worst idea.
+
+Fuckin forgot that its pretty easy to accidentally create a representation
+where it becomes impossible to tell whether or not certain type specifiers have
+already occurred when using zeroes for certain values.
+
+The two-bit int/char/float/double value will have to be repurposed. since float
+and double cannot be used with signed/unsigned, we can use those bits to
+distinguish between float and double somehow. i don't want to touch the none/
+short/long/long long bits because i think that's just about the cleanest
+solution for that.
+
+i guess we'll make the two bit selector like this: one value each for nothing,
+int, char and floating. then we have four bits to do whatever with.
+
+int will use them just the same as we currently do.
+
+char will only use the sign bits.
+
+float will repurpose the sign bits; we can actually get up to four different
+kinds of floats this way if we really want to.
+
+since we're fucking with the representation so hard, why not go all the way.
+
+once again, the enumerated list of possible specifiers and their variants are:
+
+- char, signed char, unsigned char (3)
+- int, signed, signed int (3)
+- short, short int, signed short, signed short int (4)
+- long, long int, signed long, signed long int (4)
+- long long, long long int, signed long long, signed long long int (4)
+- unsigned, unsigned int (2)
+- unsigned short, unsigned short int (2)
+- unsigned long, unsigned long int (2)
+- unsigned long long, unsigned long long int (2)
+- float, double and long double (3)
+
+29 of them in total to fit in the 64 values afforded by our 6 bits. we don't
+even need half the range, so we can afford to "waste" values making the
+representation easier to navigate.
+
+let's not even try to map bits on to actual specifiers; we're not even doing
+that with the whole short/long/long long thing anyways.
+
+lets save the first bit for distinguishing things; the second bit will mark
+the type as floating point, or bits type if unset.
+
+if it's a float, the third and fourth bits will be for float and double.
+fifth and sixth still get used for the size modifiers.
+
+if it's an int... well now we're out of space, because we've got signed and
+unsigned and the size modifiers, which takes four bits no matter what.
+
+so i guess that's what the first bit has to be for? int or char?
+
+basically, each of char, int, short, long, float, double, signed and unsigned
+need a unique bit representation that results in zero when you bitand it with
+compatible specifiers and results in a nonzero value when you bitand it with
+incompatible specifiers, to make checking easy. the exception would obviously
+be long, since in the future long long will need to work.
+
+compatibility list:
+
+- float: none
+- double: long
+- char: signed, unsigned
+- short: int, signed, unsigned
+- long: int, signed, unsigned
+- int: signed, unsigned, long, short
+- signed: int, char, long, short
+- unsigned: int, char, long, short
+
+looking at this, we can make float 0b111111 since it doesn't need to be
+compatible with anything else.
+
+oh wait i can actually be super clever about this; just make float the all zero
+value since it can only ever be by itself, and that's the only change needed.
+
+``` C
+typedef enum type_flag {
+  DECL_SPEC_NONE = 0,              /* 0x0000 no declaration specifiers */
+  TYPE_FLAG_ARRAY = 1,             /* 0x0001 array */
+  TYPE_FLAG_VARIADIC = 1 << 3,     /* 0x0008 variadic function */
+  TYPE_KIND_MASK = 0x6,            /*        type kind: 2-bit integer */
+  TYPE_KIND_OTHER = 0,             /* 0x0000 */
+  TYPE_KIND_ARTH = 1 << 1,         /* 0x0002 */
+  TYPE_KIND_PTR = 2 << 1,          /* 0x0004 */
+  TYPE_KIND_FN = 3 << 1,           /* 0x0006 */
+  TYPE_QUAL_MASK = 0x78,           /*        type qualifiers: 4-bit flagset */
+                                   /* 0x0000 no type qualifiers */
+  TYPE_QUAL_CONST = 1 << 3,        /* 0x0008 */
+  TYPE_QUAL_VOLATILE = 1 << 4,     /* 0x0010 */
+                                   /* 0x0020 reserved for restrict */
+                                   /* 0x0040 reserved for atomic */
+  STORE_SPEC_MASK = 0x380,         /*        storage class: 3-bit integer */
+                                   /* 0x0000 no explicit storage class */
+  STORE_SPEC_REGISTER = 1 << 7,    /* 0x0080 */
+  STORE_SPEC_AUTO = 2 << 7,        /* 0x0100 */
+  STORE_SPEC_STATIC = 3 << 7,      /* 0x0180 */
+  STORE_SPEC_EXTERN = 4 << 7,      /* 0x0200 */
+  STORE_SPEC_TYPEDEF = 5 << 7,     /* 0x0280 */
+                                   /* 0x0300 invalid 7th value */
+                                   /* 0x0380 invalid 8th value */
+  TYPE_MASK_ARTH = 0x0c00,         /*        arithmetic specifiers: 2 bits */
+  TYPE_SPEC_INT = 0 << 10,         /* 0x0000 */
+  TYPE_SPEC_CHAR = 1 << 10,        /* 0x0400 */
+  TYPE_SPEC_FLT = 2 << 10,         /* 0x0800 */
+  TYPE_SPEC_DBL = 3 << 10,         /* 0x0c00 */
+  TYPE_MASK_SIGN = 0x3000,         /*        signedness specifiers: 2 bits */
+  TYPE_SPEC_SIGNED = 1 << 12,      /* 0x1000 */
+  TYPE_SPEC_UNSIGNED = 1 << 13,    /* 0x2000 */
+  TYPE_MASK_SIZE = 0xc000,         /*        size specifiers: 2 bits */
+                                   /* 0x0000 no type specifiers */
+  TYPE_SPEC_SHRT = 1 << 14,        /* 0x4000 */
+  TYPE_SPEC_LONG = 2 << 14,        /* 0x8000 */
+  TYPE_SPEC_LLONG = 3 << 14,       /* 0xc000 */
+  TYPE_MASK_OTHER = 0xfc00,        /*        other specifiers: 6 bits */
+                                   /* 0x0000 no type specifiers */
+  TYPE_SPEC_VOID = 1 << 10,        /* 0x0400 */
+  TYPE_SPEC_STRUCT = 2 << 10,      /* 0x0800 */
+  TYPE_SPEC_UNION = 3 << 10,       /* 0x0c00 */
+  TYPE_SPEC_ENUM = 4 << 10,        /* 0x1000 */
+  TYPE_SPEC_DEDUCED_ARR = 5 << 10, /* 0x1400 */
+  /* "canonical" bit representations of types */
+  TYPE_REPR_CHAR = TYPE_KIND_ARTH | TYPE_SPEC_CHAR,
+  TYPE_REPR_SCHAR = TYPE_KIND_ARTH | TYPE_SPEC_SIGNED | TYPE_FLAG_SBIT,
+  TYPE_REPR_UCHAR = TYPE_KIND_ARTH | TYPE_SPEC_CHAR | TYPE_FLAG_SBIT,
+  TYPE_REPR_INT = TYPE_KIND_ARTH | TYPE_SPEC_INT | TYPE_FLAG_SBIT,
+  TYPE_REPR_UINT = TYPE_KIND_ARTH | TYPE_SPEC_UNSIGNED | TYPE_FLAG_SBIT,
+  TYPE_REPR_SHRT = TYPE_REPR_INT | TYPE_SPEC_SHRT,
+  TYPE_REPR_USHRT = TYPE_REPR_UINT | TYPE_SPEC_SHRT,
+  TYPE_REPR_LONG = TYPE_REPR_INT | TYPE_SPEC_LONG,
+  TYPE_REPR_ULONG = TYPE_REPR_UINT | TYPE_SPEC_LONG,
+  TYPE_REPR_LLONG = TYPE_REPR_INT | TYPE_SPEC_LLONG,
+  TYPE_REPR_ULLONG = TYPE_REPR_UINT | TYPE_SPEC_LLONG,
+  TYPE_REPR_FLT = TYPE_KIND_ARTH | TYPE_SPEC_FLT,
+  TYPE_REPR_DBL = TYPE_KIND_ARTH | TYPE_SPEC_DBL,
+  TYPE_REPR_LDBL = TYPE_KIND_ARTH | TYPE_SPEC_DBL | TYPE_SPEC_LONG,
+  TYPE_REPR_VOID = TYPE_KIND_OTHER | TYPE_SPEC_VOID,
+  TYPE_REPR_STRUCT = TYPE_KIND_OTHER | TYPE_SPEC_STRUCT,
+  TYPE_REPR_UNION = TYPE_KIND_OTHER | TYPE_SPEC_UNION,
+  TYPE_REPR_ENUM = TYPE_KIND_OTHER | TYPE_SPEC_ENUM,
+  TYPE_REPR_BOOL = TYPE_KIND_OTHER | TYPE_SPEC_BOOL,
+  TYPE_REPR_FLEX_ARR = TYPE_KIND_OTHER | TYPE_SPEC_FLEX_ARR,
+  TYPE_REPR_MASK = 0xffff ^ (TYPE_QUAL_MASK | STORE_SPEC_MASK),
+} TypeFlag;
+```

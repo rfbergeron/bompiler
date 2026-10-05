@@ -79,11 +79,11 @@ build/yyparse.h build/yyparse.c&: src/parser.y build
 	bison -Wall -v --defines=build/yyparse.h --output=build/yyparse.c $<
 
 format:
-	clang-format --style=Google -i ${SRC:%=src/%} ${HDR:%=src/%} \
+	clang-format --style=file -i ${SRC:%=src/%} ${HDR:%=src/%} \
 	${UNITSRC:%=src/%} src/parser.y src/parser.c
 
 check:
-	clang-format --style=Google --dry-run --Werror ${SRC:%=src/%} \
+	clang-format --style=file --dry-run --Werror ${SRC:%=src/%} \
         ${HDR:%=src/%} ${UNITSRC:%=src/%} src/parser.y src/parser.c
 
 ci: check

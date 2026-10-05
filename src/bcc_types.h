@@ -18,8 +18,6 @@
 #define X64_SIZEOF_LDBL ((size_t)16UL)
 #define X64_ALIGNOF_LDBL ((size_t)16UL)
 
-#define BCC_DEDUCE_ARR ((size_t)0UL)
-
 typedef union type Type;
 union tag;
 

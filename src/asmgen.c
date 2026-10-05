@@ -825,7 +825,7 @@ ASTree *translate_logical_not(ASTree * not, ASTree *operand) {
   set_op_reg(&movz_instr->dest, REG_DWORD, next_vreg());
   movz_instr->persist_flags |= PERSIST_DEST_CLEAR;
 
-  (void)instr_append(not ->instructions, 4, operand->instructions, test_instr,
+  (void)instr_append(not->instructions, 4, operand->instructions, test_instr,
                      setz_instr, movz_instr);
   return astree_adopt(not, 1, operand);
 }

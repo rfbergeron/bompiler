@@ -371,7 +371,7 @@ ASTree *define_params(ASTree *declarator, ASTree *param_list) {
 ASTree *define_array(ASTree *declarator, ASTree *array) {
   Type *array_type;
   if (astree_count(array) == 0)
-    array_type = type_init_array(BCC_DEDUCE_ARR);
+    array_type = type_init_array(0);
   else if (type_is_unsigned(astree_get(array, 0)->type))
     array_type =
         type_init_array(astree_get(array, 0)->constant.integral.unsigned_value);
