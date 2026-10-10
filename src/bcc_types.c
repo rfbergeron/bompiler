@@ -1,5 +1,7 @@
 #include "bcc_types.h"
 
+#include <limits.h>
+
 #include "assert.h"
 #include "scope.h"
 #include "stdint.h"
@@ -36,7 +38,10 @@ typedef enum type_flag {
   TYPE_OTHER_STRUCT = 2 << 4,     /* 0x0020 */
   TYPE_OTHER_UNION = 3 << 4,      /* 0x0030 */
   TYPE_OTHER_ENUM = 4 << 4,       /* 0x0040 */
-                                  /* 0x0050 - 0x01f0 reserved */
+  TYPE_OTHER_BFLD = 5 << 4,       /* 0x0050 */
+  TYPE_OTHER_SBFLD = 6 << 4,      /* 0x0060 */
+  TYPE_OTHER_UBFLD = 7 << 4,      /* 0x0070 */
+                                  /* 0x0080 - 0x01f0 reserved */
   TYPE_MASK_ARTH = 0x0018,        /*        arithmetic specifiers: 2 bit int */
   TYPE_ARTH_FLT = 0 << 3,         /* 0x0000 */
   TYPE_ARTH_DBL = 1 << 3,         /* 0x0008 */
@@ -93,6 +98,9 @@ typedef enum type_flag {
   TYPE_REPR_UNION = TYPE_KIND_OTHER | TYPE_OTHER_UNION,
   TYPE_REPR_ENUM = TYPE_KIND_OTHER | TYPE_OTHER_ENUM,
   TYPE_REPR_INC_ARR = TYPE_KIND_OTHER | TYPE_FLAG_ARR_SPECIAL,
+  TYPE_REPR_BFLD = TYPE_KIND_OTHER | TYPE_OTHER_BFLD,
+  TYPE_REPR_SBFLD = TYPE_KIND_OTHER | TYPE_OTHER_SBFLD,
+  TYPE_REPR_UBFLD = TYPE_KIND_OTHER | TYPE_OTHER_UBFLD,
   /* types with representations that need special handling */
   TYPE_MASK_EXTRA_KIND = TYPE_MASK_KIND | TYPE_MASK_EXTRA,
   TYPE_EXTRA_ARR = TYPE_KIND_OTHER | TYPE_FLAG_ARR_SPECIAL,
@@ -103,7 +111,10 @@ typedef enum type_flag {
 union type {
   struct {
     unsigned long flags;
-    union tag *tag;
+    union {
+      union tag *tag;
+      unsigned int bit_field_width : 5;
+    } extra;
   } decl_specs;
   struct {
     unsigned long flags;
@@ -119,7 +130,7 @@ union type {
   } function;
 };
 
-static Tag TAG_VA_SPILL_REGION = {{TAG_STRUCT, 1,
+static Tag TAG_VA_SPILL_REGION = {{TAG_STRUCT, 1, 0,
                                    X64_SIZEOF_LONG * PARAM_REG_COUNT,
                                    X64_ALIGNOF_LONG, NULL, NULL}};
 
@@ -132,7 +143,7 @@ static Type TYPE_UNSIGNED_INT_INTERNAL;
 static Type TYPE_UNSIGNED_LONG_INTERNAL;
 static Type TYPE_NONE_INTERNAL;
 static const Type TYPE_VA_SPILL_REGION_INTERNAL = {
-    {TYPE_REPR_STRUCT, &TAG_VA_SPILL_REGION}};
+    {TYPE_REPR_STRUCT, {&TAG_VA_SPILL_REGION}}};
 
 const Type *const TYPE_VOID = &TYPE_VOID_INTERNAL;
 const Type *const TYPE_POINTER = &TYPE_POINTER_INTERNAL;
@@ -180,7 +191,7 @@ Type *type_init_tag(Tag *tag) {
                                               TYPE_REPR_ENUM};
   Type *type = malloc(sizeof(Type));
   type->decl_specs.flags = TAG_TYPESPEC_MAP[tag_get_kind(tag)];
-  type->decl_specs.tag = tag;
+  type->decl_specs.extra.tag = tag;
   return type;
 }
 
@@ -211,6 +222,14 @@ Type *type_init_function(size_t parameters_size, Type **parameters,
   if (variadic) type->function.flags |= TYPE_FLAG_VARIADIC;
   type->function.next = parameters;
   type->function.next[parameters_size] = NULL;
+  return type;
+}
+
+Type *type_init_bit_field(unsigned char width) {
+  assert(width <= X64_CHAR_BIT * X64_SIZEOF_INT);
+  Type *type = malloc(sizeof(Type));
+  type->decl_specs.flags = TYPE_REPR_BFLD;
+  type->decl_specs.extra.bit_field_width = width;
   return type;
 }
 
@@ -387,6 +406,8 @@ static const char *decl_specs_get_str(unsigned int flags) {
       return "signed char";
     case TYPE_REPR_UCHAR:
       return "unsigned char";
+    case TYPE_SPEC_INT:
+      return "int";
     case TYPE_REPR_INT:
       return "signed int";
     case TYPE_REPR_UINT:
@@ -424,9 +445,9 @@ static int specifiers_to_str(const Type *type, char *buf) {
 
   if (type_is_record(type) || type_is_enum(type)) {
     return qual_str == NULL ? sprintf(buf, FMT_STRS[1], type_str,
-                                      type->decl_specs.tag->record.name)
+                                      type->decl_specs.extra.tag->record.name)
                             : sprintf(buf, FMT_STRS[2], qual_str, type_str,
-                                      type->decl_specs.tag->record.name);
+                                      type->decl_specs.extra.tag->record.name);
   } else {
     return qual_str == NULL ? sprintf(buf, FMT_STRS[0], type_str)
                             : sprintf(buf, FMT_STRS[1], qual_str, type_str);
@@ -501,16 +522,24 @@ int type_is_integer(const Type *type) {
           (type->decl_specs.flags & TYPE_MASK_ARTH) == TYPE_ARTH_CHAR);
 }
 
-/* TODO(Robert): how to handle char without `signed` or `unsigned`? */
+/* TODO(Robert): enums should probably be considered signed; this should not
+ * matter in practice because they are implicitly converted to signed integers
+ * whenever they are used in an arithmetic expression, but it may prevent
+ * confusion later on.
+ */
 int type_is_signed(const Type *type) {
-  /* pointers are not considered signed or unsigend */
-  return type_is_integer(type) &&
-         !(type->decl_specs.flags & TYPE_SIGN_UNSIGNED);
+  /* pointers are not considered signed or unsigned; plain `char` is signed */
+  return (type_is_integer(type) &&
+          !(type->decl_specs.flags & TYPE_SIGN_UNSIGNED)) ||
+         type->decl_specs.flags == TYPE_REPR_SBFLD;
 }
 
 int type_is_unsigned(const Type *type) {
   /* pointers are not considered signed or unsigend */
-  return type_is_integer(type) && (type->decl_specs.flags & TYPE_SIGN_UNSIGNED);
+  return (type_is_integer(type) &&
+          (type->decl_specs.flags & TYPE_SIGN_UNSIGNED)) ||
+         type->decl_specs.flags == TYPE_REPR_BFLD ||
+         type->decl_specs.flags == TYPE_REPR_UBFLD;
 }
 
 int type_is_enum(const Type *type) {
@@ -518,7 +547,7 @@ int type_is_enum(const Type *type) {
 }
 
 int type_is_integral(const Type *type) {
-  return type_is_integer(type) || type_is_enum(type);
+  return type_is_integer(type) || type_is_enum(type) || type_is_bit_field(type);
 }
 
 int type_is_arithmetic(const Type *type) { return type_is_integral(type); }
@@ -622,28 +651,35 @@ int type_is_incomplete(const Type *type) {
   } else if (type_is_deduced_array(type)) {
     return 1;
   } else if ((type_is_union(type) || type_is_struct(type)) &&
-             !type->decl_specs.tag->record.defined) {
+             !type->decl_specs.extra.tag->record.defined) {
     return 1;
   } else {
     return 0;
   }
 }
 
+int type_is_bit_field(const Type *type) {
+  return type->decl_specs.flags == TYPE_REPR_BFLD ||
+         type->decl_specs.flags == TYPE_REPR_SBFLD ||
+         type->decl_specs.flags == TYPE_REPR_UBFLD;
+}
+
 Symbol *type_get_member_name(const Type *type, const char *name) {
   assert(type_is_record(type));
-  return scope_get_member(type->decl_specs.tag->record.members, name);
+  return scope_get_member(type->decl_specs.extra.tag->record.members, name);
 }
 
 Symbol *type_get_member_index(const Type *type, size_t index) {
   assert(type_is_record(type));
   Symbol *member;
-  scope_member_at(type->decl_specs.tag->record.members, index, NULL, &member);
+  scope_member_at(type->decl_specs.extra.tag->record.members, index, NULL,
+                  &member);
   return member;
 }
 
 size_t type_get_member_count(const Type *type) {
   assert(type_is_record(type));
-  return scope_member_count(type->decl_specs.tag->record.members);
+  return scope_member_count(type->decl_specs.extra.tag->record.members);
 }
 
 size_t type_get_elem_count(const Type *type) {
@@ -677,6 +713,8 @@ static size_t type_decl_specs_alignment(const Type *type) {
       /* fallthrough */
     case TYPE_REPR_UCHAR:
       return X64_ALIGNOF_CHAR;
+    case TYPE_SPEC_INT:
+      /* fallthrough */
     case TYPE_REPR_INT:
       /* fallthrough */
     case TYPE_REPR_UINT:
@@ -700,7 +738,13 @@ static size_t type_decl_specs_alignment(const Type *type) {
     case TYPE_REPR_UNION:
       /* fallthrough */
     case TYPE_REPR_ENUM:
-      return tag_get_alignment(type->decl_specs.tag);
+      return tag_get_alignment(type->decl_specs.extra.tag);
+    case TYPE_REPR_BFLD:
+      /* fallthrough */
+    case TYPE_REPR_SBFLD:
+      /* fallthrough */
+    case TYPE_REPR_UBFLD:
+      return X64_ALIGNOF_CHAR;
     default:
       abort();
   }
@@ -740,6 +784,8 @@ static size_t type_decl_specs_width(const Type *type) {
       /* fallthrough */
     case TYPE_REPR_UCHAR:
       return X64_SIZEOF_CHAR;
+    case TYPE_SPEC_INT:
+      /* fallthrough */
     case TYPE_REPR_INT:
       /* fallthrough */
     case TYPE_REPR_UINT:
@@ -763,7 +809,15 @@ static size_t type_decl_specs_width(const Type *type) {
     case TYPE_REPR_UNION:
       /* fallthrough */
     case TYPE_REPR_ENUM:
-      return tag_get_width(type->decl_specs.tag);
+      return tag_get_width(type->decl_specs.extra.tag);
+    case TYPE_REPR_BFLD:
+      /* fallthrough */
+    case TYPE_REPR_SBFLD:
+      /* fallthrough */
+    case TYPE_REPR_UBFLD:
+      /* TODO(Robert): I might use this on accident, causing bugs */
+      return type->decl_specs.extra.bit_field_width / X64_CHAR_BIT +
+             (type->decl_specs.extra.bit_field_width % X64_CHAR_BIT != 0);
     default:
       abort();
   }
@@ -840,6 +894,11 @@ size_t type_get_padding(const Type *type, size_t to_pad) {
   return to_pad % alignment == 0 ? 0 : alignment - (to_pad % alignment);
 }
 
+unsigned char type_get_bit_field_width(const Type *type) {
+  assert(type_is_bit_field(type));
+  return type->decl_specs.extra.bit_field_width;
+}
+
 unsigned int type_get_flags(const Type *type) {
   switch (type->decl_specs.flags & TYPE_MASK_EXTRA_KIND) {
     case TYPE_KIND_ARTH:
@@ -861,7 +920,7 @@ unsigned int type_get_flags(const Type *type) {
 
 Tag *type_get_tag(const Type *type) {
   assert(type_is_record(type) || type_is_enum(type));
-  return type->decl_specs.tag;
+  return type->decl_specs.extra.tag;
 }
 
 static int params_compatible(const Type *type1, const Type *type2) {
@@ -894,7 +953,7 @@ int types_compatible(const Type *type1, const Type *type2, int qualified) {
       return !((type1->decl_specs.flags ^ type2->decl_specs.flags) &
                (qualified ? TYPE_MASK_REPR | TYPE_MASK_QUAL
                           : TYPE_MASK_REPR)) &&
-             type1->decl_specs.tag == type2->decl_specs.tag;
+             type1->decl_specs.extra.tag == type2->decl_specs.extra.tag;
     case TYPE_KIND_PTR:
       return !(qualified && ((type1->pointer.flags ^ type2->pointer.flags) &
                              TYPE_MASK_QUAL)) &&
@@ -1245,6 +1304,11 @@ Type *type_merge(const Type *dest, const Type *src) {
   }
 }
 
+/* TODO(Robert): we can't fully normalize plain `int` because of bit fields,
+ * but we probably shouldn't be doing stuff like that in general. we can
+ * handle the variety of synonyms with switch-case statements and leaving the
+ * flags identical to the input program improves the quality of diagnostics
+ */
 int type_normalize(Type *type) {
   type = type_get_decl_specs(type);
 
@@ -1253,16 +1317,12 @@ int type_normalize(Type *type) {
   } else if ((type->decl_specs.flags & TYPE_MASK_KIND) != TYPE_KIND_ARTH) {
     /* not arithmetic; nothing to do */
     return 0;
-  } else if ((type->decl_specs.flags & TYPE_MASK_ARTH) == TYPE_ARTH_INT) {
-    /* specify signed integer if not explicit */
-    if (!(type->decl_specs.flags & TYPE_MASK_SIGN))
-      type->decl_specs.flags |= TYPE_SIGN_SIGNED;
-    return 0;
   } else if ((type->decl_specs.flags & (TYPE_MASK_SIGN | TYPE_MASK_SIZE)) ==
              DECL_SPEC_NONE) {
     /* no signedness/integer size specifiers; nothing to do */
     return 0;
-  } else if ((type->decl_specs.flags & TYPE_MASK_ARTH) != TYPE_ARTH_FLT) {
+  } else if ((type->decl_specs.flags & TYPE_MASK_ARTH) == TYPE_ARTH_CHAR ||
+             (type->decl_specs.flags & TYPE_MASK_ARTH) == TYPE_ARTH_DBL) {
     /* char or double; nothing to do */
     return 0;
   } else if (type->decl_specs.flags & TYPE_MASK_SIGN) {
@@ -1316,6 +1376,30 @@ int type_validate(const Type *type) {
   return 1;
 }
 
+int type_adjust_bit_field(const Type *decl_specs, Type *declarator) {
+  assert(type_is_bit_field(declarator));
+  switch (decl_specs->decl_specs.flags & ~TYPE_MASK_QUAL) {
+    /* need explicit check; bitfield default signedness undefined */
+    case TYPE_SPEC_INT:
+      /* fallthrough */
+    case TYPE_REPR_BFLD:
+      /* flags already set correctly */
+      return 0;
+    case TYPE_REPR_UINT:
+      /* fallthrough */
+    case TYPE_REPR_UBFLD:
+      declarator->decl_specs.flags = TYPE_REPR_UBFLD;
+      return 0;
+    case TYPE_REPR_INT:
+      /* fallthrough */
+    case TYPE_REPR_SBFLD:
+      declarator->decl_specs.flags = TYPE_REPR_SBFLD;
+      return 0;
+    default:
+      return 1;
+  }
+}
+
 /*
  * Performs automatic conversions from function and array types to pointer
  * types. Replaces old type with appropriately converted type.
@@ -1359,7 +1443,7 @@ Type *type_arithmetic_conversions(Type *type1, Type *type2) {
     return type1;
   } else if (flags2 == TYPE_REPR_UINT) {
     return type2;
-  } else if (flags1 == TYPE_REPR_INT) {
+  } else if (flags1 == TYPE_REPR_INT || flags1 == TYPE_SPEC_INT) {
     return type1;
   } else if (flags2 == TYPE_REPR_INT) {
     return type2;

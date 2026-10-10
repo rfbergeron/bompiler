@@ -560,14 +560,17 @@ static ASTree *validate_indirection(ASTree *indirection, ASTree *operand) {
 }
 
 static ASTree *validate_addrof(ASTree *addrof, ASTree *operand) {
-  if (astree_is_lvalue(operand) != LVAL_FALSE ||
-      type_is_function(operand->type)) {
+  if (type_is_bit_field(operand->type)) {
+    (void)semerr_addrof_bit_field(addrof, operand);
+    return astree_adopt(addrof, 1, operand);
+  } else if (astree_is_lvalue(operand) == LVAL_FALSE &&
+             !type_is_function(operand->type)) {
+    (void)semerr_expected_lvalue(addrof, operand);
+    return astree_adopt(addrof, 1, operand);
+  } else {
     addrof->type = type_init_pointer();
     (void)type_append(addrof->type, operand->type);
     return evaluate_addrof(addrof, operand);
-  } else {
-    (void)semerr_expected_lvalue(addrof, operand);
-    return astree_adopt(addrof, 1, operand);
   }
 }
 

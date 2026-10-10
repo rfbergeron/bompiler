@@ -442,3 +442,43 @@ int semerr_fn_member(const ASTree *where) {
                  lexer_filename(where->loc.filenr), where->loc.linenr,
                  where->loc.offset, ast_buffer1);
 }
+
+int semerr_invalid_bit_field_width(const ASTree *where, const ASTree *width) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(astree_to_string(where, ast_buffer1), BUFFER_SIZE);
+  return fprintf(
+      stderr, "%s:%lu.%lu: invalid width `%lu` for bit field at node %s\n",
+      lexer_filename(where->loc.filenr), where->loc.linenr, where->loc.offset,
+      width->constant.integral.unsigned_value, ast_buffer1);
+}
+
+int semerr_invalid_bit_field_specs(const ASTree *where) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(astree_to_string(where, ast_buffer1), BUFFER_SIZE);
+  return fprintf(stderr,
+                 "%s:%lu.%lu: invalid specifiers for bit field at node %s\n",
+                 lexer_filename(where->loc.filenr), where->loc.linenr,
+                 where->loc.offset, ast_buffer1);
+}
+
+int semerr_bit_field_declarator(const ASTree *where) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(astree_to_string(where, ast_buffer1), BUFFER_SIZE);
+  return fprintf(stderr,
+                 "%s:%lu.%lu: attempt to declare pointer to, array of, or "
+                 "function returning a bitfield at node %s\n",
+                 lexer_filename(where->loc.filenr), where->loc.linenr,
+                 where->loc.offset, ast_buffer1);
+}
+
+int semerr_addrof_bit_field(const ASTree *where, const ASTree *offender) {
+  semantic_error = 1;
+  int chars_written;
+  CHECK_TO_STR(astree_to_string(offender, ast_buffer1), BUFFER_SIZE);
+  return fprintf(stderr, "%s:%lu.%lu: cannot take address of bitfield %s\n",
+                 lexer_filename(where->loc.filenr), where->loc.linenr,
+                 where->loc.offset, ast_buffer1);
+}

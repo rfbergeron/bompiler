@@ -245,6 +245,10 @@ int state_get_member(CompilerState *state, const char *ident, Symbol **out) {
   return i == 1;
 }
 
+/* TODO(Robert): if two unions whose members are all bit fields are adjacent to
+ * one another in a struct, or if a bit field is adjacent to such a union in a
+ * struct, are they allowed to occupy each others' storage? no, right?
+ */
 void state_insert_member(CompilerState *state, const char *ident,
                          Symbol *member) {
   scope_insert_member(ARR_PEEK(state->scopes), ident, member);
@@ -252,17 +256,40 @@ void state_insert_member(CompilerState *state, const char *ident,
   size_t member_width = type_get_width(member->type);
 
   Tag *tag = ARR_PEEK(state->record_stack);
+  assert(tag->record.kind != TAG_ENUM);
+  assert(tag->record.unused_bits < X64_CHAR_BIT);
   if (tag->record.alignment < member_alignment) {
     tag->record.alignment = member_alignment;
   }
 
-  if (tag->record.kind == TAG_STRUCT) {
+  if (tag->record.kind == TAG_UNION && tag->record.width < member_width) {
+    tag->record.width = member_width;
+  } else if (type_is_bit_field(member->type)) {
+    unsigned char bit_field_width = type_get_bit_field_width(member->type);
+    member->disp = tag->record.width * X64_CHAR_BIT - tag->record.unused_bits;
+
+    if (bit_field_width == 0) {
+      /* just need to make partial byte (if present) unusable */
+      tag->record.unused_bits = 0;
+    } else {
+      member->disp = tag->record.width * X64_CHAR_BIT - tag->record.unused_bits;
+      /* add enough bits to calculation to add a partial byte if needed */
+      tag->record.width +=
+          (bit_field_width - tag->record.unused_bits + X64_CHAR_BIT - 1) /
+          X64_CHAR_BIT;
+      /* only need one modulus; overflow and modular arithmetic */
+      tag->record.unused_bits =
+          (X64_CHAR_BIT - (bit_field_width - tag->record.unused_bits)) %
+          X64_CHAR_BIT;
+
+      tag->record.width += (bit_field_width + X64_CHAR_BIT - 1) / X64_CHAR_BIT;
+      tag->record.unused_bits = (X64_CHAR_BIT - bit_field_width) % X64_CHAR_BIT;
+    }
+  } else {
     size_t padding = member_alignment - (tag->record.width % member_alignment);
     if (padding != member_alignment) tag->record.width += padding;
     member->disp = tag->record.width;
     tag->record.width += member_width;
-  } else if (tag->record.width < member_width) {
-    tag->record.width = member_width;
   }
 }
 

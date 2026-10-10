@@ -49,4 +49,8 @@ int semerr_expected_record(const ASTree *where, const Type *type);
 int semerr_not_assignable(const ASTree *where, const Type *type);
 int semerr_fndef_typedef(const ASTree *where);
 int semerr_fn_member(const ASTree *where);
+int semerr_invalid_bit_field_width(const ASTree *where, const ASTree *width);
+int semerr_invalid_bit_field_specs(const ASTree *where);
+int semerr_bit_field_declarator(const ASTree *where);
+int semerr_addrof_bit_field(const ASTree *where, const ASTree *offender);
 #endif

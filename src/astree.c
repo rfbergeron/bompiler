@@ -112,8 +112,6 @@ void astree_destroy(ASTree *tree) {
       assert(type_is_pointer(tree->type));
       (void)type_detach(tree->type);
       /* fallthrough */
-    case TOK_TYPE_NAME:
-      /* fallthrough */
     case TOK_STRINGCON:
       type_destroy(tree->type);
       break;

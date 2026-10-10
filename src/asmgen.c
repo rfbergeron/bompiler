@@ -2661,7 +2661,7 @@ ASTree *translate_prepare_init(ASTree *declaration, ASTree *declarator) {
   assert(symbol && in_current_scope);
 
   if (type_is_function(declarator->type) || symbol->info == SYM_INHERITOR ||
-      declarator->tok_kind == TOK_TYPE_NAME || symbol->storage == STORE_EXT ||
+      IS_TYPE_NAME(declarator->lexinfo) || symbol->storage == STORE_EXT ||
       symbol->linkage == LINK_TYPEDEF) {
     return astree_adopt(declaration, 1, declarator);
   } else if (symbol->storage == STORE_AUTO) {
@@ -2741,7 +2741,7 @@ ASTree *translate_local_decl(ASTree *declaration, ASTree *declarator) {
   assert(symbol && in_current_scope);
 
   if (type_is_function(declarator->type) || symbol->info == SYM_INHERITOR ||
-      declarator->tok_kind == TOK_TYPE_NAME || symbol->storage == STORE_EXT ||
+      IS_TYPE_NAME(declarator->lexinfo) || symbol->storage == STORE_EXT ||
       symbol->linkage == LINK_TYPEDEF) {
     return astree_adopt(declaration, 1, declarator);
   } else if (symbol->storage == STORE_STAT) {

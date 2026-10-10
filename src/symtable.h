@@ -49,7 +49,8 @@ TABOE_TDEF(EnumTable)
 typedef union tag {
   struct {
     TagKind kind;
-    int defined;
+    short defined;
+    unsigned char unused_bits;
     size_t width;
     size_t alignment;
     const char *name;
@@ -57,7 +58,8 @@ typedef union tag {
   } record;
   struct {
     TagKind kind;
-    int defined;
+    short defined;
+    unsigned char _; /* filler */
     size_t width;
     size_t alignment;
     const char *name;

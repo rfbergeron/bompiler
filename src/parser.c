@@ -30,12 +30,18 @@ static const char *VA_LIST_MEMBER_NAMES[] = {
 const Type *TYPE_VA_LIST_POINTER;
 Type *TYPE_VA_LIST_POINTER_INTERNAL;
 
+/* For the sake of code reusability, the tree structure of a type name is the
+ * same as that of a full declaration. A (hopefully) unique name is generated
+ * based on the lexer's state and the nearest AST node which is used to store
+ * the type information in the
+ * symbol table. This way, the code for processing declaration can also
+ * be used to validate type names, with a little tweaking. This also means that
+ * cleanup is handled exactly the same as for normal declarators.
+ */
 BCC_YYSTATIC ASTree *parser_make_unique(ASTree *tree) {
   const char *node_str;
+  char buffer[1024];
   switch (tree->tok_kind) {
-    case TOK_TYPE_NAME:
-      node_str = "type_name";
-      break;
     case TOK_STRUCT:
       node_str = "struct";
       break;
@@ -46,9 +52,10 @@ BCC_YYSTATIC ASTree *parser_make_unique(ASTree *tree) {
       node_str = "union";
       break;
     default:
-      fprintf(stderr, "ERROR: unable to create unique name for token %s\n",
-              parser_get_tname(tree->tok_kind));
-      abort();
+      astree_to_string(tree, buffer);
+      PFDBG1('p', "Creating unique name node for type using node %s", buffer);
+      node_str = "type_name";
+      break;
   }
 
   char name[1024];
@@ -192,16 +199,6 @@ BCC_YYSTATIC ASTree *parser_make_declaration(ASTree *decl_specs) {
 BCC_YYSTATIC ASTree *parser_make_param_list(ASTree *left_paren) {
   /* all error handling done in validate_param */
   return validate_param_list(parser_new_sym(left_paren, TOK_PARAM_LIST));
-}
-
-/* For the sake of code reusability, the tree structure of a type name is the
- * same as that of a full declaration, with the exception being that in the
- * place of the node with the TOK_IDENT symbol, there is instead a node with the
- * TOK_TYPE_NAME symbol. This way, the code for processing declaration can also
- * be used to validate type names, with a little tweaking.
- */
-BCC_YYSTATIC ASTree *parser_make_type_name(void) {
-  return astree_init(TOK_TYPE_NAME, lexer_get_loc(), "_type_name");
 }
 
 BCC_YYSTATIC ASTree *parser_make_cast(ASTree *left_paren, ASTree *decl_specs,

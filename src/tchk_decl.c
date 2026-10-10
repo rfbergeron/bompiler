@@ -215,16 +215,22 @@ static Symbol *validate_declaration(ASTree *declaration, ASTree *declarator) {
   ASTree *decl_specs = astree_get(declaration, 0);
   if (declarator->type == NULL) {
     declarator->type = type_copy(decl_specs->type);
-  } else {
+  } else if (!type_is_bit_field(declarator->type)) {
     (void)type_append(declarator->type, type_copy(decl_specs->type));
+  } else if (type_adjust_bit_field(decl_specs->type, declarator->type)) {
+    (void)semerr_invalid_bit_field_specs(declaration);
+    return NULL;
   }
 
-  if (declarator->tok_kind == TOK_TYPE_NAME) return NULL;
-
-  /* TODO(Robert): why don't we do this for type names? */
-  if (type_validate(declarator->type)) {
+  /* TODO(Robert): find a way to store symbol information for invalid nodes or
+   * to detect semantic errors in the middle of a parser action, otherwise we
+   * get use-after-free bugs. until then, bad types become an int and we're
+   * going to leak memory
+   */
+  if (!IS_TYPE_NAME(declarator->lexinfo) && type_validate(declarator->type)) {
     (void)semerr_invalid_type(declarator);
     type_destroy(declarator->type);
+    declarator->type = type_copy(TYPE_INT);
     return NULL;
   }
 
@@ -239,26 +245,40 @@ static Symbol *validate_declaration(ASTree *declaration, ASTree *declarator) {
   if (set_symbol_qualifiers(identifier, symbol)) {
     (void)semerr_invalid_linkage(declarator, symbol);
     symbol_destroy(symbol);
+    declarator->type = type_copy(TYPE_INT);
     return NULL;
-  } else if (symbol->storage != STORE_TYPEDEF && type_is_void(symbol->type)) {
+  } else if (symbol->storage != STORE_TYPEDEF &&
+             !IS_TYPE_NAME(declarator->lexinfo) && type_is_void(symbol->type)) {
+    /* void ok for typedefs and type names casts and abstract declarators */
     (void)semerr_incomplete_type(declarator, symbol->type);
     symbol_destroy(symbol);
+    declarator->type = type_copy(TYPE_INT);
     return NULL;
   } else if (!is_redeclaration) {
-    if (symbol->linkage == LINK_MEMBER)
-      state_insert_member(state, identifier, symbol);
-    else
+    /* TODO(Robert): check for incomplete member types */
+    if (symbol->linkage != LINK_MEMBER) {
       state_insert_symbol(state, identifier, symbol);
+    } else if (type_is_function(symbol->type)) {
+      (void)semerr_fn_member(declaration);
+      symbol_destroy(symbol);
+      declarator->type = type_copy(TYPE_INT);
+      return NULL;
+    } else {
+      state_insert_member(state, identifier, symbol);
+    }
+
     /* reassign type information in case it was replaced */
     if (symbol->info == SYM_INHERITOR) declarator->type = symbol->type;
     return symbol;
   } else if (!linkage_valid(exists, symbol->linkage)) {
     (void)semerr_incompatible_linkage(declarator, exists, symbol);
     symbol_destroy(symbol);
+    declarator->type = type_copy(TYPE_INT);
     return NULL;
   } else if (type_compose(exists->type, declarator->type, 1)) {
     (void)semerr_incompatible_types(declarator, exists->type, declarator->type);
     symbol_destroy(symbol);
+    declarator->type = type_copy(TYPE_INT);
     return NULL;
   } else {
     if (exists->info == SYM_HIDDEN) {
@@ -451,7 +471,7 @@ ASTree *define_function(ASTree *declaration, ASTree *declarator, ASTree *body) {
           astree_get(param_list, 0)->tok_kind == TOK_VOID && param_count == 0));
   for (i = 0; i < param_count; ++i) {
     ASTree *param_declarator = astree_get(astree_get(param_list, i), 1);
-    if (param_declarator->tok_kind == TOK_TYPE_NAME) {
+    if (IS_TYPE_NAME(declarator->lexinfo)) {
       (void)semerr_expected_ident(declarator, param_declarator);
       return astree_adopt(declaration, 2, declarator, body);
     } else if (type_is_incomplete(param_declarator->type)) {
@@ -642,11 +662,25 @@ ASTree *declare_member(ASTree *struct_decl, ASTree *declarator) {
     /* member declaration with incomplete type */
     (void)semerr_incomplete_type(declarator, symbol->type);
     return astree_adopt(struct_decl, 1, declarator);
-  } else if (type_is_function(symbol->type)) {
-    (void)semerr_fn_member(declarator);
-    return astree_adopt(struct_decl, 1, declarator);
   } else {
     return astree_adopt(struct_decl, 1, declarator);
+  }
+}
+
+ASTree *validate_bit_field(ASTree *declarator, ASTree *width_expr) {
+  if (width_expr->cexpr_kind != CEXPR_INT) {
+    (void)semerr_expected_intconst(declarator, width_expr);
+    return astree_adopt(declarator, 1, width_expr);
+  } else if (width_expr->constant.integral.unsigned_value >
+                 X64_CHAR_BIT * X64_SIZEOF_INT ||
+             (width_expr->constant.integral.unsigned_value == 0 &&
+              !IS_TYPE_NAME(declarator->lexinfo))) {
+    (void)semerr_invalid_bit_field_width(declarator, width_expr);
+    return astree_adopt(declarator, 1, width_expr);
+  } else {
+    declarator->type =
+        type_init_bit_field(width_expr->constant.integral.unsigned_value);
+    return astree_adopt(declarator, 1, width_expr);
   }
 }
 
@@ -680,6 +714,7 @@ ASTree *declare_symbol(ASTree *declaration, ASTree *declarator) {
   if (symbol == NULL) {
     return astree_adopt(declaration, 1, declarator);
   } else if (type_is_incomplete(symbol->type) &&
+             !IS_TYPE_NAME(declarator->lexinfo) &&
              symbol->storage != STORE_TYPEDEF && symbol->linkage == LINK_NONE) {
     /* local object declaration with incomplete type */
     (void)semerr_incomplete_type(declarator, symbol->type);

@@ -1,6 +1,8 @@
 #ifndef __ASTREE_H__
 #define __ASTREE_H__
 
+#include <ctype.h>
+
 #include "arrlist.h"
 #include "bcc_types.h"
 #include "debug.h"
@@ -8,6 +10,8 @@
 #include "scope.h"
 #include "stdint.h"
 #include "symtable.h"
+
+#define IS_TYPE_NAME(str) isdigit((str)[0])
 
 typedef enum cexpr_kind {
   CEXPR_FALSE, /* not a constant expression */

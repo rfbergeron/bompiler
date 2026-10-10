@@ -18,6 +18,8 @@
 #define X64_SIZEOF_LDBL ((size_t)16UL)
 #define X64_ALIGNOF_LDBL ((size_t)16UL)
 
+#define X64_CHAR_BIT ((size_t)8UL)
+
 typedef union type Type;
 union tag;
 
@@ -43,6 +45,7 @@ Type *type_init_pointer(void);
 Type *type_init_array(size_t length);
 Type *type_init_function(size_t parameters_size, Type **parameters,
                          int variadic);
+Type *type_init_bit_field(unsigned char width);
 
 void type_destroy(Type *type);
 
@@ -77,6 +80,7 @@ int type_is_qualified(const Type *type);
 int type_is_declarator(const Type *type);
 int type_is_none(const Type *type);
 int type_is_incomplete(const Type *type);
+int type_is_bit_field(const Type *type);
 
 struct symbol *type_get_member_name(const Type *type, const char *name);
 struct symbol *type_get_member_index(const Type *type, size_t index);
@@ -94,6 +98,7 @@ int type_retrieve_storage_specifier(Type *type);
 size_t type_get_elem_width(const Type *type);
 size_t type_get_eightbytes(const Type *type);
 size_t type_get_padding(const Type *type, size_t to_pad);
+unsigned char type_get_bit_field_width(const Type *type);
 union tag *type_get_tag(const Type *type);
 int types_compatible(const Type *type1, const Type *type2, int qualified);
 int types_assignable(const Type *dest, const Type *src, int is_const_zero);
@@ -108,6 +113,7 @@ int type_add_decl_spec(Type *type, int tok_kind);
 Type *type_merge(const Type *dest, const Type *src);
 int type_normalize(Type *type);
 int type_validate(const Type *type);
+int type_adjust_bit_field(const Type *decl_specs, Type *declarator);
 Type *type_pointer_conversions(Type *type);
 Type *type_arithmetic_conversions(Type *type1, Type *type2);
 int type_compose(Type *dest, Type *src, int qualified);

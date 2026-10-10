@@ -29,7 +29,6 @@
   static ASTree *parser_make_decl_specs(ASTree * first_specifier);
   static ASTree *parser_make_declaration(ASTree * decl_specs);
   static ASTree *parser_make_param_list(ASTree * left_paren);
-  static ASTree *parser_make_type_name(void);
   static ASTree *parser_make_cast(ASTree * left_paren, ASTree * decl_specs,
                                   ASTree * type_name, ASTree * expr);
   static ASTree *parser_make_label(ASTree * ident);
@@ -67,7 +66,7 @@
 /* tokens constructed by checker */
 %token TOK_SCAL_CONV TOK_PTR_CONV TOK_DISP_CONV TOK_CEXPR_CONV TOK_RVAL_CONV TOK_DIFF_CONV TOK_NONE
 /* tokens constructed by parser */
-%token TOK_DECLARATION TOK_ROOT TOK_TYPE_NAME TOK_SPEC_LIST TOK_ATTR_LIST TOK_EMPTY
+%token TOK_DECLARATION TOK_ROOT TOK_SPEC_LIST TOK_ATTR_LIST TOK_EMPTY
 /* tokens assigned to exsting nodes */
 %token TOK_POS TOK_NEG TOK_POST_INC TOK_POST_DEC TOK_INDIRECTION TOK_ADDROF TOK_CALL TOK_SUBSCRIPT
 %token TOK_BLOCK TOK_ARRAY TOK_CAST TOK_POINTER TOK_LABEL TOK_INIT_LIST TOK_PARAM_LIST
@@ -119,7 +118,7 @@ function_def        : decl_specs declarator '{'                         { ERRCHK
                     | function_def stmt                                 { ERRCHK; $$ = bcc_yyval = validate_fnbody_content($1, $2); }
                     | function_def declarations ';'                     { ERRCHK; $$ = bcc_yyval = validate_fnbody_content($1, finalize_declaration($2)); parser_cleanup(1, $3); }
                     ;
-declarations        : decl_specs                                        { ERRCHK; $$ = bcc_yyval = declare_symbol(parser_make_declaration($1), parser_make_type_name()); }
+declarations        : decl_specs                                        { ERRCHK; $$ = bcc_yyval = declare_symbol(parser_make_declaration($1), parser_make_unique($1)); }
                     | declaration_list                                  { ERRCHK; $$ = bcc_yyval = $1; }
                     ;
 declaration_list    : decl_specs declarator                             { ERRCHK; $$ = bcc_yyval = declare_symbol(parser_make_declaration($1), $2); }
@@ -165,9 +164,14 @@ struct_or_union     : TOK_STRUCT                                        { ERRCHK
                     | TOK_UNION                                         { ERRCHK; $$ = bcc_yyval = $1; }
                     ;
 struct_decl         : struct_decl ',' declarator                        { ERRCHK; $$ = bcc_yyval = declare_member($1, $3); astree_destroy($2); } /* define struct member */
+                    | struct_decl ',' bit_field_decl                    { ERRCHK; $$ = bcc_yyval = declare_member($1, $3); astree_destroy($2); } /* define struct member */
                     | struct_decl ',' abs_declarator                    { ERRCHK; $$ = bcc_yyval = declare_member($1, $3); astree_destroy($2); } /* define struct member */
                     | decl_specs declarator                             { ERRCHK; $$ = bcc_yyval = declare_member(parser_make_declaration($1), $2); } /* define struct member */
+                    | decl_specs bit_field_decl                         { ERRCHK; $$ = bcc_yyval = declare_member(parser_make_declaration($1), $2); } /* define struct member */
                     | decl_specs abs_declarator                         { ERRCHK; $$ = bcc_yyval = declare_member(parser_make_declaration($1), $2); } /* define struct member */
+                    ;
+bit_field_decl      : declarator ':' cond_expr                          { ERRCHK; $$ = bcc_yyval = validate_bit_field($1, $3); parser_cleanup(1, $2); } /* validate bit field width */
+                    | ':' cond_expr                                     { ERRCHK; $$ = bcc_yyval = validate_bit_field(parser_make_unique($1), $2); parser_cleanup(1, $1); } /* validate bit field width */
                     ;
 enum_spec           : enum_def '}'                                      { ERRCHK; $$ = bcc_yyval = finalize_tag_def($1); parser_cleanup(1, $2); } /* create tag and iterate over enums */
                     | enum_def ',' '}'                                  { ERRCHK; $$ = bcc_yyval = finalize_tag_def($1); parser_cleanup(2, $2, $3); } /* create tag and iterate over enums */
@@ -217,7 +221,7 @@ declarator          : pointer declarator                                { ERRCHK
 abs_declarator      : pointer abs_declarator                            { ERRCHK; $$ = bcc_yyval = define_pointer($2, $1); } /* define_pointer */
                     | '(' abs_declarator ')'                            { ERRCHK; $$ = bcc_yyval = $2; parser_cleanup(2, $1, $3); } /* do nothing */
                     | abs_declarator direct_decl                        { ERRCHK; $$ = bcc_yyval = define_dirdecl($1, $2); } /* validate_dirdecl */
-                    | %empty                                            { ERRCHK; $$ = bcc_yyval = parser_make_type_name(); }
+                    | %empty                                            { ERRCHK; $$ = bcc_yyval = parser_make_unique(bcc_yyval); }
                     ;
 pointer             : '*'                                               { ERRCHK; $$ = bcc_yyval = parser_new_sym($1, TOK_POINTER); }
                     | pointer TOK_CONST                                 { ERRCHK; $$ = bcc_yyval = astree_adopt($1, 1, $2); }
@@ -404,3 +408,4 @@ any_ident           : TOK_IDENT                                         { ERRCHK
 
 /* define parser-specific functions in a separate source file */
 #include "parser.c"
+/* vim: set ts=8, sts=2, sw=2, et */

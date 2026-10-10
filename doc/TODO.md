@@ -1,4 +1,11 @@
-# Harder TODOs
+# TODO
+
+## ~~Harder TODOs~~
+
+I believe that the compiler actually does all of these things in its current
+state, though I need to implement bit fields so that all of the tests can run
+in order to verify that.
+
 These are necessary compiler features that I have been putting off because they
 require changes to existing features that may break things in new and exciting
 ways:
@@ -11,7 +18,74 @@ ways:
   structs and unions should complete themselves.
 - restrict function and array direct declarators
 
-# Parser and syntax tree changes
+## Reimplement Abstract Syntax Tree
+
+The abstract syntax tree should be a union. It should also have its internal
+structure hidden from consumers.
+
+## Hide Symbol and Tag Implementation
+
+When I rewrote the type representation, I put the struct definitions inside a
+source file and made functions to access and modify their members, which has
+improved the overall quality of the source code, even if it made it a little
+more verbose.
+
+This should also be done for tags and symbols.
+
+Tags should also probably go in their own translation unit, or should share a
+translation unit with types.
+
+## Easier Constant Expression Evaluation
+
+The current way constant expressions are evaluated is an ugly hack that should
+be replaced. There are a few ways we could address this:
+
+1. The simplest fix that would help would be to add a `constant-expression`
+   nonterminal to the parser grammar whose rule matches a lone
+   `conditional-expression`. This rule would run the current constant
+   expression evaluator on the subtree and either return its value or an error
+   if the subtree does not represent a constant expression. Doing this would,
+   however, mean that we don't get the benefits of constant expression
+   evaluation in situations where constant expressions are not required.
+
+2. A potentially nicer fix would be to create an intermediate code in static
+   single assignment (SSA) form and an evaluator that can run on that. This
+   solution would be more complicated and would mean that the list of
+   instructions attached to a subtree must remain attached to the syntax tree
+   node they are associated with. This is currently the case but it is a design
+   decision I am not sure I am happy with and a decision I could otherwise
+   change if I implemented an intermediate representation.
+
+3. The most aggressively standards-conformant approach would be to generate
+   assembly for the constant expression, invoke an assembler, load the code
+   into memory and execute it in the same way a JIT compiler would. This would
+   guarantee that the expression behaves exactly as it would were it executed
+   at runtime on the CPU. However, this solution is extremely complicated.
+   Checking whether or not the expression is actually a constant expression
+   would be an orthogonal; generating assembly and successfully assembling and
+   executing does not guarantee that the expression was a constant expression.
+
+Approach 2 seems the most reasonable but would be a significant undertaking.
+However, I already wanted to generate an IR instead of assembly directly and an
+IR would be much easier to perform simple optimizations and constant expression
+evaluation on compared to x86.
+
+## Type Checker Should Not Call Code Generator
+
+Currently, the type checker calls the code generator, which then generates code
+(obviously) and carries out the adoption process for the AST before returning
+the root node of the subtree. If an error occurs during type checking, the type
+checker carries out the adoption. Whether or not the type checker succeeded,
+the result is then returned to the parser, which carries on.
+
+This is unnecessarily cumbersome and makes it difficult to tell how and where
+errors ought to be handled.
+
+A better approach would be to create functions in `src/parser.c` which call the
+type checker and code generator sequentially, handling errors if they occur.
+These would then be the functions that handle tree adoption.
+
+## Parser and syntax tree changes
 I will be paring down the syntax tree data structure and rewriting some parser
 rules to accomodate for this. There is some unnecessary complexity and
 connectivity in the syntax tree that I would like to eliminate, namely:
@@ -20,7 +94,7 @@ connectivity in the syntax tree that I would like to eliminate, namely:
 - the `astree_first`, etc. functions
 - the linked list adoption behavior of `astree_adopt`
 
-# Type checker fixes
+## Type checker fixes
 - handle new forms for the abstract declarators featured in casts and sizeof
 - handle new flat structure for declarators and make sure that the type can be
   read easily be iterating over the list
@@ -37,7 +111,7 @@ connectivity in the syntax tree that I would like to eliminate, namely:
 - try to reuse more code from `declare_symbol` and `define_symbol` in
   `define_function`, or merge `define_function` into the other two completely.
 
-# When to use pointers
+## When to use pointers
 Currently, some fields of syntax tree nodes are pointers, even though they could
 instead be nested structures. This includes the child lists and symbol tables.
 These do not have to be pointers, since only the one node should be responsible
@@ -54,7 +128,7 @@ feature that is not used.
 
 On the other hand, the fewer pointers, the better.
 
-# Symbol entry creation order
+## Symbol entry creation order
 Before, type information was constructed in an ASTree node. This is no longer
 possible, since nodes should be holding type information from a constant or
 symbol entry.
@@ -68,7 +142,7 @@ The former would be ideal and would lead to fewer errors, but would also require
 large portions of the type checker to be rewritten. The rewrite will probably
 make the code clearer, though.
 
-# Badlib improvements
+## Badlib improvements
 While giving each data structure an internal status field is convenient, it
 means that the arguments to data structures cannot truly be `const`; the status
 field may be modified in the event of a failure. I could just cast away const
@@ -87,3 +161,5 @@ implement thread-safe access to this map if it would ever be used in a multi-
 threaded environment. However, pointers are shared by threads and it wouldn't
 make sense to have thread-specific statuses, so if I made the map data structure
 thread-safe, that alone would probably be sufficient.
+
+<!-- vim: set tw=79 ts=8 sts=4 sw=4 et fo-=l: -->
