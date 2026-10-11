@@ -113,7 +113,7 @@ union type {
     unsigned long flags;
     union {
       union tag *tag;
-      unsigned int bit_field_width : 5;
+      unsigned int bit_width : 5;
     } extra;
   } decl_specs;
   struct {
@@ -229,7 +229,7 @@ Type *type_init_bit_field(unsigned char width) {
   assert(width <= X64_CHAR_BIT * X64_SIZEOF_INT);
   Type *type = malloc(sizeof(Type));
   type->decl_specs.flags = TYPE_REPR_BFLD;
-  type->decl_specs.extra.bit_field_width = width;
+  type->decl_specs.extra.bit_width = width;
   return type;
 }
 
@@ -463,9 +463,9 @@ static int specifiers_to_str(const Type *type, char *buf) {
                                       type->decl_specs.extra.tag->record.name);
   } else if (type_is_bit_field(type)) {
     return qual_str == NULL ? sprintf(buf, FMT_STRS[3], type_str,
-                                      type->decl_specs.extra.bit_field_width)
+                                      type->decl_specs.extra.bit_width)
                             : sprintf(buf, FMT_STRS[4], qual_str, type_str,
-                                      type->decl_specs.extra.bit_field_width);
+                                      type->decl_specs.extra.bit_width);
   } else {
     return qual_str == NULL ? sprintf(buf, FMT_STRS[0], type_str)
                             : sprintf(buf, FMT_STRS[1], qual_str, type_str);
@@ -834,8 +834,8 @@ static size_t type_decl_specs_width(const Type *type) {
       /* fallthrough */
     case TYPE_REPR_UBFLD:
       /* TODO(Robert): I might use this on accident, causing bugs */
-      return type->decl_specs.extra.bit_field_width / X64_CHAR_BIT +
-             (type->decl_specs.extra.bit_field_width % X64_CHAR_BIT != 0);
+      return type->decl_specs.extra.bit_width / X64_CHAR_BIT +
+             (type->decl_specs.extra.bit_width % X64_CHAR_BIT != 0);
     default:
       abort();
   }
@@ -912,9 +912,11 @@ size_t type_get_padding(const Type *type, size_t to_pad) {
   return to_pad % alignment == 0 ? 0 : alignment - (to_pad % alignment);
 }
 
-unsigned char type_get_bit_field_width(const Type *type) {
-  assert(type_is_bit_field(type));
-  return type->decl_specs.extra.bit_field_width;
+size_t type_get_bit_width(const Type *type) {
+  if (type_is_bit_field(type))
+    return type->decl_specs.extra.bit_width;
+  else
+    return type_get_width(type) * X64_CHAR_BIT;
 }
 
 unsigned int type_get_flags(const Type *type) {

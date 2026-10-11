@@ -254,6 +254,7 @@ void state_insert_member(CompilerState *state, const char *ident,
   scope_insert_member(ARR_PEEK(state->scopes), ident, member);
   size_t member_alignment = type_get_alignment(member->type);
   size_t member_width = type_get_width(member->type);
+  size_t member_bits = type_get_bit_width(member->type);
 
   Tag *tag = ARR_PEEK(state->record_stack);
   assert(tag->record.kind != TAG_ENUM);
@@ -264,32 +265,24 @@ void state_insert_member(CompilerState *state, const char *ident,
 
   if (tag->record.kind == TAG_UNION && tag->record.width < member_width) {
     tag->record.width = member_width;
-  } else if (type_is_bit_field(member->type)) {
-    unsigned char bit_field_width = type_get_bit_field_width(member->type);
-    member->disp = tag->record.width * X64_CHAR_BIT - tag->record.unused_bits;
-
-    if (bit_field_width == 0) {
-      /* just need to make partial byte (if present) unusable */
-      tag->record.unused_bits = 0;
-    } else {
-      member->disp = tag->record.width * X64_CHAR_BIT - tag->record.unused_bits;
-      /* add enough bits to calculation to add a partial byte if needed */
-      tag->record.width +=
-          (bit_field_width - tag->record.unused_bits + X64_CHAR_BIT - 1) /
-          X64_CHAR_BIT;
-      /* only need one modulus; overflow and modular arithmetic */
-      tag->record.unused_bits =
-          (X64_CHAR_BIT - (bit_field_width - tag->record.unused_bits)) %
-          X64_CHAR_BIT;
-
-      tag->record.width += (bit_field_width + X64_CHAR_BIT - 1) / X64_CHAR_BIT;
-      tag->record.unused_bits = (X64_CHAR_BIT - bit_field_width) % X64_CHAR_BIT;
-    }
-  } else {
+  } else if (!type_is_bit_field(member->type)) {
     size_t padding = member_alignment - (tag->record.width % member_alignment);
     if (padding != member_alignment) tag->record.width += padding;
     member->disp = tag->record.width;
     tag->record.width += member_width;
+  } else if (member_bits == 0) {
+    /* just need to make partial byte (if present) unusable */
+    member->disp = tag->record.width * X64_CHAR_BIT - tag->record.unused_bits;
+    tag->record.unused_bits = 0;
+  } else {
+    member->disp = tag->record.width * X64_CHAR_BIT - tag->record.unused_bits;
+    /* add enough bits to calculation to add a partial byte if needed */
+    tag->record.width +=
+        (member_bits - tag->record.unused_bits + X64_CHAR_BIT - 1) /
+        X64_CHAR_BIT;
+    /* only need one modulus; overflow and modular arithmetic */
+    tag->record.unused_bits =
+        (X64_CHAR_BIT - (member_bits - tag->record.unused_bits)) % X64_CHAR_BIT;
   }
 }
 

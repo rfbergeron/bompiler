@@ -98,7 +98,7 @@ int type_retrieve_storage_specifier(Type *type);
 size_t type_get_elem_width(const Type *type);
 size_t type_get_eightbytes(const Type *type);
 size_t type_get_padding(const Type *type, size_t to_pad);
-unsigned char type_get_bit_field_width(const Type *type);
+size_t type_get_bit_width(const Type *type);
 union tag *type_get_tag(const Type *type);
 int types_compatible(const Type *type1, const Type *type2, int qualified);
 int types_assignable(const Type *dest, const Type *src, int is_const_zero);
