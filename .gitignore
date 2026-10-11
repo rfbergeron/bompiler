@@ -4,6 +4,7 @@ murmur3/*
 **.tok
 **.ast
 **.sym
+**.tag
 **.il
 **.asm
 **.s

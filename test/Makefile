@@ -15,7 +15,7 @@ clean:
 	./run_tests.sh build_clean
 
 build_clean:
-	@rm -f *.str *.ast *.tok *.il *.err *.sym *.asm *.out
+	@rm -f *.str *.ast *.tok *.il *.err *.sym *.tag *.asm *.o *.out
 
 ci:
 	git add run_tests.sh Makefile
