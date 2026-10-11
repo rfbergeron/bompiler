@@ -14,7 +14,7 @@
 #include "strset.h"
 #include "symtable.h"
 #include "yyparse.h"
-#define LINESIZE 1024
+#define LINESIZE 8192
 
 #ifdef UNIT_TESTING
 extern void *_test_malloc(const size_t size, const char *file, const int line);
@@ -383,5 +383,91 @@ fail:
           parser_get_tname(tree->tok_kind), tree->lexinfo);
 cleanup:
   return ret;
+}
+
+static int print_tag_helper(const char *ident, const Tag *tag, FILE *out,
+                            int depth) {
+  static char tag_str[LINESIZE];
+  int status = tag_print(tag, tag_str, LINESIZE);
+  if (status < 0) return status;
+  status = fprintf(out, "%*s%s:\n", depth * 2, "", ident);
+
+  char *line = strtok(tag_str, "\n");
+  while (line) {
+    status = fprintf(out, "%*s%s\n", depth * 2, "", line);
+    if (status < 0) return status;
+    line = strtok(NULL, "\n");
+  }
+  return 0;
+}
+
+int astree_print_tags(ASTree *tree, FILE *out, int depth) {
+  switch (tree->tok_kind) {
+    static char locstr[LINESIZE];
+    int chars_printed, status;
+    case TOK_ROOT:
+      /* fallthrough */
+    case TOK_BLOCK:
+      chars_printed = location_to_string(&tree->loc, locstr);
+      if (chars_printed < 0) goto fail;
+
+      const char *tname = parser_get_tname(tree->tok_kind);
+      int padding_plus_tname = strlen(tname) + depth * 2;
+      chars_printed = fprintf(out, "%*s \"%s\" {%s} {%s}:\n",
+                              padding_plus_tname, tname, tree->lexinfo, locstr,
+                              SCOPE_KIND_STRS[scope_get_kind(tree->scope)]);
+      if (chars_printed < 0) goto fail;
+
+      size_t tag_count = scope_tag_count(tree->scope), tag_index;
+      for (tag_index = 0; tag_index < tag_count; ++tag_index) {
+        const char *ident;
+        Tag *tag;
+        scope_tag_at(tree->scope, tag_index, &ident, &tag);
+        if (print_tag_helper(ident, tag, out, depth) < 0) goto fail;
+      }
+
+      size_t child_count = astree_count(tree), child_index;
+      for (child_index = 0; child_index < child_count; ++child_index)
+        if (astree_print_tags(astree_get(tree, child_index), out, depth + 1))
+          goto fail;
+
+      return 0;
+    case TOK_FOR:
+      return astree_print_tags(astree_get(tree, 3), out, depth);
+    case TOK_SWITCH:
+      /* fallthrough */
+    case TOK_WHILE:
+      /* fallthrough */
+    case TOK_IF:
+      status = astree_print_tags(astree_get(tree, 1), out, depth);
+      if (status)
+        goto fail;
+      else if (astree_get(tree, 2)->tok_kind != TOK_BLOCK)
+        return 0;
+      else
+        return astree_print_tags(astree_get(tree, 2), out, depth);
+    case TOK_CASE:
+      /* fallthrough */
+    case TOK_LABEL:
+      return astree_print_tags(astree_get(tree, 1), out, depth);
+    case TOK_DO:
+      /* fallthrough */
+    case TOK_DEFAULT:
+      return astree_print_tags(astree_get(tree, 0), out, depth);
+    case TOK_DECLARATION:
+      if (astree_count(tree) == 3) {
+        return astree_print_tags(astree_get(tree, 2), out, depth);
+      } else {
+        default:
+          return 0;
+      }
+  }
+
+fail:
+  fprintf(stderr,
+          "ERROR: failed to print symbol table associated with "
+          "astree node, symbol: %s, lexinfo: %s\n",
+          parser_get_tname(tree->tok_kind), tree->lexinfo);
+  return -1;
 }
 #endif

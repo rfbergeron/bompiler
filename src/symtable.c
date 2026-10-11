@@ -70,12 +70,14 @@ int symbol_print(const Symbol *symbol, char *buffer) {
   const char *link_str = LINKAGE_STRINGS[symbol->linkage];
   const char *stor_str = STORAGE_STRINGS[symbol->storage];
 
-  if (symbol->storage == STORE_AUTO) {
+  if (symbol->storage == STORE_AUTO || symbol->storage == STORE_MEMBER) {
     return sprintf(buffer,
                    "{%s} {%s} {WIDTH: %lu, ALIGN: %lu} {LINK: %s, STORE: %s} "
-                   "{INFO: %s} {DISPLACEMENT: %li}",
+                   "{INFO: %s} {DISPLACEMENT: %li %s}",
                    locstr, typestr, sym_width, sym_align, link_str, stor_str,
-                   INFO_STRINGS[symbol->info], symbol->disp);
+                   INFO_STRINGS[symbol->info], symbol->disp,
+                   type_is_bit_field(symbol->type) ? "(bits in record)"
+                                                   : "(bytes in record)");
   } else if (symbol->linkage == LINK_NONE && symbol->storage == STORE_STAT) {
     return sprintf(buffer,
                    "{%s} {%s} {WIDTH: %lu, ALIGN: %lu} {LINK: %s, STORE: %s} "
@@ -154,7 +156,7 @@ int tag_print(const Tag *tag, char *buffer, size_t size) {
   }
 
   int buffer_offset =
-      sprintf(buffer, "Type: %s, Width: %lu, Align: %lu, Members: {",
+      sprintf(buffer, "Type: %s, Width: %lu, Align: %lu, Members: {\n",
               TAG_TYPE_STRINGS[tag->record.kind], tag->record.width,
               tag->record.alignment);
   if (buffer_offset < 0) return -1;
@@ -166,9 +168,9 @@ int tag_print(const Tag *tag, char *buffer, size_t size) {
       Symbol *member;
       scope_member_at(tag->record.members, member_index, &ident, &member);
       int status = symbol_print(member, symbuf);
-      if (status) return status;
+      if (status < 0) return status;
       int characters_printed =
-          sprintf(buffer + buffer_offset, "%s: %s, ", ident, symbuf);
+          sprintf(buffer + buffer_offset, "  %s: %s\n", ident, symbuf);
       buffer_offset += characters_printed;
     }
   }

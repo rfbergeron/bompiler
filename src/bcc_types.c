@@ -319,6 +319,12 @@ static const char *other_get_str(unsigned long flags) {
       return "union";
     case TYPE_OTHER_ENUM:
       return "enum";
+    case TYPE_OTHER_BFLD:
+      return "bit field";
+    case TYPE_OTHER_SBFLD:
+      return "signed bit field";
+    case TYPE_OTHER_UBFLD:
+      return "unsigned bit field";
     default:
       return "(invalid)";
   }
@@ -406,10 +412,16 @@ static const char *decl_specs_get_str(unsigned int flags) {
       return "signed char";
     case TYPE_REPR_UCHAR:
       return "unsigned char";
+    case TYPE_REPR_BFLD:
+      /* fallthrough */
     case TYPE_SPEC_INT:
       return "int";
+    case TYPE_REPR_SBFLD:
+      /* fallthrough */
     case TYPE_REPR_INT:
       return "signed int";
+    case TYPE_REPR_UBFLD:
+      /* fallthrough */
     case TYPE_REPR_UINT:
       return "unsigned int";
     case TYPE_REPR_SHRT:
@@ -439,7 +451,8 @@ static const char *decl_specs_get_str(unsigned int flags) {
 
 static int specifiers_to_str(const Type *type, char *buf) {
   assert(!type_is_declarator(type));
-  static const char *FMT_STRS[] = {"%s", "%s %s", "%s %s %s"};
+  static const char *FMT_STRS[] = {"%s", "%s %s", "%s %s %s", "%s:%u",
+                                   "%s %s:%u"};
   const char *type_str = decl_specs_get_str(type->decl_specs.flags);
   const char *qual_str = qual_get_str(type->decl_specs.flags);
 
@@ -448,6 +461,11 @@ static int specifiers_to_str(const Type *type, char *buf) {
                                       type->decl_specs.extra.tag->record.name)
                             : sprintf(buf, FMT_STRS[2], qual_str, type_str,
                                       type->decl_specs.extra.tag->record.name);
+  } else if (type_is_bit_field(type)) {
+    return qual_str == NULL ? sprintf(buf, FMT_STRS[3], type_str,
+                                      type->decl_specs.extra.bit_field_width)
+                            : sprintf(buf, FMT_STRS[4], qual_str, type_str,
+                                      type->decl_specs.extra.bit_field_width);
   } else {
     return qual_str == NULL ? sprintf(buf, FMT_STRS[0], type_str)
                             : sprintf(buf, FMT_STRS[1], qual_str, type_str);

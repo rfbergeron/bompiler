@@ -56,4 +56,5 @@ LValKind astree_is_lvalue(const ASTree *tree);
 int astree_to_string(const ASTree *astree, char *buffer);
 int astree_print_tree(ASTree *tree, FILE *out, int depth);
 int astree_print_symbols(ASTree *tree, FILE *out, int depth);
+int astree_print_tags(ASTree *tree, FILE *out, int depth);
 #endif

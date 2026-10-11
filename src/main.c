@@ -26,6 +26,7 @@ const char *STR_EXT = ".str";
 const char *TOK_EXT = ".tok";
 const char *AST_EXT = ".ast";
 const char *SYM_EXT = ".sym";
+const char *TAG_EXT = ".tag";
 const char *IL_EXT = ".il";
 const char *ASM_EXT = ".asm";
 const char *ERR_EXT = ".err";
@@ -46,6 +47,7 @@ char strname[LINESIZE];
 char tokname[LINESIZE];
 char astname[LINESIZE];
 char symname[LINESIZE];
+char tagname[LINESIZE];
 char ilname[LINESIZE];
 char asmname[LINESIZE];
 char errname[LINESIZE];
@@ -54,6 +56,7 @@ FILE *strfile;
 FILE *tokfile;
 FILE *astfile;
 FILE *symfile;
+FILE *tagfile;
 FILE *ilfile;
 FILE *asmfile;
 FILE *errfile;
@@ -170,6 +173,8 @@ int main(int argc, char **argv) {
   strcat(astname, AST_EXT);
   strcpy(symname, name);
   strcat(symname, SYM_EXT);
+  strcpy(tagname, name);
+  strcat(tagname, TAG_EXT);
   strcpy(ilname, name);
   strcat(ilname, IL_EXT);
   strcpy(asmname, name);
@@ -239,6 +244,10 @@ int main(int argc, char **argv) {
   if (symfile == NULL) {
     err(1, "%s", symname);
   }
+  tagfile = fopen(tagname, "w");
+  if (tagfile == NULL) {
+    err(1, "%s", tagname);
+  }
   ilfile = fopen(ilname, "w");
   if (ilfile == NULL) {
     err(1, "%s", ilname);
@@ -267,6 +276,7 @@ int main(int argc, char **argv) {
   if (skip_diagnostics) goto skip_diagnostics;
   string_set_print(strfile);
   astree_print_symbols(parser_root, symfile, 0);
+  astree_print_tags(parser_root, tagfile, 0);
   astree_print_tree(parser_root, astfile, 0);
   generator_debug_il(ilfile);
 skip_diagnostics:
@@ -285,6 +295,7 @@ cleanup:
   fclose(tokfile);
   fclose(astfile);
   fclose(symfile);
+  fclose(tagfile);
   fclose(ilfile);
   fclose(asmfile);
   fclose(errfile);
