@@ -442,7 +442,8 @@ int astree_print_tags(ASTree *tree, FILE *out, int depth) {
       status = astree_print_tags(astree_get(tree, 1), out, depth);
       if (status)
         goto fail;
-      else if (astree_get(tree, 2)->tok_kind != TOK_BLOCK)
+      else if (astree_count(tree) < 3 ||
+               astree_get(tree, 2)->tok_kind != TOK_BLOCK)
         return 0;
       else
         return astree_print_tags(astree_get(tree, 2), out, depth);
