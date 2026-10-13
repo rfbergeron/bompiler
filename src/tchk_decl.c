@@ -70,11 +70,6 @@ ASTree *validate_decl_spec(ASTree *decl_specs, ASTree *decl_spec) {
   }
 }
 
-ASTree *finalize_decl_specs(ASTree *decl_specs) {
-  if (type_normalize(decl_specs->type)) (void)semerr_invalid_type(decl_specs);
-  return decl_specs;
-}
-
 static int location_is_empty(Location *loc) {
   return loc->filenr == 0 && loc->linenr == 0 && loc->offset == 0;
 }

@@ -18,6 +18,8 @@
 #define X64_SIZEOF_LDBL ((size_t)16UL)
 #define X64_ALIGNOF_LDBL ((size_t)16UL)
 
+#define X64_CHAR_BIT ((size_t)8UL)
+
 typedef union type Type;
 union tag;
 
@@ -53,6 +55,7 @@ int type_is_integer(const Type *type);
 int type_is_signed(const Type *type);
 int type_is_unsigned(const Type *type);
 int type_is_enum(const Type *type);
+int type_is_bit_field(const Type *type);
 int type_is_integral(const Type *type);
 int type_is_arithmetic(const Type *type);
 int type_is_pointer(const Type *type);
@@ -90,6 +93,7 @@ size_t type_get_param_count(const Type *type);
 
 size_t type_get_alignment(const Type *type);
 size_t type_get_width(const Type *type);
+size_t type_get_bit_width(const Type *type);
 int type_retrieve_storage_specifier(Type *type);
 size_t type_get_elem_width(const Type *type);
 size_t type_get_eightbytes(const Type *type);

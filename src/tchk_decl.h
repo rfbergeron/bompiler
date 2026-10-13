@@ -4,7 +4,6 @@
 #include "astree.h"
 
 ASTree *validate_decl_spec(ASTree *decl_specs, ASTree *decl_spec);
-ASTree *finalize_decl_specs(ASTree *decl_specs);
 ASTree *finalize_declaration(ASTree *declaration);
 ASTree *validate_array_size(ASTree *array, ASTree *expr);
 ASTree *validate_param_list(ASTree *param_list);
