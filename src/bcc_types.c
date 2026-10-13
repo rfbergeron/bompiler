@@ -978,6 +978,76 @@ static int params_compatible(const Type *type1, const Type *type2) {
   return 1;
 }
 
+int arth_compatible(const Type *type1, const Type *type2) {
+  switch (type1->decl_specs.extra.arth) {
+    default:
+      return type2->decl_specs.extra.arth == type1->decl_specs.extra.arth;
+    case ARTH_NONE:
+      /* fallthrough */
+    case ARTH_INT:
+      /* fallthrough */
+    case ARTH_INT | ARTH_SIGNED:
+      return type2->decl_specs.extra.arth == ARTH_NONE ||
+             type2->decl_specs.extra.arth == ARTH_INT ||
+             type2->decl_specs.extra.arth == (ARTH_INT | ARTH_SIGNED);
+    case ARTH_UNSIGNED:
+      /* fallthrough */
+    case ARTH_INT | ARTH_UNSIGNED:
+      return type2->decl_specs.extra.arth == ARTH_UNSIGNED ||
+             type2->decl_specs.extra.arth == (ARTH_INT | ARTH_UNSIGNED);
+    case ARTH_SHRT | ARTH_UNSIGNED:
+      /* fallthrough */
+    case ARTH_INT | ARTH_SHRT | ARTH_UNSIGNED:
+      return type2->decl_specs.extra.arth == (ARTH_SHRT | ARTH_UNSIGNED) ||
+             type2->decl_specs.extra.arth ==
+                 (ARTH_INT | ARTH_SHRT | ARTH_UNSIGNED);
+    case ARTH_LONG | ARTH_UNSIGNED:
+      /* fallthrough */
+    case ARTH_INT | ARTH_LONG | ARTH_UNSIGNED:
+      return type2->decl_specs.extra.arth == (ARTH_LONG | ARTH_UNSIGNED) ||
+             type2->decl_specs.extra.arth ==
+                 (ARTH_INT | ARTH_LONG | ARTH_UNSIGNED);
+    case ARTH_SHRT:
+      /* fallthrough */
+    case ARTH_SHRT | ARTH_SIGNED:
+      /* fallthrough */
+    case ARTH_INT | ARTH_SHRT:
+      /* fallthrough */
+    case ARTH_INT | ARTH_SHRT | ARTH_SIGNED:
+      switch (type2->decl_specs.extra.arth) {
+        case ARTH_SHRT:
+          /* fallthrough */
+        case ARTH_SHRT | ARTH_SIGNED:
+          /* fallthrough */
+        case ARTH_INT | ARTH_SHRT:
+          /* fallthrough */
+        case ARTH_INT | ARTH_SHRT | ARTH_SIGNED:
+          return 1;
+        default:
+          return 0;
+      }
+    case ARTH_LONG:
+      /* fallthrough */
+    case ARTH_LONG | ARTH_SIGNED:
+      /* fallthrough */
+    case ARTH_INT | ARTH_LONG:
+      /* fallthrough */
+    case ARTH_INT | ARTH_LONG | ARTH_SIGNED:
+      switch (type2->decl_specs.extra.arth) {
+        case ARTH_LONG:
+          /* fallthrough */
+        case ARTH_LONG | ARTH_SIGNED:
+          /* fallthrough */
+        case ARTH_INT | ARTH_LONG:
+          /* fallthrough */
+        case ARTH_INT | ARTH_LONG | ARTH_SIGNED:
+          return 1;
+        default:
+          return 0;
+      }
+  }
+}
+
 int types_compatible(const Type *type1, const Type *type2, int qualified) {
   switch (type1->decl_specs.flags & TYPE_MASK_KIND) {
     case TYPE_KIND_OTHER:
@@ -986,15 +1056,14 @@ int types_compatible(const Type *type1, const Type *type2, int qualified) {
                           : TYPE_MASK_REPR)) &&
              type1->decl_specs.extra.tag == type2->decl_specs.extra.tag;
     case TYPE_KIND_ARTH:
-      if ((type1->decl_specs.flags ^ type2->decl_specs.flags) &
-          (qualified ? TYPE_MASK_REPR | TYPE_MASK_QUAL : TYPE_MASK_REPR))
-        return 0;
-      /* TODO(Robert): check arithmetic compatibility; its complicated */
-      return 1;
+      return !((type1->decl_specs.flags ^ type2->decl_specs.flags) &
+               (qualified ? TYPE_MASK_REPR | TYPE_MASK_QUAL
+                          : TYPE_MASK_REPR)) &&
+             arth_compatible(type1, type2);
     case TYPE_KIND_PTR:
-      return type_is_pointer(type2) &&
-             (!qualified || !((type1->pointer.flags ^ type2->pointer.flags) &
-                              TYPE_MASK_QUAL)) &&
+      return !((type1->decl_specs.flags ^ type2->decl_specs.flags) &
+               (qualified ? TYPE_MASK_REPR | TYPE_MASK_QUAL
+                          : TYPE_MASK_REPR)) &&
              types_compatible(type_strip_declarator(type1),
                               type_strip_declarator(type2), 1);
     case TYPE_KIND_FN:
