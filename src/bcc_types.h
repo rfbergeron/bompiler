@@ -45,7 +45,7 @@ Type *type_init_pointer(void);
 Type *type_init_array(size_t length);
 Type *type_init_function(size_t parameters_size, Type **parameters,
                          int variadic);
-Type *type_init_bit_field(unsigned char width);
+Type *type_init_bit_field(unsigned long width);
 
 void type_destroy(Type *type);
 

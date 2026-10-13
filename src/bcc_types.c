@@ -11,101 +11,74 @@
 #include "symtable.h"
 
 #define GET_ARRAY_LEN(type) (((type)->array.flags >> 1) + 1ul)
-#define GET_PARAM_COUNT(type) ((type->function.flags) >> 4)
+#define GET_PARAM_COUNT(type) ((type->function.flags) >> 8)
 #define SWAP(type, x, y) \
   do {                   \
     type temp = (x);     \
     (x) = (y);           \
     (y) = temp;          \
   } while (0)
-#define BCC_ARRAY_MAX_LEN 0x8000000000000000
-#define BCC_FN_MAX_PARAMS 0x0fffffffffffffff
+#define BCC_ARRAY_MAX_LEN (1ul << (CHAR_BIT * sizeof(unsigned long) - 1))
+#define BCC_FN_MAX_PARAMS (ULONG_MAX >> 8)
+
+typedef enum arth_flag {
+  ARTH_NONE = 0,           /* 0x00 no declaration specifiers */
+  ARTH_MASK_ARTH = 0x0f,   /* mutually exclusive specifiers */
+  ARTH_BIT_FIELD = 1 << 0, /* 0x01 bit field */
+                           /* 0x00 */
+  ARTH_INT = 1 << 1,       /* 0x02 */
+  ARTH_CHAR = 2 << 1,      /* 0x04 */
+  ARTH_FLOAT = 3 << 1,     /* 0x06 */
+  ARTH_DOUBLE = 4 << 1,    /* 0x08 */
+                           /* 0x0a reserved for _BitInt */
+                           /* 0x0c reserved for _Bool/bool */
+                           /* 0x0e reserved for __int128 */
+  ARTH_MASK_SIGN = 0x30,   /*      integer sign flags */
+  ARTH_SIGNED = 1 << 4,    /* 0x10 */
+  ARTH_UNSIGNED = 1 << 5,  /* 0x20 */
+  ARTH_MASK_SIZE = 0xc0,   /* 0xc0 */
+  ARTH_SHRT = 1 << 6,      /* 0x40 */
+  ARTH_LONG = 2 << 6       /* 0x80 */
+} ArthFlag;
 
 typedef enum type_flag {
-  DECL_SPEC_NONE = 0,             /* 0x0000 no declaration specifiers */
-  TYPE_FLAG_ARR = 1,              /* 0x0001 array */
-  TYPE_MASK_KIND = 0x0007,        /*        type kind: 2-bit int, flag */
-  TYPE_KIND_OTHER = 0,            /* 0x0000 */
-  TYPE_KIND_ARTH = 1 << 1,        /* 0x0002 */
-  TYPE_KIND_PTR = 2 << 1,         /* 0x0004 */
-  TYPE_KIND_FN = 3 << 1,          /* 0x0006 */
-  TYPE_MASK_EXTRA = 0x0008,       /* 0x0008 extra type kind flag */
-  TYPE_FLAG_VARIADIC = 1 << 3,    /* 0x0008 variadic function */
-  TYPE_FLAG_ARR_SPECIAL = 1 << 3, /* 0x0008 other array type */
-  TYPE_MASK_OTHER = 0x01f0,       /*        other specifiers: 5 bits */
-                                  /* 0x0000 no type specifiers */
-  TYPE_OTHER_VOID = 1 << 4,       /* 0x0010 */
-  TYPE_OTHER_STRUCT = 2 << 4,     /* 0x0020 */
-  TYPE_OTHER_UNION = 3 << 4,      /* 0x0030 */
-  TYPE_OTHER_ENUM = 4 << 4,       /* 0x0040 */
-  TYPE_OTHER_BFLD = 5 << 4,       /* 0x0050 */
-  TYPE_OTHER_SBFLD = 6 << 4,      /* 0x0060 */
-  TYPE_OTHER_UBFLD = 7 << 4,      /* 0x0070 */
-                                  /* 0x0080 - 0x01f0 reserved */
-  TYPE_MASK_ARTH = 0x0018,        /*        arithmetic specifiers: 2 bit int */
-  TYPE_ARTH_FLT = 0 << 3,         /* 0x0000 */
-  TYPE_ARTH_DBL = 1 << 3,         /* 0x0008 */
-  TYPE_ARTH_CHAR = 2 << 3,        /* 0x0010 */
-  TYPE_ARTH_INT = 3 << 3,         /* 0x0018 */
-  TYPE_MASK_SIGN = 0x0060,        /*        signedness specifiers: 2 bits */
-  TYPE_SIGN_SIGNED = 1 << 5,      /* 0x0020 */
-  TYPE_SIGN_UNSIGNED = 1 << 6,    /* 0x0040 */
-  TYPE_MASK_SIZE = 0x0180,        /*        size specifiers: 2 bit int */
-                                  /* 0x0000 no type specifiers */
-  TYPE_SIZE_SHRT = 1 << 7,        /* 0x0080 */
-  TYPE_SIZE_LONG = 2 << 7,        /* 0x0100 */
-                                  /* 0x0180 reserved for long long */
-  TYPE_MASK_QUAL = 0x1e00,        /*        type qualifiers: 4-bit flagset */
-                                  /* 0x0000 no type qualifiers */
-  TYPE_QUAL_CONST = 1 << 9,       /* 0x0200 */
-  TYPE_QUAL_VOLATILE = 1 << 10,   /* 0x0400 */
-                                  /* 0x0800 reserved for restrict */
-                                  /* 0x1000 reserved for atomic */
-  TYPE_MASK_STORE = 0xe000,       /*        storage class: 3-bit integer */
-                                  /* 0x0000 no explicit storage class */
-  TYPE_STORE_REGISTER = 1 << 13,  /* 0x2000 */
-  TYPE_STORE_AUTO = 2 << 13,      /* 0x4000 */
-  TYPE_STORE_STATIC = 3 << 13,    /* 0x6000 */
-  TYPE_STORE_EXTERN = 4 << 13,    /* 0x8000 */
-  TYPE_STORE_TYPEDEF = 5 << 13,   /* 0xa000 */
-                                  /* 0xc000 invalid 7th value */
-                                  /* 0xe000 invalid 8th value */
-  /* valid representations of individual type specifiers */
-  TYPE_SPEC_FLT = TYPE_KIND_ARTH | TYPE_ARTH_FLT,
-  TYPE_SPEC_DBL = TYPE_KIND_ARTH | TYPE_ARTH_DBL,
-  TYPE_SPEC_CHAR = TYPE_KIND_ARTH | TYPE_ARTH_CHAR,
-  TYPE_SPEC_INT = TYPE_KIND_ARTH | TYPE_ARTH_INT,
-  TYPE_SPEC_SIGNED = TYPE_KIND_ARTH | TYPE_SIGN_SIGNED,
-  TYPE_SPEC_UNSIGNED = TYPE_KIND_ARTH | TYPE_SIGN_UNSIGNED,
-  TYPE_SPEC_SHRT = TYPE_KIND_ARTH | TYPE_SIZE_SHRT,
-  TYPE_SPEC_LONG = TYPE_KIND_ARTH | TYPE_SIZE_LONG,
-  /* "canonical" bit representations of types */
-  TYPE_MASK_REPR = TYPE_MASK_KIND | TYPE_MASK_OTHER | TYPE_MASK_EXTRA,
-  TYPE_REPR_CHAR = TYPE_SPEC_CHAR,
-  TYPE_REPR_SCHAR = TYPE_SPEC_CHAR | TYPE_SPEC_SIGNED,
-  TYPE_REPR_UCHAR = TYPE_SPEC_CHAR | TYPE_SPEC_UNSIGNED,
-  TYPE_REPR_INT = TYPE_SPEC_INT | TYPE_SPEC_SIGNED,
-  TYPE_REPR_UINT = TYPE_SPEC_INT | TYPE_SPEC_UNSIGNED,
-  TYPE_REPR_SHRT = TYPE_REPR_INT | TYPE_SPEC_SHRT,
-  TYPE_REPR_USHRT = TYPE_REPR_UINT | TYPE_SPEC_SHRT,
-  TYPE_REPR_LONG = TYPE_REPR_INT | TYPE_SPEC_LONG,
-  TYPE_REPR_ULONG = TYPE_REPR_UINT | TYPE_SPEC_LONG,
-  TYPE_REPR_FLT = TYPE_SPEC_FLT,
-  TYPE_REPR_DBL = TYPE_SPEC_DBL,
-  TYPE_REPR_LDBL = TYPE_SPEC_DBL | TYPE_SPEC_LONG,
-  TYPE_REPR_VOID = TYPE_KIND_OTHER | TYPE_OTHER_VOID,
+  DECL_SPEC_NONE = 0,            /* 0x0000 no declaration specifiers */
+  TYPE_MASK_KIND = 0x000f,       /*        type kind: 2 flags, 2-bit int */
+  TYPE_FLAG_ARR = 1 << 0,        /* 0x0001 complete array */
+  TYPE_KIND_VARR = 1 << 1,       /* 0x0002 other array type */
+  TYPE_KIND_ARTH = 0 << 2,       /* 0x0000 */
+  TYPE_KIND_OTHER = 1 << 2,      /* 0x0004 */
+  TYPE_KIND_PTR = 2 << 2,        /* 0x0008 */
+  TYPE_KIND_FN = 3 << 2,         /* 0x000c */
+  TYPE_FN_OLD_STYLE = 1 << 4,    /* 0x0010 */
+  TYPE_FN_VARIADIC = 1 << 5,     /* 0x0020 */
+                                 /* 0x0040 reserved for inline */
+                                 /* 0x0080 reserved for noreturn */
+  TYPE_MASK_OTHER = 3 << 4,      /* 0x0030 other types */
+  TYPE_OTHER_VOID = 0 << 4,      /* 0x0000 */
+  TYPE_OTHER_STRUCT = 1 << 4,    /* 0x0010 */
+  TYPE_OTHER_UNION = 2 << 4,     /* 0x0020 */
+  TYPE_OTHER_ENUM = 3 << 4,      /* 0x0030 */
+  TYPE_MASK_QUAL = 0x1e00,       /*        type qualifiers: 4-bit flagset */
+                                 /* 0x0000 no type qualifiers */
+  TYPE_QUAL_CONST = 1 << 9,      /* 0x0200 */
+  TYPE_QUAL_VOLATILE = 1 << 10,  /* 0x0400 */
+                                 /* 0x0800 reserved for restrict */
+                                 /* 0x1000 reserved for atomic */
+  TYPE_MASK_STORE = 0xe000,      /*        storage class: 3-bit integer */
+                                 /* 0x0000 no explicit storage class */
+  TYPE_STORE_REGISTER = 1 << 13, /* 0x2000 */
+  TYPE_STORE_AUTO = 2 << 13,     /* 0x4000 */
+  TYPE_STORE_STATIC = 3 << 13,   /* 0x6000 */
+  TYPE_STORE_EXTERN = 4 << 13,   /* 0x8000 */
+  TYPE_STORE_TYPEDEF = 5 << 13,  /* 0xa000 */
+                                 /* 0xc000 invalid 7th value */
+                                 /* 0xe000 invalid 8th value */
+  TYPE_MASK_REPR = TYPE_MASK_KIND | TYPE_MASK_OTHER,
   TYPE_REPR_STRUCT = TYPE_KIND_OTHER | TYPE_OTHER_STRUCT,
   TYPE_REPR_UNION = TYPE_KIND_OTHER | TYPE_OTHER_UNION,
   TYPE_REPR_ENUM = TYPE_KIND_OTHER | TYPE_OTHER_ENUM,
-  TYPE_REPR_INC_ARR = TYPE_KIND_OTHER | TYPE_FLAG_ARR_SPECIAL,
-  TYPE_REPR_BFLD = TYPE_KIND_OTHER | TYPE_OTHER_BFLD,
-  TYPE_REPR_SBFLD = TYPE_KIND_OTHER | TYPE_OTHER_SBFLD,
-  TYPE_REPR_UBFLD = TYPE_KIND_OTHER | TYPE_OTHER_UBFLD,
-  /* types with representations that need special handling */
-  TYPE_MASK_EXTRA_KIND = TYPE_MASK_KIND | TYPE_MASK_EXTRA,
-  TYPE_EXTRA_ARR = TYPE_KIND_OTHER | TYPE_FLAG_ARR_SPECIAL,
-  TYPE_EXTRA_VAR_FN = TYPE_KIND_FN | TYPE_FLAG_VARIADIC,
-  TYPE_EXTRA_ARTH = TYPE_KIND_ARTH | TYPE_MASK_EXTRA
+  TYPE_REPR_VOID = TYPE_KIND_OTHER | TYPE_OTHER_VOID
 } TypeFlag;
 
 union type {
@@ -113,7 +86,7 @@ union type {
     unsigned long flags;
     union {
       union tag *tag;
-      unsigned int bit_width : 5;
+      unsigned long arth;
     } extra;
   } decl_specs;
   struct {
@@ -160,28 +133,17 @@ void type_init_globals(void) {
   TYPE_VOID_INTERNAL.decl_specs.flags = TYPE_REPR_VOID;
   TYPE_POINTER_INTERNAL.pointer.flags = TYPE_KIND_PTR;
   TYPE_POINTER_INTERNAL.pointer.next = &TYPE_VOID_INTERNAL;
-  TYPE_CHAR_INTERNAL.decl_specs.flags = TYPE_REPR_CHAR;
-  TYPE_INT_INTERNAL.decl_specs.flags = TYPE_REPR_INT;
-  TYPE_LONG_INTERNAL.decl_specs.flags = TYPE_REPR_LONG;
-  TYPE_UNSIGNED_INT_INTERNAL.decl_specs.flags = TYPE_REPR_UINT;
-  TYPE_UNSIGNED_LONG_INTERNAL.decl_specs.flags = TYPE_REPR_ULONG;
+  TYPE_CHAR_INTERNAL.decl_specs.flags = TYPE_KIND_ARTH;
+  TYPE_CHAR_INTERNAL.decl_specs.extra.arth = ARTH_CHAR;
+  TYPE_INT_INTERNAL.decl_specs.flags = TYPE_KIND_ARTH;
+  TYPE_INT_INTERNAL.decl_specs.extra.arth = ARTH_INT;
+  TYPE_LONG_INTERNAL.decl_specs.flags = TYPE_KIND_ARTH;
+  TYPE_LONG_INTERNAL.decl_specs.extra.arth = ARTH_LONG;
+  TYPE_UNSIGNED_INT_INTERNAL.decl_specs.flags = TYPE_KIND_ARTH;
+  TYPE_UNSIGNED_INT_INTERNAL.decl_specs.extra.arth = ARTH_INT | ARTH_UNSIGNED;
+  TYPE_UNSIGNED_LONG_INTERNAL.decl_specs.flags = TYPE_KIND_ARTH;
+  TYPE_UNSIGNED_LONG_INTERNAL.decl_specs.extra.arth = ARTH_LONG | ARTH_UNSIGNED;
   /* TYPE_NONE_INTERNAL already zero-filled; no need to initialize */
-
-  /* sanity checks */
-  assert(!(TYPE_MASK_KIND & TYPE_MASK_EXTRA & TYPE_MASK_OTHER & TYPE_MASK_QUAL &
-           TYPE_MASK_STORE & TYPE_FLAG_ARR));
-  assert(!(TYPE_MASK_KIND & TYPE_MASK_ARTH & TYPE_MASK_SIZE & TYPE_MASK_SIGN &
-           TYPE_MASK_QUAL & TYPE_MASK_STORE & TYPE_FLAG_ARR));
-
-  assert((TYPE_MASK_SIGN | TYPE_SIGN_UNSIGNED) == TYPE_MASK_SIGN);
-  assert((TYPE_MASK_SIGN | TYPE_SIGN_SIGNED) == TYPE_MASK_SIGN);
-  assert((TYPE_MASK_SIZE | TYPE_SIZE_LONG) == TYPE_MASK_SIZE);
-  assert((TYPE_MASK_SIZE | TYPE_SIZE_SHRT) == TYPE_MASK_SIZE);
-  assert((TYPE_MASK_ARTH | TYPE_ARTH_FLT) == TYPE_MASK_ARTH);
-  assert((TYPE_MASK_ARTH | TYPE_ARTH_DBL) == TYPE_MASK_ARTH);
-  assert((TYPE_MASK_ARTH | TYPE_ARTH_CHAR) == TYPE_MASK_ARTH);
-  assert((TYPE_MASK_ARTH | TYPE_ARTH_INT) == TYPE_MASK_ARTH);
-  assert((TYPE_MASK_STORE | TYPE_STORE_TYPEDEF) == TYPE_MASK_STORE);
 }
 
 Type *type_init_basic(void) { return calloc(1, sizeof(Type)); }
@@ -207,7 +169,7 @@ Type *type_init_array(size_t length) {
   assert(length <= BCC_ARRAY_MAX_LEN);
   Type *type = malloc(sizeof(Type));
   if (length == 0) /* incomplete array */
-    type->array.flags = TYPE_KIND_OTHER | TYPE_FLAG_ARR_SPECIAL;
+    type->array.flags = TYPE_KIND_VARR;
   else
     type->array.flags = TYPE_FLAG_ARR | ((length - 1) << 1);
   type->array.next = NULL;
@@ -218,30 +180,28 @@ Type *type_init_function(size_t parameters_size, Type **parameters,
                          int variadic) {
   assert(parameters_size <= BCC_FN_MAX_PARAMS);
   Type *type = malloc(sizeof(Type));
-  type->function.flags = TYPE_KIND_FN | parameters_size << 4;
-  if (variadic) type->function.flags |= TYPE_FLAG_VARIADIC;
+  type->function.flags = TYPE_KIND_FN | parameters_size << 8;
+  if (variadic) type->function.flags |= TYPE_FN_VARIADIC;
   type->function.next = parameters;
   type->function.next[parameters_size] = NULL;
   return type;
 }
 
-Type *type_init_bit_field(unsigned char width) {
+Type *type_init_bit_field(unsigned long width) {
   assert(width <= X64_CHAR_BIT * X64_SIZEOF_INT);
   Type *type = malloc(sizeof(Type));
-  type->decl_specs.flags = TYPE_REPR_BFLD;
-  type->decl_specs.extra.bit_width = width;
+  type->decl_specs.flags = TYPE_KIND_ARTH;
+  type->decl_specs.extra.arth = ARTH_BIT_FIELD | width << 11;
   return type;
 }
 
 void type_destroy(Type *type) {
   while (type != NULL) {
     Type *current = type;
-    switch (type->decl_specs.flags & TYPE_MASK_EXTRA_KIND) {
+    switch (type->decl_specs.flags & TYPE_MASK_KIND) {
       case TYPE_KIND_OTHER:
         /* fallthrough */
       case TYPE_KIND_ARTH:
-        /* fallthrough */
-      case TYPE_EXTRA_ARTH:
         free(current);
         return;
       case TYPE_KIND_PTR:
@@ -249,8 +209,6 @@ void type_destroy(Type *type) {
         free(current);
         break;
       case TYPE_KIND_FN:
-        /* fallthrough */
-      case TYPE_EXTRA_VAR_FN:
         type = type->function.next[GET_PARAM_COUNT(type)];
         free(current->function.next);
         free(current);
@@ -258,7 +216,7 @@ void type_destroy(Type *type) {
       default:
         assert(type->decl_specs.flags & TYPE_FLAG_ARR);
         /* fallthrough */
-      case TYPE_EXTRA_ARR:
+      case TYPE_KIND_VARR:
         type = type->array.next;
         free(current);
         break;
@@ -270,8 +228,8 @@ void type_destroy(Type *type) {
    */
 }
 
-static const char *qual_get_str(unsigned long flags) {
-  switch (flags & TYPE_MASK_QUAL) {
+static const char *qual_get_str(const Type *type) {
+  switch (type->decl_specs.flags & TYPE_MASK_QUAL) {
     case TYPE_QUAL_CONST | TYPE_QUAL_VOLATILE:
       return "const volatile";
     case TYPE_QUAL_CONST:
@@ -279,38 +237,76 @@ static const char *qual_get_str(unsigned long flags) {
     case TYPE_QUAL_VOLATILE:
       return "volatile";
     default:
-      return "";
+      return NULL;
   }
 }
 
-static const char *sign_get_str(unsigned long flags) {
-  static const char *SIGN_DUMP_MAP[] = {"", "signed", "unsigned",
-                                        "signed unsigned (invalid)"};
-  return SIGN_DUMP_MAP[(flags & TYPE_MASK_SIGN) >> 5];
-}
-
-static const char *arth_get_str(unsigned long flags) {
-  static const char *ARTH_DUMP_MAP[] = {"float/(none)", "double", "char",
-                                        "int"};
-  return ARTH_DUMP_MAP[(flags & TYPE_MASK_ARTH) >> 3];
-}
-
-static const char *store_get_str(unsigned long flags) {
-  static const char *STORAGE_DUMP_MAP[] = {"",          "register", "auto",
+static const char *store_get_str(const Type *type) {
+  static const char *STORAGE_DUMP_MAP[] = {NULL,        "register", "auto",
                                            "static",    "extern",   "typedef",
                                            "(invalid)", "(invalid)"};
-  return STORAGE_DUMP_MAP[(flags & TYPE_MASK_STORE) >> 13];
+  return STORAGE_DUMP_MAP[(type->decl_specs.flags & TYPE_MASK_STORE) >> 13];
 }
 
-static const char *size_get_str(unsigned long flags) {
-  static const char *SIZE_DUMP_MAP[] = {"", "short", "long", "long long"};
-  return SIZE_DUMP_MAP[(flags & TYPE_MASK_SIZE) >> 7];
-}
-
-static const char *other_get_str(unsigned long flags) {
-  switch (flags & TYPE_MASK_OTHER) {
-    case DECL_SPEC_NONE:
+static const char *arth_get_str(const Type *type) {
+  switch (type->decl_specs.extra.arth) {
+    default:
+      return "(invalid)";
+    case ARTH_NONE:
       return "(none)";
+    case ARTH_INT:
+      return "int";
+    case ARTH_INT | ARTH_SIGNED:
+      return "signed int";
+    case ARTH_INT | ARTH_UNSIGNED:
+      return "unsigned int";
+    case ARTH_SHRT:
+      return "short";
+    case ARTH_SHRT | ARTH_SIGNED:
+      return "signed short";
+    case ARTH_SHRT | ARTH_UNSIGNED:
+      return "unsigned short";
+    case ARTH_INT | ARTH_SHRT:
+      return "short int";
+    case ARTH_INT | ARTH_SHRT | ARTH_SIGNED:
+      return "signed short int";
+    case ARTH_INT | ARTH_SHRT | ARTH_UNSIGNED:
+      return "unsigned short int";
+    case ARTH_LONG:
+      return "long";
+    case ARTH_LONG | ARTH_SIGNED:
+      return "signed long";
+    case ARTH_LONG | ARTH_UNSIGNED:
+      return "unsigned long";
+    case ARTH_INT | ARTH_LONG:
+      return "long int";
+    case ARTH_INT | ARTH_LONG | ARTH_SIGNED:
+      return "signed long int";
+    case ARTH_INT | ARTH_LONG | ARTH_UNSIGNED:
+      return "unsigned long int";
+    case ARTH_CHAR:
+      return "char";
+    case ARTH_CHAR | ARTH_SIGNED:
+      return "signed char";
+    case ARTH_CHAR | ARTH_UNSIGNED:
+      return "unsigned char";
+    case ARTH_FLOAT:
+      return "float";
+    case ARTH_DOUBLE:
+      return "double";
+    case ARTH_DOUBLE | ARTH_LONG:
+      return "long double";
+    case ARTH_BIT_FIELD:
+      return "(bit field)";
+    case ARTH_BIT_FIELD | ARTH_SIGNED:
+      return "(signed bit field)";
+    case ARTH_BIT_FIELD | ARTH_UNSIGNED:
+      return "(unsigned bit field)";
+  }
+}
+
+static const char *other_get_str(const Type *type) {
+  switch (type->decl_specs.flags & TYPE_MASK_OTHER) {
     case TYPE_OTHER_VOID:
       return "void";
     case TYPE_OTHER_STRUCT:
@@ -319,18 +315,12 @@ static const char *other_get_str(unsigned long flags) {
       return "union";
     case TYPE_OTHER_ENUM:
       return "enum";
-    case TYPE_OTHER_BFLD:
-      return "bit field";
-    case TYPE_OTHER_SBFLD:
-      return "signed bit field";
-    case TYPE_OTHER_UBFLD:
-      return "unsigned bit field";
     default:
       return "(invalid)";
   }
 }
 
-void type_dump_specs(unsigned long flags) {
+void type_dump_specs(const Type *type) {
   static const char *OTHER_DUMP_FMT =
       "Type kind is other.\n"
       "Type qualifiers: %s\n"
@@ -341,10 +331,9 @@ void type_dump_specs(unsigned long flags) {
       "Type kind is arithmetic.\n"
       "Type qualifiers: %s\n"
       "Storage class specifier: %s\n"
-      "Sign specifier(s): %s\n"
-      "Size specifier(s): %s\n"
       "Type specifier(s): %s\n"
-      "Raw bit value: %lx\n";
+      "Raw bit value: %lx\n"
+      "Raw arithmetic flags value: %lx\n";
   static const char *PTR_DUMP_FMT =
       "Type qualifiers: %s\n"
       "Storage class specifier: %s\n"
@@ -356,116 +345,57 @@ void type_dump_specs(unsigned long flags) {
   static const char *FN_DUMP_FMT =
       "Type kind is function.\n"
       "Variadic: %s\n"
-      "Parameter count: %s\n"
+      "Parameter count: %lu\n"
       "Raw bit value: %lx\n";
-  switch (flags & TYPE_MASK_EXTRA_KIND) {
+  switch (type->decl_specs.flags & TYPE_MASK_KIND) {
     case TYPE_KIND_OTHER:
-      (void)fprintf(stderr, OTHER_DUMP_FMT, qual_get_str(flags),
-                    store_get_str(flags), other_get_str(flags), flags);
+      (void)fprintf(stderr, OTHER_DUMP_FMT, qual_get_str(type),
+                    store_get_str(type), other_get_str(type),
+                    type->decl_specs.flags);
       break;
     case TYPE_KIND_ARTH:
-      /* fallthrough */
-    case TYPE_EXTRA_ARTH:
-      (void)fprintf(stderr, ARTH_DUMP_FMT, qual_get_str(flags),
-                    store_get_str(flags), sign_get_str(flags),
-                    size_get_str(flags), arth_get_str(flags), flags);
+      (void)fprintf(stderr, ARTH_DUMP_FMT, qual_get_str(type),
+                    store_get_str(type), arth_get_str(type),
+                    type->decl_specs.flags, type->decl_specs.extra.arth);
       break;
     case TYPE_KIND_PTR:
-      (void)fprintf(stderr, PTR_DUMP_FMT, qual_get_str(flags),
-                    store_get_str(flags), flags);
+      (void)fprintf(stderr, PTR_DUMP_FMT, qual_get_str(type),
+                    store_get_str(type), type->decl_specs.flags);
       break;
     case TYPE_KIND_FN:
-      /* fallthrough */
-    case TYPE_EXTRA_VAR_FN:
       (void)fprintf(stderr, FN_DUMP_FMT,
-                    (flags & TYPE_FLAG_VARIADIC) ? "yes" : "no", flags >> 4,
-                    flags);
+                    (type->decl_specs.flags & TYPE_FN_VARIADIC) ? "yes" : "no",
+                    GET_PARAM_COUNT(type), type->decl_specs.flags);
       break;
-    case TYPE_EXTRA_ARR:
+    case TYPE_KIND_VARR:
       (void)fprintf(stderr,
                     "Type kind is incomplete array.\nRaw bit value: %lx\n",
-                    flags);
+                    type->array.flags);
       break;
     default:
-      if (!(flags & TYPE_FLAG_ARR)) {
+      if (!(type->array.flags & TYPE_FLAG_ARR)) {
         (void)fprintf(stderr, "Type kind is invalid.\nRaw bit value: %lx\n",
-                      flags);
+                      type->decl_specs.flags);
       } else {
-        (void)fprintf(stderr, ARR_DUMP_FMT, (flags >> 1) + 1, flags);
+        (void)fprintf(stderr, ARR_DUMP_FMT, GET_ARRAY_LEN(type),
+                      type->array.flags);
       }
       break;
   }
 }
 
-/* TODO(Robert): this function should be able to print out types that haven't
- * been normalized yet, for diagnostic purposes
- */
-static const char *decl_specs_get_str(unsigned int flags) {
-  switch (flags & TYPE_MASK_REPR) {
-    case DECL_SPEC_NONE:
-      return "(none)";
-    case TYPE_REPR_VOID:
-      return "void";
-    case TYPE_REPR_CHAR:
-      return "char";
-    case TYPE_REPR_SCHAR:
-      return "signed char";
-    case TYPE_REPR_UCHAR:
-      return "unsigned char";
-    case TYPE_REPR_BFLD:
-      /* fallthrough */
-    case TYPE_SPEC_INT:
-      return "int";
-    case TYPE_REPR_SBFLD:
-      /* fallthrough */
-    case TYPE_REPR_INT:
-      return "signed int";
-    case TYPE_REPR_UBFLD:
-      /* fallthrough */
-    case TYPE_REPR_UINT:
-      return "unsigned int";
-    case TYPE_REPR_SHRT:
-      return "signed short";
-    case TYPE_REPR_USHRT:
-      return "unsigned short";
-    case TYPE_REPR_LONG:
-      return "signed long";
-    case TYPE_REPR_ULONG:
-      return "unsigned long";
-    case TYPE_REPR_FLT:
-      return "float";
-    case TYPE_REPR_DBL:
-      return "double";
-    case TYPE_REPR_LDBL:
-      return "long double";
-    case TYPE_REPR_STRUCT:
-      return "struct";
-    case TYPE_REPR_UNION:
-      return "union";
-    case TYPE_REPR_ENUM:
-      return "enum";
-    default:
-      return "(incomplete)";
-  }
-}
-
 static int specifiers_to_str(const Type *type, char *buf) {
   assert(!type_is_declarator(type));
-  static const char *FMT_STRS[] = {"%s", "%s %s", "%s %s %s", "%s:%u",
-                                   "%s %s:%u"};
-  const char *type_str = decl_specs_get_str(type->decl_specs.flags);
-  const char *qual_str = qual_get_str(type->decl_specs.flags);
+  static const char *FMT_STRS[] = {"%s", "%s %s", "%s %s %s"};
+  const char *type_str =
+      type_is_arithmetic(type) ? arth_get_str(type) : other_get_str(type);
+  const char *qual_str = qual_get_str(type);
 
   if (type_is_record(type) || type_is_enum(type)) {
     return qual_str == NULL ? sprintf(buf, FMT_STRS[1], type_str,
                                       type->decl_specs.extra.tag->record.name)
                             : sprintf(buf, FMT_STRS[2], qual_str, type_str,
                                       type->decl_specs.extra.tag->record.name);
-  } else if (type_is_bit_field(type)) {
-    return qual_str == NULL ? sprintf(buf, FMT_STRS[3], type_str,
-                                      type->decl_specs.extra.bit_width)
-                            : sprintf(buf, FMT_STRS[4], qual_str, type_str,
-                                      type->decl_specs.extra.bit_width);
   } else {
     return qual_str == NULL ? sprintf(buf, FMT_STRS[0], type_str)
                             : sprintf(buf, FMT_STRS[1], qual_str, type_str);
@@ -473,23 +403,19 @@ static int specifiers_to_str(const Type *type, char *buf) {
 }
 
 int type_to_str(const Type *type, char *buf) {
-  buf[0] = '\0';
+  (void)strcpy(buf, "(null)");
   int ret = 0;
   const Type *current = type;
   while (current != NULL) {
-    switch (current->decl_specs.flags & TYPE_MASK_EXTRA_KIND) {
+    switch (current->decl_specs.flags & TYPE_MASK_KIND) {
       case TYPE_KIND_ARTH:
-        /* fallthrough */
-      case TYPE_EXTRA_ARTH:
         /* fallthrough */
       case TYPE_KIND_OTHER:
         ret += specifiers_to_str(current, buf + ret);
         current = NULL;
         break;
       case TYPE_KIND_FN:
-        /* fallthrough */
-      case TYPE_EXTRA_VAR_FN:
-        if (current->function.flags & TYPE_FLAG_VARIADIC)
+        if (current->function.flags & TYPE_FN_VARIADIC)
           ret += sprintf(buf + ret, "variadic function with parameters (");
         else if (GET_PARAM_COUNT(current) == 0)
           ret += sprintf(buf + ret, "function with parameters (void");
@@ -505,13 +431,12 @@ int type_to_str(const Type *type, char *buf) {
         break;
       case TYPE_KIND_PTR:
         if (type_is_qualified(current))
-          ret += sprintf(buf + ret, "%s pointer to ",
-                         qual_get_str(current->pointer.flags));
+          ret += sprintf(buf + ret, "%s pointer to ", qual_get_str(current));
         else
           ret += sprintf(buf + ret, "pointer to ");
         current = current->pointer.next;
         break;
-      case TYPE_EXTRA_ARR:
+      case TYPE_KIND_VARR:
         ret += sprintf(buf + ret, "incomplete array of ");
         current = current->array.next;
         break;
@@ -535,9 +460,23 @@ int type_is_void(const Type *type) {
  * check only happens for arithmetic (integer) types
  */
 int type_is_integer(const Type *type) {
-  return ((type->decl_specs.flags & TYPE_MASK_KIND) == TYPE_KIND_ARTH) &&
-         ((type->decl_specs.flags & TYPE_MASK_ARTH) == TYPE_ARTH_INT ||
-          (type->decl_specs.flags & TYPE_MASK_ARTH) == TYPE_ARTH_CHAR);
+  if ((type->decl_specs.flags & TYPE_MASK_KIND) != TYPE_KIND_ARTH) return 0;
+
+  switch (type->decl_specs.extra.arth & ARTH_MASK_ARTH) {
+    case ARTH_FLOAT:
+      /* fallthrough */
+    case ARTH_DOUBLE:
+      return 0;
+    case ARTH_BIT_FIELD:
+      /* fallthrough */
+    case ARTH_INT:
+      /* fallthrough */
+    case ARTH_CHAR:
+      /* fallthrough */
+    default:
+      /* anything without type specifiers is an `int` */
+      return 1;
+  }
 }
 
 /* TODO(Robert): enums should probably be considered signed; this should not
@@ -547,28 +486,68 @@ int type_is_integer(const Type *type) {
  */
 int type_is_signed(const Type *type) {
   /* pointers are not considered signed or unsigned; plain `char` is signed */
-  return (type_is_integer(type) &&
-          !(type->decl_specs.flags & TYPE_SIGN_UNSIGNED)) ||
-         type->decl_specs.flags == TYPE_REPR_SBFLD;
+  if ((type->decl_specs.flags & TYPE_MASK_KIND) != TYPE_KIND_ARTH) return 0;
+
+  switch (type->decl_specs.extra.arth & ARTH_MASK_ARTH) {
+    case ARTH_FLOAT:
+      /* fallthrough */
+    case ARTH_DOUBLE:
+      return 0;
+    case ARTH_BIT_FIELD:
+      return !(type->decl_specs.extra.arth & ARTH_SIGNED);
+    case ARTH_INT:
+      /* fallthrough */
+    case ARTH_CHAR:
+      /* fallthrough */
+    default:
+      return !(type->decl_specs.extra.arth & ARTH_UNSIGNED);
+  }
 }
 
 int type_is_unsigned(const Type *type) {
   /* pointers are not considered signed or unsigend */
-  return (type_is_integer(type) &&
-          (type->decl_specs.flags & TYPE_SIGN_UNSIGNED)) ||
-         type->decl_specs.flags == TYPE_REPR_BFLD ||
-         type->decl_specs.flags == TYPE_REPR_UBFLD;
+  if ((type->decl_specs.flags & TYPE_MASK_KIND) != TYPE_KIND_ARTH) return 0;
+
+  switch (type->decl_specs.extra.arth & ARTH_MASK_ARTH) {
+    case ARTH_FLOAT:
+      /* fallthrough */
+    case ARTH_DOUBLE:
+      return 0;
+    case ARTH_BIT_FIELD:
+      return !!(type->decl_specs.extra.arth & ARTH_SIGNED);
+    case ARTH_INT:
+      /* fallthrough */
+    case ARTH_CHAR:
+      /* fallthrough */
+    default:
+      return !!(type->decl_specs.extra.arth & ARTH_UNSIGNED);
+  }
 }
 
 int type_is_enum(const Type *type) {
   return (type->decl_specs.flags & TYPE_MASK_REPR) == TYPE_REPR_ENUM;
 }
 
-int type_is_integral(const Type *type) {
-  return type_is_integer(type) || type_is_enum(type) || type_is_bit_field(type);
+int type_is_bit_field(const Type *type) {
+  return (type->decl_specs.flags & TYPE_MASK_REPR) == TYPE_KIND_ARTH &&
+         (type->decl_specs.extra.arth & ARTH_BIT_FIELD);
 }
 
-int type_is_arithmetic(const Type *type) { return type_is_integral(type); }
+int type_is_integral(const Type *type) {
+  return type_is_integer(type) || type_is_enum(type);
+}
+
+int type_is_arithmetic(const Type *type) {
+  switch (type->decl_specs.flags & TYPE_MASK_REPR) {
+    case TYPE_KIND_ARTH:
+      /* anything without type specifiers is an `int` */
+      return type->decl_specs.flags || type->decl_specs.extra.arth;
+    case TYPE_REPR_ENUM:
+      return 1;
+    default:
+      return 0;
+  }
+}
 
 int type_is_pointer(const Type *type) {
   return (type->decl_specs.flags & TYPE_MASK_KIND) == TYPE_KIND_PTR;
@@ -579,12 +558,12 @@ int type_is_scalar(const Type *type) {
 }
 
 int type_is_array(const Type *type) {
-  return !!(type->decl_specs.flags & TYPE_FLAG_ARR) ||
+  return (type->decl_specs.flags & TYPE_FLAG_ARR) ||
          type_is_deduced_array(type);
 }
 
 int type_is_deduced_array(const Type *type) {
-  return (type->decl_specs.flags & TYPE_MASK_REPR) == TYPE_REPR_INC_ARR;
+  return (type->decl_specs.flags & TYPE_MASK_KIND) == TYPE_KIND_VARR;
 }
 
 int type_is_function(const Type *type) {
@@ -592,8 +571,8 @@ int type_is_function(const Type *type) {
 }
 
 int type_is_variadic_function(const Type *type) {
-  return (type->decl_specs.flags & (TYPE_MASK_KIND | TYPE_MASK_EXTRA)) ==
-         TYPE_EXTRA_VAR_FN;
+  return (type->decl_specs.flags & TYPE_MASK_KIND) == TYPE_KIND_FN &&
+         (type->decl_specs.flags & (TYPE_FN_OLD_STYLE | TYPE_FN_VARIADIC));
 }
 
 int type_is_void_pointer(const Type *type) {
@@ -637,8 +616,8 @@ int type_is_char_array(const Type *type) {
   return type_is_array(type) &&
          (type->array.next->decl_specs.flags & TYPE_MASK_KIND) ==
              TYPE_KIND_ARTH &&
-         (type->array.next->decl_specs.flags & TYPE_MASK_ARTH) ==
-             TYPE_ARTH_CHAR;
+         (type->array.next->decl_specs.extra.arth & ARTH_MASK_ARTH) ==
+             ARTH_CHAR;
 }
 
 int type_is_const(const Type *type) {
@@ -660,7 +639,8 @@ int type_is_declarator(const Type *type) {
 }
 
 int type_is_none(const Type *type) {
-  return (type->decl_specs.flags & TYPE_MASK_REPR) == DECL_SPEC_NONE;
+  return (type->decl_specs.flags & TYPE_MASK_REPR) == DECL_SPEC_NONE &&
+         !type->decl_specs.extra.arth;
 }
 
 int type_is_incomplete(const Type *type) {
@@ -674,12 +654,6 @@ int type_is_incomplete(const Type *type) {
   } else {
     return 0;
   }
-}
-
-int type_is_bit_field(const Type *type) {
-  return type->decl_specs.flags == TYPE_REPR_BFLD ||
-         type->decl_specs.flags == TYPE_REPR_SBFLD ||
-         type->decl_specs.flags == TYPE_REPR_UBFLD;
 }
 
 Symbol *type_get_member_name(const Type *type, const char *name) {
@@ -720,74 +694,155 @@ size_t type_get_param_count(const Type *type) {
   return GET_PARAM_COUNT(type);
 }
 
+static size_t arth_alignment(unsigned long flags) {
+  switch (flags) {
+    default:
+      /* fallthrough */
+    case ARTH_NONE: /* yep, it's an int */
+      /* fallthrough */
+    case ARTH_INT:
+      /* fallthrough */
+    case ARTH_INT | ARTH_SIGNED:
+      /* fallthrough */
+    case ARTH_INT | ARTH_UNSIGNED:
+      return X64_ALIGNOF_INT;
+    case ARTH_SHRT:
+      /* fallthrough */
+    case ARTH_SHRT | ARTH_SIGNED:
+      /* fallthrough */
+    case ARTH_SHRT | ARTH_UNSIGNED:
+      /* fallthrough */
+    case ARTH_INT | ARTH_SHRT:
+      /* fallthrough */
+    case ARTH_INT | ARTH_SHRT | ARTH_SIGNED:
+      /* fallthrough */
+    case ARTH_INT | ARTH_SHRT | ARTH_UNSIGNED:
+      return X64_ALIGNOF_SHRT;
+    case ARTH_LONG:
+      /* fallthrough */
+    case ARTH_LONG | ARTH_SIGNED:
+      /* fallthrough */
+    case ARTH_LONG | ARTH_UNSIGNED:
+      /* fallthrough */
+    case ARTH_INT | ARTH_LONG:
+      /* fallthrough */
+    case ARTH_INT | ARTH_LONG | ARTH_SIGNED:
+      /* fallthrough */
+    case ARTH_INT | ARTH_LONG | ARTH_UNSIGNED:
+      return X64_ALIGNOF_LONG;
+    case ARTH_CHAR:
+      /* fallthrough */
+    case ARTH_CHAR | ARTH_SIGNED:
+      /* fallthrough */
+    case ARTH_CHAR | ARTH_UNSIGNED:
+      return X64_ALIGNOF_CHAR;
+    case ARTH_FLOAT:
+      return X64_ALIGNOF_FLT;
+    case ARTH_DOUBLE:
+      return X64_ALIGNOF_DBL;
+    case ARTH_DOUBLE | ARTH_LONG:
+      return X64_ALIGNOF_LDBL;
+    case ARTH_BIT_FIELD:
+      /* fallthrough */
+    case ARTH_BIT_FIELD | ARTH_SIGNED:
+      /* fallthrough */
+    case ARTH_BIT_FIELD | ARTH_UNSIGNED:
+      return X64_ALIGNOF_CHAR;
+  }
+}
+
 static size_t type_decl_specs_alignment(const Type *type) {
   assert(!type_is_declarator(type));
   switch (type->decl_specs.flags & TYPE_MASK_REPR) {
     case TYPE_REPR_VOID:
       return 0;
-    case TYPE_REPR_CHAR:
-      /* fallthrough */
-    case TYPE_REPR_SCHAR:
-      /* fallthrough */
-    case TYPE_REPR_UCHAR:
-      return X64_ALIGNOF_CHAR;
-    case TYPE_SPEC_INT:
-      /* fallthrough */
-    case TYPE_REPR_INT:
-      /* fallthrough */
-    case TYPE_REPR_UINT:
-      return X64_ALIGNOF_INT;
-    case TYPE_REPR_SHRT:
-      /* fallthrough */
-    case TYPE_REPR_USHRT:
-      return X64_ALIGNOF_SHRT;
-    case TYPE_REPR_LONG:
-      /* fallthrough */
-    case TYPE_REPR_ULONG:
-      return X64_ALIGNOF_LONG;
-    case TYPE_REPR_FLT:
-      return X64_ALIGNOF_FLT;
-    case TYPE_REPR_DBL:
-      return X64_ALIGNOF_DBL;
-    case TYPE_REPR_LDBL:
-      return X64_ALIGNOF_LDBL;
     case TYPE_REPR_STRUCT:
       /* fallthrough */
     case TYPE_REPR_UNION:
       /* fallthrough */
     case TYPE_REPR_ENUM:
       return tag_get_alignment(type->decl_specs.extra.tag);
-    case TYPE_REPR_BFLD:
-      /* fallthrough */
-    case TYPE_REPR_SBFLD:
-      /* fallthrough */
-    case TYPE_REPR_UBFLD:
-      return X64_ALIGNOF_CHAR;
+    case TYPE_KIND_ARTH:
+      return arth_alignment(type->decl_specs.extra.arth);
     default:
+      (void)fprintf(stderr, "Unable to get alignment for type specifiers.\n");
       abort();
   }
 }
 
 size_t type_get_alignment(const Type *type) {
-  switch (type->decl_specs.flags & TYPE_MASK_EXTRA_KIND) {
+  switch (type->decl_specs.flags & TYPE_MASK_KIND) {
     case TYPE_KIND_FN:
-      /* fallthrough */
-    case TYPE_EXTRA_VAR_FN:
       return 0;
     case TYPE_KIND_PTR:
       return X64_ALIGNOF_LONG;
     case TYPE_KIND_ARTH:
-      /* fallthrough */
-    case TYPE_EXTRA_ARTH:
       /* fallthrough */
     case TYPE_KIND_OTHER:
       return type_decl_specs_alignment(type);
     default:
       assert(type->decl_specs.flags & TYPE_FLAG_ARR);
       /* fallthrough */
-    case TYPE_EXTRA_ARR:
+    case TYPE_KIND_VARR:
       return type_get_alignment(type->array.next);
       abort();
+  }
+}
+
+static size_t arth_width(unsigned long flags) {
+  switch (flags) {
+    default:
+      /* fallthrough */
+    case ARTH_NONE: /* yep, it's an int */
+      /* fallthrough */
+    case ARTH_INT:
+      /* fallthrough */
+    case ARTH_INT | ARTH_SIGNED:
+      /* fallthrough */
+    case ARTH_INT | ARTH_UNSIGNED:
+      return X64_SIZEOF_INT;
+    case ARTH_SHRT:
+      /* fallthrough */
+    case ARTH_SHRT | ARTH_SIGNED:
+      /* fallthrough */
+    case ARTH_SHRT | ARTH_UNSIGNED:
+      /* fallthrough */
+    case ARTH_INT | ARTH_SHRT:
+      /* fallthrough */
+    case ARTH_INT | ARTH_SHRT | ARTH_SIGNED:
+      /* fallthrough */
+    case ARTH_INT | ARTH_SHRT | ARTH_UNSIGNED:
+      return X64_SIZEOF_SHRT;
+    case ARTH_LONG:
+      /* fallthrough */
+    case ARTH_LONG | ARTH_SIGNED:
+      /* fallthrough */
+    case ARTH_LONG | ARTH_UNSIGNED:
+      /* fallthrough */
+    case ARTH_INT | ARTH_LONG:
+      /* fallthrough */
+    case ARTH_INT | ARTH_LONG | ARTH_SIGNED:
+      /* fallthrough */
+    case ARTH_INT | ARTH_LONG | ARTH_UNSIGNED:
+      return X64_SIZEOF_LONG;
+    case ARTH_CHAR:
+      /* fallthrough */
+    case ARTH_CHAR | ARTH_SIGNED:
+      /* fallthrough */
+    case ARTH_CHAR | ARTH_UNSIGNED:
+      return X64_SIZEOF_CHAR;
+    case ARTH_FLOAT:
+      return X64_SIZEOF_FLT;
+    case ARTH_DOUBLE:
+      return X64_SIZEOF_DBL;
+    case ARTH_DOUBLE | ARTH_LONG:
+      return X64_SIZEOF_LDBL;
+    case ARTH_BIT_FIELD:
+      /* fallthrough */
+    case ARTH_BIT_FIELD | ARTH_SIGNED:
+      /* fallthrough */
+    case ARTH_BIT_FIELD | ARTH_UNSIGNED:
+      return X64_SIZEOF_CHAR;
   }
 }
 
@@ -796,71 +851,59 @@ static size_t type_decl_specs_width(const Type *type) {
   switch (type->decl_specs.flags & TYPE_MASK_REPR) {
     case TYPE_REPR_VOID:
       return 0;
-    case TYPE_REPR_CHAR:
-      /* fallthrough */
-    case TYPE_REPR_SCHAR:
-      /* fallthrough */
-    case TYPE_REPR_UCHAR:
-      return X64_SIZEOF_CHAR;
-    case TYPE_SPEC_INT:
-      /* fallthrough */
-    case TYPE_REPR_INT:
-      /* fallthrough */
-    case TYPE_REPR_UINT:
-      return X64_SIZEOF_INT;
-    case TYPE_REPR_SHRT:
-      /* fallthrough */
-    case TYPE_REPR_USHRT:
-      return X64_SIZEOF_SHRT;
-    case TYPE_REPR_LONG:
-      /* fallthrough */
-    case TYPE_REPR_ULONG:
-      return X64_SIZEOF_LONG;
-    case TYPE_REPR_FLT:
-      return X64_SIZEOF_FLT;
-    case TYPE_REPR_DBL:
-      return X64_SIZEOF_DBL;
-    case TYPE_REPR_LDBL:
-      return X64_SIZEOF_LDBL;
     case TYPE_REPR_STRUCT:
       /* fallthrough */
     case TYPE_REPR_UNION:
       /* fallthrough */
     case TYPE_REPR_ENUM:
       return tag_get_width(type->decl_specs.extra.tag);
-    case TYPE_REPR_BFLD:
-      /* fallthrough */
-    case TYPE_REPR_SBFLD:
-      /* fallthrough */
-    case TYPE_REPR_UBFLD:
-      /* TODO(Robert): I might use this on accident, causing bugs */
-      return type->decl_specs.extra.bit_width / X64_CHAR_BIT +
-             (type->decl_specs.extra.bit_width % X64_CHAR_BIT != 0);
+    case TYPE_KIND_ARTH:
+      return arth_width(type->decl_specs.extra.arth);
     default:
+      (void)fprintf(stderr, "Unable to get size for type specifiers.\n");
       abort();
   }
 }
 
 /* TODO(Robert): sizeof not allowed on incomplete arrays. what to do. */
 size_t type_get_width(const Type *type) {
-  switch (type->decl_specs.flags & TYPE_MASK_EXTRA_KIND) {
-    case TYPE_EXTRA_ARR:
+  switch (type->decl_specs.flags & TYPE_MASK_KIND) {
+    case TYPE_KIND_VARR:
       /* fallthrough */
     case TYPE_KIND_FN:
-      /* fallthrough */
-    case TYPE_EXTRA_VAR_FN:
       return 0;
     case TYPE_KIND_PTR:
       return X64_SIZEOF_LONG;
     case TYPE_KIND_ARTH:
-      /* fallthrough */
-    case TYPE_EXTRA_ARTH:
       /* fallthrough */
     case TYPE_KIND_OTHER:
       return type_decl_specs_width(type);
     default: /* should be an array */
       assert(type->decl_specs.flags & TYPE_FLAG_ARR);
       return GET_ARRAY_LEN(type) * type_get_elem_width(type);
+  }
+}
+
+static size_t bit_field_width(const Type *type) {
+  assert(type_is_bit_field(type));
+  return type->decl_specs.extra.arth >> 11;
+}
+
+size_t type_get_bit_width(const Type *type) {
+  switch (type->decl_specs.flags & TYPE_MASK_KIND) {
+    case TYPE_KIND_PTR:
+      return X64_SIZEOF_LONG * X64_CHAR_BIT;
+    case TYPE_KIND_ARTH:
+      if (type_is_bit_field(type)) return bit_field_width(type);
+      /* fallthrough */
+    case TYPE_KIND_OTHER:
+      return type_decl_specs_width(type) * X64_CHAR_BIT;
+    case TYPE_KIND_VARR:
+      /* fallthrough */
+    case TYPE_KIND_FN:
+      /* fallthrough */
+    default: /* should be an array */
+      (void)fprintf(stderr, "Attempt to get bit width of declarator.\n");
       abort();
   }
 }
@@ -912,32 +955,6 @@ size_t type_get_padding(const Type *type, size_t to_pad) {
   return to_pad % alignment == 0 ? 0 : alignment - (to_pad % alignment);
 }
 
-size_t type_get_bit_width(const Type *type) {
-  if (type_is_bit_field(type))
-    return type->decl_specs.extra.bit_width;
-  else
-    return type_get_width(type) * X64_CHAR_BIT;
-}
-
-unsigned int type_get_flags(const Type *type) {
-  switch (type->decl_specs.flags & TYPE_MASK_EXTRA_KIND) {
-    case TYPE_KIND_ARTH:
-      /* fallthrough */
-    case TYPE_EXTRA_ARTH:
-      /* fallthrough */
-    case TYPE_KIND_OTHER:
-      return type->decl_specs.flags;
-    case TYPE_KIND_PTR:
-      return type->pointer.flags;
-    case TYPE_KIND_FN:
-      /* fallthrough */
-    case TYPE_EXTRA_VAR_FN:
-      /* fallthrough */
-    default: /* includes arrays */
-      return 0;
-  }
-}
-
 Tag *type_get_tag(const Type *type) {
   assert(type_is_record(type) || type_is_enum(type));
   return type->decl_specs.extra.tag;
@@ -946,14 +963,13 @@ Tag *type_get_tag(const Type *type) {
 static int params_compatible(const Type *type1, const Type *type2) {
   assert(type_is_function(type1) && type_is_function(type2));
   if ((GET_PARAM_COUNT(type1) == 0 &&
-       (type1->function.flags & TYPE_FLAG_VARIADIC)) ||
+       (type1->function.flags & TYPE_FN_VARIADIC)) ||
       (GET_PARAM_COUNT(type2) == 0 &&
-       (type2->function.flags & TYPE_FLAG_VARIADIC)))
+       (type2->function.flags & TYPE_FN_VARIADIC)))
     return 1;
   else if (GET_PARAM_COUNT(type1) != GET_PARAM_COUNT(type2))
     return 0;
-  else if (((type1->function.flags ^ type2->function.flags) &
-            TYPE_FLAG_VARIADIC))
+  else if (((type1->function.flags ^ type2->function.flags) & TYPE_FN_VARIADIC))
     return 0;
   size_t i, param_count = GET_PARAM_COUNT(type1);
   for (i = 0; i < param_count; ++i)
@@ -963,26 +979,27 @@ static int params_compatible(const Type *type1, const Type *type2) {
 }
 
 int types_compatible(const Type *type1, const Type *type2, int qualified) {
-  switch (type1->decl_specs.flags & TYPE_MASK_EXTRA_KIND) {
+  switch (type1->decl_specs.flags & TYPE_MASK_KIND) {
     case TYPE_KIND_OTHER:
-      /* fallthrough */
-    case TYPE_KIND_ARTH:
-      /* fallthrough */
-    case TYPE_EXTRA_ARTH:
-      /* fallthrough */
       return !((type1->decl_specs.flags ^ type2->decl_specs.flags) &
                (qualified ? TYPE_MASK_REPR | TYPE_MASK_QUAL
                           : TYPE_MASK_REPR)) &&
              type1->decl_specs.extra.tag == type2->decl_specs.extra.tag;
+    case TYPE_KIND_ARTH:
+      if ((type1->decl_specs.flags ^ type2->decl_specs.flags) &
+          (qualified ? TYPE_MASK_REPR | TYPE_MASK_QUAL : TYPE_MASK_REPR))
+        return 0;
+      /* TODO(Robert): check arithmetic compatibility; its complicated */
+      return 1;
     case TYPE_KIND_PTR:
-      return !(qualified && ((type1->pointer.flags ^ type2->pointer.flags) &
-                             TYPE_MASK_QUAL)) &&
+      return type_is_pointer(type2) &&
+             (!qualified || !((type1->pointer.flags ^ type2->pointer.flags) &
+                              TYPE_MASK_QUAL)) &&
              types_compatible(type_strip_declarator(type1),
                               type_strip_declarator(type2), 1);
     case TYPE_KIND_FN:
-      /* fallthrough */
-    case TYPE_EXTRA_VAR_FN:
-      return types_compatible(type_strip_declarator(type1),
+      return type_is_function(type2) &&
+             types_compatible(type_strip_declarator(type1),
                               type_strip_declarator(type2), 1) &&
              params_compatible(type1, type2);
     default:
@@ -991,8 +1008,9 @@ int types_compatible(const Type *type1, const Type *type2, int qualified) {
           GET_ARRAY_LEN(type1) != GET_ARRAY_LEN(type2))
         return 0;
       /* fallthrough */
-    case TYPE_EXTRA_ARR:
-      return types_compatible(type_strip_declarator(type1),
+    case TYPE_KIND_VARR:
+      return type_is_array(type2) &&
+             types_compatible(type_strip_declarator(type1),
                               type_strip_declarator(type2), 1);
   }
 }
@@ -1020,16 +1038,14 @@ int types_assignable(const Type *dest, const Type *src, int is_const_zero) {
 
 Type *type_strip_declarator(const Type *type) {
   assert(type_is_declarator(type));
-  switch (type->decl_specs.flags & TYPE_MASK_EXTRA_KIND) {
+  switch (type->decl_specs.flags & TYPE_MASK_KIND) {
     default:
       assert(type->decl_specs.flags & TYPE_FLAG_ARR);
       /* fallthrough */
-    case TYPE_EXTRA_ARR:
+    case TYPE_KIND_VARR:
       assert(type->array.next != NULL);
       return type->array.next;
     case TYPE_KIND_FN:
-      /* fallthough */
-    case TYPE_EXTRA_VAR_FN:
       assert(type->function.next != NULL &&
              type->function.next[GET_PARAM_COUNT(type)] != NULL);
       return type->function.next[GET_PARAM_COUNT(type)];
@@ -1053,37 +1069,33 @@ Type *type_append(Type *dest, Type *src) {
          (type_is_pointer(current) && current->pointer.next != NULL) ||
          (type_is_function(current) && current->function.next != NULL &&
           current->function.next[GET_PARAM_COUNT(current)] != NULL)) {
-    switch (current->decl_specs.flags & TYPE_MASK_EXTRA_KIND) {
+    switch (current->decl_specs.flags & TYPE_MASK_KIND) {
       default:
         assert(current->decl_specs.flags & TYPE_FLAG_ARR);
         /* fallthrough */
-      case TYPE_EXTRA_ARR:
+      case TYPE_KIND_VARR:
         current = current->array.next;
         break;
       case TYPE_KIND_PTR:
         current = current->pointer.next;
         break;
       case TYPE_KIND_FN:
-        /* fallthrough */
-      case TYPE_EXTRA_VAR_FN:
         current = current->function.next[GET_PARAM_COUNT(current)];
         break;
     }
   }
 
-  switch (current->decl_specs.flags & TYPE_MASK_EXTRA_KIND) {
+  switch (current->decl_specs.flags & TYPE_MASK_KIND) {
     default:
       assert(current->decl_specs.flags & TYPE_FLAG_ARR);
       /* fallthrough */
-    case TYPE_EXTRA_ARR:
+    case TYPE_KIND_VARR:
       current->array.next = src;
       return dest;
     case TYPE_KIND_PTR:
       current->pointer.next = src;
       return dest;
     case TYPE_KIND_FN:
-      /* fallthrough */
-    case TYPE_EXTRA_VAR_FN:
       current->function.next[GET_PARAM_COUNT(current)] = src;
       return dest;
   }
@@ -1092,17 +1104,15 @@ Type *type_append(Type *dest, Type *src) {
 Type *type_detach(Type *type) {
   assert(type_is_declarator(type));
   Type *ret;
-  switch (type->decl_specs.flags & TYPE_MASK_EXTRA_KIND) {
+  switch (type->decl_specs.flags & TYPE_MASK_KIND) {
     default:
       assert(type->decl_specs.flags & TYPE_FLAG_ARR);
       /* fallthrough */
-    case TYPE_EXTRA_ARR:
+    case TYPE_KIND_VARR:
       ret = type->array.next;
       type->array.next = NULL;
       return ret;
     case TYPE_KIND_FN:
-      /* fallthrough */
-    case TYPE_EXTRA_VAR_FN:
       ret = type->function.next[GET_PARAM_COUNT(type)];
       type->function.next[GET_PARAM_COUNT(type)] = NULL;
       return ret;
@@ -1124,12 +1134,10 @@ Type *type_copy(const Type *type) {
   while (in_current != NULL) {
     *type_tail = malloc(sizeof(Type));
     **type_tail = *in_current;
-    switch (((*type_tail)->decl_specs.flags) & TYPE_MASK_EXTRA_KIND) {
+    switch (((*type_tail)->decl_specs.flags) & TYPE_MASK_KIND) {
       case TYPE_KIND_OTHER:
         /* fallthrough */
       case TYPE_KIND_ARTH:
-        /* fallthrough */
-      case TYPE_EXTRA_ARTH:
         return anchor.pointer.next;
       case TYPE_KIND_PTR:
         type_tail = &((*type_tail)->pointer.next);
@@ -1150,7 +1158,7 @@ Type *type_copy(const Type *type) {
       default:
         assert(((*type_tail)->decl_specs.flags) & TYPE_FLAG_ARR);
         /* fallthrough */
-      case TYPE_EXTRA_ARR:
+      case TYPE_KIND_VARR:
         type_tail = &((*type_tail)->array.next);
         in_current = in_current->array.next;
         break;
@@ -1169,26 +1177,49 @@ Type *type_common_qualified_pointer(const Type *type1, const Type *type2) {
   return new_pointer;
 }
 
+static ArthFlag arth_flag_from_tok_kind(int tok_kind) {
+  switch (tok_kind) {
+    case TOK_INT:
+      return ARTH_INT;
+    case TOK_CHAR:
+      return ARTH_CHAR;
+    case TOK_FLOAT:
+      return ARTH_FLOAT;
+    case TOK_DOUBLE:
+      return ARTH_DOUBLE;
+    case TOK_SIGNED:
+      return ARTH_SIGNED;
+    case TOK_UNSIGNED:
+      return ARTH_UNSIGNED;
+    case TOK_SHORT:
+      return ARTH_SHRT;
+    case TOK_LONG:
+      return ARTH_LONG;
+    default:
+      return ARTH_NONE;
+  }
+}
+
 static TypeFlag type_flag_from_tok_kind(int tok_kind) {
   switch (tok_kind) {
     case TOK_VOID:
       return TYPE_REPR_VOID;
     case TOK_CHAR:
-      return TYPE_SPEC_CHAR;
+      /* fallthrough */
     case TOK_INT:
-      return TYPE_SPEC_INT;
+      /* fallthrough */
     case TOK_SHORT:
-      return TYPE_SPEC_SHRT;
+      /* fallthrough */
     case TOK_LONG:
-      return TYPE_SPEC_LONG;
+      /* fallthrough */
     case TOK_SIGNED:
-      return TYPE_SPEC_SIGNED;
+      /* fallthrough */
     case TOK_UNSIGNED:
-      return TYPE_SPEC_UNSIGNED;
+      /* fallthrough */
     case TOK_FLOAT:
-      return TYPE_SPEC_FLT;
+      /* fallthrough */
     case TOK_DOUBLE:
-      return TYPE_SPEC_DBL;
+      return TYPE_KIND_ARTH;
     case TOK_CONST:
       return TYPE_QUAL_CONST;
     case TOK_VOLATILE:
@@ -1218,84 +1249,78 @@ static TypeFlag type_flag_from_tok_kind(int tok_kind) {
   }
 }
 
-static int flag_valid(unsigned long old_flags, unsigned long new_flag) {
-  if (new_flag & TYPE_MASK_QUAL & old_flags) {
-    return 0; /* duplicate qualifier */
-  } else if (new_flag & TYPE_MASK_STORE & old_flags) {
-    return 0; /* multiple storage class specifiers */
-  }
-
-  /* qualifiers and storage class specifiers good; discard them */
-  old_flags &= TYPE_MASK_REPR, new_flag &= TYPE_MASK_REPR;
-  /* get JUST these two bits of the type kind to make things simpler */
-  unsigned long old_kind = old_flags & (TYPE_MASK_KIND ^ TYPE_FLAG_ARR);
-
-  if (old_flags == DECL_SPEC_NONE || new_flag == DECL_SPEC_NONE) {
-    /* no type specifiers; early return */
-    return 1;
-  } else if (old_kind != TYPE_KIND_ARTH || old_flags == TYPE_SPEC_FLT) {
-    /* you can only combine arithmetic type specifiers, unless it's `float` */
-    return 0;
-  }
-
-  unsigned long old_arth = old_flags & TYPE_MASK_ARTH;
-  unsigned long old_size = old_flags & TYPE_MASK_SIZE;
-  unsigned long old_sign = old_flags & TYPE_MASK_SIGN;
+static int arth_valid(unsigned long old_flags, unsigned long new_flag) {
+  unsigned long base_type = old_flags & ARTH_MASK_ARTH;
   switch (new_flag) {
-    case TYPE_SPEC_FLT:
+    case ARTH_NONE:
+      return 1;
+    case ARTH_INT:
+      return !(old_flags & ARTH_MASK_ARTH);
+    case ARTH_CHAR:
+      return !(old_flags & (ARTH_MASK_ARTH | ARTH_MASK_SIZE));
+    case ARTH_FLOAT:
+      return !(old_flags & (ARTH_MASK_ARTH | ARTH_MASK_SIZE | ARTH_MASK_SIGN));
+    case ARTH_DOUBLE:
+      return !(old_flags & (ARTH_MASK_ARTH | ARTH_MASK_SIGN)) &&
+             !(old_flags & (ARTH_SHRT));
+    case ARTH_SIGNED:
       /* fallthrough */
-    case TYPE_REPR_VOID:
-      /* no other type specifiers allowed */
-      return 0;
-    case TYPE_SPEC_CHAR:
-      return old_flags == TYPE_SPEC_SIGNED || old_flags == TYPE_SPEC_UNSIGNED;
-    case TYPE_SPEC_INT:
-      return old_kind == TYPE_KIND_ARTH &&
-             (old_flags & TYPE_MASK_ARTH) == DECL_SPEC_NONE;
-    case TYPE_SPEC_SHRT:
-      return old_size == DECL_SPEC_NONE && old_arth != TYPE_ARTH_DBL &&
-             old_arth != TYPE_ARTH_CHAR;
-    case TYPE_SPEC_LONG: /* TODO(Robert): support `long long` in future */
-      return old_size == DECL_SPEC_NONE && old_arth != TYPE_ARTH_CHAR;
-    case TYPE_SPEC_SIGNED:
-      /* fallthrough */
-    case TYPE_SPEC_UNSIGNED:
-      return old_arth != TYPE_ARTH_DBL && old_sign == DECL_SPEC_NONE;
-    case TYPE_SPEC_DBL:
-      return old_flags == TYPE_SPEC_LONG;
-    case TYPE_REPR_STRUCT:
-      /* fallthrough */
-    case TYPE_REPR_UNION:
-      /* fallthrough */
-    case TYPE_REPR_ENUM:
-      /* fallthrough */
+    case ARTH_UNSIGNED:
+      return base_type != ARTH_FLOAT && base_type != ARTH_DOUBLE &&
+             !(old_flags & ARTH_MASK_SIGN);
+    case ARTH_SHRT:
+      return base_type != ARTH_FLOAT && base_type != ARTH_DOUBLE &&
+             !(old_flags & ARTH_MASK_SIZE);
+    case ARTH_LONG:
+      return base_type != ARTH_FLOAT && !(old_flags & ARTH_MASK_SIZE);
     default:
-      abort(); /* tag type specifiers are added differently */
+      (void)fprintf(stderr, "Invalid argument to `arth_valid`.\n");
+      abort();
   }
 }
 
 int type_add_decl_spec(Type *type, int tok_kind) {
   assert(!type_is_declarator(type) || type_is_pointer(type));
   TypeFlag new_flag = type_flag_from_tok_kind(tok_kind);
-  switch (type->decl_specs.flags & TYPE_MASK_EXTRA_KIND) {
-    case TYPE_KIND_OTHER:
-      /* fallthrough */
-    case TYPE_KIND_ARTH:
-      /* fallthrough */
-    case TYPE_EXTRA_ARTH:
-      if (!flag_valid(type->decl_specs.flags, new_flag))
-        return -1;
-      else
-        return type->decl_specs.flags |= new_flag, 0;
-    case TYPE_KIND_PTR:
-      if ((~TYPE_MASK_QUAL & new_flag))
-        return -1; /* pointers can only have type qualifiers */
-      else if (type->pointer.flags & new_flag)
-        return -1; /* duplicate type qualifier */
-      else
-        return type->pointer.flags |= new_flag, 0;
-    default:
-      abort();
+  ArthFlag arth_flag = arth_flag_from_tok_kind(tok_kind);
+
+  if (new_flag & TYPE_MASK_QUAL) {
+    if (type->decl_specs.flags & new_flag) {
+      /* duplicate type qualifier */
+      return -1;
+    } else {
+      type->decl_specs.flags |= new_flag;
+      return 0;
+    }
+  } else if (type_is_pointer(type)) {
+    /* pointers only accept type qualifiers */
+    return -1;
+  } else if (new_flag & TYPE_MASK_STORE) {
+    if (type->decl_specs.flags & TYPE_MASK_STORE) {
+      /* multiple storage class specifiers */
+      return -1;
+    } else {
+      type->decl_specs.flags |= new_flag;
+      return 0;
+    }
+  } else if (type_is_none(type)) {
+    type->decl_specs.flags |= new_flag;
+    if (arth_flag != ARTH_NONE) type->decl_specs.extra.arth |= arth_flag;
+    return 0;
+  } else if (type_is_arithmetic(type)) {
+    if (arth_flag == ARTH_NONE) {
+      /* mixed arithmetic and non-arithmetic specifiers */
+      return -1;
+    } else if (!arth_valid(type->decl_specs.extra.arth, arth_flag)) {
+      /* duplicate/incompatible arithmetic flags */
+      return -1;
+    } else {
+      type->decl_specs.extra.arth |= arth_flag;
+      return 0;
+    }
+  } else {
+    /* mixed arithmetic and non-arithmetic specifiers */
+    return -1;
   }
 }
 
@@ -1324,60 +1349,21 @@ Type *type_merge(const Type *dest, const Type *src) {
   }
 }
 
-/* TODO(Robert): we can't fully normalize plain `int` because of bit fields,
- * but we probably shouldn't be doing stuff like that in general. we can
- * handle the variety of synonyms with switch-case statements and leaving the
- * flags identical to the input program improves the quality of diagnostics
- */
-int type_normalize(Type *type) {
-  type = type_get_decl_specs(type);
-
-  if (type->decl_specs.flags == DECL_SPEC_NONE) {
-    return -1;
-  } else if ((type->decl_specs.flags & TYPE_MASK_KIND) != TYPE_KIND_ARTH) {
-    /* not arithmetic; nothing to do */
-    return 0;
-  } else if ((type->decl_specs.flags & (TYPE_MASK_SIGN | TYPE_MASK_SIZE)) ==
-             DECL_SPEC_NONE) {
-    /* no signedness/integer size specifiers; nothing to do */
-    return 0;
-  } else if ((type->decl_specs.flags & TYPE_MASK_ARTH) == TYPE_ARTH_CHAR ||
-             (type->decl_specs.flags & TYPE_MASK_ARTH) == TYPE_ARTH_DBL) {
-    /* char or double; nothing to do */
-    return 0;
-  } else if (type->decl_specs.flags & TYPE_MASK_SIGN) {
-    /* only `signed` or `unsigned` specified; make it an `int` */
-    type->decl_specs.flags |= TYPE_ARTH_INT;
-    return 0;
-  } else if ((type->decl_specs.flags & TYPE_MASK_SIZE) ||
-             (type->decl_specs.flags & TYPE_MASK_STORE) == TYPE_STORE_AUTO) {
-    /* only size or `auto` specified; make it a `signed (size) int` */
-    type->decl_specs.flags |= TYPE_ARTH_INT | TYPE_SIGN_SIGNED;
-    return 0;
-  } else {
-    return -1;
-  }
-}
-
 int type_validate(const Type *type) {
   /* allow declarations of type `void`, but only for typedefs */
   if (type_is_void(type) && !(type->decl_specs.flags & TYPE_STORE_TYPEDEF))
     return 1;
 
   while (type != NULL) {
-    switch (type->decl_specs.flags & TYPE_MASK_EXTRA_KIND) {
+    switch (type->decl_specs.flags & TYPE_MASK_KIND) {
       case TYPE_KIND_OTHER:
         /* fallthrough */
       case TYPE_KIND_ARTH:
-        /* fallthrough */
-      case TYPE_EXTRA_ARTH:
         return 0;
       case TYPE_KIND_PTR:
         type = type_strip_declarator(type);
         continue;
       case TYPE_KIND_FN:
-        /* fallthrough */
-      case TYPE_EXTRA_VAR_FN:
         type = type_strip_declarator(type);
         if (type == NULL || type_is_array(type) || type_is_function(type))
           return 1;
@@ -1385,7 +1371,7 @@ int type_validate(const Type *type) {
       default:
         assert(type->decl_specs.flags & TYPE_FLAG_ARR);
         /* fallthrough */
-      case TYPE_EXTRA_ARR:
+      case TYPE_KIND_VARR:
         type = type_strip_declarator(type);
         if (type == NULL || type_is_incomplete(type) || type_is_function(type))
           return 1;
@@ -1398,25 +1384,19 @@ int type_validate(const Type *type) {
 
 int type_adjust_bit_field(const Type *decl_specs, Type *declarator) {
   assert(type_is_bit_field(declarator));
-  switch (decl_specs->decl_specs.flags & ~TYPE_MASK_QUAL) {
-    /* need explicit check; bitfield default signedness undefined */
-    case TYPE_SPEC_INT:
-      /* fallthrough */
-    case TYPE_REPR_BFLD:
-      /* flags already set correctly */
-      return 0;
-    case TYPE_REPR_UINT:
-      /* fallthrough */
-    case TYPE_REPR_UBFLD:
-      declarator->decl_specs.flags = TYPE_REPR_UBFLD;
-      return 0;
-    case TYPE_REPR_INT:
-      /* fallthrough */
-    case TYPE_REPR_SBFLD:
-      declarator->decl_specs.flags = TYPE_REPR_SBFLD;
-      return 0;
-    default:
-      return 1;
+  if (!type_is_arithmetic(decl_specs)) {
+    return 1;
+  } else if ((decl_specs->decl_specs.extra.arth & ~ARTH_MASK_SIZE) !=
+                 ARTH_NONE &&
+             (decl_specs->decl_specs.extra.arth & ARTH_MASK_ARTH) != ARTH_INT) {
+    /* only need to check for int; can't get a bitfield in a type specifier list
+     * since they only appear as struct fields and therefore you can't typedef
+     * them */
+    return 1;
+  } else {
+    declarator->decl_specs.extra.arth |=
+        (decl_specs->decl_specs.extra.arth & ARTH_MASK_SIGN);
+    return 0;
   }
 }
 
@@ -1441,34 +1421,24 @@ Type *type_pointer_conversions(Type *type) {
 Type *type_arithmetic_conversions(Type *type1, Type *type2) {
   assert(type1 != NULL && type2 != NULL);
   assert(type_is_arithmetic(type1) && type_is_arithmetic(type2));
-  unsigned int flags1 = type1->decl_specs.flags & TYPE_MASK_REPR;
-  unsigned int flags2 = type2->decl_specs.flags & TYPE_MASK_REPR;
+  size_t bits1 = type_get_bit_width(type1), bits2 = type_get_bit_width(type2);
 
-  /* TODO(Robert): support LLONG and ULLONG */
-  if (flags1 == TYPE_REPR_LDBL || flags2 == TYPE_REPR_LDBL) {
-    abort(); /* floating types not implemented */
-  } else if (flags1 == TYPE_REPR_DBL || flags2 == TYPE_REPR_DBL) {
-    abort(); /* floating types not implemented */
-  } else if (flags1 == TYPE_REPR_FLT || flags2 == TYPE_REPR_FLT) {
-    abort(); /* floating types not implemented */
-  } else if (flags1 == TYPE_REPR_ULONG) {
+  if (bits1 < X64_SIZEOF_INT * X64_CHAR_BIT &&
+      bits2 < X64_SIZEOF_INT * X64_CHAR_BIT) {
+    return (Type *)TYPE_INT;
+  } else if (bits1 > bits2) {
     return type1;
-  } else if (flags2 == TYPE_REPR_ULONG) {
+  } else if (bits1 < bits2) {
     return type2;
-  } else if (flags1 == TYPE_REPR_LONG) {
+  } else if (type_is_unsigned(type1)) {
+    return type_is_bit_field(type1) ? (Type *)TYPE_UNSIGNED_INT : type1;
+  } else if (type_is_unsigned(type2)) {
+    return type_is_bit_field(type2) ? (Type *)TYPE_UNSIGNED_INT : type2;
+  } else if (!type_is_enum(type1) && !type_is_bit_field(type1)) {
     return type1;
-  } else if (flags2 == TYPE_REPR_LONG) {
-    return type2;
-  } else if (flags1 == TYPE_REPR_UINT) {
-    return type1;
-  } else if (flags2 == TYPE_REPR_UINT) {
-    return type2;
-  } else if (flags1 == TYPE_REPR_INT || flags1 == TYPE_SPEC_INT) {
-    return type1;
-  } else if (flags2 == TYPE_REPR_INT) {
+  } else if (!type_is_enum(type2) && !type_is_bit_field(type2)) {
     return type2;
   } else {
-    /* no need to check for enum, char, etc. explicitly; all become int */
     return (Type *)TYPE_INT;
   }
 }
@@ -1478,12 +1448,10 @@ static int compose_arrays(Type *dest, Type *src) {
                         1)) {
     /* incompatible element types */
     return -1;
-  } else if ((src->decl_specs.flags & (TYPE_MASK_KIND | TYPE_MASK_EXTRA)) ==
-             TYPE_EXTRA_ARR) {
+  } else if ((src->decl_specs.flags & TYPE_MASK_KIND) == TYPE_KIND_VARR) {
     /* source type incomplete; nothing to do */
     return 0;
-  } else if ((dest->decl_specs.flags & (TYPE_MASK_KIND | TYPE_MASK_EXTRA)) ==
-             TYPE_EXTRA_ARR) {
+  } else if ((dest->decl_specs.flags & TYPE_MASK_KIND) == TYPE_KIND_VARR) {
     /* complete destination type */
     dest->array.flags = src->array.flags;
     return 0;
@@ -1498,7 +1466,7 @@ static int compose_functions(Type *dest, Type *src) {
                         1)) {
     /* incompatible return type */
     return -1;
-  } else if ((dest->function.flags & TYPE_FLAG_VARIADIC) &&
+  } else if ((dest->function.flags & TYPE_FN_VARIADIC) &&
              GET_PARAM_COUNT(dest) == 0) {
     /* dest unprototyped; use param info from new type; keep return type */
     dest->function.flags = src->function.flags;
@@ -1512,9 +1480,9 @@ static int compose_functions(Type *dest, Type *src) {
      */
     SWAP(Type **, dest->function.next, src->function.next);
     /* set src flags to that of an unprototyped function (variadic, 0 params) */
-    src->function.flags = TYPE_KIND_FN | TYPE_FLAG_VARIADIC;
+    src->function.flags = TYPE_KIND_FN | TYPE_FN_VARIADIC;
     return 0;
-  } else if ((src->function.flags & TYPE_FLAG_VARIADIC) &&
+  } else if ((src->function.flags & TYPE_FN_VARIADIC) &&
              GET_PARAM_COUNT(src) == 0) {
     /* nothing do do; move on */
     return 0;
@@ -1531,23 +1499,19 @@ static int compose_functions(Type *dest, Type *src) {
 }
 
 int type_compose(Type *dest, Type *src, int qualified) {
-  switch (dest->decl_specs.flags & TYPE_MASK_EXTRA_KIND) {
+  switch (dest->decl_specs.flags & TYPE_MASK_KIND) {
     case TYPE_KIND_OTHER:
       /* fallthrough */
     case TYPE_KIND_ARTH:
       /* fallthrough */
-    case TYPE_EXTRA_ARTH:
-      /* fallthrough */
     case TYPE_KIND_PTR:
       return types_compatible(dest, src, qualified) ? 0 : -1;
     case TYPE_KIND_FN:
-      /* fallthrough */
-    case TYPE_EXTRA_VAR_FN:
       return compose_functions(dest, src);
     default:
       assert(dest->decl_specs.flags & TYPE_FLAG_ARR);
       /* fallthrough */
-    case TYPE_EXTRA_ARR:
+    case TYPE_KIND_VARR:
       return compose_arrays(dest, src);
   }
 }
