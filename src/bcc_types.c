@@ -903,8 +903,8 @@ size_t type_get_bit_width(const Type *type) {
     case TYPE_KIND_FN:
       /* fallthrough */
     default: /* should be an array */
-      (void)fprintf(stderr, "Attempt to get bit width of declarator.\n");
-      abort();
+      /* we just need to return a bogus value here */
+      return SIZE_MAX;
   }
 }
 
