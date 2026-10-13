@@ -253,6 +253,11 @@ static Symbol *validate_declaration(ASTree *declaration, ASTree *declarator) {
     /* TODO(Robert): check for incomplete member types */
     if (symbol->linkage != LINK_MEMBER) {
       state_insert_symbol(state, identifier, symbol);
+    } else if (type_is_incomplete(symbol->type)) {
+      (void)semerr_incomplete_type(declarator, symbol->type);
+      symbol_destroy(symbol);
+      declarator->type = type_copy(TYPE_INT);
+      return NULL;
     } else if (type_is_function(symbol->type)) {
       (void)semerr_fn_member(declaration);
       symbol_destroy(symbol);
@@ -650,16 +655,8 @@ ASTree *define_enumerator(ASTree *enum_spec, ASTree *enum_id,
 }
 
 ASTree *declare_member(ASTree *struct_decl, ASTree *declarator) {
-  Symbol *symbol = validate_declaration(struct_decl, declarator);
-  if (symbol == NULL) {
-    return astree_adopt(struct_decl, 1, declarator);
-  } else if (type_is_incomplete(symbol->type)) {
-    /* member declaration with incomplete type */
-    (void)semerr_incomplete_type(declarator, symbol->type);
-    return astree_adopt(struct_decl, 1, declarator);
-  } else {
-    return astree_adopt(struct_decl, 1, declarator);
-  }
+  (void)validate_declaration(struct_decl, declarator);
+  return astree_adopt(struct_decl, 1, declarator);
 }
 
 ASTree *validate_bit_field(ASTree *declarator, ASTree *width_expr) {
