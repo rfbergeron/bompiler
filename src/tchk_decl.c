@@ -212,7 +212,7 @@ static Symbol *validate_declaration(ASTree *declaration, ASTree *declarator) {
     declarator->type = type_copy(decl_specs->type);
   } else if (!type_is_bit_field(declarator->type)) {
     (void)type_append(declarator->type, type_copy(decl_specs->type));
-  } else if (type_adjust_bit_field(decl_specs->type, declarator->type)) {
+  } else if (type_field_set_sign(decl_specs->type, declarator->type)) {
     (void)semerr_invalid_bit_field_specs(declaration);
     return NULL;
   }

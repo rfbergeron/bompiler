@@ -191,6 +191,7 @@ BCC_YYSTATIC ASTree *parser_make_decl_specs(ASTree *first_specifier) {
 }
 
 BCC_YYSTATIC ASTree *parser_make_declaration(ASTree *decl_specs) {
+  if (type_is_none(decl_specs->type)) type_implicit_int(decl_specs->type);
   ASTree *declaration = astree_init(TOK_DECLARATION, LOC_EMPTY, "_declaration");
   return astree_adopt(declaration, 1, decl_specs);
 }

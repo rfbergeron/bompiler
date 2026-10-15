@@ -70,14 +70,19 @@ int symbol_print(const Symbol *symbol, char *buffer) {
   const char *link_str = LINKAGE_STRINGS[symbol->linkage];
   const char *stor_str = STORAGE_STRINGS[symbol->storage];
 
-  if (symbol->storage == STORE_AUTO || symbol->storage == STORE_MEMBER) {
+  if (type_is_bit_field(symbol->type)) {
     return sprintf(buffer,
                    "{%s} {%s} {WIDTH: %lu, ALIGN: %lu} {LINK: %s, STORE: %s} "
-                   "{INFO: %s} {DISPLACEMENT: %li %s}",
+                   "{INFO: %s} {DISPLACEMENT: %li+%u}",
                    locstr, typestr, sym_width, sym_align, link_str, stor_str,
                    INFO_STRINGS[symbol->info], symbol->disp,
-                   type_is_bit_field(symbol->type) ? "(bits in record)"
-                                                   : "(bytes in record)");
+                   type_field_get_offset(symbol->type));
+  } else if (symbol->storage == STORE_AUTO || symbol->storage == STORE_MEMBER) {
+    return sprintf(buffer,
+                   "{%s} {%s} {WIDTH: %lu, ALIGN: %lu} {LINK: %s, STORE: %s} "
+                   "{INFO: %s} {DISPLACEMENT: %li}",
+                   locstr, typestr, sym_width, sym_align, link_str, stor_str,
+                   INFO_STRINGS[symbol->info], symbol->disp);
   } else if (symbol->linkage == LINK_NONE && symbol->storage == STORE_STAT) {
     return sprintf(buffer,
                    "{%s} {%s} {WIDTH: %lu, ALIGN: %lu} {LINK: %s, STORE: %s} "

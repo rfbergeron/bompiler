@@ -5,6 +5,7 @@ struct foo {
   int d:5, e:3, :0;
   int f:17;
   char g;
+  int h:32;
 };
 
 struct bar {

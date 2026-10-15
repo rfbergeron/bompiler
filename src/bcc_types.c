@@ -11,7 +11,15 @@
 #include "symtable.h"
 
 #define GET_ARRAY_LEN(type) (((type)->array.flags >> 1) + 1ul)
-#define GET_PARAM_COUNT(type) ((type->function.flags) >> 8)
+#define GET_PARAM_COUNT(type) (((type)->function.flags) >> 8)
+#define BIT_OFFSET_OFFSET 8
+#define BIT_WIDTH_OFFSET 11
+#define GET_BIT_OFFSET(type) \
+  (((type)->decl_specs.extra.arth >> BIT_OFFSET_OFFSET) & 0x7)
+#define GET_BIT_WIDTH(type)                                               \
+  (((type)->decl_specs.extra.arth & ARTH_MASK_ARTH) == ARTH_BIT_FIELD     \
+       ? (((type)->decl_specs.extra.arth >> BIT_WIDTH_OFFSET) & 0x1f) + 1 \
+       : 0)
 #define SWAP(type, x, y) \
   do {                   \
     type temp = (x);     \
@@ -22,23 +30,22 @@
 #define BCC_FN_MAX_PARAMS (ULONG_MAX >> 8)
 
 typedef enum arth_flag {
-  ARTH_NONE = 0,           /* 0x00 no declaration specifiers */
-  ARTH_MASK_ARTH = 0x0f,   /* mutually exclusive specifiers */
-  ARTH_BIT_FIELD = 1 << 0, /* 0x01 bit field */
-                           /* 0x00 */
-  ARTH_INT = 1 << 1,       /* 0x02 */
-  ARTH_CHAR = 2 << 1,      /* 0x04 */
-  ARTH_FLOAT = 3 << 1,     /* 0x06 */
-  ARTH_DOUBLE = 4 << 1,    /* 0x08 */
-                           /* 0x0a reserved for _BitInt */
-                           /* 0x0c reserved for _Bool/bool */
-                           /* 0x0e reserved for __int128 */
-  ARTH_MASK_SIGN = 0x30,   /*      integer sign flags */
-  ARTH_SIGNED = 1 << 4,    /* 0x10 */
-  ARTH_UNSIGNED = 1 << 5,  /* 0x20 */
-  ARTH_MASK_SIZE = 0xc0,   /* 0xc0 */
-  ARTH_SHRT = 1 << 6,      /* 0x40 */
-  ARTH_LONG = 2 << 6       /* 0x80 */
+  ARTH_MASK_NO_BITS = 0xff, /* mask out bit field stuff */
+  ARTH_MASK_ARTH = 0x0f,    /* mutually exclusive specifiers */
+  ARTH_NONE = 0,            /* 0x00 no arithmetic specifiers */
+  ARTH_INT,                 /* 0x01 */
+  ARTH_CHAR,                /* 0x02 */
+  ARTH_FLOAT,               /* 0x03 */
+  ARTH_DOUBLE,              /* 0x04 */
+  ARTH_BIT_FIELD,           /* 0x05 */
+  ARTH_BIT_FIELD_0,         /* 0x06 special value for 0-width bit fields */
+  ARTH_IMPLICIT_INT,        /* 0x07 special value for implicit integers */
+  ARTH_MASK_SIGN = 0x30,    /* 0x30 integer sign specifiers */
+  ARTH_SIGNED = 1 << 4,     /* 0x10 */
+  ARTH_UNSIGNED = 1 << 5,   /* 0x20 */
+  ARTH_MASK_SIZE = 0xc0,    /* 0xc0 width specifiers */
+  ARTH_SHRT = 1 << 6,       /* 0x40 */
+  ARTH_LONG = 2 << 6        /* 0x80 */
 } ArthFlag;
 
 typedef enum type_flag {
@@ -191,7 +198,9 @@ Type *type_init_bit_field(unsigned long width) {
   assert(width <= X64_CHAR_BIT * X64_SIZEOF_INT);
   Type *type = malloc(sizeof(Type));
   type->decl_specs.flags = TYPE_KIND_ARTH;
-  type->decl_specs.extra.arth = ARTH_BIT_FIELD | width << 11;
+  type->decl_specs.extra.arth =
+      width ? (ARTH_BIT_FIELD | (width - 1) << BIT_WIDTH_OFFSET)
+            : ARTH_BIT_FIELD_0;
   return type;
 }
 
@@ -249,15 +258,29 @@ static const char *store_get_str(const Type *type) {
 }
 
 static const char *arth_get_str(const Type *type) {
-  switch (type->decl_specs.extra.arth) {
+  switch (type->decl_specs.extra.arth & ARTH_MASK_NO_BITS) {
     default:
       return "(invalid)";
     case ARTH_NONE:
       return "(none)";
+    case ARTH_IMPLICIT_INT:
+      return "(implicit integer)";
+    case ARTH_BIT_FIELD:
+      /* fallthrough */
+    case ARTH_BIT_FIELD_0:
+      /* fallthrough */
     case ARTH_INT:
       return "int";
+    case ARTH_BIT_FIELD | ARTH_SIGNED:
+      /* fallthrough */
+    case ARTH_BIT_FIELD_0 | ARTH_SIGNED:
+      /* fallthrough */
     case ARTH_INT | ARTH_SIGNED:
       return "signed int";
+    case ARTH_BIT_FIELD | ARTH_UNSIGNED:
+      /* fallthrough */
+    case ARTH_BIT_FIELD_0 | ARTH_UNSIGNED:
+      /* fallthrough */
     case ARTH_INT | ARTH_UNSIGNED:
       return "unsigned int";
     case ARTH_SHRT:
@@ -296,12 +319,6 @@ static const char *arth_get_str(const Type *type) {
       return "double";
     case ARTH_DOUBLE | ARTH_LONG:
       return "long double";
-    case ARTH_BIT_FIELD:
-      return "(bit field)";
-    case ARTH_BIT_FIELD | ARTH_SIGNED:
-      return "(signed bit field)";
-    case ARTH_BIT_FIELD | ARTH_UNSIGNED:
-      return "(unsigned bit field)";
   }
 }
 
@@ -334,6 +351,15 @@ void type_dump_specs(const Type *type) {
       "Type specifier(s): %s\n"
       "Raw bit value: %lx\n"
       "Raw arithmetic flags value: %lx\n";
+  static const char *BIT_FIELD_DUMP_FMT =
+      "Type kind is arithmetic.\n"
+      "Type qualifiers: %s\n"
+      "Storage class specifier: %s\n"
+      "Type specifier(s): %s\n"
+      "Bit field width: %lu\n"
+      "Bit field offset: %lu\n"
+      "Raw bit value: %lx\n"
+      "Raw arithmetic flags value: %lx\n";
   static const char *PTR_DUMP_FMT =
       "Type qualifiers: %s\n"
       "Storage class specifier: %s\n"
@@ -354,9 +380,15 @@ void type_dump_specs(const Type *type) {
                     type->decl_specs.flags);
       break;
     case TYPE_KIND_ARTH:
-      (void)fprintf(stderr, ARTH_DUMP_FMT, qual_get_str(type),
-                    store_get_str(type), arth_get_str(type),
-                    type->decl_specs.flags, type->decl_specs.extra.arth);
+      if (type_is_bit_field(type))
+        (void)fprintf(stderr, BIT_FIELD_DUMP_FMT, qual_get_str(type),
+                      store_get_str(type), arth_get_str(type),
+                      GET_BIT_WIDTH(type), GET_BIT_OFFSET(type),
+                      type->decl_specs.flags, type->decl_specs.extra.arth);
+      else
+        (void)fprintf(stderr, ARTH_DUMP_FMT, qual_get_str(type),
+                      store_get_str(type), arth_get_str(type),
+                      type->decl_specs.flags, type->decl_specs.extra.arth);
       break;
     case TYPE_KIND_PTR:
       (void)fprintf(stderr, PTR_DUMP_FMT, qual_get_str(type),
@@ -391,7 +423,12 @@ static int specifiers_to_str(const Type *type, char *buf) {
       type_is_arithmetic(type) ? arth_get_str(type) : other_get_str(type);
   const char *qual_str = qual_get_str(type);
 
-  if (type_is_record(type) || type_is_enum(type)) {
+  if (type_is_bit_field(type)) {
+    return qual_str == NULL
+               ? sprintf(buf, "%s:%lu", type_str, GET_BIT_WIDTH(type))
+               : sprintf(buf, "%s %s:%lu", qual_str, type_str,
+                         GET_BIT_WIDTH(type));
+  } else if (type_is_record(type) || type_is_enum(type)) {
     return qual_str == NULL ? sprintf(buf, FMT_STRS[1], type_str,
                                       type->decl_specs.extra.tag->record.name)
                             : sprintf(buf, FMT_STRS[2], qual_str, type_str,
@@ -463,43 +500,44 @@ int type_is_integer(const Type *type) {
   if ((type->decl_specs.flags & TYPE_MASK_KIND) != TYPE_KIND_ARTH) return 0;
 
   switch (type->decl_specs.extra.arth & ARTH_MASK_ARTH) {
-    case ARTH_FLOAT:
-      /* fallthrough */
+    default:
+      return !!(type->decl_specs.extra.arth &
+                (ARTH_MASK_SIGN | ARTH_MASK_SIZE));
     case ARTH_DOUBLE:
+      /* special case to handle `long double` */
       return 0;
+    case ARTH_BIT_FIELD_0:
+      /* fallthrough */
     case ARTH_BIT_FIELD:
       /* fallthrough */
     case ARTH_INT:
       /* fallthrough */
     case ARTH_CHAR:
       /* fallthrough */
-    default:
-      /* anything without type specifiers is an `int` */
+    case ARTH_IMPLICIT_INT:
       return 1;
   }
 }
 
-/* TODO(Robert): enums should probably be considered signed; this should not
- * matter in practice because they are implicitly converted to signed integers
- * whenever they are used in an arithmetic expression, but it may prevent
- * confusion later on.
- */
 int type_is_signed(const Type *type) {
   /* pointers are not considered signed or unsigned; plain `char` is signed */
-  if ((type->decl_specs.flags & TYPE_MASK_KIND) != TYPE_KIND_ARTH) return 0;
+  if ((type->decl_specs.flags & TYPE_MASK_REPR) == TYPE_REPR_ENUM)
+    return 1;
+  else if ((type->decl_specs.flags & TYPE_MASK_KIND) != TYPE_KIND_ARTH)
+    return 0;
 
   switch (type->decl_specs.extra.arth & ARTH_MASK_ARTH) {
-    case ARTH_FLOAT:
+    default:
+      return !!(type->decl_specs.extra.arth & ARTH_SIGNED);
+    case ARTH_BIT_FIELD_0:
       /* fallthrough */
-    case ARTH_DOUBLE:
-      return 0;
     case ARTH_BIT_FIELD:
       return !(type->decl_specs.extra.arth & ARTH_SIGNED);
     case ARTH_INT:
       /* fallthrough */
     case ARTH_CHAR:
       /* fallthrough */
-    default:
+    case ARTH_IMPLICIT_INT:
       return !(type->decl_specs.extra.arth & ARTH_UNSIGNED);
   }
 }
@@ -509,16 +547,10 @@ int type_is_unsigned(const Type *type) {
   if ((type->decl_specs.flags & TYPE_MASK_KIND) != TYPE_KIND_ARTH) return 0;
 
   switch (type->decl_specs.extra.arth & ARTH_MASK_ARTH) {
-    case ARTH_FLOAT:
+    case ARTH_BIT_FIELD_0:
       /* fallthrough */
-    case ARTH_DOUBLE:
-      return 0;
     case ARTH_BIT_FIELD:
       return !!(type->decl_specs.extra.arth & ARTH_SIGNED);
-    case ARTH_INT:
-      /* fallthrough */
-    case ARTH_CHAR:
-      /* fallthrough */
     default:
       return !!(type->decl_specs.extra.arth & ARTH_UNSIGNED);
   }
@@ -530,7 +562,8 @@ int type_is_enum(const Type *type) {
 
 int type_is_bit_field(const Type *type) {
   return (type->decl_specs.flags & TYPE_MASK_REPR) == TYPE_KIND_ARTH &&
-         (type->decl_specs.extra.arth & ARTH_BIT_FIELD);
+         ((type->decl_specs.extra.arth & ARTH_MASK_ARTH) == ARTH_BIT_FIELD ||
+          (type->decl_specs.extra.arth & ARTH_MASK_ARTH) == ARTH_BIT_FIELD_0);
 }
 
 int type_is_integral(const Type *type) {
@@ -540,8 +573,7 @@ int type_is_integral(const Type *type) {
 int type_is_arithmetic(const Type *type) {
   switch (type->decl_specs.flags & TYPE_MASK_REPR) {
     case TYPE_KIND_ARTH:
-      /* anything without type specifiers is an `int` */
-      return type->decl_specs.flags || type->decl_specs.extra.arth;
+      return !!type->decl_specs.extra.arth;
     case TYPE_REPR_ENUM:
       return 1;
     default:
@@ -639,7 +671,7 @@ int type_is_declarator(const Type *type) {
 }
 
 int type_is_none(const Type *type) {
-  return (type->decl_specs.flags & TYPE_MASK_REPR) == DECL_SPEC_NONE &&
+  return !(type->decl_specs.flags & TYPE_MASK_KIND) &&
          !type->decl_specs.extra.arth;
 }
 
@@ -694,11 +726,12 @@ size_t type_get_param_count(const Type *type) {
   return GET_PARAM_COUNT(type);
 }
 
-static size_t arth_alignment(unsigned long flags) {
-  switch (flags) {
+static size_t arth_alignment(const Type *type) {
+  switch (type->decl_specs.extra.arth & ARTH_MASK_NO_BITS) {
     default:
-      /* fallthrough */
-    case ARTH_NONE: /* yep, it's an int */
+      (void)fprintf(stderr, "Attempt to get alignment of unknown type.\n");
+      abort();
+    case ARTH_IMPLICIT_INT:
       /* fallthrough */
     case ARTH_INT:
       /* fallthrough */
@@ -742,6 +775,12 @@ static size_t arth_alignment(unsigned long flags) {
       return X64_ALIGNOF_DBL;
     case ARTH_DOUBLE | ARTH_LONG:
       return X64_ALIGNOF_LDBL;
+    case ARTH_BIT_FIELD_0:
+      /* fallthrough */
+    case ARTH_BIT_FIELD_0 | ARTH_SIGNED:
+      /* fallthrough */
+    case ARTH_BIT_FIELD_0 | ARTH_UNSIGNED:
+      /* fallthrough */
     case ARTH_BIT_FIELD:
       /* fallthrough */
     case ARTH_BIT_FIELD | ARTH_SIGNED:
@@ -763,7 +802,7 @@ static size_t type_decl_specs_alignment(const Type *type) {
     case TYPE_REPR_ENUM:
       return tag_get_alignment(type->decl_specs.extra.tag);
     case TYPE_KIND_ARTH:
-      return arth_alignment(type->decl_specs.extra.arth);
+      return arth_alignment(type);
     default:
       (void)fprintf(stderr, "Unable to get alignment for type specifiers.\n");
       abort();
@@ -789,11 +828,12 @@ size_t type_get_alignment(const Type *type) {
   }
 }
 
-static size_t arth_width(unsigned long flags) {
-  switch (flags) {
+static size_t arth_width(const Type *type) {
+  switch (type->decl_specs.extra.arth & ARTH_MASK_NO_BITS) {
     default:
-      /* fallthrough */
-    case ARTH_NONE: /* yep, it's an int */
+      (void)fprintf(stderr, "Attempt to get width of unkown type.\n");
+      abort();
+    case ARTH_IMPLICIT_INT:
       /* fallthrough */
     case ARTH_INT:
       /* fallthrough */
@@ -837,12 +877,19 @@ static size_t arth_width(unsigned long flags) {
       return X64_SIZEOF_DBL;
     case ARTH_DOUBLE | ARTH_LONG:
       return X64_SIZEOF_LDBL;
+    case ARTH_BIT_FIELD_0:
+      /* fallthrough */
+    case ARTH_BIT_FIELD_0 | ARTH_SIGNED:
+      /* fallthrough */
+    case ARTH_BIT_FIELD_0 | ARTH_UNSIGNED:
+      return 0;
     case ARTH_BIT_FIELD:
       /* fallthrough */
     case ARTH_BIT_FIELD | ARTH_SIGNED:
       /* fallthrough */
     case ARTH_BIT_FIELD | ARTH_UNSIGNED:
-      return X64_SIZEOF_CHAR;
+      return (GET_BIT_WIDTH(type) + GET_BIT_OFFSET(type) + X64_CHAR_BIT - 1) /
+             X64_CHAR_BIT;
   }
 }
 
@@ -858,7 +905,7 @@ static size_t type_decl_specs_width(const Type *type) {
     case TYPE_REPR_ENUM:
       return tag_get_width(type->decl_specs.extra.tag);
     case TYPE_KIND_ARTH:
-      return arth_width(type->decl_specs.extra.arth);
+      return arth_width(type);
     default:
       (void)fprintf(stderr, "Unable to get size for type specifiers.\n");
       abort();
@@ -881,30 +928,6 @@ size_t type_get_width(const Type *type) {
     default: /* should be an array */
       assert(type->decl_specs.flags & TYPE_FLAG_ARR);
       return GET_ARRAY_LEN(type) * type_get_elem_width(type);
-  }
-}
-
-static size_t bit_field_width(const Type *type) {
-  assert(type_is_bit_field(type));
-  return type->decl_specs.extra.arth >> 11;
-}
-
-size_t type_get_bit_width(const Type *type) {
-  switch (type->decl_specs.flags & TYPE_MASK_KIND) {
-    case TYPE_KIND_PTR:
-      return X64_SIZEOF_LONG * X64_CHAR_BIT;
-    case TYPE_KIND_ARTH:
-      if (type_is_bit_field(type)) return bit_field_width(type);
-      /* fallthrough */
-    case TYPE_KIND_OTHER:
-      return type_decl_specs_width(type) * X64_CHAR_BIT;
-    case TYPE_KIND_VARR:
-      /* fallthrough */
-    case TYPE_KIND_FN:
-      /* fallthrough */
-    default: /* should be an array */
-      /* we just need to return a bogus value here */
-      return SIZE_MAX;
   }
 }
 
@@ -982,7 +1005,7 @@ int arth_compatible(const Type *type1, const Type *type2) {
   switch (type1->decl_specs.extra.arth) {
     default:
       return type2->decl_specs.extra.arth == type1->decl_specs.extra.arth;
-    case ARTH_NONE:
+    case ARTH_IMPLICIT_INT:
       /* fallthrough */
     case ARTH_INT:
       /* fallthrough */
@@ -1418,6 +1441,11 @@ Type *type_merge(const Type *dest, const Type *src) {
   }
 }
 
+void type_implicit_int(Type *type) {
+  assert(type_is_none(type));
+  type->decl_specs.extra.arth = ARTH_IMPLICIT_INT;
+}
+
 int type_validate(const Type *type) {
   /* allow declarations of type `void`, but only for typedefs */
   if (type_is_void(type) && !(type->decl_specs.flags & TYPE_STORE_TYPEDEF))
@@ -1451,22 +1479,44 @@ int type_validate(const Type *type) {
   return 1;
 }
 
-int type_adjust_bit_field(const Type *decl_specs, Type *declarator) {
+size_t type_field_width(const Type *type) {
+  assert(type_is_bit_field(type));
+  return GET_BIT_WIDTH(type);
+}
+
+int type_field_set_sign(const Type *decl_specs, Type *declarator) {
   assert(type_is_bit_field(declarator));
-  if (!type_is_arithmetic(decl_specs)) {
+  if (!type_is_integer(decl_specs)) {
     return 1;
-  } else if ((decl_specs->decl_specs.extra.arth & ~ARTH_MASK_SIZE) !=
+  } else if ((decl_specs->decl_specs.extra.arth & ARTH_MASK_ARTH) !=
                  ARTH_NONE &&
-             (decl_specs->decl_specs.extra.arth & ARTH_MASK_ARTH) != ARTH_INT) {
+             (decl_specs->decl_specs.extra.arth & ARTH_MASK_ARTH) != ARTH_INT &&
+             (decl_specs->decl_specs.extra.arth & ARTH_MASK_ARTH) !=
+                 ARTH_IMPLICIT_INT) {
     /* only need to check for int; can't get a bitfield in a type specifier list
      * since they only appear as struct fields and therefore you can't typedef
      * them */
+    return 1;
+  } else if (decl_specs->decl_specs.extra.arth & ARTH_MASK_SIZE) {
+    /* no size specifiers allowed for bit fields */
     return 1;
   } else {
     declarator->decl_specs.extra.arth |=
         (decl_specs->decl_specs.extra.arth & ARTH_MASK_SIGN);
     return 0;
   }
+}
+
+void type_field_set_offset(Type *type, unsigned long offset) {
+  assert(type_is_bit_field(type));
+  assert(offset < X64_CHAR_BIT);
+  assert(GET_BIT_OFFSET(type) == 0);
+  type->decl_specs.extra.arth |= offset << BIT_OFFSET_OFFSET;
+}
+
+unsigned char type_field_get_offset(const Type *type) {
+  assert(type_is_bit_field(type));
+  return GET_BIT_OFFSET(type);
 }
 
 /*
@@ -1490,14 +1540,13 @@ Type *type_pointer_conversions(Type *type) {
 Type *type_arithmetic_conversions(Type *type1, Type *type2) {
   assert(type1 != NULL && type2 != NULL);
   assert(type_is_arithmetic(type1) && type_is_arithmetic(type2));
-  size_t bits1 = type_get_bit_width(type1), bits2 = type_get_bit_width(type2);
+  size_t width1 = type_get_width(type1), width2 = type_get_width(type2);
 
-  if (bits1 < X64_SIZEOF_INT * X64_CHAR_BIT &&
-      bits2 < X64_SIZEOF_INT * X64_CHAR_BIT) {
+  if (width1 < X64_SIZEOF_INT && width2 < X64_SIZEOF_INT) {
     return (Type *)TYPE_INT;
-  } else if (bits1 > bits2) {
+  } else if (width1 > width2) {
     return type1;
-  } else if (bits1 < bits2) {
+  } else if (width1 < width2) {
     return type2;
   } else if (type_is_unsigned(type1)) {
     return type_is_bit_field(type1) ? (Type *)TYPE_UNSIGNED_INT : type1;
