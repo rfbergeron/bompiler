@@ -58,17 +58,38 @@ static LiveTable *persistence_table;
  * value in dest to perform the addition, so the register would still be live
  * at the beginning of the instruction. very few instructions write to dest in
  * a purely destructive manner; namely the SETcc, MOV, and LEA instructions.
+ * All of the MOV and LEA instructions must be checked to ensure that the source
+ * and destination registers are different, otherwise this function will not
+ * behave as expected.
  */
 static int instr_writes_dest(Instruction *instr) {
 #define GENERATE_WRITES(CODE, TYPE, BOOL, WRITES) WRITES,
   static const int OPCODE_WRITE_TABLE[] = {FOREACH_OPCODE(GENERATE_WRITES)};
 #undef GENERATE_WRITES
-  if (instr->opcode == OP_MOV && instr->src.all.mode == MODE_REGISTER &&
-      instr->dest.all.mode == MODE_REGISTER &&
-      instr->dest.reg.num == instr->src.reg.num) {
-    /* dummy mov from a register to itself; vreg is still live */
-    assert(instr->dest.reg.width == instr->src.reg.width);
-    return 0;
+  assert(instr->dest.all.mode == MODE_REGISTER);
+  if (instr->opcode == OP_LEA) {
+    if (instr->src.all.mode == MODE_INDIRECT) {
+      return instr->dest.reg.num != instr->src.ind.num;
+    } else if (instr->src.all.mode == MODE_SCALE) {
+      return instr->dest.reg.num != instr->src.sca.base &&
+             instr->dest.reg.num != instr->src.sca.index;
+    } else {
+      /* some other addressing mode which doesn't use registers */
+      return 1;
+    }
+  } else if (instr->opcode == OP_MOV || instr->opcode == OP_MOVZ ||
+             instr->opcode == OP_MOVS) {
+    if (instr->src.all.mode == MODE_REGISTER) {
+      return instr->dest.reg.num != instr->src.reg.num;
+    } else if (instr->src.all.mode == MODE_INDIRECT) {
+      return instr->dest.reg.num != instr->src.ind.num;
+    } else if (instr->src.all.mode == MODE_SCALE) {
+      return instr->dest.reg.num != instr->src.sca.base &&
+             instr->dest.reg.num != instr->src.sca.index;
+    } else {
+      /* some other addressing mode which doesn't use registers */
+      return 1;
+    }
   } else {
     return OPCODE_WRITE_TABLE[instr->opcode];
   }

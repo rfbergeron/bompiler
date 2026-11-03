@@ -124,6 +124,7 @@ Tag *tag_init(TagKind kind, const char *name) {
   if (kind == TAG_STRUCT || kind == TAG_UNION) {
     tag->record.kind = kind;
     tag->record.defined = 0;
+    tag->record.unused_bits = 0;
     tag->record.width = 0;
     tag->record.alignment = 0;
     tag->record.name = name;
