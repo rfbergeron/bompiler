@@ -715,6 +715,8 @@ ASTree *declare_symbol(ASTree *declaration, ASTree *declarator) {
   }
   assert(symbol->type == declarator->type);
 
+  if (IS_TYPE_NAME(declarator->lexinfo))
+    return astree_adopt(declaration, 1, declarator);
   if (symbol->linkage == LINK_NONE || symbol->info == SYM_INHERITOR)
     return translate_local_decl(declaration, declarator);
   else

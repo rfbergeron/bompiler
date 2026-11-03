@@ -532,7 +532,7 @@ int type_is_signed(const Type *type) {
     case ARTH_BIT_FIELD_0:
       /* fallthrough */
     case ARTH_BIT_FIELD:
-      return !(type->decl_specs.extra.arth & ARTH_SIGNED);
+      return !!(type->decl_specs.extra.arth & ARTH_SIGNED);
     case ARTH_INT:
       /* fallthrough */
     case ARTH_CHAR:
@@ -550,7 +550,7 @@ int type_is_unsigned(const Type *type) {
     case ARTH_BIT_FIELD_0:
       /* fallthrough */
     case ARTH_BIT_FIELD:
-      return !!(type->decl_specs.extra.arth & ARTH_SIGNED);
+      return !(type->decl_specs.extra.arth & ARTH_SIGNED);
     default:
       return !!(type->decl_specs.extra.arth & ARTH_UNSIGNED);
   }
