@@ -127,6 +127,38 @@ Instruction *instr_append(Instruction *instr, size_t count, ...) {
   return where;
 }
 
+/* TODO(Robert): this gets used in exactly one place and only needs to exist
+ * because `instr_append` has some very specific expectations about its inputs
+ * and because in this one particular case we need to free a sentinel
+ * instruction. This is bad and confusing. Consider making `instr_append` more
+ * flexible or changing the way instructions are strung together in general.
+ */
+Instruction *instr_concat(Instruction *dest, Instruction *src) {
+  assert(dest->opcode == OP_SENTINEL);
+  assert(src->opcode == OP_SENTINEL);
+
+  if (instr_empty(src)) {
+    instr_destroy(src);
+    return dest;
+  } else if (instr_empty(dest)) {
+    src->next->prev = dest;
+    src->prev->next = dest;
+    dest->prev = src->prev;
+    dest->next = src->next;
+    src->next = src->prev = src;
+    instr_destroy(src);
+    return dest;
+  } else {
+    dest->prev->next = src->next;
+    src->next->prev = dest->prev;
+    src->prev->next = dest;
+    dest->prev = src->prev;
+    src->prev = src->next = src;
+    instr_destroy(src);
+    return dest;
+  }
+}
+
 Instruction *instr_prepend(Instruction *instr, size_t count, ...) {
   Instruction *where = instr->opcode == OP_SENTINEL ? instr->next : instr;
   va_list args;

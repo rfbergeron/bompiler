@@ -1,6 +1,7 @@
 #include "asmgen.h"
 
 #include <limits.h>
+#include <math.h>
 #include <stdarg.h>
 #include <string.h>
 
@@ -583,6 +584,41 @@ ASTree *translate_cexpr_conv(ASTree *cexpr_conv, ASTree *expr) {
   return astree_adopt(cexpr_conv, 1, expr);
 }
 
+static Instruction *bit_field_to_rval(const Instruction *lval_instr,
+                                      const Type *type) {
+  assert(lval_instr->dest.all.mode == MODE_REGISTER);
+  assert(lval_instr->dest.reg.width == X64_SIZEOF_LONG);
+
+  /* need this hack to work with instruction functions */
+  Instruction *sentinel_instr = instr_init(OP_SENTINEL);
+
+  /* load allocation unit */
+  size_t byte_width = type_get_width(type);
+  Instruction *load_instr = instr_init(OP_MOV);
+  set_op_reg(&load_instr->dest, byte_width, next_vreg());
+  set_op_ind(&load_instr->src, 0, lval_instr->dest.reg.num);
+  load_instr->persist_flags |= PERSIST_SRC_SET;
+
+  /* discard most significant bits with a left shift */
+  size_t bit_width = type_get_bits(type), bit_offset = bf_get_offset(type);
+  Instruction *discard_instr = instr_init(OP_SHL);
+  discard_instr->dest = load_instr->dest;
+  set_op_imm(&discard_instr->src,
+             (byte_width * X64_CHAR_BIT) - (bit_width + bit_offset),
+             IMM_UNSIGNED);
+
+  /* shift to least significant bits; also sign extends if necessary */
+  Instruction *extend_instr =
+      instr_init(type_is_signed(type) ? OP_SAR : OP_SHR);
+  extend_instr->dest = discard_instr->dest;
+  set_op_imm(&extend_instr->src, (byte_width * X64_CHAR_BIT) - bit_width,
+             IMM_UNSIGNED);
+
+  (void)instr_append(sentinel_instr, 3, load_instr, discard_instr,
+                     extend_instr);
+  return sentinel_instr;
+}
+
 static Instruction *convert_rval(const Instruction *instr, const Type *type) {
   assert(instr->dest.all.mode == MODE_REGISTER);
   assert(instr->dest.reg.width == X64_SIZEOF_LONG);
@@ -599,12 +635,18 @@ ASTree *translate_rval_conv(ASTree *rval_conv, ASTree *expr) {
   assert(expr->cexpr_kind == CEXPR_FALSE);
   assert(!instr_empty(expr->instructions));
 
-  if (type_is_scalar(expr->type))
+  if (type_is_bit_field(expr->type)) {
+    (void)instr_append(rval_conv->instructions, 1, expr->instructions);
+    (void)instr_concat(
+        rval_conv->instructions,
+        bit_field_to_rval(instr_prev(expr->instructions), expr->type));
+  } else if (type_is_scalar(expr->type)) {
     (void)instr_append(
         rval_conv->instructions, 2, expr->instructions,
         convert_rval(instr_prev(expr->instructions), expr->type));
-  else
+  } else {
     (void)instr_append(rval_conv->instructions, 1, expr->instructions);
+  }
 
   return astree_adopt(rval_conv, 1, expr);
 }

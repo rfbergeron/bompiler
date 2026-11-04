@@ -233,6 +233,7 @@ void instr_destroy(Instruction *instr);
 Instruction *instr_prev(Instruction *instr);
 Instruction *instr_next(Instruction *instr);
 Instruction *instr_append(Instruction *instr, size_t count, ...);
+Instruction *instr_concat(Instruction *dest, Instruction *src);
 Instruction *instr_prepend(Instruction *instr, size_t count, ...);
 Instruction *instr_pop(Instruction *instr);
 int instr_empty(Instruction *instr);
