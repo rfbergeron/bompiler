@@ -45,7 +45,7 @@ Type *type_init_pointer(void);
 Type *type_init_array(size_t length);
 Type *type_init_function(size_t parameters_size, Type **parameters,
                          int variadic);
-Type *type_init_bit_field(unsigned long width);
+Type *type_init_bit_field(const Type *decl_specs, unsigned char width);
 
 void type_destroy(Type *type);
 
@@ -97,6 +97,7 @@ size_t type_get_width(const Type *type);
 int type_retrieve_storage_specifier(Type *type);
 size_t type_get_elem_width(const Type *type);
 size_t type_get_eightbytes(const Type *type);
+size_t type_get_bits(const Type *type);
 size_t type_get_padding(const Type *type, size_t to_pad);
 union tag *type_get_tag(const Type *type);
 int types_compatible(const Type *type1, const Type *type2, int qualified);
@@ -112,12 +113,10 @@ int type_add_decl_spec(Type *type, int tok_kind);
 Type *type_merge(const Type *dest, const Type *src);
 void type_implicit_int(Type *type);
 int type_validate(const Type *type);
-size_t type_field_width(const Type *type);
-int type_field_set_sign(const Type *decl_specs, Type *declarator);
-void type_field_set_offset(Type *type, unsigned long offset);
-unsigned char type_field_get_offset(const Type *type);
 Type *type_pointer_conversions(Type *type);
 Type *type_arithmetic_conversions(Type *type1, Type *type2);
 int type_compose(Type *dest, Type *src, int qualified);
 
+void bf_set_offset(Type *type, unsigned char offset);
+unsigned char bf_get_offset(const Type *type);
 #endif

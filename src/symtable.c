@@ -76,7 +76,7 @@ int symbol_print(const Symbol *symbol, char *buffer) {
                    "{INFO: %s} {DISPLACEMENT: %li+%u}",
                    locstr, typestr, sym_width, sym_align, link_str, stor_str,
                    INFO_STRINGS[symbol->info], symbol->disp,
-                   type_field_get_offset(symbol->type));
+                   bf_get_offset(symbol->type));
   } else if (symbol->storage == STORE_AUTO || symbol->storage == STORE_MEMBER) {
     return sprintf(buffer,
                    "{%s} {%s} {WIDTH: %lu, ALIGN: %lu} {LINK: %s, STORE: %s} "

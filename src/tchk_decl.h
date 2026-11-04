@@ -24,6 +24,8 @@ ASTree *finalize_tag_def(ASTree *tag_spec);
 ASTree *define_enumerator(ASTree *enum_spec, ASTree *ident, ASTree *equal_sign,
                           ASTree *expr);
 ASTree *declare_member(ASTree *struct_decl, ASTree *declarator);
+ASTree *declare_bit_field(ASTree *struct_decl, ASTree *declarator,
+                          ASTree *bits);
 ASTree *validate_bit_field(ASTree *declarator, ASTree *width_expr);
 ASTree *prepare_init(ASTree *declaration, ASTree *declarator);
 ASTree *declare_symbol(ASTree *declaration, ASTree *declarator);

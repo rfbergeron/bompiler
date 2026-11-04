@@ -254,13 +254,15 @@ void state_insert_member(CompilerState *state, const char *ident,
   scope_insert_member(ARR_PEEK(state->scopes), ident, member);
   size_t member_alignment = type_get_alignment(member->type);
   size_t member_width = type_get_width(member->type);
-  size_t member_bits = type_is_bit_field(member->type)
-                           ? type_field_width(member->type)
-                           : member_width * X64_CHAR_BIT;
+  size_t member_bits = type_get_bits(member->type);
 
   Tag *tag = ARR_PEEK(state->record_stack);
   assert(tag->record.kind != TAG_ENUM);
   assert(tag->record.unused_bits < X64_CHAR_BIT);
+  size_t unit_offset =
+      ((tag->record.width * X64_CHAR_BIT) - tag->record.unused_bits) %
+      (member_alignment * X64_CHAR_BIT);
+
   if (tag->record.alignment < member_alignment) {
     tag->record.alignment = member_alignment;
   }
@@ -274,32 +276,33 @@ void state_insert_member(CompilerState *state, const char *ident,
     member->disp = tag->record.width;
     tag->record.width += member_width;
     tag->record.unused_bits = 0;
-  } else if (member_width == 0) {
-    /* just need to make partial byte (if present) unusable */
-    member->disp = tag->record.width - 1;
-    type_field_set_offset(
-        member->type, (X64_CHAR_BIT - tag->record.unused_bits) % X64_CHAR_BIT);
-    tag->record.unused_bits = 0;
-  } else if (tag->record.unused_bits == 0) {
+  } else if (member_bits == 0) {
+    /* zero-width bit field; make previous allocation unit unusable */
+    /* padding; only need one modulus; overflow and modular arithmetic */
+    tag->record.width +=
+        (member_alignment - tag->record.width) % member_alignment;
     member->disp = tag->record.width;
-    type_field_set_offset(member->type, 0);
-    tag->record.width += member_width;
+    tag->record.unused_bits = 0;
+  } else if (unit_offset + member_bits > X64_CHAR_BIT * member_alignment) {
+    /* bit field must go in next allocation unit */
+    /* padding; only need one modulus; overflow and modular arithmetic */
+    tag->record.width +=
+        (member_alignment - tag->record.width) % member_alignment;
+    member->disp = tag->record.width;
+    tag->record.width += (member_bits + X64_CHAR_BIT - 1) / X64_CHAR_BIT;
     /* only need one modulus; overflow and modular arithmetic */
     tag->record.unused_bits = (X64_CHAR_BIT - member_bits) % X64_CHAR_BIT;
-  } else if (tag->record.unused_bits >= member_bits) {
-    member->disp = tag->record.width - 1;
-    type_field_set_offset(member->type, X64_CHAR_BIT - tag->record.unused_bits);
-    tag->record.unused_bits -= member_bits;
   } else {
-    member->disp = tag->record.width - 1;
-    type_field_set_offset(member->type, X64_CHAR_BIT - tag->record.unused_bits);
-    /* size of type might change after setting offset; need to get it again */
-    member_width = type_get_width(member->type);
-    /* account for partial byte */
-    tag->record.width += member_width - 1;
+    /* pack bit field */
+    /* need to mask out lsb unconditionally to account for char alignment */
+    member->disp = tag->record.width & ~(member_alignment - 1) & ~1ul;
+    bf_set_offset(member->type, unit_offset);
+    tag->record.width +=
+        (member_bits - tag->record.unused_bits + X64_CHAR_BIT - 1) /
+        X64_CHAR_BIT;
     /* only need one modulus; overflow and modular arithmetic */
     tag->record.unused_bits =
-        (X64_CHAR_BIT - (member_bits - tag->record.unused_bits)) % X64_CHAR_BIT;
+        (X64_CHAR_BIT - (unit_offset + member_bits)) % X64_CHAR_BIT;
   }
 }
 

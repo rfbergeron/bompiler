@@ -212,9 +212,6 @@ static Symbol *validate_declaration(ASTree *declaration, ASTree *declarator) {
     declarator->type = type_copy(decl_specs->type);
   } else if (!type_is_bit_field(declarator->type)) {
     (void)type_append(declarator->type, type_copy(decl_specs->type));
-  } else if (type_field_set_sign(decl_specs->type, declarator->type)) {
-    (void)semerr_invalid_bit_field_specs(declaration);
-    return NULL;
   }
 
   /* TODO(Robert): find a way to store symbol information for invalid nodes or
@@ -659,21 +656,32 @@ ASTree *declare_member(ASTree *struct_decl, ASTree *declarator) {
   return astree_adopt(struct_decl, 1, declarator);
 }
 
-ASTree *validate_bit_field(ASTree *declarator, ASTree *width_expr) {
-  if (width_expr->cexpr_kind != CEXPR_INT) {
-    (void)semerr_expected_intconst(declarator, width_expr);
-    return astree_adopt(declarator, 1, width_expr);
-  } else if (width_expr->constant.integral.unsigned_value >
-                 X64_CHAR_BIT * X64_SIZEOF_INT ||
-             (width_expr->constant.integral.unsigned_value == 0 &&
-              !IS_TYPE_NAME(declarator->lexinfo))) {
-    (void)semerr_invalid_bit_field_width(declarator, width_expr);
-    return astree_adopt(declarator, 1, width_expr);
+ASTree *declare_bit_field(ASTree *struct_decl, ASTree *declarator,
+                          ASTree *bits_expr) {
+  ASTree *decl_specs = astree_get(struct_decl, 0);
+  unsigned char bits = bits_expr->constant.integral.unsigned_value;
+
+  if (bits_expr->cexpr_kind != CEXPR_INT) {
+    /* bit width is not an integer constant expression */
+    (void)semerr_expected_intconst(declarator, bits_expr);
+  } else if (type_is_enum(decl_specs->type) ||
+             !type_is_integer(decl_specs->type)) {
+    /* invalid type specifiers for bit field */
+    (void)semerr_invalid_bit_field_specs(struct_decl);
+  } else if (type_get_bits(decl_specs->type) <
+             bits_expr->constant.integral.unsigned_value) {
+    /* bit width exceeds underlying type */
+    (void)semerr_invalid_bit_field_width(declarator, bits_expr);
+  } else if (!IS_TYPE_NAME(declarator->lexinfo) &&
+             bits_expr->constant.integral.unsigned_value == 0) {
+    /* named bit field with width zero; not allowed */
+    (void)semerr_invalid_bit_field_width(declarator, bits_expr);
   } else {
-    declarator->type =
-        type_init_bit_field(width_expr->constant.integral.unsigned_value);
-    return astree_adopt(declarator, 1, width_expr);
+    declarator->type = type_init_bit_field(decl_specs->type, bits);
+    (void)validate_declaration(struct_decl, declarator);
   }
+
+  return astree_adopt(struct_decl, 1, astree_adopt(declarator, 1, bits_expr));
 }
 
 /* insert symbol into table in case it appears in its own initializer */

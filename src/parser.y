@@ -164,14 +164,13 @@ struct_or_union     : TOK_STRUCT                                        { ERRCHK
                     | TOK_UNION                                         { ERRCHK; $$ = bcc_yyval = $1; }
                     ;
 struct_decl         : struct_decl ',' declarator                        { ERRCHK; $$ = bcc_yyval = declare_member($1, $3); astree_destroy($2); } /* define struct member */
-                    | struct_decl ',' bit_field_decl                    { ERRCHK; $$ = bcc_yyval = declare_member($1, $3); astree_destroy($2); } /* define struct member */
+                    | struct_decl ',' declarator ':' cond_expr          { ERRCHK; $$ = bcc_yyval = declare_bit_field($1, $3, $5); parser_cleanup(2, $2, $4); } /* define struct member */
+                    | struct_decl ',' ':' cond_expr                     { ERRCHK; $$ = bcc_yyval = declare_bit_field($1, parser_make_unique($3), $4); parser_cleanup(2, $2, $3); } /* define struct member */
                     | struct_decl ',' abs_declarator                    { ERRCHK; $$ = bcc_yyval = declare_member($1, $3); astree_destroy($2); } /* define struct member */
                     | decl_specs declarator                             { ERRCHK; $$ = bcc_yyval = declare_member(parser_make_declaration($1), $2); } /* define struct member */
-                    | decl_specs bit_field_decl                         { ERRCHK; $$ = bcc_yyval = declare_member(parser_make_declaration($1), $2); } /* define struct member */
+                    | decl_specs declarator ':' cond_expr               { ERRCHK; $$ = bcc_yyval = declare_bit_field(parser_make_declaration($1), $2, $4); astree_destroy($3); } /* define struct member */
+                    | decl_specs ':' cond_expr                          { ERRCHK; $$ = bcc_yyval = declare_bit_field(parser_make_declaration($1), parser_make_unique($2), $3); astree_destroy($2); } /* define struct member */
                     | decl_specs abs_declarator                         { ERRCHK; $$ = bcc_yyval = declare_member(parser_make_declaration($1), $2); } /* define struct member */
-                    ;
-bit_field_decl      : declarator ':' cond_expr                          { ERRCHK; $$ = bcc_yyval = validate_bit_field($1, $3); parser_cleanup(1, $2); } /* validate bit field width */
-                    | ':' cond_expr                                     { ERRCHK; $$ = bcc_yyval = validate_bit_field(parser_make_unique($1), $2); parser_cleanup(1, $1); } /* validate bit field width */
                     ;
 enum_spec           : enum_def '}'                                      { ERRCHK; $$ = bcc_yyval = finalize_tag_def($1); parser_cleanup(1, $2); } /* create tag and iterate over enums */
                     | enum_def ',' '}'                                  { ERRCHK; $$ = bcc_yyval = finalize_tag_def($1); parser_cleanup(2, $2, $3); } /* create tag and iterate over enums */
