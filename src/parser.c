@@ -213,10 +213,6 @@ BCC_YYSTATIC ASTree *parser_make_label(ASTree *ident) {
   return astree_init(TOK_LABEL, ident->loc, "_label");
 }
 
-BCC_YYSTATIC ASTree *parser_make_attributes_list(void) {
-  return astree_init(TOK_ATTR_LIST, lexer_get_loc(), "_attr_list");
-}
-
 BCC_YYSTATIC ASTree *parse_pretty_function(ASTree *pretty_function) {
   assert(pretty_function->tok_kind == TOK_PRTY_FN);
   const char *fn_name = state_get_function_name(state);

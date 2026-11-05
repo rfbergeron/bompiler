@@ -32,7 +32,6 @@
   static ASTree *parser_make_cast(ASTree * left_paren, ASTree * decl_specs,
                                   ASTree * type_name, ASTree * expr);
   static ASTree *parser_make_label(ASTree * ident);
-  static ASTree *parser_make_attributes_list(void);
   static ASTree *parse_pretty_function(ASTree * pretty_function);
   static ASTree *parse_sizeof(ASTree * sizeof_, ASTree * decl_specs,
                               ASTree * declarator);
@@ -66,12 +65,12 @@
 /* tokens constructed by checker */
 %token TOK_SCAL_CONV TOK_PTR_CONV TOK_DISP_CONV TOK_CEXPR_CONV TOK_RVAL_CONV TOK_DIFF_CONV TOK_NONE
 /* tokens constructed by parser */
-%token TOK_DECLARATION TOK_ROOT TOK_SPEC_LIST TOK_ATTR_LIST TOK_EMPTY
+%token TOK_DECLARATION TOK_ROOT TOK_SPEC_LIST TOK_EMPTY
 /* tokens assigned to exsting nodes */
 %token TOK_POS TOK_NEG TOK_POST_INC TOK_POST_DEC TOK_INDIRECTION TOK_ADDROF TOK_CALL TOK_SUBSCRIPT
 %token TOK_BLOCK TOK_ARRAY TOK_CAST TOK_POINTER TOK_LABEL TOK_INIT_LIST TOK_PARAM_LIST
 /* tokens constructed by lexer */
-%token TOK_VA_ARG TOK_VA_START TOK_VA_END TOK_ELLIPSIS TOK_ATTR TOK_ASM TOK_EXTNSN TOK_PRTY_FN
+%token TOK_VA_ARG TOK_VA_START TOK_VA_END TOK_ELLIPSIS TOK_PRTY_FN
 %token TOK_VOID TOK_INT TOK_SHORT TOK_LONG TOK_CHAR TOK_UNSIGNED TOK_SIGNED TOK_FLOAT TOK_DOUBLE
 %token TOK_CONST TOK_VOLATILE TOK_TYPEDEF TOK_STATIC TOK_EXTERN TOK_AUTO TOK_REGISTER TOK_RESTRICT
 %token TOK_IF TOK_ELSE TOK_SWITCH TOK_DO TOK_WHILE TOK_FOR TOK_STRUCT TOK_UNION TOK_ENUM
@@ -130,7 +129,6 @@ prepare_init        : decl_specs declarator                             { ERRCHK
                     ;
 decl_specs          : decl_specs decl_spec                              { ERRCHK; $$ = bcc_yyval = validate_decl_spec($1, $2); } /* validate_decl_spec */
                     | decl_spec                                         { ERRCHK; $$ = bcc_yyval = parser_make_decl_specs($1); } /* make_spec_list, validate_decl_spec */
-                    | attr_spec_list                                    { ERRCHK; $$ = bcc_yyval = parser_make_decl_specs($1); } /* validate decl_spec frees attributes */
                     ;
 decl_spec           : TOK_LONG                                          { ERRCHK; $$ = bcc_yyval = $1; }
                     | TOK_SIGNED                                        { ERRCHK; $$ = bcc_yyval = $1; }
@@ -183,28 +181,6 @@ enum_def            : TOK_ENUM any_ident '{' any_ident                  { ERRCHK
                     | enum_def ',' any_ident                            { ERRCHK; $$ = bcc_yyval = define_enumerator($1, $3, NULL, NULL); parser_cleanup(1, $2); }
                     | enum_def ',' any_ident '=' cond_expr              { ERRCHK; $$ = bcc_yyval = define_enumerator($1, $3, $4, $5); parser_cleanup(1, $2); }
                     ;
-asm_spec            : TOK_ASM '(' TOK_STRINGCON TOK_STRINGCON ')'       { ERRCHK; $$ = bcc_yyval = astree_adopt($1, 2, $3, $4); parser_cleanup(2, $2, $5); }
-                    ;
-attr_spec_list      : %empty                                            { ERRCHK; $$ = bcc_yyval = parser_make_attributes_list(); }
-                    | attr_spec_list attr_spec                          { ERRCHK; $$ = bcc_yyval = astree_adopt($1, 1, $2); }
-                    ;
-attr_spec           : TOK_ATTR '(' '(' ')' ')'                          { ERRCHK; $$ = bcc_yyval = $1; parser_cleanup(4, $2, $3, $4, $5); }
-                    | attrs ')' ')'                                     { ERRCHK; $$ = bcc_yyval = $1; parser_cleanup(2, $2, $3); }
-                    ;
-attrs               : TOK_ATTR '(' '(' attr                             { ERRCHK; $$ = bcc_yyval = astree_adopt($1, 1, $4); parser_cleanup(2, $2, $3); }
-                    | attrs ',' attr                                    { ERRCHK; $$ = bcc_yyval = astree_adopt($1, 1, $3); parser_cleanup(1, $2); }
-                    ;
-attr                : TOK_IDENT                                         { ERRCHK; $$ = bcc_yyval = $1; }
-                    | TOK_IDENT '(' ')'                                 { ERRCHK; $$ = bcc_yyval = $1; parser_cleanup(2, $2, $3); }
-                    | attr_fn ')'                                       { ERRCHK; $$ = bcc_yyval = $1; parser_cleanup(1, $2); }
-                    ;
-attr_fn             : TOK_IDENT '(' TOK_IDENT                           { ERRCHK; $$ = bcc_yyval = astree_adopt($1, 1, $3); parser_cleanup(1, $2); }
-                    | TOK_IDENT '(' TOK_INTCON                          { ERRCHK; $$ = bcc_yyval = astree_adopt($1, 1, $3); parser_cleanup(1, $2); }
-                    | TOK_IDENT '(' TOK_STRINGCON                       { ERRCHK; $$ = bcc_yyval = astree_adopt($1, 1, $3); parser_cleanup(1, $2); }
-                    | attr_fn ',' TOK_IDENT                             { ERRCHK; $$ = bcc_yyval = astree_adopt($1, 1, $3); parser_cleanup(1, $2); }
-                    | attr_fn ',' TOK_INTCON                            { ERRCHK; $$ = bcc_yyval = astree_adopt($1, 1, $3); parser_cleanup(1, $2); }
-                    | attr_fn ',' TOK_STRINGCON                         { ERRCHK; $$ = bcc_yyval = astree_adopt($1, 1, $3); parser_cleanup(1, $2); }
-                    ;
 initializer         : assign_expr                                       { ERRCHK; $$ = bcc_yyval = $1->tok_kind == TOK_STRINGCON ? $1 : tchk_ptr_conv($1, 1); } /* do nothing */
                     | init_list '}'                                     { ERRCHK; $$ = bcc_yyval = $1; astree_destroy($2); } /* do nothing */
                     | init_list ',' '}'                                 { ERRCHK; $$ = bcc_yyval = $1; astree_destroy($2); astree_destroy($3); } /* do nothing */
@@ -213,9 +189,9 @@ init_list           : init_list ',' initializer                         { ERRCHK
                     | '{' initializer                                   { ERRCHK; $$ = bcc_yyval = astree_adopt(parser_new_sym($1, TOK_INIT_LIST), 1, $2); } /* adopt */
                     ;
 declarator          : pointer declarator                                { ERRCHK; $$ = bcc_yyval = define_pointer($2, $1); } /* define_pointer */
-                    | TOK_IDENT attr_spec_list                          { ERRCHK; $$ = bcc_yyval = $1; parser_cleanup(1, $2); }
-                    | '(' declarator attr_spec_list ')'                 { ERRCHK; $$ = bcc_yyval = $2; parser_cleanup(3, $1, $3, $4); } /* do nothing */
-                    | declarator direct_decl attr_spec_list             { ERRCHK; $$ = bcc_yyval = define_dirdecl($1, $2); parser_cleanup(1, $3); } /* validate_dirdecl */
+                    | TOK_IDENT                                         { ERRCHK; $$ = bcc_yyval = $1; }
+                    | '(' declarator ')'                                { ERRCHK; $$ = bcc_yyval = $2; parser_cleanup(2, $1, $3); } /* do nothing */
+                    | declarator direct_decl                            { ERRCHK; $$ = bcc_yyval = define_dirdecl($1, $2); } /* validate_dirdecl */
                     ;
 abs_declarator      : pointer abs_declarator                            { ERRCHK; $$ = bcc_yyval = define_pointer($2, $1); } /* define_pointer */
                     | '(' abs_declarator ')'                            { ERRCHK; $$ = bcc_yyval = $2; parser_cleanup(2, $1, $3); } /* do nothing */
@@ -230,7 +206,6 @@ pointer             : '*'                                               { ERRCHK
 direct_decl         : '[' ']'                                           { ERRCHK; $$ = bcc_yyval = parser_new_sym($1, TOK_ARRAY); astree_destroy($2); } /* do nothing */
                     | '[' cond_expr ']'                                 { ERRCHK; $$ = bcc_yyval = validate_array_size(parser_new_sym($1, TOK_ARRAY), $2); astree_destroy($3); }
                     | fn_direct_decl                                    { ERRCHK; $$ = bcc_yyval = $1; }
-                    | fn_direct_decl asm_spec                           { ERRCHK; $$ = bcc_yyval = $1; parser_cleanup(1, $2); }
                     ;
 fn_direct_decl      : param_list ')'                                    { ERRCHK; $$ = bcc_yyval = finalize_param_list($1, NULL); parser_cleanup(1, $2); }
                     | param_list ',' TOK_ELLIPSIS ')'                   { ERRCHK; $$ = bcc_yyval = finalize_param_list($1, $3); parser_cleanup(2, $2, $4); }
@@ -308,9 +283,7 @@ return              : TOK_RETURN expr ';'                               { ERRCHK
                     | TOK_RETURN ';'                                    { ERRCHK; $$ = bcc_yyval = validate_return($1, parser_make_empty($2->loc)); parser_cleanup (1, $2); }
                     ;
 expr                : assign_expr                                       { ERRCHK; $$ = bcc_yyval = $1; }
-                    | TOK_EXTNSN assign_expr                            { ERRCHK; $$ = bcc_yyval = $2; parser_cleanup(1, $1); }
                     | expr ',' assign_expr                              { ERRCHK; $$ = bcc_yyval = validate_comma($2, $1, $3); }
-                    | expr ',' TOK_EXTNSN assign_expr                   { ERRCHK; $$ = bcc_yyval = validate_comma($2, $1, $4); parser_cleanup(1, $3); }
                     ;
 assign_expr         : unary_expr assign_op assign_expr                  { ERRCHK; $$ = bcc_yyval = validate_assignment($2, $1, $3); }
                     | cond_expr                                         { ERRCHK; $$ = bcc_yyval = $1; }
@@ -385,7 +358,6 @@ call                : designator '(' ')'                                { ERRCHK
                     ;
 call_args           : designator '(' assign_expr                        { ERRCHK; $$ = bcc_yyval = validate_arg(astree_adopt(parser_new_sym($2, TOK_CALL), 1, $1), $3); }
                     | call_args ',' assign_expr                         { ERRCHK; $$ = bcc_yyval = validate_arg($1, $3); parser_cleanup(1, $2); }
-                    | call_args ',' TOK_EXTNSN assign_expr              { ERRCHK; $$ = bcc_yyval = validate_arg($1, $4); parser_cleanup(2, $2, $3); }
                     ;
 primary_expr        : TOK_IDENT                                         { ERRCHK; $$ = bcc_yyval = validate_ident($1); }
                     | constant                                          { ERRCHK; $$ = bcc_yyval = $1; }

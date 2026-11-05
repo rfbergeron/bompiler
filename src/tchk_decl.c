@@ -53,12 +53,8 @@ ASTree *validate_typedef_name(ASTree *decl_specs, ASTree *typedef_name) {
 ASTree *validate_decl_spec(ASTree *decl_specs, ASTree *decl_spec) {
   assert(decl_specs->type != NULL);
 
-  if (decl_spec->tok_kind == TOK_ATTR_LIST) {
-    astree_destroy(decl_spec);
-    return decl_specs;
-  } else if (decl_spec->tok_kind == TOK_STRUCT ||
-             decl_spec->tok_kind == TOK_UNION ||
-             decl_spec->tok_kind == TOK_ENUM) {
+  if (decl_spec->tok_kind == TOK_STRUCT || decl_spec->tok_kind == TOK_UNION ||
+      decl_spec->tok_kind == TOK_ENUM) {
     return validate_tag_spec(decl_specs, decl_spec);
   } else if (decl_spec->tok_kind == TOK_TYPEDEF_NAME) {
     return validate_typedef_name(decl_specs, decl_spec);

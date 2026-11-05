@@ -79,9 +79,6 @@ NOTSTRING       (\"[^"]*)
 "__builtin_va_arg" { return lexer_token(TOK_VA_ARG); }
 "__builtin_va_start" { return lexer_token(TOK_VA_START); }
 "__builtin_va_end" { return lexer_token(TOK_VA_END); }
-"__attribute__" { return lexer_token(TOK_ATTR); }
-"__extension__" { return lexer_token(TOK_EXTNSN); }
-"__asm__"       { return lexer_token(TOK_ASM); }
 "__PRETTY_FUNCTION__" { return lexer_token(TOK_PRTY_FN); }
 "__restrict"    { return lexer_token(TOK_RESTRICT); }
 "\.\.\."        { return lexer_token(TOK_ELLIPSIS); }
