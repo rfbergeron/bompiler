@@ -66,14 +66,14 @@ static const ptrdiff_t HIDDEN_PARAM_DISP = -8 * (PRESERVED_REG_COUNT + 2);
 static const ptrdiff_t INIT_WINDOW_SIZE = 40;
 static const ptrdiff_t VA_INIT_WINDOW_SIZE = 88;
 /* locations of 8-byte regions for contents of unspilled registers */
-const ptrdiff_t UNSPILL_REGIONS[] = {-8 * (PRESERVED_REG_COUNT + 5),
-                                     -8 * (PRESERVED_REG_COUNT + 4),
-                                     -8 * (PRESERVED_REG_COUNT + 3)};
+const ptrdiff_t UNSPILL_REGIONS[] = {
+    -8 * (PRESERVED_REG_COUNT + 6), -8 * (PRESERVED_REG_COUNT + 5),
+    -8 * (PRESERVED_REG_COUNT + 4), -8 * (PRESERVED_REG_COUNT + 3)};
 const size_t UNSPILL_REGIONS_SIZE = ARRAY_ELEM_COUNT(UNSPILL_REGIONS);
 const ptrdiff_t VA_SPILL_REGIONS[] = {
-    -8 * (PRESERVED_REG_COUNT + 11), -8 * (PRESERVED_REG_COUNT + 10),
-    -8 * (PRESERVED_REG_COUNT + 9),  -8 * (PRESERVED_REG_COUNT + 8),
-    -8 * (PRESERVED_REG_COUNT + 7),  -8 * (PRESERVED_REG_COUNT + 6)};
+    -8 * (PRESERVED_REG_COUNT + 12), -8 * (PRESERVED_REG_COUNT + 11),
+    -8 * (PRESERVED_REG_COUNT + 10), -8 * (PRESERVED_REG_COUNT + 9),
+    -8 * (PRESERVED_REG_COUNT + 8),  -8 * (PRESERVED_REG_COUNT + 7)};
 static size_t param_reg_index;
 static ptrdiff_t param_stack_disp;
 ptrdiff_t window_size;
@@ -97,6 +97,9 @@ extern int skip_liveness;
          (right)->dest.all.mode == MODE_REGISTER && \
          (left)->dest.reg.width == (right)->dest.reg.width)
 #define REGCHK(instr) assert((instr)->dest.all.mode == MODE_REGISTER)
+#define LVALCHK(instr)                              \
+  assert((instr)->dest.all.mode == MODE_REGISTER && \
+         (instr)->dest.reg.width == REG_QWORD)
 
 const char *mk_generic_label(const char *fmt, size_t unique_id) {
   char buffer[LABEL_BUFFER_SIZE];
@@ -336,6 +339,33 @@ void static_zero_pad(size_t count, Instruction *where) {
   Instruction *zero_instr = instr_init(OP_ZERO);
   set_op_imm(&zero_instr->dest, count, IMM_UNSIGNED);
   (void)instr_append(where, 1, zero_instr);
+}
+
+static int is_compound(int tok_kind) {
+  switch (tok_kind) {
+    default:
+      return 0;
+    case TOK_MULEQ:
+      /* fallthrough */
+    case TOK_DIVEQ:
+      /* fallthrough */
+    case TOK_REMEQ:
+      /* fallthrough */
+    case TOK_ADDEQ:
+      /* fallthrough */
+    case TOK_SUBEQ:
+      /* fallthrough */
+    case TOK_ANDEQ:
+      /* fallthrough */
+    case TOK_OREQ:
+      /* fallthrough */
+    case TOK_XOREQ:
+      /* fallthrough */
+    case TOK_SHLEQ:
+      /* fallthrough */
+    case TOK_SHREQ:
+      return 1;
+  }
 }
 
 static Opcode opcode_from_operator(int tok_kind, const Type *type) {
@@ -584,25 +614,25 @@ ASTree *translate_cexpr_conv(ASTree *cexpr_conv, ASTree *expr) {
   return astree_adopt(cexpr_conv, 1, expr);
 }
 
-static Instruction *bit_field_to_rval(const Instruction *lval_instr,
-                                      const Type *type) {
-  assert(lval_instr->dest.all.mode == MODE_REGISTER);
-  assert(lval_instr->dest.reg.width == X64_SIZEOF_LONG);
+static Instruction *convert_rval(Instruction *where, const Type *type) {
+  assert(where->opcode == OP_SENTINEL || where->opcode == OP_BUNDLE);
+  Instruction *lval_instr = instr_prev(where);
+  LVALCHK(lval_instr);
 
-  /* need this hack to work with instruction functions */
-  Instruction *sentinel_instr = instr_init(OP_SENTINEL);
+  Instruction *mov_instr = instr_init(OP_MOV);
+  set_op_ind(&mov_instr->src, NO_DISP, lval_instr->dest.reg.num);
+  set_op_reg(&mov_instr->dest, type_get_width(type), next_vreg());
+  mov_instr->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
 
-  /* load allocation unit */
-  size_t byte_width = type_get_width(type);
-  Instruction *load_instr = instr_init(OP_MOV);
-  set_op_reg(&load_instr->dest, byte_width, next_vreg());
-  set_op_ind(&load_instr->src, 0, lval_instr->dest.reg.num);
-  load_instr->persist_flags |= PERSIST_SRC_SET;
+  /* bit fields need a little extra sauce */
+  if (!type_is_bit_field(type))
+    return instr_append(instr_init(OP_BUNDLE), 1, mov_instr);
 
   /* discard most significant bits with a left shift */
+  size_t byte_width = type_get_width(type);
   size_t bit_width = type_get_bits(type), bit_offset = bf_get_offset(type);
   Instruction *discard_instr = instr_init(OP_SHL);
-  discard_instr->dest = load_instr->dest;
+  discard_instr->dest = mov_instr->dest;
   set_op_imm(&discard_instr->src,
              (byte_width * X64_CHAR_BIT) - (bit_width + bit_offset),
              IMM_UNSIGNED);
@@ -614,20 +644,8 @@ static Instruction *bit_field_to_rval(const Instruction *lval_instr,
   set_op_imm(&extend_instr->src, (byte_width * X64_CHAR_BIT) - bit_width,
              IMM_UNSIGNED);
 
-  (void)instr_append(sentinel_instr, 3, load_instr, discard_instr,
-                     extend_instr);
-  return sentinel_instr;
-}
-
-static Instruction *convert_rval(const Instruction *instr, const Type *type) {
-  assert(instr->dest.all.mode == MODE_REGISTER);
-  assert(instr->dest.reg.width == X64_SIZEOF_LONG);
-
-  Instruction *mov_instr = instr_init(OP_MOV);
-  set_op_ind(&mov_instr->src, NO_DISP, instr->dest.reg.num);
-  set_op_reg(&mov_instr->dest, type_get_width(type), next_vreg());
-  mov_instr->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
-  return mov_instr;
+  return instr_append(instr_init(OP_BUNDLE), 3, mov_instr, discard_instr,
+                      extend_instr);
 }
 
 ASTree *translate_rval_conv(ASTree *rval_conv, ASTree *expr) {
@@ -635,18 +653,11 @@ ASTree *translate_rval_conv(ASTree *rval_conv, ASTree *expr) {
   assert(expr->cexpr_kind == CEXPR_FALSE);
   assert(!instr_empty(expr->instructions));
 
-  if (type_is_bit_field(expr->type)) {
-    (void)instr_append(rval_conv->instructions, 1, expr->instructions);
-    (void)instr_concat(
-        rval_conv->instructions,
-        bit_field_to_rval(instr_prev(expr->instructions), expr->type));
-  } else if (type_is_scalar(expr->type)) {
-    (void)instr_append(
-        rval_conv->instructions, 2, expr->instructions,
-        convert_rval(instr_prev(expr->instructions), expr->type));
-  } else {
-    (void)instr_append(rval_conv->instructions, 1, expr->instructions);
-  }
+  (void)instr_append(rval_conv->instructions, 1, expr->instructions);
+
+  if (type_is_scalar(expr->type))
+    (void)instr_append(rval_conv->instructions, 1,
+                       convert_rval(expr->instructions, expr->type));
 
   return astree_adopt(rval_conv, 1, expr);
 }
@@ -669,80 +680,81 @@ ASTree *translate_ptr_conv(ASTree *ptr_conv, ASTree *expr) {
  *
  * also, this function is poorly named; it can also "convert" aggregates to void
  */
-static Instruction *convert_scalar(const Instruction *instr,
-                                   const Type *to_type, const Type *from_type) {
+static Instruction *convert_scalar(Instruction *where, const Type *to_type,
+                                   const Type *from_type) {
+  assert(where->opcode == OP_SENTINEL || where->opcode == OP_BUNDLE);
   assert((type_is_scalar(from_type) && type_is_scalar(to_type)) ||
          type_is_void(to_type));
-  assert(instr->dest.all.mode == MODE_REGISTER);
+  Instruction *rval_instr = instr_prev(where);
+  REGCHK(rval_instr);
 
   size_t from_width = type_get_width(from_type);
   size_t to_width = type_get_width(to_type);
 
+  Instruction *bundle_instr = instr_init(OP_BUNDLE);
   if (type_is_void(to_type)) {
-    return instr_init(OP_NOP);
+    return instr_append(bundle_instr, 1, instr_init(OP_NOP));
   } else if (from_width == to_width) {
     Instruction *mov_instr = instr_init(OP_MOV);
-    mov_instr->src = mov_instr->dest = instr->dest;
+    mov_instr->src = mov_instr->dest = rval_instr->dest;
     mov_instr->persist_flags |= PERSIST_SRC_SET;
-    return mov_instr;
+    return instr_append(bundle_instr, 1, mov_instr);
   } else if (from_width > to_width) {
     /* unnecessary mov so that the width of the destination is set correctly,
      * and the whole structure describing the operand can just be copied to the
      * next instruction that needs it.
      */
     Instruction *mov_instr = instr_init(OP_MOV);
-    set_op_reg(&mov_instr->src, to_width, instr->dest.reg.num);
+    set_op_reg(&mov_instr->src, to_width, rval_instr->dest.reg.num);
     set_op_reg(&mov_instr->dest, to_width, next_vreg());
     mov_instr->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
-    return mov_instr;
+    return instr_append(bundle_instr, 1, mov_instr);
   } else if (type_is_signed(from_type) || type_is_enum(from_type)) {
     Instruction *movs_instr = instr_init(OP_MOVS);
-    movs_instr->src = instr->dest;
+    movs_instr->src = rval_instr->dest;
     set_op_reg(&movs_instr->dest, to_width, next_vreg());
     movs_instr->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
-    return movs_instr;
+    return instr_append(bundle_instr, 1, movs_instr);
   } else if (to_width != X64_SIZEOF_LONG || from_width != X64_SIZEOF_INT) {
     assert(type_is_unsigned(from_type));
     Instruction *movz_instr = instr_init(OP_MOVZ);
-    movz_instr->src = instr->dest;
+    movz_instr->src = rval_instr->dest;
     set_op_reg(&movz_instr->dest, to_width, next_vreg());
     movz_instr->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
-    return movz_instr;
+    return instr_append(bundle_instr, 1, movz_instr);
   } else {
     /* set width of destination; no need to extend */
     assert(type_is_unsigned(from_type));
     Instruction *mov_instr = instr_init(OP_MOV);
-    set_op_reg(&mov_instr->src, REG_QWORD, instr->dest.reg.num);
+    set_op_reg(&mov_instr->src, REG_QWORD, rval_instr->dest.reg.num);
     mov_instr->dest = mov_instr->src;
     mov_instr->persist_flags |= PERSIST_SRC_SET | PERSIST_DEST_CLEAR;
-    return mov_instr;
+    return instr_append(bundle_instr, 1, mov_instr);
   }
 }
 
 ASTree *translate_scal_conv(ASTree *scal_conv, ASTree *expr) {
   SEMCHK(expr);
-  Instruction *conversion = convert_scalar(instr_prev(expr->instructions),
-                                           scal_conv->type, expr->type);
-  (void)instr_append(scal_conv->instructions, 2, expr->instructions,
-                     conversion);
+  (void)instr_append(
+      scal_conv->instructions, 2, expr->instructions,
+      convert_scalar(expr->instructions, scal_conv->type, expr->type));
   return astree_adopt(scal_conv, 1, expr);
 }
 
 ASTree *translate_disp_conv(ASTree *disp_conv, ASTree *expr,
                             const Type *pointer_type) {
   SEMCHK(expr);
-  Instruction *conv_instr = convert_scalar(instr_prev(expr->instructions),
-                                           disp_conv->type, expr->type);
+  Instruction *conv_instrs =
+      convert_scalar(expr->instructions, disp_conv->type, expr->type);
 
   /* use two-operand imul because it is more convenient */
   Instruction *imul_instr = instr_init(OP_IMUL);
+  imul_instr->dest = instr_prev(conv_instrs)->dest;
   set_op_imm(&imul_instr->src, type_get_elem_width(pointer_type), IMM_SIGNED);
   imul_instr->persist_flags = PERSIST_DEST_SET | PERSIST_DEST_CLEAR;
 
-  imul_instr->dest = conv_instr->dest;
-
-  (void)instr_append(disp_conv->instructions, 3, expr->instructions, conv_instr,
-                     imul_instr);
+  (void)instr_append(disp_conv->instructions, 3, expr->instructions,
+                     conv_instrs, imul_instr);
 
   return astree_adopt(disp_conv, 1, expr);
 }
@@ -1019,60 +1031,129 @@ ASTree *translate_reference(ASTree *reference, ASTree *struct_,
   return astree_adopt(reference, 2, struct_, member);
 }
 
+static Instruction *store_helper(size_t dest_memreg, size_t src_reg,
+                                 const Type *type) {
+  if (!type_is_bit_field(type)) {
+    Instruction *store_instr = instr_init(OP_MOV);
+    set_op_ind(&store_instr->dest, NO_DISP, dest_memreg);
+    set_op_reg(&store_instr->src, type_get_width(type), src_reg);
+    store_instr->persist_flags = PERSIST_DEST_SET | PERSIST_SRC_SET;
+
+    /* dummy mov to propogate result */
+    Instruction *dummy_instr = instr_init(OP_MOV);
+    dummy_instr->src = dummy_instr->dest = store_instr->src;
+    return instr_append(instr_init(OP_BUNDLE), 2, store_instr, dummy_instr);
+  } else {
+    /* copy original value so that it can be propogated */
+    size_t byte_width = type_get_width(type);
+    Instruction *copy_instr = instr_init(OP_MOV);
+    set_op_reg(&copy_instr->dest, byte_width, next_vreg());
+    set_op_reg(&copy_instr->src, byte_width, src_reg);
+    copy_instr->persist_flags |= PERSIST_DEST_CLEAR;
+
+    /* move result to the correct offset */
+    unsigned char bit_offset = bf_get_offset(type);
+    Instruction *shift_instr = instr_init(OP_SHL);
+    shift_instr->dest = copy_instr->src;
+    set_op_imm(&shift_instr->src, bit_offset, IMM_UNSIGNED);
+
+    /* load bit mask for new value */
+    Instruction *rval_mask_instr = instr_init(OP_MOV);
+    set_op_reg(&rval_mask_instr->dest, byte_width, next_vreg());
+    set_op_imm(&rval_mask_instr->src, bf_get_mask(type), IMM_UNSIGNED);
+
+    /* mask extra bits out of new value */
+    Instruction *rval_and_instr = instr_init(OP_AND);
+    rval_and_instr->dest = shift_instr->dest;
+    rval_and_instr->src = rval_mask_instr->dest;
+
+    /* load original value */
+    Instruction *lval_load_instr = instr_init(OP_MOV);
+    set_op_reg(&lval_load_instr->dest, byte_width, next_vreg());
+    set_op_ind(&lval_load_instr->src, NO_DISP, dest_memreg);
+    lval_load_instr->persist_flags |= PERSIST_SRC_SET;
+
+    /* load bit mask for allocation unit */
+    Instruction *lval_mask_instr = instr_init(OP_MOV);
+    set_op_reg(&lval_mask_instr->dest, byte_width, next_vreg());
+    set_op_imm(&lval_mask_instr->src, ~bf_get_mask(type), IMM_UNSIGNED);
+
+    /* mask old bits out of allocation unit */
+    Instruction *lval_and_instr = instr_init(OP_AND);
+    lval_and_instr->dest = lval_load_instr->dest;
+    lval_and_instr->src = lval_mask_instr->dest;
+
+    /* combine new value and allocation unit */
+    Instruction *or_instr = instr_init(OP_OR);
+    or_instr->dest = lval_and_instr->dest;
+    or_instr->src = rval_and_instr->dest;
+
+    /* store new value */
+    Instruction *store_instr = instr_init(OP_MOV);
+    store_instr->dest = lval_load_instr->src;
+    store_instr->src = or_instr->dest;
+
+    /* dummy mov to propogate result */
+    Instruction *dummy_instr = instr_init(OP_MOV);
+    dummy_instr->dest = dummy_instr->src = copy_instr->dest;
+
+    return instr_append(instr_init(OP_BUNDLE), 10, copy_instr, shift_instr,
+                        rval_mask_instr, rval_and_instr, lval_load_instr,
+                        lval_mask_instr, lval_and_instr, or_instr, store_instr,
+                        dummy_instr);
+  }
+}
+
 ASTree *translate_post_inc_dec(ASTree *post_inc_dec, ASTree *operand) {
   PFDBG0('g', "Translating postfix increment/decrement");
-  Instruction *lvalue_instr = instr_prev(operand->instructions);
-  Instruction *rval_conv_instr = convert_rval(lvalue_instr, operand->type);
-  Instruction *type_conv_instr =
-      convert_scalar(rval_conv_instr, post_inc_dec->type, operand->type);
+  Instruction *conv_instrs = convert_rval(operand->instructions, operand->type);
+  (void)instr_append(
+      conv_instrs, 1,
+      convert_scalar(conv_instrs, post_inc_dec->type, operand->type));
+  Instruction *result_instr = instr_prev(conv_instrs);
 
   Instruction *mov_instr = instr_init(OP_MOV);
-  mov_instr->src = type_conv_instr->dest;
+  mov_instr->src = result_instr->dest;
   set_op_reg(&mov_instr->dest, type_get_width(post_inc_dec->type), next_vreg());
   mov_instr->persist_flags |= PERSIST_DEST_CLEAR;
 
   Instruction *inc_dec_instr = instr_init(
       opcode_from_operator(post_inc_dec->tok_kind, post_inc_dec->type));
-  inc_dec_instr->dest = type_conv_instr->dest;
+  inc_dec_instr->dest = result_instr->dest;
 
   /* no need to set flags; conversion functions should do that */
-  Instruction *store_instr = instr_init(OP_MOV);
-  set_op_ind(&store_instr->dest, NO_DISP, lvalue_instr->dest.reg.num);
-  set_op_reg(&store_instr->src, type_get_width(operand->type),
-             type_conv_instr->dest.reg.num);
+  Instruction *lvalue_instr = instr_prev(operand->instructions);
+  Instruction *store_instrs = store_helper(
+      lvalue_instr->dest.reg.num, result_instr->dest.reg.num, operand->type);
 
   Instruction *dummy_instr = instr_init(OP_MOV);
   dummy_instr->src = dummy_instr->dest = mov_instr->dest;
 
-  (void)instr_append(post_inc_dec->instructions, 7, operand->instructions,
-                     rval_conv_instr, type_conv_instr, mov_instr, inc_dec_instr,
-                     store_instr, dummy_instr);
+  (void)instr_append(post_inc_dec->instructions, 6, operand->instructions,
+                     conv_instrs, mov_instr, inc_dec_instr, store_instrs,
+                     dummy_instr);
   return astree_adopt(post_inc_dec, 1, operand);
 }
 
 ASTree *translate_inc_dec(ASTree *inc_dec, ASTree *operand) {
   PFDBG0('g', "Translating prefix increment/decrement");
-  Instruction *lvalue_instr = instr_prev(operand->instructions);
-  Instruction *rval_conv_instr = convert_rval(lvalue_instr, operand->type);
-  Instruction *type_conv_instr =
-      convert_scalar(rval_conv_instr, inc_dec->type, operand->type);
+  Instruction *conv_instrs = convert_rval(operand->instructions, operand->type);
+  (void)instr_append(conv_instrs, 1,
+                     convert_scalar(conv_instrs, inc_dec->type, operand->type));
 
   /* no need to set persistence flags; conversion functions do that */
   Instruction *inc_dec_instr =
       instr_init(opcode_from_operator(inc_dec->tok_kind, inc_dec->type));
-  inc_dec_instr->dest = type_conv_instr->dest;
+  inc_dec_instr->dest = instr_prev(conv_instrs)->dest;
 
-  Instruction *store_instr = instr_init(OP_MOV);
-  set_op_ind(&store_instr->dest, NO_DISP, lvalue_instr->dest.reg.num);
-  set_op_reg(&store_instr->src, type_get_width(operand->type),
-             type_conv_instr->dest.reg.num);
+  Instruction *lvalue_instr = instr_prev(operand->instructions);
+  /* store_helper creates the dummy instruction */
+  Instruction *store_instrs =
+      store_helper(lvalue_instr->dest.reg.num,
+                   instr_prev(conv_instrs)->dest.reg.num, operand->type);
 
-  Instruction *dummy_instr = instr_init(OP_MOV);
-  dummy_instr->src = dummy_instr->dest = type_conv_instr->dest;
-
-  (void)instr_append(inc_dec->instructions, 6, operand->instructions,
-                     rval_conv_instr, type_conv_instr, inc_dec_instr,
-                     store_instr, dummy_instr);
+  (void)instr_append(inc_dec->instructions, 4, operand->instructions,
+                     conv_instrs, inc_dec_instr, store_instrs);
   return astree_adopt(inc_dec, 1, operand);
 }
 
@@ -1135,19 +1216,16 @@ ASTree *translate_addition(ASTree *operator, ASTree * left, ASTree *right) {
  * Attempting to do so will only trip up the register allocator.
  */
 static void multiply_helper(ASTree *operator, ASTree * left, ASTree *right) {
-  Instruction *lvalue_instr, *conv_instr, *left_instr;
-  if (operator->tok_kind ==
-      TOK_MULEQ || operator->tok_kind == TOK_DIVEQ || operator->tok_kind ==
-      TOK_REMEQ) {
+  Instruction *conv_instrs, *left_instr, *lvalue_instr;
+  if (is_compound(operator->tok_kind)) {
     lvalue_instr = instr_prev(left->instructions);
-    assert(lvalue_instr->dest.all.mode == MODE_REGISTER);
-    assert(lvalue_instr->dest.reg.width == REG_QWORD);
-    conv_instr = convert_rval(lvalue_instr, operator->type);
-    left_instr = convert_scalar(conv_instr, right->type, operator->type);
+    LVALCHK(lvalue_instr);
+    conv_instrs = convert_rval(left->instructions, left->type);
+    (void)instr_append(conv_instrs, 1,
+                       convert_scalar(conv_instrs, right->type, left->type));
+    left_instr = instr_prev(conv_instrs);
   } else {
-    lvalue_instr = conv_instr = NULL;
-    /* TODO(Robert): remove this line */
-    right->type = operator->type;
+    conv_instrs = lvalue_instr = NULL;
     left_instr = instr_prev(left->instructions);
   }
 
@@ -1168,10 +1246,8 @@ static void multiply_helper(ASTree *operator, ASTree * left, ASTree *right) {
   push_right_instr->persist_flags |= PERSIST_DEST_SET;
 
   /* spill lvalue location to 3rd unspill region, if applicable */
-  Instruction *spill_lvalue_instr;
-  if (lvalue_instr == NULL) {
-    spill_lvalue_instr = instr_init(OP_NOP);
-  } else {
+  Instruction *spill_lvalue_instr = NULL;
+  if (is_compound(operator->tok_kind)) {
     spill_lvalue_instr = instr_init(OP_MOV);
     spill_lvalue_instr->src = lvalue_instr->dest;
     set_op_ind(&spill_lvalue_instr->dest, UNSPILL_REGIONS[2], RBP_VREG);
@@ -1205,34 +1281,13 @@ static void multiply_helper(ASTree *operator, ASTree * left, ASTree *right) {
   Instruction *operator_instr = instr_init(opcode);
   set_op_reg(&operator_instr->dest, type_get_width(right->type), R10_VREG);
 
-  /* if this is a compound assignment operator, store result in lvalue
-   * location; otherwise, store in 3rd unspill register, which should not be
-   * used by any subsequent instructions. if it is a compound assignment
-   * operator, we also need to unspill the register containing the lvalue
-   * location; we can use r10 since we are done with the right operand.
-   */
-  Instruction *unspill_lvalue_instr, *assign_instr;
-  if (lvalue_instr == NULL) {
-    unspill_lvalue_instr = instr_init(OP_NOP);
-    assign_instr = instr_init(OP_NOP);
-  } else {
-    unspill_lvalue_instr = instr_init(OP_MOV);
-    set_op_ind(&unspill_lvalue_instr->src, UNSPILL_REGIONS[2], RBP_VREG);
-    set_op_reg(&unspill_lvalue_instr->dest, REG_QWORD, R10_VREG);
-
-    assign_instr = instr_init(OP_MOV);
-    set_op_reg(&assign_instr->src,
-               type_get_width(left->type),
-               operator->tok_kind == TOK_REMEQ ? RDX_VREG : RAX_VREG);
-    set_op_ind(&assign_instr->dest, NO_DISP, R10_VREG);
-  }
-
-  Instruction *store_instr = instr_init(OP_MOV);
-  if (operator->tok_kind == '%' || operator->tok_kind == TOK_REMEQ)
-    set_op_reg(&store_instr->src, type_get_width(right->type), RDX_VREG);
-  else
-    set_op_reg(&store_instr->src, type_get_width(right->type), RAX_VREG);
-  set_op_ind(&store_instr->dest, UNSPILL_REGIONS[2], RBP_VREG);
+  /* store result in 4th unspill region */
+  Instruction *spill_res_instr = instr_init(OP_MOV);
+  set_op_ind(&spill_res_instr->dest, UNSPILL_REGIONS[3], RBP_VREG);
+  set_op_reg(&spill_res_instr->src, type_get_width(right->type),
+             (operator->tok_kind == TOK_REMEQ || operator->tok_kind == '%')
+                 ? RDX_VREG
+                 : RAX_VREG);
 
   /* restore clobbered registers */
   Instruction *pop_r10_instr = instr_init(OP_POP);
@@ -1242,31 +1297,42 @@ static void multiply_helper(ASTree *operator, ASTree * left, ASTree *right) {
   Instruction *pop_rax_instr = instr_init(OP_POP);
   set_op_reg(&pop_rax_instr->dest, REG_QWORD, RAX_VREG);
 
-  /* load result into a fresh vreg */
-  Instruction *load_instr = instr_init(OP_MOV);
-  load_instr->src = store_instr->dest;
-  if (lvalue_instr == NULL)
-    set_op_reg(&load_instr->dest, type_get_width(right->type), next_vreg());
-  else
-    set_op_reg(&load_instr->dest, type_get_width(left->type), next_vreg());
-  load_instr->persist_flags |= PERSIST_DEST_CLEAR;
+  /* load result into vreg now that allocator will work correctly */
+  Instruction *unspill_res_instr = instr_init(OP_MOV);
+  set_op_reg(&unspill_res_instr->dest, type_get_width(right->type),
+             next_vreg());
+  unspill_res_instr->src = spill_res_instr->dest;
+  unspill_res_instr->persist_flags = PERSIST_DEST_CLEAR;
 
-  if (lvalue_instr == NULL) {
-    (void)instr_append(operator->instructions, 18, left->instructions,
-                       right->instructions, push_rax_instr, push_rdx_instr,
-                       push_r10_instr, push_right_instr, spill_lvalue_instr,
-                       mov_rax_instr, extend_instr, pop_right_instr,
-                       operator_instr, unspill_lvalue_instr, assign_instr,
-                       store_instr, pop_r10_instr, pop_rdx_instr, pop_rax_instr,
-                       load_instr);
+  /* if this is a compound assignment operator, restore it from the third
+   * unspill region. fortunately all registers have been restored already so
+   * it is safe to use virtual registers.
+   */
+  Instruction *unspill_lvalue_instr = NULL, *store_instrs = NULL;
+  if (is_compound(operator->tok_kind)) {
+    unspill_lvalue_instr = instr_init(OP_MOV);
+    set_op_reg(&unspill_lvalue_instr->dest, REG_QWORD, next_vreg());
+    unspill_lvalue_instr->src = spill_lvalue_instr->dest;
+
+    store_instrs = store_helper(unspill_lvalue_instr->dest.reg.num,
+                                unspill_res_instr->dest.reg.num, left->type);
+  }
+
+  if (is_compound(operator->tok_kind)) {
+    (void)instr_append(operator->instructions, 19, left->instructions,
+                       conv_instrs, right->instructions, push_rax_instr,
+                       push_rdx_instr, push_r10_instr, push_right_instr,
+                       spill_lvalue_instr, mov_rax_instr, extend_instr,
+                       pop_right_instr, operator_instr, spill_res_instr,
+                       pop_r10_instr, pop_rdx_instr, pop_rax_instr,
+                       unspill_res_instr, unspill_lvalue_instr, store_instrs);
   } else {
-    (void)instr_append(operator->instructions, 20, left->instructions,
-                       conv_instr, left_instr, right->instructions,
-                       push_rax_instr, push_rdx_instr, push_r10_instr,
-                       push_right_instr, spill_lvalue_instr, mov_rax_instr,
+    (void)instr_append(operator->instructions, 15, left->instructions,
+                       right->instructions, push_rax_instr, push_rdx_instr,
+                       push_r10_instr, push_right_instr, mov_rax_instr,
                        extend_instr, pop_right_instr, operator_instr,
-                       unspill_lvalue_instr, assign_instr, store_instr,
-                       pop_r10_instr, pop_rdx_instr, pop_rax_instr, load_instr);
+                       spill_res_instr, pop_r10_instr, pop_rdx_instr,
+                       pop_rax_instr, unspill_res_instr);
   }
 }
 
@@ -1281,20 +1347,22 @@ ASTree *translate_multiplication(ASTree *operator, ASTree * left,
 }
 
 static void shift_helper(ASTree *operator, ASTree * left, ASTree *right) {
-  Instruction *lvalue_instr, *conv_instr, *left_instr;
+  Instruction *conv_instrs, *left_instr, *lvalue_instr;
   Type *promoted_type;
-  if (operator->tok_kind == TOK_SHLEQ || operator->tok_kind == TOK_SHREQ) {
+  if (is_compound(operator->tok_kind)) {
     lvalue_instr = instr_prev(left->instructions);
-    assert(lvalue_instr->dest.all.mode == MODE_REGISTER);
-    assert(lvalue_instr->dest.reg.width == REG_QWORD);
-    conv_instr = convert_rval(lvalue_instr, operator->type);
-    promoted_type =
-        type_arithmetic_conversions(operator->type, (Type *)TYPE_INT);
-    left_instr = convert_scalar(conv_instr, promoted_type, operator->type);
+    LVALCHK(lvalue_instr);
+    /* none of the operands are of the type the operation is performed at */
+
+    promoted_type = type_arithmetic_conversions(left->type, (Type *)TYPE_INT);
+    conv_instrs = convert_rval(left->instructions, promoted_type);
+    (void)instr_append(conv_instrs, 1,
+                       convert_scalar(conv_instrs, promoted_type, left->type));
+    left_instr = instr_prev(conv_instrs);
   } else {
     promoted_type = operator->type;
-    lvalue_instr = conv_instr = NULL;
     left_instr = instr_prev(left->instructions);
+    conv_instrs = lvalue_instr = NULL;
   }
 
   PFDBG0('g', "Translating shift operation");
@@ -1312,7 +1380,7 @@ static void shift_helper(ASTree *operator, ASTree * left, ASTree *right) {
 
   /* spill lvalue location to 3rd unspill region, if applicable */
   Instruction *spill_lvalue_instr = NULL;
-  if (lvalue_instr != NULL) {
+  if (is_compound(operator->tok_kind)) {
     spill_lvalue_instr = instr_init(OP_MOV);
     spill_lvalue_instr->src = lvalue_instr->dest;
     set_op_ind(&spill_lvalue_instr->dest, UNSPILL_REGIONS[2], RBP_VREG);
@@ -1334,27 +1402,10 @@ static void shift_helper(ASTree *operator, ASTree * left, ASTree *right) {
   operator_instr->dest = mov_left_instr->dest;
   set_op_reg(&operator_instr->src, REG_BYTE, RCX_VREG);
 
-  /* if this is a compound assignment operator, store result in lvalue
-   * location; otherwise, store in 3rd unspill register, which should not be
-   * used by any subsequent instructions. if it is a compound assignment
-   * operator, we also need to unspill the register containing the lvalue
-   * location; we can use rcx since we are done with the right operand.
-   */
-  Instruction *unspill_lvalue_instr = NULL, *assign_instr = NULL;
-  if (lvalue_instr != NULL) {
-    unspill_lvalue_instr = instr_init(OP_MOV);
-    set_op_ind(&unspill_lvalue_instr->src, UNSPILL_REGIONS[2], RBP_VREG);
-    set_op_reg(&unspill_lvalue_instr->dest, REG_QWORD, RCX_VREG);
-
-    assign_instr = instr_init(OP_MOV);
-    set_op_reg(&assign_instr->src, type_get_width(left->type), R10_VREG);
-    set_op_ind(&assign_instr->dest, NO_DISP, RCX_VREG);
-  }
-
-  /* save result to 3rd unspill region, which should not be used */
-  Instruction *store_instr = instr_init(OP_MOV);
-  store_instr->src = operator_instr->dest;
-  set_op_ind(&store_instr->dest, UNSPILL_REGIONS[2], RBP_VREG);
+  /* save result to 4th unspill region, which should not be used */
+  Instruction *spill_res_instr = instr_init(OP_MOV);
+  spill_res_instr->src = operator_instr->dest;
+  set_op_ind(&spill_res_instr->dest, UNSPILL_REGIONS[3], RBP_VREG);
 
   /* restore clobbered registers */
   Instruction *pop_r10_instr = instr_init(OP_POP);
@@ -1362,25 +1413,39 @@ static void shift_helper(ASTree *operator, ASTree * left, ASTree *right) {
   Instruction *pop_rcx_instr = instr_init(OP_POP);
   pop_rcx_instr->dest = push_rcx_instr->dest;
 
-  /* load result into a fresh vreg */
-  Instruction *load_instr = instr_init(OP_MOV);
-  load_instr->src = store_instr->dest;
-  set_op_reg(&load_instr->dest, store_instr->src.reg.width, next_vreg());
-  load_instr->persist_flags |= PERSIST_DEST_CLEAR;
+  /* load result into a vreg since the register allocator should behave now */
+  Instruction *unspill_res_instr = instr_init(OP_MOV);
+  set_op_reg(&unspill_res_instr->dest, type_get_width(promoted_type),
+             next_vreg());
+  unspill_res_instr->src = spill_res_instr->dest;
 
-  if (lvalue_instr == NULL) {
+  /* if this is a compound assignment operator, restore it from the third
+   * unspill region. fortunately all registers have been restored already so
+   * it is safe to use virtual registers.
+   */
+  Instruction *unspill_lvalue_instr = NULL, *store_instrs = NULL;
+  if (is_compound(operator->tok_kind)) {
+    unspill_lvalue_instr = instr_init(OP_MOV);
+    set_op_reg(&unspill_lvalue_instr->dest, REG_QWORD, next_vreg());
+    unspill_lvalue_instr->src = spill_lvalue_instr->dest;
+
+    store_instrs = store_helper(unspill_lvalue_instr->dest.reg.num,
+                                unspill_res_instr->dest.reg.num, promoted_type);
+  }
+
+  if (is_compound(operator->tok_kind)) {
+    (void)instr_append(operator->instructions, 16, left->instructions,
+                       conv_instrs, right->instructions, push_rcx_instr,
+                       push_r10_instr, push_right_instr, spill_lvalue_instr,
+                       mov_left_instr, pop_right_instr, operator_instr,
+                       spill_res_instr, pop_r10_instr, pop_rcx_instr,
+                       unspill_res_instr, unspill_lvalue_instr, store_instrs);
+  } else {
     (void)instr_append(operator->instructions, 12, left->instructions,
                        right->instructions, push_rcx_instr, push_r10_instr,
                        push_right_instr, mov_left_instr, pop_right_instr,
-                       operator_instr, store_instr, pop_r10_instr,
-                       pop_rcx_instr, load_instr);
-  } else {
-    (void)instr_append(operator->instructions, 17, left->instructions,
-                       conv_instr, left_instr, right->instructions,
-                       push_rcx_instr, push_r10_instr, push_right_instr,
-                       spill_lvalue_instr, mov_left_instr, pop_right_instr,
-                       operator_instr, unspill_lvalue_instr, assign_instr,
-                       store_instr, pop_r10_instr, pop_rcx_instr, load_instr);
+                       operator_instr, spill_res_instr, pop_r10_instr,
+                       pop_rcx_instr, unspill_res_instr);
   }
 }
 
@@ -1502,19 +1567,9 @@ static void assign_compound(ASTree *assignment, ASTree *lvalue,
                             ASTree *rvalue) {
   SEMCHK(rvalue);
   /* no need to set persistence flags; conversion functions do that */
-  Instruction *lvalue_instr = instr_prev(lvalue->instructions);
-  REGCHK(lvalue_instr);
-  Instruction *rval_conv_instr = convert_rval(lvalue_instr, assignment->type);
-  Instruction *type_conv_instr;
-  if (assignment->tok_kind == TOK_SHREQ || assignment->tok_kind == TOK_SHLEQ) {
-    Type *promoted_type =
-        type_arithmetic_conversions(assignment->type, (Type *)TYPE_INT);
-    type_conv_instr =
-        convert_scalar(rval_conv_instr, promoted_type, assignment->type);
-  } else {
-    type_conv_instr =
-        convert_scalar(rval_conv_instr, rvalue->type, assignment->type);
-  }
+  Instruction *conv_instrs = convert_rval(lvalue->instructions, lvalue->type);
+  (void)instr_append(conv_instrs, 1,
+                     convert_scalar(conv_instrs, rvalue->type, lvalue->type));
 
   Instruction *rvalue_instr = instr_prev(rvalue->instructions);
   REGCHK(rvalue_instr);
@@ -1523,23 +1578,19 @@ static void assign_compound(ASTree *assignment, ASTree *lvalue,
   Instruction *operator_instr =
       instr_init(opcode_from_operator(assignment->tok_kind, rvalue->type));
   operator_instr->src = rvalue_instr->dest;
-  operator_instr->dest = type_conv_instr->dest;
+  operator_instr->dest = instr_prev(conv_instrs)->dest;
   operator_instr->persist_flags = PERSIST_SRC_SET | PERSIST_DEST_SET;
 
   /* save result */
-  Instruction *store_instr = instr_init(OP_MOV);
-  set_op_reg(&store_instr->src, type_get_width(assignment->type),
-             operator_instr->dest.reg.num);
-  set_op_ind(&store_instr->dest, NO_DISP, lvalue_instr->dest.reg.num);
-  store_instr->persist_flags = PERSIST_DEST_SET;
+  Instruction *lvalue_instr = instr_prev(lvalue->instructions);
+  /* store_helper creates dummy mov */
+  Instruction *store_instrs =
+      store_helper(lvalue_instr->dest.reg.num, operator_instr->dest.reg.num,
+                   assignment->type);
 
-  /* dummy mov with new value */
-  Instruction *dummy_instr = instr_init(OP_MOV);
-  dummy_instr->dest = dummy_instr->src = store_instr->src;
-
-  (void)instr_append(assignment->instructions, 7, lvalue->instructions,
-                     rval_conv_instr, type_conv_instr, rvalue->instructions,
-                     operator_instr, store_instr, dummy_instr);
+  (void)instr_append(assignment->instructions, 5, lvalue->instructions,
+                     conv_instrs, rvalue->instructions, operator_instr,
+                     store_instrs);
 }
 
 static void assign_scalar(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
@@ -1550,19 +1601,13 @@ static void assign_scalar(ASTree *assignment, ASTree *lvalue, ASTree *rvalue) {
   Instruction *rvalue_instr = instr_prev(rvalue->instructions);
   REGCHK(rvalue_instr);
 
-  Instruction *assignment_instr =
-      instr_init(opcode_from_operator(assignment->tok_kind, assignment->type));
-  set_op_ind(&assignment_instr->dest, NO_DISP, lvalue_instr->dest.reg.num);
-  assignment_instr->src = rvalue_instr->dest;
-  assignment_instr->persist_flags |= PERSIST_DEST_SET | PERSIST_SRC_SET;
+  Instruction *store_instrs = store_helper(
+      lvalue_instr->dest.reg.num, rvalue_instr->dest.reg.num, lvalue->type);
 
-  Instruction *load_instr = instr_init(OP_MOV);
-  load_instr->src = assignment_instr->dest;
-  set_op_reg(&load_instr->dest, type_get_width(assignment->type), next_vreg());
-  load_instr->persist_flags |= PERSIST_DEST_CLEAR;
+  Instruction *load_instrs = convert_rval(lvalue->instructions, lvalue->type);
 
   (void)instr_append(assignment->instructions, 4, lvalue->instructions,
-                     rvalue->instructions, assignment_instr, load_instr);
+                     rvalue->instructions, store_instrs, load_instrs);
 }
 
 ASTree *translate_assignment(ASTree *assignment, ASTree *lvalue,
@@ -1714,10 +1759,10 @@ static void save_call_subexprs(ASTree *call) {
       /* extend all scalar arguments to be eight bytes wide to make loading and
        * storing more convenient
        */
-      Instruction *conv_instr =
-          convert_scalar(subexpr_instr, TYPE_UNSIGNED_LONG, subexpr->type);
-      spill_instr->src = conv_instr->dest;
-      (void)instr_append(subexpr->instructions, 2, conv_instr, spill_instr);
+      Instruction *conv_instrs = convert_scalar(
+          subexpr->instructions, TYPE_UNSIGNED_LONG, subexpr->type);
+      spill_instr->src = instr_prev(conv_instrs)->dest;
+      (void)instr_append(subexpr->instructions, 2, conv_instrs, spill_instr);
       (void)instr_append(call->instructions, 1, subexpr->instructions);
     } else {
       assert(subexpr_instr->dest.all.mode == MODE_REGISTER);

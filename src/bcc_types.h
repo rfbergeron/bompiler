@@ -119,4 +119,5 @@ int type_compose(Type *dest, Type *src, int qualified);
 
 void bf_set_offset(Type *type, unsigned char offset);
 unsigned char bf_get_offset(const Type *type);
+unsigned long bf_get_mask(const Type *type);
 #endif

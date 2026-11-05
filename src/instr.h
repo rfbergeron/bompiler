@@ -9,6 +9,7 @@
   GENERATOR(NONE, OPTYPE_NULLARY, 0, 0)      \
   GENERATOR(SENTINEL, OPTYPE_NULLARY, 0, 0)  \
   GENERATOR(ERASED, OPTYPE_NULLARY, 0, 0)    \
+  GENERATOR(BUNDLE, OPTYPE_NULLARY, 0, 0)    \
   /* arithmetic */                           \
   GENERATOR(ADD, OPTYPE_BINARY, 1, 0)        \
   GENERATOR(SUB, OPTYPE_BINARY, 1, 0)        \

@@ -72,7 +72,7 @@ static const char VREG_REG_TABLE[][5] = {
 Instruction *instr_init(Opcode opcode) {
   Instruction *ret = calloc(1, sizeof(Instruction));
   ret->opcode = opcode;
-  if (opcode == OP_SENTINEL) ret->next = ret->prev = ret;
+  if (opcode == OP_SENTINEL || opcode == OP_BUNDLE) ret->next = ret->prev = ret;
   return ret;
 }
 
@@ -81,7 +81,7 @@ void instr_destroy(Instruction *instr) {
     assert(instr->prev == NULL || instr->prev->next != instr);
     free(instr);
   } else {
-    assert(instr->opcode == OP_SENTINEL);
+    assert(instr->opcode == OP_SENTINEL || instr->opcode == OP_BUNDLE);
     Instruction *current = instr->next;
     while (current != instr) {
       Instruction *next = current->next;
@@ -97,13 +97,27 @@ Instruction *instr_prev(Instruction *instr) { return instr->prev; }
 Instruction *instr_next(Instruction *instr) { return instr->next; }
 
 Instruction *instr_append(Instruction *instr, size_t count, ...) {
-  Instruction *where = instr->opcode == OP_SENTINEL ? instr->prev : instr;
+  assert(instr->opcode == OP_SENTINEL || instr->opcode == OP_BUNDLE);
+  Instruction *where = instr->prev;
   va_list args;
   va_start(args, count);
   size_t i;
   for (i = 0; i < count; ++i) {
     Instruction *to_append = va_arg(args, Instruction *);
-    if (to_append->opcode == OP_SENTINEL) {
+    if (to_append->opcode == OP_BUNDLE) {
+      assert(!instr_empty(to_append));
+      Instruction *last = to_append->prev;
+      last->next = where->next;
+      last->next->prev = last;
+
+      Instruction *first = to_append->next;
+      where->next = first;
+      where->next->prev = where;
+
+      where = last;
+      /* instr_destroy knows not to destroy to_append's neighbors */
+      instr_destroy(to_append);
+    } else if (to_append->opcode == OP_SENTINEL) {
       if (instr_empty(to_append)) continue;
       Instruction *last = to_append->prev;
       last->next = where->next;
@@ -124,7 +138,9 @@ Instruction *instr_append(Instruction *instr, size_t count, ...) {
       where = to_append;
     }
   }
-  return where;
+  assert(where->next->opcode == OP_SENTINEL ||
+         where->next->opcode == OP_BUNDLE);
+  return where->next;
 }
 
 /* TODO(Robert): this gets used in exactly one place and only needs to exist
@@ -166,7 +182,19 @@ Instruction *instr_prepend(Instruction *instr, size_t count, ...) {
   size_t i;
   for (i = 0; i < count; ++i) {
     Instruction *to_prepend = va_arg(args, Instruction *);
-    if (to_prepend->opcode == OP_SENTINEL) {
+    if (to_prepend->opcode == OP_BUNDLE) {
+      Instruction *first = to_prepend->next;
+      first->prev = where->prev;
+      first->prev->next = first;
+
+      Instruction *last = to_prepend->prev;
+      where->prev = last;
+      where->prev->next = where;
+
+      where = first;
+      /* instr_destroy knows not to destroy to_append's neighbors */
+      instr_destroy(to_prepend);
+    } else if (to_prepend->opcode == OP_SENTINEL) {
       Instruction *first = to_prepend->next;
       first->prev = where->prev;
       first->prev->next = first;
@@ -189,7 +217,7 @@ Instruction *instr_prepend(Instruction *instr, size_t count, ...) {
 }
 
 int instr_empty(Instruction *instr) {
-  assert(instr->opcode == OP_SENTINEL);
+  assert(instr->opcode == OP_SENTINEL || instr->opcode == OP_BUNDLE);
   return instr->next == instr;
 }
 
@@ -519,7 +547,9 @@ static int operand_debug(Operand *operand, char *str) {
 }
 
 int instr_debug(Instruction *instr, char *str) {
-  if (instr->opcode == OP_INVALID || instr->opcode == OP_SENTINEL) abort();
+  if (instr->opcode == OP_INVALID || instr->opcode == OP_SENTINEL ||
+      instr->opcode == OP_BUNDLE)
+    abort();
   static char src_buf[MAX_OPERAND_DEBUG_LENGTH],
       dest_buf[MAX_OPERAND_DEBUG_LENGTH];
   int status = operand_debug(&instr->src, src_buf);
@@ -537,7 +567,8 @@ int instr_debug(Instruction *instr, char *str) {
 }
 
 int instr_to_str(Instruction *instr, char *str) {
-  if (instr->opcode == OP_INVALID || instr->opcode == OP_SENTINEL) {
+  if (instr->opcode == OP_INVALID || instr->opcode == OP_SENTINEL ||
+      instr->opcode == OP_BUNDLE) {
     abort();
   } else if (instr->opcode == OP_ERASED) {
     str[0] = '\0';

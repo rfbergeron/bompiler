@@ -28,6 +28,7 @@
   } while (0)
 #define BCC_ARRAY_MAX_LEN (1ul << (CHAR_BIT * sizeof(unsigned long) - 1))
 #define BCC_FN_MAX_PARAMS (ULONG_MAX >> 8)
+#define BIT_WIDTH_MAX 64
 
 typedef enum arth_flag {
   ARTH_MASK_NO_BITS = 0xff, /* mask out bit field stuff */
@@ -506,14 +507,20 @@ int type_is_integer(const Type *type) {
   }
 }
 
+/* NOTE: though the standard says the default signedness of bit fields is
+ * implementation-defined and the ABI says that bit fields with unspecified
+ * signedness are expected to have non-negative values with the same range
+ * as the corresponding unsigned type, both gcc and clang sign extend them and
+ * print diagnostics when values outside the range of a signed integer of the
+ * same bit width are assigned, effectively treating them as default signed.
+ * we do the same here for consistency.
+ */
 int type_is_signed(const Type *type) {
   /* pointers are not considered signed or unsigned; plain `char` is signed */
   if ((type->decl_specs.flags & TYPE_MASK_REPR) == TYPE_REPR_ENUM)
     return 1;
   else if ((type->decl_specs.flags & TYPE_MASK_KIND) != TYPE_KIND_ARTH)
     return 0;
-  else if ((type->decl_specs.extra.arth & (ARTH_FLAG_BF | ARTH_FLAG_BF_0)))
-    return !!(type->decl_specs.extra.arth & ARTH_SIGNED);
 
   switch (type->decl_specs.extra.arth & ARTH_MASK_ARTH) {
     default:
@@ -531,8 +538,6 @@ int type_is_unsigned(const Type *type) {
   /* pointers are not considered signed or unsigend */
   if ((type->decl_specs.flags & TYPE_MASK_KIND) != TYPE_KIND_ARTH)
     return 0;
-  else if ((type->decl_specs.extra.arth & (ARTH_FLAG_BF | ARTH_FLAG_BF_0)))
-    return !(type->decl_specs.extra.arth & ARTH_SIGNED);
   else
     return !!(type->decl_specs.extra.arth & ARTH_UNSIGNED);
 }
@@ -1480,6 +1485,15 @@ unsigned char bf_get_offset(const Type *type) {
   return GET_BIT_OFFSET(type);
 }
 
+/* TODO(Robert): maybe clean this up? don't care right now */
+unsigned long bf_get_mask(const Type *type) {
+  unsigned char bit_width = GET_BIT_WIDTH(type);
+  unsigned char bit_offset = GET_BIT_OFFSET(type);
+  return (((~0ul) << (BIT_WIDTH_MAX - (bit_width + bit_offset))) >>
+          (BIT_WIDTH_MAX - bit_width))
+         << bit_offset;
+}
+
 /*
  * Performs automatic conversions from function and array types to pointer
  * types. Replaces old type with appropriately converted type.
@@ -1498,17 +1512,44 @@ Type *type_pointer_conversions(Type *type) {
   }
 }
 
+/* TODO(Robert): consider simplifying this by just returning predefined type
+ * constants instead of trying to use the existing types
+ */
 Type *type_arithmetic_conversions(Type *type1, Type *type2) {
   assert(type1 != NULL && type2 != NULL);
   assert(type_is_arithmetic(type1) && type_is_arithmetic(type2));
   size_t width1 = type_get_width(type1), width2 = type_get_width(type2);
 
-  if (width1 < X64_SIZEOF_INT && width2 < X64_SIZEOF_INT) {
-    return (Type *)TYPE_INT;
-  } else if (width1 > width2) {
-    return type1;
+  /* return plain int if both types are narrower
+   * otherwise return the wider type
+   * if the types have the same width, return the unsigned one
+   * if the wider type is an enum, return int
+   * if the wider type is a bit field, return some kind of integer
+   */
+  if (width1 > width2) {
+    if (width1 < X64_SIZEOF_INT || type_is_enum(type1)) {
+      return (Type *)TYPE_INT;
+    } else if (!type_is_bit_field(type1)) {
+      return type1;
+    }
+
+    if (type_is_unsigned(type1)) {
+      return width1 == X64_SIZEOF_INT ? (Type *)TYPE_UNSIGNED_INT
+                                      : (Type *)TYPE_UNSIGNED_LONG;
+    } else {
+      return width1 == X64_SIZEOF_INT ? (Type *)TYPE_INT : (Type *)TYPE_LONG;
+    }
   } else if (width1 < width2) {
-    return type2;
+    if (width2 < X64_SIZEOF_INT || type_is_enum(type2)) {
+      return (Type *)TYPE_INT;
+    } else if (!type_is_bit_field(type2)) {
+      return type2;
+    } else if (type_is_unsigned(type2)) {
+      return width2 == X64_SIZEOF_INT ? (Type *)TYPE_UNSIGNED_INT
+                                      : (Type *)TYPE_UNSIGNED_LONG;
+    } else {
+      return width2 == X64_SIZEOF_INT ? (Type *)TYPE_INT : (Type *)TYPE_LONG;
+    }
   } else if (type_is_unsigned(type1)) {
     return type_is_bit_field(type1) ? (Type *)TYPE_UNSIGNED_INT : type1;
   } else if (type_is_unsigned(type2)) {
